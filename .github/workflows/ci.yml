@@ -167,6 +167,9 @@ jobs:
       - name: 验证上下文关闭与文件锁生命周期
         run: python tests/python_context_manager.py
 
+      - name: 验证非向量查询路径（FIND / MATCH / 事务 / TQL DML）
+        run: python tests/python_nonvector_stability.py
+
       - name: 验证 Python 类型存根与 Wheel 内容
         shell: bash
         run: |
@@ -201,6 +204,9 @@ jobs:
 
       - name: 验证关闭、资源管理与跨进程文件锁
         run: npm run test:lifecycle
+
+      - name: 验证非向量查询路径（FIND / MATCH / TQL DML）
+        run: npm run test:nonvector
 
   # ═══════════════════════════════════════════
   #  Job 2b: ARM64 Linux 原生测试 (QEMU)

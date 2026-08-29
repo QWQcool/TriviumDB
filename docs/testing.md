@@ -244,6 +244,20 @@ fn from_json_嵌套and_or() {
 | `stress.rs`       | 压力极限   | 高频写入、自环重边图谱震荡、空库极端操作 |
 | `tql_executor.rs` | TQL 全链路 | MATCH/FIND/SEARCH 三种入口的完整执行     |
 | `tql_dml.rs`      | TQL 写操作 | CREATE/SET/DELETE/DETACH DELETE          |
+| `non_vector_stability.rs` | 非向量规模化基线 | 10k / 100k / 1M 三档规模下 FIND 文档过滤与 MATCH 图遍历的延迟采样，含 p50/p95/p99/p999 尾延迟；性能用例默认 `#[ignore]`，见下文说明 |
+
+### 非向量规模化性能采样
+
+`benches/bench_queries.rs` 覆盖 5k–10k 规模的 Criterion 基准。`non_vector_stability.rs`
+补足 10 万级以上的非向量查询基线，并统计尾延迟。性能用例默认 `#[ignore]`，按需执行：
+
+```bash
+cargo test --release --test non_vector_stability -- --ignored --nocapture --test-threads=1
+```
+
+输出的 `avg` / `p50` / `p95` / `p99` / `p999` 仅供回归比对，**不同机器之间不可横向比较**。
+跨版本对比时务必在同一会话内相邻采集，否则极易被整机负载干扰
+（实测可造成 30%–70% 的偏差，足以得出完全相反的性能结论）。
 
 ### WAL 断写安全测试示例
 
