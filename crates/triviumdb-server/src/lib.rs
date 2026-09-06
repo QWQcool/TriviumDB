@@ -125,6 +125,9 @@ pub async fn build_app(config: ServerConfig) -> Result<Router, ApiError> {
     });
 
     Ok(Router::new()
+        .route("/", get(webui_index))
+        .route("/ui", get(webui_index))
+        .route("/ui/", get(webui_index))
         .route("/health/live", get(live))
         .route("/health/ready", get(ready))
         .route("/health/details", get(health_details))
@@ -156,6 +159,15 @@ pub async fn build_app(config: ServerConfig) -> Result<Router, ApiError> {
         .layer(DefaultBodyLimit::max(config.max_body_bytes))
         .layer(ServiceBuilder::new().layer(CatchPanicLayer::new()))
         .with_state(state))
+}
+
+const WEBUI_HTML: &str = include_str!("../web/index.html");
+
+async fn webui_index() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        WEBUI_HTML,
+    )
 }
 
 async fn live() -> Json<HealthResponse> {

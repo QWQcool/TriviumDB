@@ -1,0 +1,1501 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TriviumDB Web Console</title>
+  <style>
+    :root {
+      --bg-app: #f4f6f9;
+      --bg-surface: #ffffff;
+      --bg-surface-secondary: #f8fafc;
+      --border-color: #dbe2ea;
+      --border-focus: #1e6bb8;
+      --text-main: #1e293b;
+      --text-muted: #64748b;
+      --text-light: #94a3b8;
+      --primary: #1e6bb8;
+      --primary-hover: #16528e;
+      --primary-bg: #e8f2fc;
+      --accent: #0284c7;
+      --success: #16a34a;
+      --success-bg: #dcfce7;
+      --warning: #d97706;
+      --warning-bg: #fef3c7;
+      --danger: #dc2626;
+      --danger-bg: #fee2e2;
+      --font-mono: "JetBrains Mono", "Fira Code", Consolas, Menlo, monospace;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      --sidebar-width: 280px;
+      --header-height: 48px;
+      --status-height: 28px;
+      --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+      --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    }
+
+    [data-theme="dark"] {
+      --bg-app: #0b1120;
+      --bg-surface: #131d31;
+      --bg-surface-secondary: #1a2744;
+      --border-color: #243556;
+      --border-focus: #38bdf8;
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --text-light: #64748b;
+      --primary: #38bdf8;
+      --primary-hover: #0284c7;
+      --primary-bg: #0c4a6e33;
+      --accent: #818cf8;
+      --success: #22c55e;
+      --success-bg: #14532d44;
+      --warning: #f59e0b;
+      --warning-bg: #78350f44;
+      --danger: #ef4444;
+      --danger-bg: #7f1d1d44;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--font-sans);
+      background-color: var(--bg-app);
+      color: var(--text-main);
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+      font-size: 13px;
+    }
+
+    /* 顶部导航栏 */
+    header.app-header {
+      height: var(--header-height);
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      user-select: none;
+      z-index: 20;
+    }
+    .header-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      font-size: 15px;
+      color: var(--primary);
+    }
+    .header-brand svg { width: 22px; height: 22px; fill: currentColor; }
+    .header-status {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      font-size: 12px;
+      font-weight: 500;
+      background: var(--primary-bg);
+      color: var(--primary);
+      border: 1px solid var(--border-color);
+    }
+    .status-badge.live { background: var(--success-bg); color: var(--success); }
+    .status-badge.dead { background: var(--danger-bg); color: var(--danger); }
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 5px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      border: 1px solid var(--border-color);
+      background: var(--bg-surface);
+      color: var(--text-main);
+      transition: all 0.15s ease;
+      white-space: nowrap;
+    }
+    .btn:hover { background: var(--bg-surface-secondary); border-color: var(--border-focus); }
+    .btn-primary {
+      background: var(--primary);
+      color: #ffffff;
+      border-color: var(--primary);
+    }
+    .btn-primary:hover {
+      background: var(--primary-hover);
+      border-color: var(--primary-hover);
+      color: #ffffff;
+    }
+    .btn-success { background: var(--success); color: #fff; border-color: var(--success); }
+    .btn-success:hover { opacity: 0.9; }
+
+    /* 主布局 */
+    .app-body {
+      flex: 1;
+      display: flex;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* 左侧对象导航树 (Navicat 风格) */
+    aside.sidebar {
+      width: var(--sidebar-width);
+      background: var(--bg-surface);
+      border-right: 1px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      user-select: none;
+      z-index: 10;
+    }
+    .sidebar-header {
+      padding: 10px 14px;
+      font-weight: 600;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .sidebar-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 6px 0;
+    }
+    .nav-section-title {
+      padding: 8px 14px 4px;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-light);
+      text-transform: uppercase;
+    }
+    .nav-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 7px 14px;
+      cursor: pointer;
+      color: var(--text-main);
+      transition: background 0.15s ease;
+    }
+    .nav-item:hover { background: var(--bg-surface-secondary); }
+    .nav-item.active {
+      background: var(--primary-bg);
+      color: var(--primary);
+      font-weight: 600;
+      border-right: 3px solid var(--primary);
+    }
+    .nav-item-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .nav-item-icon { width: 16px; height: 16px; opacity: 0.75; }
+    .badge {
+      font-size: 11px;
+      padding: 1px 6px;
+      border-radius: 10px;
+      background: var(--bg-surface-secondary);
+      border: 1px solid var(--border-color);
+      color: var(--text-muted);
+    }
+
+    /* 中央多标签页工作台 */
+    main.workspace {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: var(--bg-app);
+    }
+    .tabs-bar {
+      height: 36px;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      padding: 0 8px;
+      gap: 4px;
+      overflow-x: auto;
+    }
+    .tab {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      border-radius: 6px 6px 0 0;
+      background: var(--bg-surface-secondary);
+      border: 1px solid var(--border-color);
+      border-bottom: none;
+      cursor: pointer;
+      font-weight: 500;
+      color: var(--text-muted);
+      height: 30px;
+      margin-top: 5px;
+    }
+    .tab.active {
+      background: var(--bg-surface);
+      color: var(--primary);
+      border-top: 2px solid var(--primary);
+      font-weight: 600;
+    }
+
+    /* 工作区内容 */
+    .tab-pane {
+      display: none;
+      flex: 1;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .tab-pane.active { display: flex; }
+
+    /* 编辑器与工具栏 */
+    .editor-toolbar {
+      padding: 8px 14px;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .toolbar-left, .toolbar-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .checkbox-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      color: var(--text-main);
+      user-select: none;
+    }
+
+    /* 查询编辑器区域 (Split Pane) */
+    .query-layout {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .editor-container {
+      height: 180px;
+      min-height: 100px;
+      max-height: 60%;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border-color);
+      position: relative;
+      display: flex;
+    }
+    .editor-textarea {
+      flex: 1;
+      width: 100%;
+      height: 100%;
+      padding: 12px 16px;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.5;
+      background: transparent;
+      color: var(--text-main);
+      border: none;
+      outline: none;
+      resize: none;
+      white-space: pre-wrap;
+      tab-size: 2;
+    }
+
+    /* 结果展示区 */
+    .results-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: var(--bg-surface);
+    }
+    .results-tabs {
+      height: 32px;
+      background: var(--bg-surface-secondary);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      padding: 0 10px;
+      gap: 6px;
+    }
+    .res-tab {
+      padding: 4px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      color: var(--text-muted);
+      border: 1px solid transparent;
+    }
+    .res-tab.active {
+      background: var(--bg-surface);
+      color: var(--primary);
+      border-color: var(--border-color);
+      font-weight: 600;
+    }
+    .res-content {
+      flex: 1;
+      overflow: auto;
+      position: relative;
+    }
+
+    /* Navicat 风格数据网格 (Data Grid Table) */
+    table.data-grid {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: var(--font-sans);
+      font-size: 12px;
+      text-align: left;
+    }
+    table.data-grid th {
+      position: sticky;
+      top: 0;
+      background: var(--bg-surface-secondary);
+      border-bottom: 1px solid var(--border-color);
+      border-right: 1px solid var(--border-color);
+      padding: 7px 10px;
+      font-weight: 600;
+      color: var(--text-muted);
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+    }
+    table.data-grid th:hover { background: var(--border-color); }
+    table.data-grid td {
+      border-bottom: 1px solid var(--border-color);
+      border-right: 1px solid var(--border-color);
+      padding: 6px 10px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 260px;
+    }
+    table.data-grid tr:hover { background: var(--bg-surface-secondary); }
+    table.data-grid tr:nth-child(even) { background: rgba(0,0,0,0.015); }
+
+    /* Canvas 拓扑图 */
+    #graphCanvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      cursor: grab;
+    }
+    #graphCanvas:active { cursor: grabbing; }
+    .graph-controls {
+      position: absolute;
+      bottom: 16px;
+      right: 16px;
+      display: flex;
+      gap: 6px;
+      background: var(--bg-surface);
+      padding: 6px;
+      border-radius: 6px;
+      border: 1px solid var(--border-color);
+      box-shadow: var(--shadow-md);
+      z-index: 5;
+    }
+    .node-detail-drawer {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 320px;
+      height: 100%;
+      background: var(--bg-surface);
+      border-left: 1px solid var(--border-color);
+      box-shadow: var(--shadow-lg);
+      padding: 16px;
+      overflow-y: auto;
+      transform: translateX(100%);
+      transition: transform 0.2s ease;
+      z-index: 10;
+    }
+    .node-detail-drawer.open { transform: translateX(0); }
+
+    /* 教程抽屉 (Interactive Tutorial Modal / Drawer) */
+    .tutorial-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.4);
+      z-index: 100;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+    .tutorial-overlay.open { display: flex; }
+    .tutorial-modal {
+      width: 800px;
+      max-width: 90vw;
+      height: 80vh;
+      background: var(--bg-surface);
+      border-radius: 8px;
+      border: 1px solid var(--border-color);
+      box-shadow: var(--shadow-lg);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .tutorial-header {
+      padding: 14px 20px;
+      background: var(--bg-surface-secondary);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .tutorial-body {
+      flex: 1;
+      display: flex;
+      overflow: hidden;
+    }
+    .tutorial-steps-nav {
+      width: 220px;
+      border-right: 1px solid var(--border-color);
+      background: var(--bg-surface);
+      overflow-y: auto;
+      padding: 8px 0;
+    }
+    .tutorial-step-item {
+      padding: 10px 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--text-muted);
+      border-left: 3px solid transparent;
+      transition: all 0.15s ease;
+    }
+    .tutorial-step-item:hover { background: var(--bg-surface-secondary); }
+    .tutorial-step-item.active {
+      background: var(--primary-bg);
+      color: var(--primary);
+      font-weight: 600;
+      border-left-color: var(--primary);
+    }
+    .tutorial-content-pane {
+      flex: 1;
+      padding: 24px;
+      overflow-y: auto;
+      line-height: 1.6;
+    }
+    .tutorial-code-block {
+      background: var(--bg-app);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 12px;
+      margin: 12px 0;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      position: relative;
+    }
+
+    /* 底部状态栏 */
+    footer.app-status-bar {
+      height: var(--status-height);
+      background: var(--bg-surface);
+      border-top: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 14px;
+      font-size: 11px;
+      color: var(--text-muted);
+      user-select: none;
+      z-index: 20;
+    }
+    .status-left, .status-right {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    /* 通用空状态/加载器 */
+    .empty-placeholder {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: var(--text-light);
+      gap: 8px;
+    }
+    pre.json-view {
+      padding: 14px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-main);
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 顶部导航栏 -->
+  <header class="app-header">
+    <div class="header-brand">
+      <svg viewBox="0 0 24 24">
+        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+      </svg>
+      <span>TriviumDB Web Console</span>
+      <span class="badge">Server Edition</span>
+    </div>
+
+    <div class="header-status">
+      <span id="connStatus" class="status-badge">
+        <span class="status-dot"></span>
+        <span id="connText">连接检测中...</span>
+      </span>
+      <span class="badge" id="headerGeneration">Generation: -</span>
+    </div>
+
+    <div class="header-actions">
+      <button class="btn btn-primary" id="openTutorialBtn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        可视化使用教程
+      </button>
+      <button class="btn" id="themeToggleBtn" title="切换深色/浅色模式">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- 主界面布局 -->
+  <div class="app-body">
+    <!-- 左侧对象导航树 (Navicat 风格对象管理器) -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <span>对象导航 (Explorer)</span>
+        <button class="btn" id="refreshMetaBtn" style="padding: 2px 6px;" title="刷新元数据">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        </button>
+      </div>
+      <div class="sidebar-content">
+        <div class="nav-section-title">三模数据引擎</div>
+        <div class="nav-item active" data-action="quick-find">
+          <div class="nav-item-left">
+            <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <span>文档 (Documents)</span>
+          </div>
+          <span class="badge" id="docCountBadge">FIND</span>
+        </div>
+        <div class="nav-item" data-action="quick-match">
+          <div class="nav-item-left">
+            <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+            <span>图拓扑 (Graph)</span>
+          </div>
+          <span class="badge">MATCH</span>
+        </div>
+        <div class="nav-item" data-action="quick-search">
+          <div class="nav-item-left">
+            <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+            <span>向量与 QuIVer</span>
+          </div>
+          <span class="badge">SEARCH</span>
+        </div>
+
+        <div class="nav-section-title">常用代码片段 (Snippets)</div>
+        <div class="nav-item" data-snippet="FIND {} RETURN * LIMIT 20">
+          <div class="nav-item-left"><span>🔍 扫描所有节点</span></div>
+        </div>
+        <div class="nav-item" data-snippet="MATCH (a)-[r]->(b) RETURN a, r, b LIMIT 25">
+          <div class="nav-item-left"><span>🕸 探索一跳图关系</span></div>
+        </div>
+        <div class="nav-item" data-snippet="MATCH (a)-[:knows*1..3]->(b) RETURN a, b LIMIT 20">
+          <div class="nav-item-left"><span>🌐 多跳可变长路径</span></div>
+        </div>
+        <div class="nav-item" data-snippet='CREATE ({name: "Alice", type: "user", level: 5})'>
+          <div class="nav-item-left"><span>➕ 创建单节点 (Doc)</span></div>
+        </div>
+        <div class="nav-item" data-snippet="EXPLAIN ANALYZE FIND {} RETURN *">
+          <div class="nav-item-left"><span>⏱ 剖析执行计划</span></div>
+        </div>
+
+        <div class="nav-section-title">查询历史 (History)</div>
+        <div id="historyList" style="max-height: 160px; overflow-y: auto;">
+          <div style="padding: 6px 14px; color: var(--text-light); font-size: 11px;">暂无历史记录</div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 中央多标签页工作台 -->
+    <main class="workspace">
+      <!-- 标签栏 -->
+      <div class="tabs-bar">
+        <div class="tab active" data-tab="queryPane">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+          <span>TQL 查询控制台</span>
+        </div>
+        <div class="tab" data-tab="graphExplorePane">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/></svg>
+          <span>独立图拓扑探索</span>
+        </div>
+      </div>
+
+      <!-- 标签页 1：TQL 查询与结果控制台 -->
+      <div class="tab-pane active" id="queryPane">
+        <div class="editor-toolbar">
+          <div class="toolbar-left">
+            <button class="btn btn-success" id="runQueryBtn" title="运行查询 (快捷键: Ctrl + Enter)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              <span>运行 (Run)</span>
+            </button>
+            <label class="checkbox-label" title="开启写入事务支持 (CREATE / LINK / DELETE 等)">
+              <input type="checkbox" id="mutationCheck"> 写入模式 (Mutation)
+            </label>
+            <label class="checkbox-label" title="返回耗时剖析指标">
+              <input type="checkbox" id="profileCheck" checked> Profile 剖析
+            </label>
+          </div>
+          <div class="toolbar-right">
+            <button class="btn" id="formatTqlBtn" title="格式化查询文本">美化 TQL</button>
+            <button class="btn" id="clearEditorBtn" title="清空编辑器">清空</button>
+            <button class="btn" id="exportJsonBtn" title="导出当前结果为 JSON">导出 JSON</button>
+          </div>
+        </div>
+
+        <div class="query-layout">
+          <!-- 查询输入区 -->
+          <div class="editor-container">
+            <textarea class="editor-textarea" id="tqlInput" spellcheck="false" placeholder="在此输入 TQL 语句，例如: FIND {} RETURN * LIMIT 10 (按 Ctrl+Enter 运行)">FIND {} RETURN * LIMIT 25</textarea>
+          </div>
+
+          <!-- 结果展示区 -->
+          <div class="results-container">
+            <div class="results-tabs">
+              <div class="res-tab active" data-view="grid">
+                <span>表格网格 (Data Grid)</span>
+              </div>
+              <div class="res-tab" data-view="graph">
+                <span>交互拓扑图 (Graph Canvas)</span>
+              </div>
+              <div class="res-tab" data-view="json">
+                <span>JSON 原始树</span>
+              </div>
+            </div>
+
+            <div class="res-content">
+              <!-- 表格网格视图 -->
+              <div id="viewGrid" style="height: 100%; overflow: auto;">
+                <table class="data-grid" id="gridTable">
+                  <thead><tr id="gridHead"><th>#</th><th>数据</th></tr></thead>
+                  <tbody id="gridBody">
+                    <tr><td colspan="2" style="text-align: center; padding: 40px; color: var(--text-light);">点击“运行”执行查询并呈现结果</td></tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- 图拓扑画布视图 -->
+              <div id="viewGraph" style="display: none; width: 100%; height: 100%; position: relative;">
+                <canvas id="graphCanvas"></canvas>
+                <div class="graph-controls">
+                  <button class="btn" id="centerGraphBtn" title="重置居中">居中视角</button>
+                  <button class="btn" id="togglePhysicsBtn" title="固定物理模拟">冻结力学</button>
+                </div>
+                <!-- 节点详情抽屉 -->
+                <div class="node-detail-drawer" id="nodeDrawer">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <h4 id="drawerNodeTitle">节点详情</h4>
+                    <button class="btn" id="closeDrawerBtn" style="padding: 2px 6px;">✕</button>
+                  </div>
+                  <pre class="json-view" id="drawerNodeContent"></pre>
+                </div>
+              </div>
+
+              <!-- JSON 树视图 -->
+              <div id="viewJson" style="display: none; height: 100%; overflow: auto;">
+                <pre class="json-view" id="rawJsonOutput">{}</pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 标签页 2：独立图拓扑探索 -->
+      <div class="tab-pane" id="graphExplorePane">
+        <div class="editor-toolbar">
+          <div class="toolbar-left">
+            <button class="btn btn-primary" id="loadWholeGraphBtn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>
+              加载全图拓扑 (Top 100 边)
+            </button>
+            <span style="color: var(--text-muted); font-size: 12px;">提示：可在画布上自由拖拽节点，滚轮缩放，单击节点查看属性</span>
+          </div>
+        </div>
+        <div style="flex: 1; position: relative; background: var(--bg-surface);">
+          <canvas id="standaloneGraphCanvas" style="width: 100%; height: 100%; display: block;"></canvas>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- 底部状态与可观测性栏 -->
+  <footer class="app-status-bar">
+    <div class="status-left">
+      <span id="statusQueryTime">耗时: -</span>
+      <span id="statusRowCount">返回: 0 行</span>
+      <span id="statusAffected">影响: -</span>
+    </div>
+    <div class="status-right">
+      <span id="statusQueue">写队列: 0</span>
+      <span id="statusReads">并发读: 0</span>
+      <span id="statusVersion">TriviumDB Server v0.8.6</span>
+    </div>
+  </footer>
+
+  <!-- 可视化交互教程弹窗 (Interactive Tutorial Modal) -->
+  <div class="tutorial-overlay" id="tutorialOverlay">
+    <div class="tutorial-modal">
+      <div class="tutorial-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+          <strong style="font-size: 14px;">TriviumDB 三模数据库可视化实战教程</strong>
+        </div>
+        <button class="btn" id="closeTutorialBtn" style="padding: 2px 8px;">✕</button>
+      </div>
+      <div class="tutorial-body">
+        <div class="tutorial-steps-nav" id="tutorialStepsNav">
+          <!-- 教程步骤导航项由 JS 动态生成 -->
+        </div>
+        <div class="tutorial-content-pane" id="tutorialContentPane">
+          <!-- 教程正文由 JS 动态渲染 -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ==========================================
+    // 全局状态与配置
+    // ==========================================
+    const API_BASE = window.location.origin.startsWith('http') ? window.location.origin : 'http://127.0.0.1:8080';
+    let currentGeneration = '-';
+    let queryHistory = JSON.parse(localStorage.getItem('tdb_query_history') || '[]');
+    let currentResultData = null;
+
+    // 力导向图模拟器状态
+    let graphNodes = [];
+    let graphEdges = [];
+    let simulationRunning = true;
+    let selectedNode = null;
+    let transform = { x: 0, y: 0, k: 1 };
+    let isDraggingCanvas = false;
+    let dragStart = { x: 0, y: 0 };
+    let draggedNode = null;
+
+    // ==========================================
+    // 教程系统数据 (6 步体系化实战)
+    // ==========================================
+    const TUTORIAL_STEPS = [
+      {
+        id: "step1",
+        title: "1. 三模合一引擎总览",
+        badge: "核心架构",
+        desc: `<h3>🌟 为什么需要三模合一？</h3>
+        <p style="margin: 8px 0;">在构建现代 AI 与大模型应用时，通常需要搭建：<strong>向量数据库</strong>（做语义召回） + <strong>图数据库</strong>（做知识关联与多跳推导） + <strong>文档数据库</strong>（存业务 JSON 数据）。这带来了巨大的维护成本和数据同步延迟。</p>
+        <p style="margin: 8px 0;"><strong>TriviumDB</strong> 在单个存储引擎中把三者彻底融合：每一个节点天然具备 <code>NodeId</code>、<code>Payload (JSON 文档)</code>、<code>Vector (嵌入向量)</code> 以及任意方向的 <code>Edges (图关系)</code>！</p>
+        <div class="tutorial-code-block">
+          <strong>教学任务：一键写入示例知识图谱</strong><br>
+          点击下方按钮，将自动向本地服务器写入包含人员、论文与研究领域的测试三模数据！
+        </div>
+        <button class="btn btn-primary" onclick="initTutorialData()">⚡ 一键注入教学数据集</button>`
+      },
+      {
+        id: "step2",
+        title: "2. 文档过滤 (FIND 查询)",
+        badge: "文档模式",
+        desc: `<h3>📄 极简且强大的文档过滤</h3>
+        <p style="margin: 8px 0;">TriviumDB 支持原生 MongoDB 风格的丰富操作符，如 <code>$gte</code>、<code>$in</code>、<code>$regex</code> 等，且支持底层属性索引加速：</p>
+        <div class="tutorial-code-block">
+FIND {type: "person", citations: {$gte: 50}} RETURN *
+        </div>
+        <p>此查询将快速筛出引用量 ≥ 50 的人员节点，并在数据网格中呈现完整的 JSON Payload。</p>
+        <button class="btn btn-primary" onclick="runTutorialCode('FIND {type: \"person\", citations: {$gte: 50}} RETURN *', false)">▶ 在工作台运行此查询</button>`
+      },
+      {
+        id: "step3",
+        title: "3. 图模式匹配 (MATCH)",
+        badge: "图模式",
+        desc: `<h3>🕸 关联发现与多跳关系匹配</h3>
+        <p style="margin: 8px 0;">使用熟悉的 Cypher 风格语法查询关联拓扑。例如找到 Alice 写过的论文及其涉及的领域：</p>
+        <div class="tutorial-code-block">
+MATCH (p {name: "Alice"})-[:AUTHORED]->(paper)-[:COVERS]->(topic)
+RETURN p, paper, topic
+        </div>
+        <p>执行后，切换至<strong>“交互拓扑图 (Graph Canvas)”</strong>，你可以直接用鼠标拖动节点，查看三模连接关系！</p>
+        <button class="btn btn-primary" onclick="runTutorialCode('MATCH (p {name: \"Alice\"})-[:AUTHORED]->(paper)-[:COVERS]->(topic) RETURN p, paper, topic', false, 'graph')">▶ 运行并查看图拓扑</button>`
+      },
+      {
+        id: "step4",
+        title: "4. 向量检索 (SEARCH VECTOR)",
+        badge: "向量模式",
+        desc: `<h3>🧬 极速向量近邻检索与 QuIVer 加速</h3>
+        <p style="margin: 8px 0;">TriviumDB 内置 QuIVer 向量索引与 BQ 编码加速，支持毫秒级 Top-K 召回：</p>
+        <div class="tutorial-code-block">
+SEARCH VECTOR [0.12, -0.45, 0.78, 0.33] TOP 3 RETURN *
+        </div>
+        <p>向量查询将直接按相似度排序返回最匹配的节点与得分。</p>
+        <button class="btn btn-primary" onclick="runTutorialCode('SEARCH VECTOR [0.12, -0.45, 0.78, 0.33] TOP 3 RETURN *', false)">▶ 运行向量检索</button>`
+      },
+      {
+        id: "step5",
+        title: "5. 自由 DIY 混合管线 (WITH)",
+        badge: "自由编排",
+        desc: `<h3>🔥 核心杀手锏：跨模混合管线</h3>
+        <p style="margin: 8px 0;">无需在应用程序端来回搬运数据！一条 TQL 即可将图匹配、属性过滤与向量检索自由串联：</p>
+        <div class="tutorial-code-block">
+MATCH (doc)-[:COVERS]->(t {name: "Tri-Model DB"})
+WHERE doc.year >= 2024
+RETURN doc, t
+        </div>
+        <button class="btn btn-primary" onclick="runTutorialCode('MATCH (doc)-[:COVERS]->(t {name: \"Tri-Model DB\"}) WHERE doc.year >= 2024 RETURN doc, t', false, 'graph')">▶ 运行多模混合管线</button>`
+      },
+      {
+        id: "step6",
+        title: "6. OCC 乐观并发与事务",
+        badge: "企业级特性",
+        desc: `<h3>🛡 无锁高并发与 Generation ETag</h3>
+        <p style="margin: 8px 0;">TriviumDB Server 采用 <strong>Writer Actor + Group Commit + OCC (乐观并发控制)</strong> 架构：</p>
+        <ul style="margin-left: 20px; margin-bottom: 10px;">
+          <li>并发读绝不阻塞写，写操作通过有界队列由单一 Actor 动态合批提交；</li>
+          <li>通过全局 <code>Generation ETag</code> 校验版本冲突，确保高并发写入数据绝对一致。</li>
+        </ul>
+        <div class="tutorial-code-block">
+CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
+        </div>
+        <button class="btn btn-success" onclick="runTutorialCode('CREATE ({name: \"Bob\", type: \"person\", citations: 120, department: \"AI Lab\"})', true)">⚡ 体验一次安全的原子写入</button>`
+      }
+    ];
+
+    // ==========================================
+    // 初始化应用
+    // ==========================================
+    document.addEventListener('DOMContentLoaded', () => {
+      setupTheme();
+      setupEventListeners();
+      setupTutorial();
+      setupTabs();
+      checkServerHealth();
+      renderHistory();
+      initCanvas('graphCanvas');
+      setInterval(checkServerHealth, 5000);
+    });
+
+    // 主题切换
+    function setupTheme() {
+      const saved = localStorage.getItem('tdb_theme') || 'light';
+      document.documentElement.setAttribute('data-theme', saved);
+      document.getElementById('themeToggleBtn').addEventListener('click', () => {
+        const current = document.documentElement.getAttribute('data-theme');
+        const next = current === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', next);
+        localStorage.setItem('tdb_theme', next);
+        redrawGraph();
+      });
+    }
+
+    // 事件监听绑定
+    function setupEventListeners() {
+      document.getElementById('runQueryBtn').addEventListener('click', executeCurrentQuery);
+      document.getElementById('clearEditorBtn').addEventListener('click', () => {
+        document.getElementById('tqlInput').value = '';
+      });
+      document.getElementById('formatTqlBtn').addEventListener('click', formatTql);
+      document.getElementById('exportJsonBtn').addEventListener('click', exportJson);
+      document.getElementById('refreshMetaBtn').addEventListener('click', checkServerHealth);
+
+      // 快捷键: Ctrl+Enter 运行
+      document.getElementById('tqlInput').addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+          e.preventDefault();
+          executeCurrentQuery();
+        }
+      });
+
+      // 快捷查询片段点击
+      document.querySelectorAll('[data-snippet]').forEach(el => {
+        el.addEventListener('click', () => {
+          document.getElementById('tqlInput').value = el.dataset.snippet;
+          if (el.dataset.snippet.startsWith('CREATE')) {
+            document.getElementById('mutationCheck').checked = true;
+          } else {
+            document.getElementById('mutationCheck').checked = false;
+          }
+          executeCurrentQuery();
+        });
+      });
+
+      // 快速动作
+      document.querySelectorAll('[data-action]').forEach(el => {
+        el.addEventListener('click', () => {
+          const action = el.dataset.action;
+          if (action === 'quick-find') {
+            document.getElementById('tqlInput').value = 'FIND {} RETURN * LIMIT 25';
+            document.getElementById('mutationCheck').checked = false;
+          } else if (action === 'quick-match') {
+            document.getElementById('tqlInput').value = 'MATCH (a)-[r]->(b) RETURN a, r, b LIMIT 25';
+            document.getElementById('mutationCheck').checked = false;
+          } else if (action === 'quick-search') {
+            document.getElementById('tqlInput').value = 'SEARCH VECTOR [0.1, 0.2, 0.3] TOP 5 RETURN *';
+            document.getElementById('mutationCheck').checked = false;
+          }
+          executeCurrentQuery();
+        });
+      });
+    }
+
+    // 工作台标签页与结果视图切换
+    function setupTabs() {
+      document.querySelectorAll('.tabs-bar .tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+          document.querySelectorAll('.tabs-bar .tab').forEach(t => t.classList.remove('active'));
+          document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+          tab.classList.add('active');
+          const targetId = tab.dataset.tab;
+          document.getElementById(targetId).classList.add('active');
+          if (targetId === 'graphExplorePane') {
+            initStandaloneGraph();
+          }
+        });
+      });
+
+      document.querySelectorAll('.results-tabs .res-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+          document.querySelectorAll('.results-tabs .res-tab').forEach(t => t.classList.remove('active'));
+          tab.classList.add('active');
+          const view = tab.dataset.view;
+          document.getElementById('viewGrid').style.display = view === 'grid' ? 'block' : 'none';
+          document.getElementById('viewGraph').style.display = view === 'graph' ? 'block' : 'none';
+          document.getElementById('viewJson').style.display = view === 'json' ? 'block' : 'none';
+          if (view === 'graph') redrawGraph();
+        });
+      });
+    }
+
+    // ==========================================
+    // 后端 API 通信
+    // ==========================================
+    async function checkServerHealth() {
+      const connBadge = document.getElementById('connStatus');
+      const connText = document.getElementById('connText');
+      try {
+        const res = await fetch(`${API_BASE}/health/ready`);
+        if (res.ok) {
+          const data = await res.json();
+          connBadge.className = 'status-badge live';
+          connText.textContent = `在线 (${data.status})`;
+          document.getElementById('statusVersion').textContent = `TriviumDB Server v${data.version || '0.8.6'}`;
+        } else {
+          connBadge.className = 'status-badge dead';
+          connText.textContent = `就绪异常 (${res.status})`;
+        }
+      } catch (err) {
+        connBadge.className = 'status-badge dead';
+        connText.textContent = '无法连接 Server';
+      }
+
+      // 抓取详细指标
+      try {
+        const resDetails = await fetch(`${API_BASE}/health/details`);
+        if (resDetails.ok) {
+          const details = await resDetails.json();
+          document.getElementById('statusQueue').textContent = `写队列: ${details.writeQueueDepth || 0}/${details.writeQueueCapacity || 256}`;
+          document.getElementById('statusReads').textContent = `并发读: ${details.activeReads || 0}`;
+        }
+      } catch (_) {}
+    }
+
+    // 执行当前 TQL
+    async function executeCurrentQuery() {
+      const query = document.getElementById('tqlInput').value.trim();
+      if (!query) return;
+
+      const isMutation = document.getElementById('mutationCheck').checked;
+      const isProfile = document.getElementById('profileCheck').checked;
+
+      const runBtn = document.getElementById('runQueryBtn');
+      runBtn.disabled = true;
+      runBtn.innerHTML = `<span>执行中...</span>`;
+
+      const startTime = performance.now();
+
+      try {
+        const response = await fetch(`${API_BASE}/v1/tql`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query, mutation: isMutation, profile: isProfile })
+        });
+
+        const elapsed = (performance.now() - startTime).toFixed(1);
+        document.getElementById('statusQueryTime').textContent = `耗时: ${elapsed} ms`;
+
+        if (!response.ok) {
+          const errorJson = await response.json().catch(() => ({ title: '未知错误', detail: response.statusText }));
+          renderError(errorJson);
+          return;
+        }
+
+        const data = await response.json();
+        currentResultData = data;
+
+        // 保存历史
+        saveHistory(query);
+
+        // 更新 Generation
+        if (data.generation) {
+          currentGeneration = data.generation;
+          document.getElementById('headerGeneration').textContent = `Generation: ${data.generation}`;
+        }
+
+        if (isMutation) {
+          document.getElementById('statusAffected').textContent = `影响: ${data.affected || 0} 行`;
+          document.getElementById('statusRowCount').textContent = `创建: ${(data.createdIds || []).length} 个`;
+          renderMutationResult(data);
+        } else {
+          const rows = data.rows || [];
+          document.getElementById('statusRowCount').textContent = `返回: ${rows.length} 行`;
+          document.getElementById('statusAffected').textContent = '只读';
+          renderGrid(rows);
+          renderGraph(rows);
+          renderRawJson(data);
+        }
+
+      } catch (err) {
+        renderError({ title: '网络请求失败', detail: err.message });
+      } finally {
+        runBtn.disabled = false;
+        runBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>运行 (Run)</span>`;
+      }
+    }
+
+    // ==========================================
+    // 视图渲染引擎
+    // ==========================================
+    function renderGrid(rows) {
+      const head = document.getElementById('gridHead');
+      const body = document.getElementById('gridBody');
+      head.innerHTML = '';
+      body.innerHTML = '';
+
+      if (!rows || rows.length === 0) {
+        head.innerHTML = '<th>#</th><th>结果</th>';
+        body.innerHTML = '<tr><td colspan="2" style="text-align:center; padding:30px; color:var(--text-light);">查询成功，但没有匹配的行</td></tr>';
+        return;
+      }
+
+      // 提取全部列名
+      const colSet = new Set(['#']);
+      rows.forEach(r => Object.keys(r).forEach(k => colSet.add(k)));
+      const cols = Array.from(colSet);
+
+      cols.forEach(c => {
+        const th = document.createElement('th');
+        th.textContent = c;
+        head.appendChild(th);
+      });
+
+      rows.forEach((row, idx) => {
+        const tr = document.createElement('tr');
+        cols.forEach(c => {
+          const td = document.createElement('td');
+          if (c === '#') {
+            td.textContent = idx + 1;
+            td.style.color = 'var(--text-light)';
+          } else {
+            const val = row[c];
+            if (val === undefined || val === null) {
+              td.textContent = 'null';
+              td.style.color = 'var(--text-light)';
+            } else if (typeof val === 'object') {
+              td.textContent = JSON.stringify(val);
+            } else {
+              td.textContent = String(val);
+            }
+          }
+          tr.appendChild(td);
+        });
+        body.appendChild(tr);
+      });
+    }
+
+    function renderMutationResult(data) {
+      const head = document.getElementById('gridHead');
+      const body = document.getElementById('gridBody');
+      head.innerHTML = '<th>状态</th><th>受影响行数</th><th>生成节点 ID</th>';
+      body.innerHTML = `<tr>
+        <td style="color:var(--success); font-weight:600;">✓ 写入成功</td>
+        <td>${data.affected || 0}</td>
+        <td><code>${(data.createdIds || []).join(', ') || '无'}</code></td>
+      </tr>`;
+      document.getElementById('rawJsonOutput').textContent = JSON.stringify(data, null, 2);
+    }
+
+    function renderRawJson(data) {
+      document.getElementById('rawJsonOutput').textContent = JSON.stringify(data, null, 2);
+    }
+
+    function renderError(err) {
+      const body = document.getElementById('gridBody');
+      body.innerHTML = `<tr><td colspan="5" style="padding: 20px; background: var(--danger-bg); color: var(--danger);">
+        <strong>❌ ${err.title || '执行错误'}</strong><br>
+        <span style="font-size: 12px; margin-top: 4px; display:inline-block;">${err.detail || JSON.stringify(err)}</span>
+      </td></tr>`;
+      document.getElementById('rawJsonOutput').textContent = JSON.stringify(err, null, 2);
+    }
+
+    // ==========================================
+    // 拓扑图解析与 Force-Directed Canvas 渲染
+    // ==========================================
+    function renderGraph(rows) {
+      graphNodes = [];
+      graphEdges = [];
+      const nodeMap = new Map();
+
+      // 从结果中抽取所有节点与边对象
+      rows.forEach((row, rowIdx) => {
+        Object.entries(row).forEach(([key, val]) => {
+          if (val && typeof val === 'object') {
+            if (val.id !== undefined) {
+              // 节点
+              const id = String(val.id);
+              if (!nodeMap.has(id)) {
+                const node = {
+                  id,
+                  label: val.payload?.name || val.payload?.title || `Node ${id}`,
+                  payload: val.payload || {},
+                  vector: val.vector || [],
+                  x: (Math.random() - 0.5) * 400,
+                  y: (Math.random() - 0.5) * 400,
+                  vx: 0,
+                  vy: 0,
+                  color: getNodeColor(val.payload?.type || key)
+                };
+                nodeMap.set(id, node);
+                graphNodes.push(node);
+              }
+            } else if (val.source !== undefined && val.target !== undefined) {
+              // 边
+              graphEdges.push({
+                source: String(val.source),
+                target: String(val.target),
+                label: val.label || 'LINK'
+              });
+            }
+          }
+        });
+      });
+
+      // 如果只有节点没有明确边，则做基础网状互连展示
+      redrawGraph();
+    }
+
+    function getNodeColor(type) {
+      const colors = {
+        person: '#3b82f6',
+        paper: '#10b981',
+        topic: '#8b5cf6',
+        user: '#f59e0b',
+        event: '#ec4899'
+      };
+      return colors[type] || '#0284c7';
+    }
+
+    function initCanvas(canvasId) {
+      const canvas = document.getElementById(canvasId);
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+
+      function resize() {
+        canvas.width = canvas.parentElement.clientWidth;
+        canvas.height = canvas.parentElement.clientHeight;
+        transform.x = canvas.width / 2;
+        transform.y = canvas.height / 2;
+        redrawGraph();
+      }
+      window.addEventListener('resize', resize);
+      setTimeout(resize, 100);
+
+      // 拖拽与缩放
+      canvas.addEventListener('mousedown', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const mx = (e.clientX - rect.left - transform.x) / transform.k;
+        const my = (e.clientY - rect.top - transform.y) / transform.k;
+
+        // 碰撞测试
+        const clickedNode = graphNodes.find(n => Math.hypot(n.x - mx, n.y - my) < 20);
+        if (clickedNode) {
+          draggedNode = clickedNode;
+          selectedNode = clickedNode;
+          openNodeDrawer(clickedNode);
+        } else {
+          isDraggingCanvas = true;
+          dragStart = { x: e.clientX, y: e.clientY };
+        }
+      });
+
+      window.addEventListener('mousemove', (e) => {
+        if (draggedNode) {
+          const rect = canvas.getBoundingClientRect();
+          draggedNode.x = (e.clientX - rect.left - transform.x) / transform.k;
+          draggedNode.y = (e.clientY - rect.top - transform.y) / transform.k;
+          redrawGraph();
+        } else if (isDraggingCanvas) {
+          transform.x += e.clientX - dragStart.x;
+          transform.y += e.clientY - dragStart.y;
+          dragStart = { x: e.clientX, y: e.clientY };
+          redrawGraph();
+        }
+      });
+
+      window.addEventListener('mouseup', () => {
+        draggedNode = null;
+        isDraggingCanvas = false;
+      });
+
+      canvas.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const zoom = e.deltaY < 0 ? 1.1 : 0.9;
+        transform.k *= zoom;
+        redrawGraph();
+      });
+
+      document.getElementById('centerGraphBtn').addEventListener('click', () => {
+        transform.x = canvas.width / 2;
+        transform.y = canvas.height / 2;
+        transform.k = 1;
+        redrawGraph();
+      });
+
+      document.getElementById('togglePhysicsBtn').addEventListener('click', () => {
+        simulationRunning = !simulationRunning;
+        document.getElementById('togglePhysicsBtn').textContent = simulationRunning ? '冻结力学' : '恢复力学';
+      });
+
+      document.getElementById('closeDrawerBtn').addEventListener('click', () => {
+        document.getElementById('nodeDrawer').classList.remove('open');
+      });
+    }
+
+    function redrawGraph() {
+      const canvas = document.getElementById('graphCanvas');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      ctx.save();
+      ctx.translate(transform.x, transform.y);
+      ctx.scale(transform.k, transform.k);
+
+      // 绘制连线
+      graphEdges.forEach(edge => {
+        const s = graphNodes.find(n => n.id === edge.source);
+        const t = graphNodes.find(n => n.id === edge.target);
+        if (s && t) {
+          ctx.beginPath();
+          ctx.moveTo(s.x, s.y);
+          ctx.lineTo(t.x, t.y);
+          ctx.strokeStyle = document.documentElement.getAttribute('data-theme') === 'dark' ? '#334155' : '#cbd5e1';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+
+          // 绘制标签
+          const midX = (s.x + t.x) / 2;
+          const midY = (s.y + t.y) / 2;
+          ctx.fillStyle = '#64748b';
+          ctx.font = '10px var(--font-sans)';
+          ctx.fillText(edge.label, midX, midY - 3);
+        }
+      });
+
+      // 绘制节点
+      graphNodes.forEach(node => {
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, 16, 0, Math.PI * 2);
+        ctx.fillStyle = node.color;
+        ctx.fill();
+        ctx.strokeStyle = selectedNode === node ? '#ffffff' : 'rgba(0,0,0,0.15)';
+        ctx.lineWidth = selectedNode === node ? 3 : 1;
+        ctx.stroke();
+
+        // 文字
+        ctx.fillStyle = document.documentElement.getAttribute('data-theme') === 'dark' ? '#f1f5f9' : '#1e293b';
+        ctx.font = '11px var(--font-sans)';
+        ctx.textAlign = 'center';
+        ctx.fillText(node.label, node.x, node.y + 28);
+      });
+
+      ctx.restore();
+    }
+
+    function openNodeDrawer(node) {
+      document.getElementById('drawerNodeTitle').textContent = `节点: #${node.id} (${node.label})`;
+      document.getElementById('drawerNodeContent').textContent = JSON.stringify({
+        id: node.id,
+        payload: node.payload,
+        vector: node.vector.length > 0 ? `[${node.vector.length} 维向量]` : '无向量'
+      }, null, 2);
+      document.getElementById('nodeDrawer').classList.add('open');
+    }
+
+    // 独立图拓扑探索标签页
+    function initStandaloneGraph() {
+      document.getElementById('loadWholeGraphBtn').onclick = () => {
+        document.getElementById('tqlInput').value = 'MATCH (a)-[r]->(b) RETURN a, r, b LIMIT 100';
+        document.querySelector('[data-tab="queryPane"]').click();
+        document.querySelector('[data-view="graph"]').click();
+        executeCurrentQuery();
+      };
+    }
+
+    // ==========================================
+    // 教程系统控制器
+    // ==========================================
+    function setupTutorial() {
+      const overlay = document.getElementById('tutorialOverlay');
+      const openBtn = document.getElementById('openTutorialBtn');
+      const closeBtn = document.getElementById('closeTutorialBtn');
+      const nav = document.getElementById('tutorialStepsNav');
+
+      openBtn.addEventListener('click', () => overlay.classList.add('open'));
+      closeBtn.addEventListener('click', () => overlay.classList.remove('open'));
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) overlay.classList.remove('open');
+      });
+
+      // 渲染步骤列表
+      nav.innerHTML = '';
+      TUTORIAL_STEPS.forEach((step, idx) => {
+        const item = document.createElement('div');
+        item.className = `tutorial-step-item ${idx === 0 ? 'active' : ''}`;
+        item.innerHTML = `<span>${step.title}</span>`;
+        item.addEventListener('click', () => {
+          document.querySelectorAll('.tutorial-step-item').forEach(i => i.classList.remove('active'));
+          item.classList.add('active');
+          renderTutorialContent(step);
+        });
+        nav.appendChild(item);
+      });
+
+      renderTutorialContent(TUTORIAL_STEPS[0]);
+    }
+
+    function renderTutorialContent(step) {
+      const pane = document.getElementById('tutorialContentPane');
+      pane.innerHTML = step.desc;
+    }
+
+    window.runTutorialCode = function(code, isMutation, targetTab = 'grid') {
+      document.getElementById('tqlInput').value = code;
+      document.getElementById('mutationCheck').checked = !!isMutation;
+      document.getElementById('tutorialOverlay').classList.remove('open');
+
+      if (targetTab === 'graph') {
+        document.querySelector('[data-view="graph"]').click();
+      } else {
+        document.querySelector('[data-view="grid"]').click();
+      }
+      executeCurrentQuery();
+    };
+
+    window.initTutorialData = async function() {
+      const overlay = document.getElementById('tutorialOverlay');
+      const sampleQueries = [
+        'CREATE ({name: "Alice", type: "person", citations: 150, department: "AI Lab"})',
+        'CREATE ({name: "Bob", type: "person", citations: 45, department: "Systems"})',
+        'CREATE ({name: "Carol", type: "person", citations: 210, department: "AI Lab"})',
+        'CREATE ({title: "TriviumDB Architecture", type: "paper", year: 2026})',
+        'CREATE ({title: "QuIVer Vector Engine", type: "paper", year: 2025})',
+        'CREATE ({name: "Tri-Model DB", type: "topic"})'
+      ];
+
+      alert('正在注入 6 条三模节点数据...');
+      for (const q of sampleQueries) {
+        await fetch(`${API_BASE}/v1/tql`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: q, mutation: true })
+        });
+      }
+      alert('数据注入成功！现在请切换至第 2 关或直接在控制台执行查询！');
+    };
+
+    // ==========================================
+    // 实用工具 (格式化 / 导出 / 历史)
+    // ==========================================
+    function formatTql() {
+      const area = document.getElementById('tqlInput');
+      let text = area.value;
+      const keywords = ['FIND', 'MATCH', 'SEARCH', 'VECTOR', 'TOP', 'WHERE', 'RETURN', 'WITH', 'LIMIT', 'CREATE', 'LINK', 'DELETE', 'AND', 'OR'];
+      keywords.forEach(kw => {
+        const reg = new RegExp(`\\b${kw}\\b`, 'gi');
+        text = text.replace(reg, kw);
+      });
+      area.value = text;
+    }
+
+    function exportJson() {
+      if (!currentResultData) {
+        alert('当前没有可导出的结果');
+        return;
+      }
+      const blob = new Blob([JSON.stringify(currentResultData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `triviumdb-export-${Date.now()}.json`;
+      a.click();
+    }
+
+    function saveHistory(q) {
+      if (!queryHistory.includes(q)) {
+        queryHistory.unshift(q);
+        if (queryHistory.length > 30) queryHistory.pop();
+        localStorage.setItem('tdb_query_history', JSON.stringify(queryHistory));
+        renderHistory();
+      }
+    }
+
+    function renderHistory() {
+      const container = document.getElementById('historyList');
+      if (!queryHistory.length) return;
+      container.innerHTML = '';
+      queryHistory.slice(0, 10).forEach(q => {
+        const item = document.createElement('div');
+        item.className = 'nav-item';
+        item.style.fontSize = '11px';
+        item.style.padding = '5px 14px';
+        item.innerHTML = `<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${q}</span>`;
+        item.onclick = () => {
+          document.getElementById('tqlInput').value = q;
+          executeCurrentQuery();
+        };
+        container.appendChild(item);
+      });
+    }
+  </script>
+</body>
+</html>
