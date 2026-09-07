@@ -744,7 +744,9 @@ mod tests {
         let entry_bytes = estimate_json_memory(&value);
         let mut store = PayloadStore::new(entry_bytes.saturating_mul(2), entry_bytes);
         for id in 1..=3 {
-            store.insert_raw(id, &serde_json::to_vec(&value).unwrap()).unwrap();
+            store
+                .insert_raw(id, &serde_json::to_vec(&value).unwrap())
+                .unwrap();
         }
 
         // Cache 1 and 2, then read 1 again so 2 is the least recently used.
@@ -802,7 +804,9 @@ mod tests {
             self.bytes += bytes;
             self.values.insert(id, bytes);
             while self.bytes > max_bytes {
-                let Some(oldest) = self.order.pop_front() else { break };
+                let Some(oldest) = self.order.pop_front() else {
+                    break;
+                };
                 if let Some(previous) = self.values.remove(&oldest) {
                     self.bytes -= previous;
                     self.evictions += 1;
