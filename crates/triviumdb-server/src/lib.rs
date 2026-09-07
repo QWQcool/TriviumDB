@@ -165,7 +165,11 @@ const WEBUI_HTML: &str = include_str!("../web/index.html");
 
 async fn webui_index() -> impl IntoResponse {
     (
-        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            // 页面在编译期内嵌，升级 server 后必须让浏览器重新拉取，避免旧 UI 与新接口不匹配
+            (header::CACHE_CONTROL, "no-cache"),
+        ],
         WEBUI_HTML,
     )
 }

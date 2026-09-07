@@ -6,56 +6,70 @@
   <title>TriviumDB Web Console</title>
   <style>
     :root {
-      --bg-app: #f4f6f9;
+      --bg-app: #f6f7f9;
       --bg-surface: #ffffff;
-      --bg-surface-secondary: #f8fafc;
-      --border-color: #dbe2ea;
-      --border-focus: #1e6bb8;
-      --text-main: #1e293b;
-      --text-muted: #64748b;
-      --text-light: #94a3b8;
-      --primary: #1e6bb8;
-      --primary-hover: #16528e;
-      --primary-bg: #e8f2fc;
-      --accent: #0284c7;
-      --success: #16a34a;
-      --success-bg: #dcfce7;
-      --warning: #d97706;
-      --warning-bg: #fef3c7;
+      --bg-surface-secondary: #f1f3f6;
+      --bg-inset: #eaeef3;
+      --border-color: #e5e9ef;
+      --border-strong: #d2d9e3;
+      --border-focus: #6366f1;
+      --text-main: #171c26;
+      --text-muted: #5b6572;
+      --text-light: #95a0af;
+      --primary: #4f46e5;
+      --primary-hover: #4338ca;
+      --primary-bg: #eef2ff;
+      --accent: #0891b2;
+      --success: #059669;
+      --success-bg: #d6f5e7;
+      --warning: #b45309;
+      --warning-bg: #fdf0c9;
       --danger: #dc2626;
-      --danger-bg: #fee2e2;
-      --font-mono: "JetBrains Mono", "Fira Code", Consolas, Menlo, monospace;
-      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      --sidebar-width: 280px;
-      --header-height: 48px;
+      --danger-bg: #fde3e3;
+      --tri-doc: #06b6d4;
+      --tri-graph: #f59e0b;
+      --tri-vector: #8b5cf6;
+      --font-mono: ui-monospace, "JetBrains Mono", "Fira Code", Consolas, Menlo, monospace;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      --sidebar-width: 264px;
+      --header-height: 52px;
       --status-height: 28px;
-      --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-      --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-      --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 14px;
+      --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05);
+      --shadow-md: 0 1px 3px rgba(16, 24, 40, 0.06), 0 6px 16px rgba(16, 24, 40, 0.07);
+      --shadow-lg: 0 12px 40px rgba(16, 24, 40, 0.18);
     }
 
     [data-theme="dark"] {
-      --bg-app: #0b1120;
-      --bg-surface: #131d31;
-      --bg-surface-secondary: #1a2744;
-      --border-color: #243556;
-      --border-focus: #38bdf8;
-      --text-main: #f1f5f9;
-      --text-muted: #94a3b8;
-      --text-light: #64748b;
-      --primary: #38bdf8;
-      --primary-hover: #0284c7;
-      --primary-bg: #0c4a6e33;
-      --accent: #818cf8;
-      --success: #22c55e;
-      --success-bg: #14532d44;
-      --warning: #f59e0b;
-      --warning-bg: #78350f44;
-      --danger: #ef4444;
-      --danger-bg: #7f1d1d44;
+      --bg-app: #0f1216;
+      --bg-surface: #151a20;
+      --bg-surface-secondary: #1c222a;
+      --bg-inset: #232a34;
+      --border-color: #242b35;
+      --border-strong: #333c49;
+      --border-focus: #818cf8;
+      --text-main: #e8ebf1;
+      --text-muted: #9aa4b2;
+      --text-light: #5f6b7a;
+      --primary: #818cf8;
+      --primary-hover: #a5b4fc;
+      --primary-bg: rgba(129, 140, 248, 0.14);
+      --accent: #22d3ee;
+      --success: #34d399;
+      --success-bg: rgba(16, 185, 129, 0.15);
+      --warning: #fbbf24;
+      --warning-bg: rgba(245, 158, 11, 0.15);
+      --danger: #f87171;
+      --danger-bg: rgba(239, 68, 68, 0.15);
+      --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+      --shadow-md: 0 1px 3px rgba(0, 0, 0, 0.35), 0 6px 16px rgba(0, 0, 0, 0.35);
+      --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.55);
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { height: 100%; }
     body {
       font-family: var(--font-sans);
       background-color: var(--bg-app);
@@ -65,11 +79,27 @@
       height: 100vh;
       overflow: hidden;
       font-size: 13px;
+      -webkit-font-smoothing: antialiased;
+    }
+    ::selection { background: var(--primary-bg); }
+    :focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; border-radius: 4px; }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 8px; border: 3px solid transparent; background-clip: content-box; }
+    ::-webkit-scrollbar-thumb:hover { background-color: var(--text-light); }
+    ::-webkit-scrollbar-track { background: transparent; }
+    code { font-family: var(--font-mono); font-size: 0.95em; }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+      }
     }
 
     /* 顶部导航栏 */
     header.app-header {
       height: var(--header-height);
+      flex: none;
       background: var(--bg-surface);
       border-bottom: 1px solid var(--border-color);
       display: flex;
@@ -83,11 +113,16 @@
       display: flex;
       align-items: center;
       gap: 10px;
-      font-weight: 700;
-      font-size: 15px;
-      color: var(--primary);
+      font-weight: 650;
+      font-size: 14px;
+      letter-spacing: -0.01em;
+      color: var(--text-main);
     }
-    .header-brand svg { width: 22px; height: 22px; fill: currentColor; }
+    .brand-mark { width: 24px; height: 24px; flex: none; }
+    .brand-dot { fill: var(--tri-doc); }
+    .brand-dot--graph { fill: var(--tri-graph); }
+    .brand-dot--vector { fill: var(--tri-vector); }
+    .brand-link { stroke: var(--border-strong); stroke-width: 1.4; stroke-linecap: round; }
     .header-status {
       display: flex;
       align-items: center;
@@ -97,16 +132,17 @@
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      padding: 4px 10px;
+      padding: 3px 10px;
       border-radius: 9999px;
       font-size: 12px;
       font-weight: 500;
-      background: var(--primary-bg);
-      color: var(--primary);
+      background: var(--bg-surface-secondary);
+      color: var(--text-muted);
       border: 1px solid var(--border-color);
+      transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
     }
-    .status-badge.live { background: var(--success-bg); color: var(--success); }
-    .status-badge.dead { background: var(--danger-bg); color: var(--danger); }
+    .status-badge.live { background: var(--success-bg); color: var(--success); border-color: transparent; }
+    .status-badge.dead { background: var(--danger-bg); color: var(--danger); border-color: transparent; }
     .status-dot {
       width: 7px;
       height: 7px;
@@ -122,18 +158,22 @@
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      padding: 6px 12px;
-      border-radius: 5px;
+      padding: 5px 12px;
+      border-radius: var(--radius-sm);
       font-size: 12px;
       font-weight: 500;
+      font-family: inherit;
       cursor: pointer;
       border: 1px solid var(--border-color);
       background: var(--bg-surface);
       color: var(--text-main);
-      transition: all 0.15s ease;
+      transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
       white-space: nowrap;
     }
-    .btn:hover { background: var(--bg-surface-secondary); border-color: var(--border-focus); }
+    .btn:hover { background: var(--bg-surface-secondary); border-color: var(--border-strong); }
+    .btn:active { background: var(--bg-inset); }
+    .btn:disabled { opacity: 0.55; cursor: default; }
+    .btn svg { flex: none; }
     .btn-primary {
       background: var(--primary);
       color: #ffffff;
@@ -145,7 +185,7 @@
       color: #ffffff;
     }
     .btn-success { background: var(--success); color: #fff; border-color: var(--success); }
-    .btn-success:hover { opacity: 0.9; }
+    .btn-success:hover { opacity: 0.92; color: #fff; }
 
     /* 主布局 */
     .app-body {
@@ -153,11 +193,13 @@
       display: flex;
       overflow: hidden;
       position: relative;
+      min-height: 0;
     }
 
-    /* 左侧对象导航树 (Navicat 风格) */
+    /* 左侧对象导航树 */
     aside.sidebar {
       width: var(--sidebar-width);
+      flex: none;
       background: var(--bg-surface);
       border-right: 1px solid var(--border-color);
       display: flex;
@@ -166,12 +208,12 @@
       z-index: 10;
     }
     .sidebar-header {
-      padding: 10px 14px;
+      padding: 12px 16px 10px;
+      font-size: 11px;
       font-weight: 600;
-      font-size: 12px;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: var(--text-muted);
+      letter-spacing: 0.08em;
+      color: var(--text-light);
       border-bottom: 1px solid var(--border-color);
       display: flex;
       align-items: center;
@@ -180,45 +222,58 @@
     .sidebar-content {
       flex: 1;
       overflow-y: auto;
-      padding: 6px 0;
+      padding: 8px 8px 12px;
     }
     .nav-section-title {
-      padding: 8px 14px 4px;
-      font-size: 11px;
-      font-weight: 700;
+      padding: 14px 8px 6px;
+      font-size: 10.5px;
+      font-weight: 600;
       color: var(--text-light);
       text-transform: uppercase;
+      letter-spacing: 0.08em;
     }
     .nav-item {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 7px 14px;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: var(--radius-sm);
       cursor: pointer;
       color: var(--text-main);
-      transition: background 0.15s ease;
+      line-height: 1.4;
+      transition: background-color 0.12s ease, color 0.12s ease;
     }
     .nav-item:hover { background: var(--bg-surface-secondary); }
     .nav-item.active {
       background: var(--primary-bg);
       color: var(--primary);
       font-weight: 600;
-      border-right: 3px solid var(--primary);
     }
     .nav-item-left {
       display: flex;
       align-items: center;
       gap: 8px;
+      min-width: 0;
     }
-    .nav-item-icon { width: 16px; height: 16px; opacity: 0.75; }
+    .nav-item-left > span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .nav-item-icon { width: 15px; height: 15px; flex: none; opacity: 0.8; }
     .badge {
-      font-size: 11px;
-      padding: 1px 6px;
-      border-radius: 10px;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 0.03em;
+      padding: 1px 7px;
+      border-radius: 9999px;
       background: var(--bg-surface-secondary);
-      border: 1px solid var(--border-color);
       color: var(--text-muted);
+      border: none;
+      flex: none;
     }
+    .nav-item.active .badge { background: transparent; color: inherit; }
 
     /* 中央多标签页工作台 */
     main.workspace {
@@ -227,36 +282,38 @@
       flex-direction: column;
       overflow: hidden;
       background: var(--bg-app);
+      min-width: 0;
     }
     .tabs-bar {
-      height: 36px;
+      height: 40px;
+      flex: none;
       background: var(--bg-surface);
       border-bottom: 1px solid var(--border-color);
       display: flex;
-      align-items: center;
-      padding: 0 8px;
+      align-items: stretch;
+      padding: 0 12px;
       gap: 4px;
       overflow-x: auto;
     }
     .tab {
       display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 6px 14px;
-      border-radius: 6px 6px 0 0;
-      background: var(--bg-surface-secondary);
-      border: 1px solid var(--border-color);
-      border-bottom: none;
+      gap: 7px;
+      padding: 0 12px;
       cursor: pointer;
+      font-size: 12.5px;
       font-weight: 500;
       color: var(--text-muted);
-      height: 30px;
-      margin-top: 5px;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      user-select: none;
+      white-space: nowrap;
+      transition: color 0.15s ease, border-color 0.15s ease;
     }
+    .tab:hover { color: var(--text-main); }
     .tab.active {
-      background: var(--bg-surface);
       color: var(--primary);
-      border-top: 2px solid var(--primary);
+      border-bottom-color: var(--primary);
       font-weight: 600;
     }
 
@@ -271,7 +328,7 @@
 
     /* 编辑器与工具栏 */
     .editor-toolbar {
-      padding: 8px 14px;
+      padding: 8px 12px;
       background: var(--bg-surface);
       border-bottom: 1px solid var(--border-color);
       display: flex;
@@ -288,12 +345,14 @@
     .checkbox-label {
       display: inline-flex;
       align-items: center;
-      gap: 4px;
+      gap: 5px;
       cursor: pointer;
       font-size: 12px;
-      color: var(--text-main);
+      color: var(--text-muted);
       user-select: none;
     }
+    .checkbox-label:hover { color: var(--text-main); }
+    .checkbox-label input { accent-color: var(--primary); }
 
     /* 查询编辑器区域 (Split Pane) */
     .query-layout {
@@ -310,15 +369,16 @@
       border-bottom: 1px solid var(--border-color);
       position: relative;
       display: flex;
+      flex: none;
     }
     .editor-textarea {
       flex: 1;
       width: 100%;
       height: 100%;
-      padding: 12px 16px;
+      padding: 14px 64px 12px 16px;
       font-family: var(--font-mono);
       font-size: 13px;
-      line-height: 1.5;
+      line-height: 1.6;
       background: transparent;
       color: var(--text-main);
       border: none;
@@ -326,6 +386,21 @@
       resize: none;
       white-space: pre-wrap;
       tab-size: 2;
+      caret-color: var(--primary);
+    }
+    .editor-chip {
+      position: absolute;
+      top: 10px;
+      right: 12px;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      color: var(--text-light);
+      background: var(--bg-surface-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      padding: 2px 7px;
+      pointer-events: none;
     }
 
     /* 结果展示区 */
@@ -335,69 +410,79 @@
       flex-direction: column;
       overflow: hidden;
       background: var(--bg-surface);
+      min-height: 0;
     }
     .results-tabs {
-      height: 32px;
-      background: var(--bg-surface-secondary);
-      border-bottom: 1px solid var(--border-color);
+      height: 40px;
+      flex: none;
       display: flex;
       align-items: center;
-      padding: 0 10px;
-      gap: 6px;
+      padding: 0 12px;
+      gap: 2px;
     }
     .res-tab {
-      padding: 4px 10px;
-      border-radius: 4px;
+      padding: 5px 10px;
+      border-radius: var(--radius-sm);
       cursor: pointer;
       font-size: 12px;
       color: var(--text-muted);
-      border: 1px solid transparent;
+      border: none;
+      background: transparent;
+      user-select: none;
+      transition: background-color 0.12s ease, color 0.12s ease;
+    }
+    .res-tab:hover {
+      background: var(--bg-surface-secondary);
+      color: var(--text-main);
     }
     .res-tab.active {
-      background: var(--bg-surface);
-      color: var(--primary);
-      border-color: var(--border-color);
+      background: var(--bg-inset);
+      color: var(--text-main);
       font-weight: 600;
     }
     .res-content {
       flex: 1;
       overflow: auto;
       position: relative;
+      min-height: 0;
     }
 
-    /* Navicat 风格数据网格 (Data Grid Table) */
+    /* 数据网格 (Data Grid) */
     table.data-grid {
       width: 100%;
       border-collapse: collapse;
-      font-family: var(--font-sans);
       font-size: 12px;
       text-align: left;
     }
     table.data-grid th {
       position: sticky;
       top: 0;
-      background: var(--bg-surface-secondary);
-      border-bottom: 1px solid var(--border-color);
-      border-right: 1px solid var(--border-color);
-      padding: 7px 10px;
+      z-index: 2;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border-strong);
+      padding: 8px 12px;
       font-weight: 600;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
       color: var(--text-muted);
       cursor: pointer;
       user-select: none;
       white-space: nowrap;
     }
-    table.data-grid th:hover { background: var(--border-color); }
+    table.data-grid th:hover { color: var(--text-main); }
     table.data-grid td {
       border-bottom: 1px solid var(--border-color);
-      border-right: 1px solid var(--border-color);
-      padding: 6px 10px;
+      padding: 7px 12px;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      max-width: 260px;
+      max-width: 320px;
+      font-family: var(--font-mono);
+      font-size: 11.5px;
     }
-    table.data-grid tr:hover { background: var(--bg-surface-secondary); }
-    table.data-grid tr:nth-child(even) { background: rgba(0,0,0,0.015); }
+    table.data-grid tbody tr { transition: background-color 0.1s ease; }
+    table.data-grid tbody tr:hover { background: var(--bg-surface-secondary); }
 
     /* Canvas 拓扑图 */
     #graphCanvas {
@@ -415,7 +500,7 @@
       gap: 6px;
       background: var(--bg-surface);
       padding: 6px;
-      border-radius: 6px;
+      border-radius: var(--radius-md);
       border: 1px solid var(--border-color);
       box-shadow: var(--shadow-md);
       z-index: 5;
@@ -424,24 +509,28 @@
       position: absolute;
       top: 0;
       right: 0;
-      width: 320px;
+      width: 340px;
+      max-width: 85%;
       height: 100%;
       background: var(--bg-surface);
       border-left: 1px solid var(--border-color);
       box-shadow: var(--shadow-lg);
       padding: 16px;
       overflow-y: auto;
-      transform: translateX(100%);
-      transition: transform 0.2s ease;
+      transform: translateX(calc(100% + 2px));
+      transition: transform 0.28s cubic-bezier(0.32, 0.72, 0, 1);
       z-index: 10;
     }
     .node-detail-drawer.open { transform: translateX(0); }
+    .node-detail-drawer h4 { font-size: 13px; font-weight: 600; }
 
     /* 教程抽屉 (Interactive Tutorial Modal / Drawer) */
     .tutorial-overlay {
       position: fixed;
       inset: 0;
-      background: rgba(0,0,0,0.4);
+      background: rgba(10, 13, 17, 0.45);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
       z-index: 100;
       display: none;
       align-items: center;
@@ -453,7 +542,7 @@
       max-width: 90vw;
       height: 80vh;
       background: var(--bg-surface);
-      border-radius: 8px;
+      border-radius: var(--radius-lg);
       border: 1px solid var(--border-color);
       box-shadow: var(--shadow-lg);
       display: flex;
@@ -462,7 +551,6 @@
     }
     .tutorial-header {
       padding: 14px 20px;
-      background: var(--bg-surface-secondary);
       border-bottom: 1px solid var(--border-color);
       display: flex;
       align-items: center;
@@ -475,54 +563,89 @@
     }
     .tutorial-steps-nav {
       width: 220px;
+      flex: none;
       border-right: 1px solid var(--border-color);
       background: var(--bg-surface);
       overflow-y: auto;
-      padding: 8px 0;
+      padding: 8px;
     }
     .tutorial-step-item {
-      padding: 10px 16px;
+      padding: 9px 12px;
       cursor: pointer;
       display: flex;
       align-items: center;
       gap: 10px;
+      border-radius: var(--radius-sm);
       color: var(--text-muted);
-      border-left: 3px solid transparent;
-      transition: all 0.15s ease;
+      font-size: 12.5px;
+      transition: background-color 0.12s ease, color 0.12s ease;
     }
     .tutorial-step-item:hover { background: var(--bg-surface-secondary); }
     .tutorial-step-item.active {
       background: var(--primary-bg);
       color: var(--primary);
       font-weight: 600;
-      border-left-color: var(--primary);
     }
     .tutorial-content-pane {
       flex: 1;
       padding: 24px;
       overflow-y: auto;
-      line-height: 1.6;
+      line-height: 1.65;
+      font-size: 13px;
     }
+    .tutorial-content-pane h3 { font-size: 15px; margin-bottom: 8px; }
     .tutorial-code-block {
       background: var(--bg-app);
       border: 1px solid var(--border-color);
-      border-radius: 6px;
+      border-radius: var(--radius-sm);
       padding: 12px;
       margin: 12px 0;
       font-family: var(--font-mono);
       font-size: 12px;
+      line-height: 1.6;
       position: relative;
+      white-space: pre-wrap;
     }
+    .tutorial-content-pane .btn { margin-top: 4px; }
+
+    /* 轻提示 (Toast) */
+    .toast-stack {
+      position: fixed;
+      bottom: 40px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      z-index: 200;
+      pointer-events: none;
+    }
+    .toast {
+      padding: 8px 16px;
+      border-radius: 9999px;
+      background: var(--text-main);
+      color: var(--bg-surface);
+      font-size: 12.5px;
+      box-shadow: var(--shadow-lg);
+      opacity: 0;
+      transform: translateY(6px);
+      transition: opacity 0.2s ease, transform 0.2s ease;
+      max-width: 80vw;
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
 
     /* 底部状态栏 */
     footer.app-status-bar {
       height: var(--status-height);
+      flex: none;
       background: var(--bg-surface);
       border-top: 1px solid var(--border-color);
       display: flex;
       align-items: center;
       justify-content: space-between;
       padding: 0 14px;
+      font-family: var(--font-mono);
       font-size: 11px;
       color: var(--text-muted);
       user-select: none;
@@ -545,9 +668,10 @@
       gap: 8px;
     }
     pre.json-view {
-      padding: 14px;
+      padding: 14px 16px;
       font-family: var(--font-mono);
       font-size: 12px;
+      line-height: 1.6;
       color: var(--text-main);
       white-space: pre-wrap;
     }
@@ -558,11 +682,14 @@
   <!-- 顶部导航栏 -->
   <header class="app-header">
     <div class="header-brand">
-      <svg viewBox="0 0 24 24">
-        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+      <svg class="brand-mark" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path class="brand-link" d="M8.6 7.4 15.3 8.6M7.3 9.3l2.2 6.1M16.5 11.7l-5.1 4.4"/>
+        <circle class="brand-dot" cx="6" cy="6.5" r="3"/>
+        <circle class="brand-dot brand-dot--graph" cx="18" cy="9" r="3"/>
+        <circle class="brand-dot brand-dot--vector" cx="10.5" cy="18" r="3"/>
       </svg>
-      <span>TriviumDB Web Console</span>
-      <span class="badge">Server Edition</span>
+      <span>TriviumDB Console</span>
+      <span class="badge">SERVER</span>
     </div>
 
     <div class="header-status">
@@ -619,20 +746,35 @@
         </div>
 
         <div class="nav-section-title">常用代码片段 (Snippets)</div>
-        <div class="nav-item" data-snippet="FIND {} RETURN * LIMIT 20">
-          <div class="nav-item-left"><span>🔍 扫描所有节点</span></div>
+        <div class="nav-item" data-snippet='FIND {type: "person"} RETURN * LIMIT 20'>
+          <div class="nav-item-left">
+            <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
+            <span>扫描所有节点</span>
+          </div>
         </div>
-        <div class="nav-item" data-snippet="MATCH (a)-[r]->(b) RETURN a, r, b LIMIT 25">
-          <div class="nav-item-left"><span>🕸 探索一跳图关系</span></div>
+        <div class="nav-item" data-snippet="MATCH (a)-[]->(b) RETURN a, b LIMIT 25">
+          <div class="nav-item-left">
+            <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+            <span>探索一跳图关系</span>
+          </div>
         </div>
         <div class="nav-item" data-snippet="MATCH (a)-[:knows*1..3]->(b) RETURN a, b LIMIT 20">
-          <div class="nav-item-left"><span>🌐 多跳可变长路径</span></div>
+          <div class="nav-item-left">
+            <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="6" r="3"/><circle cx="19" cy="18" r="3"/><path d="M12 3a9 9 0 0 1 9 9M12 21a9 9 0 0 1-9-9"/></svg>
+            <span>多跳可变长路径</span>
+          </div>
         </div>
         <div class="nav-item" data-snippet='CREATE ({name: "Alice", type: "user", level: 5})'>
-          <div class="nav-item-left"><span>➕ 创建单节点 (Doc)</span></div>
+          <div class="nav-item-left">
+            <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            <span>创建单节点 (Doc)</span>
+          </div>
         </div>
-        <div class="nav-item" data-snippet="EXPLAIN ANALYZE FIND {} RETURN *">
-          <div class="nav-item-left"><span>⏱ 剖析执行计划</span></div>
+        <div class="nav-item" data-snippet='EXPLAIN ANALYZE FIND {type: "person"} RETURN *'>
+          <div class="nav-item-left">
+            <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            <span>剖析执行计划</span>
+          </div>
         </div>
 
         <div class="nav-section-title">查询历史 (History)</div>
@@ -681,7 +823,8 @@
         <div class="query-layout">
           <!-- 查询输入区 -->
           <div class="editor-container">
-            <textarea class="editor-textarea" id="tqlInput" spellcheck="false" placeholder="在此输入 TQL 语句，例如: FIND {} RETURN * LIMIT 10 (按 Ctrl+Enter 运行)">FIND {} RETURN * LIMIT 25</textarea>
+            <textarea class="editor-textarea" id="tqlInput" spellcheck="false" placeholder="在此输入 TQL 语句，例如: FIND {type: &quot;person&quot;} RETURN * LIMIT 10 (按 Ctrl+Enter 运行)">FIND {type: "person"} RETURN * LIMIT 25</textarea>
+            <span class="editor-chip">TQL</span>
           </div>
 
           <!-- 结果展示区 -->
@@ -800,7 +943,10 @@
     // 力导向图模拟器状态
     let graphNodes = [];
     let graphEdges = [];
+    let nodeMap = new Map();
     let simulationRunning = true;
+    let simulationAlpha = 1;
+    let simulationRafId = null;
     let selectedNode = null;
     let transform = { x: 0, y: 0, k: 1 };
     let isDraggingCanvas = false;
@@ -834,7 +980,7 @@
 FIND {type: "person", citations: {$gte: 50}} RETURN *
         </div>
         <p>此查询将快速筛出引用量 ≥ 50 的人员节点，并在数据网格中呈现完整的 JSON Payload。</p>
-        <button class="btn btn-primary" onclick="runTutorialCode('FIND {type: \"person\", citations: {$gte: 50}} RETURN *', false)">▶ 在工作台运行此查询</button>`
+        <button class="btn btn-primary" onclick="runTutorialCode('FIND {type: &quot;person&quot;, citations: {$gte: 50}} RETURN *', false)">▶ 在工作台运行此查询</button>`
       },
       {
         id: "step3",
@@ -847,7 +993,7 @@ MATCH (p {name: "Alice"})-[:AUTHORED]->(paper)-[:COVERS]->(topic)
 RETURN p, paper, topic
         </div>
         <p>执行后，切换至<strong>“交互拓扑图 (Graph Canvas)”</strong>，你可以直接用鼠标拖动节点，查看三模连接关系！</p>
-        <button class="btn btn-primary" onclick="runTutorialCode('MATCH (p {name: \"Alice\"})-[:AUTHORED]->(paper)-[:COVERS]->(topic) RETURN p, paper, topic', false, 'graph')">▶ 运行并查看图拓扑</button>`
+        <button class="btn btn-primary" onclick="runTutorialCode('MATCH (a)-[:AUTHORED]-&gt;(b)-[:COVERS]-&gt;(c) WHERE a.name == &quot;Alice&quot; RETURN a, b, c LIMIT 20', false, 'graph')">▶ 运行并查看图拓扑</button>`
       },
       {
         id: "step4",
@@ -872,7 +1018,7 @@ MATCH (doc)-[:COVERS]->(t {name: "Tri-Model DB"})
 WHERE doc.year >= 2024
 RETURN doc, t
         </div>
-        <button class="btn btn-primary" onclick="runTutorialCode('MATCH (doc)-[:COVERS]->(t {name: \"Tri-Model DB\"}) WHERE doc.year >= 2024 RETURN doc, t', false, 'graph')">▶ 运行多模混合管线</button>`
+        <button class="btn btn-primary" onclick="runTutorialCode('MATCH (doc)-[:COVERS]-&gt;(t {name: &quot;Tri-Model DB&quot;}) WHERE doc.year &gt;= 2024 RETURN doc, t', false, 'graph')">▶ 运行多模混合管线</button>`
       },
       {
         id: "step6",
@@ -887,7 +1033,7 @@ RETURN doc, t
         <div class="tutorial-code-block">
 CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         </div>
-        <button class="btn btn-success" onclick="runTutorialCode('CREATE ({name: \"Bob\", type: \"person\", citations: 120, department: \"AI Lab\"})', true)">⚡ 体验一次安全的原子写入</button>`
+        <button class="btn btn-success" onclick="runTutorialCode('CREATE ({name: &quot;Bob&quot;, type: &quot;person&quot;, citations: 120, department: &quot;AI Lab&quot;})', true)">⚡ 体验一次安全的原子写入</button>`
       }
     ];
 
@@ -916,6 +1062,72 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         localStorage.setItem('tdb_theme', next);
         redrawGraph();
       });
+    }
+
+    // ==========================================
+    // 动效层（GSAP 可选加载，降级为无动画）
+    // ==========================================
+    const CANVAS_FONT_FAMILY = '-apple-system, "Segoe UI", sans-serif';
+
+    function initMotion() {
+      if (!window.gsap) return;
+      const mm = gsap.matchMedia();
+      mm.add({
+        reduce: '(prefers-reduced-motion: reduce)',
+        standard: '(prefers-reduced-motion: no-preference)'
+      }, (ctx) => {
+        if (ctx.conditions.reduce) return;
+        gsap.defaults({ ease: 'power3.out' });
+        gsap.timeline({ defaults: { duration: 0.5 } })
+          .from('header.app-header', { yPercent: -100, autoAlpha: 0 })
+          .from('aside.sidebar', { x: -20, autoAlpha: 0 }, '-=0.3')
+          .from('main.workspace', { y: 14, autoAlpha: 0 }, '-=0.35')
+          .from('footer.app-status-bar', { yPercent: 100, autoAlpha: 0 }, '-=0.3');
+        gsap.from('.brand-dot', {
+          scale: 0,
+          transformOrigin: '50% 50%',
+          stagger: 0.12,
+          duration: 0.45,
+          delay: 0.35,
+          ease: 'back.out(2.2)'
+        });
+        gsap.from('.sidebar-content .nav-item', {
+          x: -10,
+          autoAlpha: 0,
+          duration: 0.3,
+          stagger: 0.025,
+          delay: 0.25
+        });
+      });
+    }
+
+    function animateResultsIn() {
+      if (!window.gsap) return;
+      const target = document.getElementById('viewGrid');
+      if (!target || !target.offsetParent) return;
+      gsap.fromTo(target,
+        { opacity: 0 },
+        { opacity: 1, duration: 0.35, ease: 'power2.out', overwrite: true }
+      );
+    }
+
+    function showToast(message, duration = 2600) {
+      let stack = document.getElementById('toastStack');
+      if (!stack) {
+        stack = document.createElement('div');
+        stack.id = 'toastStack';
+        stack.className = 'toast-stack';
+        document.body.appendChild(stack);
+      }
+      const toast = document.createElement('div');
+      toast.className = 'toast';
+      toast.textContent = message;
+      stack.appendChild(toast);
+      requestAnimationFrame(() => toast.classList.add('show'));
+      setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 250);
+      }, duration);
     }
 
     // 事件监听绑定
@@ -954,13 +1166,13 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         el.addEventListener('click', () => {
           const action = el.dataset.action;
           if (action === 'quick-find') {
-            document.getElementById('tqlInput').value = 'FIND {} RETURN * LIMIT 25';
+            document.getElementById('tqlInput').value = 'FIND {type: "person"} RETURN * LIMIT 25';
             document.getElementById('mutationCheck').checked = false;
           } else if (action === 'quick-match') {
-            document.getElementById('tqlInput').value = 'MATCH (a)-[r]->(b) RETURN a, r, b LIMIT 25';
+            document.getElementById('tqlInput').value = 'MATCH (a)-[]->(b) RETURN a, b LIMIT 25';
             document.getElementById('mutationCheck').checked = false;
           } else if (action === 'quick-search') {
-            document.getElementById('tqlInput').value = 'SEARCH VECTOR [0.1, 0.2, 0.3] TOP 5 RETURN *';
+            document.getElementById('tqlInput').value = 'SEARCH VECTOR [0.1, 0.2, 0.3, 0.4] TOP 5 RETURN *';
             document.getElementById('mutationCheck').checked = false;
           }
           executeCurrentQuery();
@@ -1104,6 +1316,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       if (!rows || rows.length === 0) {
         head.innerHTML = '<th>#</th><th>结果</th>';
         body.innerHTML = '<tr><td colspan="2" style="text-align:center; padding:30px; color:var(--text-light);">查询成功，但没有匹配的行</td></tr>';
+        animateResultsIn();
         return;
       }
 
@@ -1140,6 +1353,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         });
         body.appendChild(tr);
       });
+      animateResultsIn();
     }
 
     function renderMutationResult(data) {
@@ -1152,6 +1366,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         <td><code>${(data.createdIds || []).join(', ') || '无'}</code></td>
       </tr>`;
       document.getElementById('rawJsonOutput').textContent = JSON.stringify(data, null, 2);
+      animateResultsIn();
     }
 
     function renderRawJson(data) {
@@ -1165,6 +1380,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         <span style="font-size: 12px; margin-top: 4px; display:inline-block;">${err.detail || JSON.stringify(err)}</span>
       </td></tr>`;
       document.getElementById('rawJsonOutput').textContent = JSON.stringify(err, null, 2);
+      animateResultsIn();
     }
 
     // ==========================================
@@ -1173,23 +1389,28 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     function renderGraph(rows) {
       graphNodes = [];
       graphEdges = [];
-      const nodeMap = new Map();
+      nodeMap = new Map();
 
       // 从结果中抽取所有节点与边对象
       rows.forEach((row, rowIdx) => {
+        const rowNodeIds = [];
         Object.entries(row).forEach(([key, val]) => {
           if (val && typeof val === 'object') {
             if (val.id !== undefined) {
               // 节点
               const id = String(val.id);
+              rowNodeIds.push(id);
               if (!nodeMap.has(id)) {
+                // 黄金角螺旋初始位置：相比纯随机可显著减少初始重叠
+                const idx = nodeMap.size;
+                const radius = 30 + idx * 11;
                 const node = {
                   id,
                   label: val.payload?.name || val.payload?.title || `Node ${id}`,
                   payload: val.payload || {},
                   vector: val.vector || [],
-                  x: (Math.random() - 0.5) * 400,
-                  y: (Math.random() - 0.5) * 400,
+                  x: Math.cos(idx * 2.399963) * radius,
+                  y: Math.sin(idx * 2.399963) * radius,
                   vx: 0,
                   vy: 0,
                   color: getNodeColor(val.payload?.type || key)
@@ -1207,10 +1428,102 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
             }
           }
         });
+        // TQL 的 MATCH 投影只能返回节点对象而无法返回边，
+        // 同一行内先后出现的节点按返回顺序推断连线关系
+        for (let i = 1; i < rowNodeIds.length; i++) {
+          graphEdges.push({ source: rowNodeIds[i - 1], target: rowNodeIds[i], label: '' });
+        }
       });
 
       // 如果只有节点没有明确边，则做基础网状互连展示
-      redrawGraph();
+      startSimulation(1);
+    }
+
+    // ==========================================
+    // 力导向布局引擎（斥力 + 弹簧 + 向心力，冷却收敛后自动停止）
+    // ==========================================
+    function startSimulation(alpha) {
+      simulationAlpha = Math.max(simulationAlpha, alpha);
+      if (simulationRafId === null) {
+        simulationRafId = requestAnimationFrame(simulationStep);
+      }
+    }
+
+    function simulationStep() {
+      if (simulationRunning && graphNodes.length > 0 && simulationAlpha > 0.005) {
+        tickPhysics();
+        redrawGraph();
+        simulationAlpha *= 0.982;
+        simulationRafId = requestAnimationFrame(simulationStep);
+      } else {
+        simulationRafId = null;
+      }
+    }
+
+    function tickPhysics() {
+      const nodes = graphNodes;
+      const count = nodes.length;
+      if (count === 0) return;
+      // 库仑斥力 + 最小间距约束：避免节点堆叠
+      const repulsion = 9000;
+      const minDist = 56;
+      for (let i = 0; i < count; i++) {
+        for (let j = i + 1; j < count; j++) {
+          const a = nodes[i];
+          const b = nodes[j];
+          let dx = a.x - b.x;
+          let dy = a.y - b.y;
+          let distSq = dx * dx + dy * dy;
+          if (distSq < 1) {
+            dx = Math.random() - 0.5 || 0.1;
+            dy = Math.random() - 0.5 || 0.1;
+            distSq = dx * dx + dy * dy;
+          }
+          const dist = Math.sqrt(distSq);
+          const force = repulsion / distSq + (dist < minDist ? (minDist - dist) * 0.8 : 0);
+          const fx = (dx / dist) * force;
+          const fy = (dy / dist) * force;
+          a.vx += fx;
+          a.vy += fy;
+          b.vx -= fx;
+          b.vy -= fy;
+        }
+      }
+      // 弹簧力：有边相连的节点向理想长度聚拢（对应官网风格中关系紧密节点彼此靠近）
+      const springLength = 130;
+      const stiffness = 0.015;
+      for (const edge of graphEdges) {
+        const s = nodeMap.get(edge.source);
+        const t = nodeMap.get(edge.target);
+        if (!s || !t) continue;
+        const dx = t.x - s.x;
+        const dy = t.y - s.y;
+        const dist = Math.hypot(dx, dy) || 0.1;
+        const force = (dist - springLength) * stiffness;
+        const fx = (dx / dist) * force;
+        const fy = (dy / dist) * force;
+        s.vx += fx;
+        s.vy += fy;
+        t.vx -= fx;
+        t.vy -= fy;
+      }
+      // 向心力 + 阻尼积分：整体收拢在视口中心附近并逐渐静止
+      const canvas = document.getElementById('graphCanvas');
+      const halfW = (canvas ? canvas.width : 800) / 2 - 70;
+      const halfH = (canvas ? canvas.height : 600) / 2 - 70;
+      for (const node of nodes) {
+        node.vx -= node.x * 0.002;
+        node.vy -= node.y * 0.002;
+        // 软边界：越界节点受回拉力，保证布局始终落在画布内
+        if (node.x < -halfW) node.vx += (-halfW - node.x) * 0.05;
+        if (node.x > halfW) node.vx += (halfW - node.x) * 0.05;
+        if (node.y < -halfH) node.vy += (-halfH - node.y) * 0.05;
+        if (node.y > halfH) node.vy += (halfH - node.y) * 0.05;
+        node.vx *= 0.82;
+        node.vy *= 0.82;
+        node.x += node.vx * simulationAlpha;
+        node.y += node.vy * simulationAlpha;
+      }
     }
 
     function getNodeColor(type) {
@@ -1262,6 +1575,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           const rect = canvas.getBoundingClientRect();
           draggedNode.x = (e.clientX - rect.left - transform.x) / transform.k;
           draggedNode.y = (e.clientY - rect.top - transform.y) / transform.k;
+          if (simulationRunning) startSimulation(0.3);
           redrawGraph();
         } else if (isDraggingCanvas) {
           transform.x += e.clientX - dragStart.x;
@@ -1293,6 +1607,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       document.getElementById('togglePhysicsBtn').addEventListener('click', () => {
         simulationRunning = !simulationRunning;
         document.getElementById('togglePhysicsBtn').textContent = simulationRunning ? '冻结力学' : '恢复力学';
+        if (simulationRunning) startSimulation(0.5);
       });
 
       document.getElementById('closeDrawerBtn').addEventListener('click', () => {
@@ -1303,6 +1618,16 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     function redrawGraph() {
       const canvas = document.getElementById('graphCanvas');
       if (!canvas) return;
+      // 画布可能在容器隐藏（display:none）时被初始化为 0 尺寸，
+      // 切换到图视图后需先同步到当前布局，否则永远画不出内容
+      const parent = canvas.parentElement;
+      if (parent && parent.clientWidth > 0
+        && (canvas.width !== parent.clientWidth || canvas.height !== parent.clientHeight)) {
+        canvas.width = parent.clientWidth;
+        canvas.height = parent.clientHeight;
+        transform.x = canvas.width / 2;
+        transform.y = canvas.height / 2;
+      }
       const ctx = canvas.getContext('2d');
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -1323,11 +1648,13 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           ctx.stroke();
 
           // 绘制标签
-          const midX = (s.x + t.x) / 2;
-          const midY = (s.y + t.y) / 2;
-          ctx.fillStyle = '#64748b';
-          ctx.font = '10px var(--font-sans)';
-          ctx.fillText(edge.label, midX, midY - 3);
+          if (edge.label) {
+            const midX = (s.x + t.x) / 2;
+            const midY = (s.y + t.y) / 2;
+            ctx.fillStyle = '#64748b';
+            ctx.font = '10px ' + CANVAS_FONT_FAMILY;
+            ctx.fillText(edge.label, midX, midY - 3);
+          }
         }
       });
 
@@ -1343,7 +1670,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
 
         // 文字
         ctx.fillStyle = document.documentElement.getAttribute('data-theme') === 'dark' ? '#f1f5f9' : '#1e293b';
-        ctx.font = '11px var(--font-sans)';
+        ctx.font = '11px ' + CANVAS_FONT_FAMILY;
         ctx.textAlign = 'center';
         ctx.fillText(node.label, node.x, node.y + 28);
       });
@@ -1422,25 +1749,32 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     };
 
     window.initTutorialData = async function() {
-      const overlay = document.getElementById('tutorialOverlay');
-      const sampleQueries = [
-        'CREATE ({name: "Alice", type: "person", citations: 150, department: "AI Lab"})',
-        'CREATE ({name: "Bob", type: "person", citations: 45, department: "Systems"})',
-        'CREATE ({name: "Carol", type: "person", citations: 210, department: "AI Lab"})',
-        'CREATE ({title: "TriviumDB Architecture", type: "paper", year: 2026})',
-        'CREATE ({title: "QuIVer Vector Engine", type: "paper", year: 2025})',
-        'CREATE ({name: "Tri-Model DB", type: "topic"})'
+      // 链式创建：一次语句同时建立节点与 AUTHORED / COVERS 图关系，
+      // 保证第 3 关（图匹配）与第 5 关（混合管线）开箱可查
+      const statements = [
+        'CREATE ({name: "Alice", type: "person", citations: 150, department: "AI Lab"})-[:AUTHORED]->({title: "TriviumDB Architecture", type: "paper", year: 2026})-[:COVERS]->({name: "Tri-Model DB", type: "topic"})',
+        'CREATE ({name: "Bob", type: "person", citations: 45, department: "Systems"})-[:AUTHORED]->({title: "QuIVer Vector Engine", type: "paper", year: 2025})-[:COVERS]->({name: "Tri-Model DB", type: "topic"})',
+        'CREATE ({name: "Carol", type: "person", citations: 210, department: "AI Lab"})'
       ];
-
-      alert('正在注入 6 条三模节点数据...');
-      for (const q of sampleQueries) {
-        await fetch(`${API_BASE}/v1/tql`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: q, mutation: true })
-        });
+      showToast('正在注入教学数据集...');
+      let succeeded = 0;
+      for (const query of statements) {
+        try {
+          const res = await fetch(`${API_BASE}/v1/tql`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query, mutation: true })
+          });
+          if (res.ok) succeeded++;
+        } catch (_) {}
       }
-      alert('数据注入成功！现在请切换至第 2 关或直接在控制台执行查询！');
+      showToast(
+        succeeded === statements.length
+          ? `注入完成（${succeeded} 条语句），可直接运行第 2 / 3 关的查询`
+          : `注入完成 ${succeeded}/${statements.length}，部分语句失败请查看服务端日志`,
+        3200
+      );
+      checkServerHealth();
     };
 
     // ==========================================
@@ -1496,6 +1830,16 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         container.appendChild(item);
       });
     }
+  </script>
+  <script>
+    // 动效层：GSAP 按需从 CDN 加载；加载失败（如离线环境）时界面完整可用，仅退化为无动画。
+    document.addEventListener('DOMContentLoaded', () => {
+      if (window.gsap) { initMotion(); return; }
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/gsap@3.13.0/dist/gsap.min.js';
+      script.addEventListener('load', () => initMotion());
+      document.head.appendChild(script);
+    });
   </script>
 </body>
 </html>
