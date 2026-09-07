@@ -172,6 +172,8 @@
     }
     .btn:hover { background: var(--bg-surface-secondary); border-color: var(--border-strong); }
     .btn:active { background: var(--bg-inset); }
+    /* <a> 复用 .btn 样式时去掉链接下划线 */
+    a.btn { text-decoration: none; }
     .btn:disabled { opacity: 0.55; cursor: default; }
     .btn svg { flex: none; }
     .btn-primary {
@@ -656,6 +658,15 @@
       align-items: center;
       gap: 14px;
     }
+    /* 状态栏语义色胶囊：QuIVer 预热 / 引擎就绪提示 */
+    .status-pill {
+      padding: 1px 8px;
+      border-radius: 9999px;
+      transition: background-color 0.2s ease, color 0.2s ease;
+    }
+    .status-pill--ok { background: var(--success-bg); color: var(--success); }
+    .status-pill--warn { background: var(--warning-bg); color: var(--warning); }
+    .status-pill--bad { background: var(--danger-bg); color: var(--danger); }
 
     /* 通用空状态/加载器 */
     .empty-placeholder {
@@ -705,6 +716,10 @@
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
         可视化使用教程
       </button>
+      <!-- 跳转官网文档（新窗口打开，rel=noopener 防止 window.opener 泄露） -->
+      <a class="btn" href="https://triviumdb.com/" target="_blank" rel="noopener" title="打开 TriviumDB 官方文档 (新窗口)">
+        文档 ↗
+      </a>
       <button class="btn" id="themeToggleBtn" title="切换深色/浅色模式">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
       </button>
@@ -904,6 +919,8 @@
       <span id="statusAffected">影响: -</span>
     </div>
     <div class="status-right">
+      <span id="statusQuiver" class="status-pill" title="QuIVer 向量索引预热状态 (来自 /health/details 的 quiverWarmup)">QuIVer: -</span>
+      <span id="statusHealth" class="status-pill" title="引擎整体就绪状态 (来自 /health/details 的 status)"></span>
       <span id="statusQueue">写队列: 0</span>
       <span id="statusReads">并发读: 0</span>
       <span id="statusVersion">TriviumDB Server v0.8.6</span>
@@ -1237,8 +1254,35 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           const details = await resDetails.json();
           document.getElementById('statusQueue').textContent = `写队列: ${details.writeQueueDepth || 0}/${details.writeQueueCapacity || 256}`;
           document.getElementById('statusReads').textContent = `并发读: ${details.activeReads || 0}`;
+          renderStatusBarHealth(details);
         }
       } catch (_) {}
+    }
+
+    // 将 /health/details 的 quiverWarmup 与 status 渲染到底部状态栏
+    // quiverWarmup 可能取值: idle / preparing / building / ready / skipped / failed (与后端 WarmupState 对齐)
+    function renderStatusBarHealth(details) {
+      const quiverEl = document.getElementById('statusQuiver');
+      const healthEl = document.getElementById('statusHealth');
+
+      const quiverState = details.quiverWarmup || 'idle';
+      quiverEl.textContent = `QuIVer: ${quiverState}`;
+      quiverEl.className = 'status-pill ' + (
+        quiverState === 'ready' ? 'status-pill--ok' :
+        (quiverState === 'preparing' || quiverState === 'building') ? 'status-pill--warn' :
+        quiverState === 'failed' ? 'status-pill--bad' : ''
+      );
+
+      // 引擎整体状态非 ready 时给出可感知提示（正常时保持空白，避免与连接徽章重复）
+      if (details.status && details.status !== 'ready') {
+        healthEl.textContent = `引擎: ${details.status}`;
+        healthEl.className = 'status-pill status-pill--bad';
+        healthEl.title = `引擎整体状态异常: ${details.reason || details.status}`;
+      } else {
+        healthEl.textContent = '';
+        healthEl.className = 'status-pill';
+        healthEl.title = '引擎整体就绪状态 (来自 /health/details 的 status)';
+      }
     }
 
     // 执行当前 TQL
