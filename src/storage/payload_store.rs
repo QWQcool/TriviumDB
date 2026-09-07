@@ -8,7 +8,7 @@ use crate::node::NodeId;
 use crate::observability::PayloadMemoryStats;
 use crate::storage::fs::robust_rename_and_sync;
 use memmap2::Mmap;
-use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::ops::Range;
@@ -50,16 +50,83 @@ pub(crate) struct PayloadEntry {
     raw: RawPayload,
 }
 
+struct CachedValue {
+    value: Arc<serde_json::Value>,
+    bytes: usize,
+    /// 最近一次访问的序号，同时是该条目在 `ParsedCache::order` 里的键。
+    seq: u64,
+}
+
+/// 解析结果 LRU。
+///
+/// 访问顺序放在 `order`（序号 → NodeId）而不是 `VecDeque`。命中、插入、失效都要把
+/// 一个 id 移到最近端；用 `VecDeque::retain` 定位它是 O(缓存条数)，这让每次
+/// `get_payload` 和每次 payload 写入都随缓存驻留量线性变慢（默认 64 MiB 能装下几万
+/// 条小 payload）。按序号查找是 O(log n)，淘汰仍从最小序号、即最久未用的一端取。
+///
+/// Recency order is a sequence-keyed `BTreeMap` instead of a `VecDeque`, so
+/// touching one entry is O(log n) rather than a scan of every resident entry.
 #[derive(Default)]
 struct ParsedCache {
-    values: HashMap<NodeId, (Arc<serde_json::Value>, usize)>,
-    lru: VecDeque<NodeId>,
+    values: HashMap<NodeId, CachedValue>,
+    order: BTreeMap<u64, NodeId>,
+    /// 单调递增。按每纳秒一次算 u64 也要五百多年才用完，不做回绕处理。
+    next_seq: u64,
     bytes: usize,
     hits: u64,
     misses: u64,
     evictions: u64,
     lookups: u64,
     parsed_bytes: u64,
+}
+
+impl ParsedCache {
+    fn next_sequence(&mut self) -> u64 {
+        self.next_seq += 1;
+        self.next_seq
+    }
+
+    /// 把已缓存的条目标记为最近使用；不在缓存里则什么都不做。
+    fn touch(&mut self, id: NodeId) {
+        let Some(previous) = self.values.get(&id).map(|entry| entry.seq) else {
+            return;
+        };
+        let seq = self.next_sequence();
+        if let Some(entry) = self.values.get_mut(&id) {
+            entry.seq = seq;
+        }
+        self.order.remove(&previous);
+        self.order.insert(seq, id);
+    }
+
+    fn insert(&mut self, id: NodeId, value: Arc<serde_json::Value>, bytes: usize) {
+        let seq = self.next_sequence();
+        if let Some(previous) = self.values.insert(id, CachedValue { value, bytes, seq }) {
+            self.bytes = self.bytes.saturating_sub(previous.bytes);
+            self.order.remove(&previous.seq);
+        }
+        self.bytes = self.bytes.saturating_add(bytes);
+        self.order.insert(seq, id);
+    }
+
+    fn remove(&mut self, id: NodeId) {
+        if let Some(previous) = self.values.remove(&id) {
+            self.bytes = self.bytes.saturating_sub(previous.bytes);
+            self.order.remove(&previous.seq);
+        }
+    }
+
+    fn evict_to_budget(&mut self, max_bytes: usize) {
+        while self.bytes > max_bytes {
+            let Some((_, id)) = self.order.pop_first() else {
+                break;
+            };
+            if let Some(previous) = self.values.remove(&id) {
+                self.bytes = self.bytes.saturating_sub(previous.bytes);
+                self.evictions = self.evictions.saturating_add(1);
+            }
+        }
+    }
 }
 
 type MappedPayloadRecords = Vec<(NodeId, Range<usize>)>;
@@ -262,7 +329,7 @@ impl PayloadStore {
         self.cache_max_bytes = max_bytes;
         self.cache_max_entry_bytes = max_entry_bytes;
         let mut cache = self.cache.lock().unwrap_or_else(|p| p.into_inner());
-        Self::evict_to_budget(&mut cache, max_bytes);
+        cache.evict_to_budget(max_bytes);
     }
 
     pub fn reserve(&mut self, additional: usize) -> Result<()> {
@@ -334,9 +401,9 @@ impl PayloadStore {
         {
             let mut cache = self.cache.lock().unwrap_or_else(|p| p.into_inner());
             cache.lookups = cache.lookups.saturating_add(1);
-            if let Some((value, _)) = cache.values.get(&id).cloned() {
+            if let Some(value) = cache.values.get(&id).map(|entry| Arc::clone(&entry.value)) {
                 cache.hits = cache.hits.saturating_add(1);
-                touch(&mut cache.lru, id);
+                cache.touch(id);
                 return Some(value);
             }
             cache.misses = cache.misses.saturating_add(1);
@@ -377,7 +444,7 @@ impl PayloadStore {
             pinned_cache_entries: cache
                 .values
                 .values()
-                .filter(|(value, _)| Arc::strong_count(value) > 1)
+                .filter(|entry| Arc::strong_count(&entry.value) > 1)
                 .count(),
             mapped_file_bytes: self.mapped.as_ref().map_or(0, |mmap| mmap.len()),
             cache_hits: cache.hits,
@@ -422,10 +489,7 @@ impl PayloadStore {
 
     fn invalidate(&self, id: NodeId) {
         let mut cache = self.cache.lock().unwrap_or_else(|p| p.into_inner());
-        if let Some((_, bytes)) = cache.values.remove(&id) {
-            cache.bytes = cache.bytes.saturating_sub(bytes);
-        }
-        cache.lru.retain(|candidate| *candidate != id);
+        cache.remove(id);
     }
 
     fn cache_insert(&self, id: NodeId, value: Arc<serde_json::Value>) {
@@ -437,25 +501,8 @@ impl PayloadStore {
             return;
         }
         let mut cache = self.cache.lock().unwrap_or_else(|p| p.into_inner());
-        if let Some((_, previous)) = cache.values.remove(&id) {
-            cache.bytes = cache.bytes.saturating_sub(previous);
-        }
-        touch(&mut cache.lru, id);
-        cache.bytes = cache.bytes.saturating_add(bytes);
-        cache.values.insert(id, (value, bytes));
-        Self::evict_to_budget(&mut cache, self.cache_max_bytes);
-    }
-
-    fn evict_to_budget(cache: &mut ParsedCache, max_bytes: usize) {
-        while cache.bytes > max_bytes {
-            let Some(id) = cache.lru.pop_front() else {
-                break;
-            };
-            if let Some((_, bytes)) = cache.values.remove(&id) {
-                cache.bytes = cache.bytes.saturating_sub(bytes);
-                cache.evictions = cache.evictions.saturating_add(1);
-            }
-        }
+        cache.insert(id, value, bytes);
+        cache.evict_to_budget(self.cache_max_bytes);
     }
 }
 
@@ -491,11 +538,6 @@ fn read_u64(bytes: &[u8], offset: usize, field: &str) -> Result<u64> {
         .and_then(|value| value.try_into().ok())
         .map(u64::from_le_bytes)
         .ok_or_else(|| TriviumError::CorruptedFile(format!("{field} 被截断")))
-}
-
-fn touch(lru: &mut VecDeque<NodeId>, id: NodeId) {
-    lru.retain(|candidate| *candidate != id);
-    lru.push_back(id);
 }
 
 fn validate_json(raw: &[u8]) -> Result<()> {
@@ -688,6 +730,164 @@ mod tests {
         assert_eq!(after.cache_hits, 1);
         assert_eq!(after.cache_evictions, 2);
         assert!(after.parsed_cache_bytes <= budget);
+    }
+
+    /// 淘汰顺序必须按「最近访问」，不是按插入顺序。
+    ///
+    /// Recency, not insertion order, decides eviction. The sequence-keyed
+    /// index has to reproduce what the deque did: reading an entry moves it
+    /// out of the eviction path, and re-inserting an id must not leave its
+    /// previous position behind.
+    #[test]
+    fn eviction_follows_access_recency_not_insertion_order() {
+        let value = serde_json::json!({"text": "一二三四"});
+        let entry_bytes = estimate_json_memory(&value);
+        let mut store = PayloadStore::new(entry_bytes.saturating_mul(2), entry_bytes);
+        for id in 1..=3 {
+            store.insert_raw(id, &serde_json::to_vec(&value).unwrap()).unwrap();
+        }
+
+        // Cache 1 and 2, then read 1 again so 2 is the least recently used.
+        assert!(store.get_value(1).is_some());
+        assert!(store.get_value(2).is_some());
+        assert!(store.get_value(1).is_some());
+        // Caching 3 has to evict 2, and 1 has to survive.
+        assert!(store.get_value(3).is_some());
+        assert_eq!(store.memory_stats().parsed_cache_entries, 2);
+        let hits_before = store.memory_stats().cache_hits;
+        assert!(store.get_value(1).is_some());
+        assert_eq!(store.memory_stats().cache_hits, hits_before + 1);
+
+        // Re-inserting an already-cached id must replace its position rather
+        // than leave a stale one that later evicts the wrong entry.
+        store.insert_value(3, value.clone()).unwrap();
+        store.insert_value(3, value.clone()).unwrap();
+        let stats = store.memory_stats();
+        assert!(stats.parsed_cache_bytes <= entry_bytes.saturating_mul(2));
+        assert!(stats.parsed_cache_entries <= 2);
+    }
+
+    use proptest::prelude::*;
+    use std::collections::VecDeque;
+
+    /// 参照模型：原先的 `VecDeque` LRU。序号索引必须在任意操作序列下与它给出
+    /// 完全相同的缓存内容、字节数和淘汰次数。
+    #[derive(Default)]
+    struct DequeLru {
+        values: HashMap<NodeId, usize>,
+        order: VecDeque<NodeId>,
+        bytes: usize,
+        evictions: u64,
+    }
+
+    impl DequeLru {
+        fn touch(&mut self, id: NodeId) {
+            self.order.retain(|candidate| *candidate != id);
+            self.order.push_back(id);
+        }
+
+        fn hit(&mut self, id: NodeId) -> bool {
+            if self.values.contains_key(&id) {
+                self.touch(id);
+                return true;
+            }
+            false
+        }
+
+        fn insert(&mut self, id: NodeId, bytes: usize, max_bytes: usize) {
+            if let Some(previous) = self.values.remove(&id) {
+                self.bytes -= previous;
+            }
+            self.touch(id);
+            self.bytes += bytes;
+            self.values.insert(id, bytes);
+            while self.bytes > max_bytes {
+                let Some(oldest) = self.order.pop_front() else { break };
+                if let Some(previous) = self.values.remove(&oldest) {
+                    self.bytes -= previous;
+                    self.evictions += 1;
+                }
+            }
+        }
+
+        fn remove(&mut self, id: NodeId) {
+            if let Some(previous) = self.values.remove(&id) {
+                self.bytes -= previous;
+            }
+            self.order.retain(|candidate| *candidate != id);
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    enum CacheOp {
+        Get(NodeId),
+        Insert(NodeId, usize),
+        Remove(NodeId),
+    }
+
+    fn arb_cache_op() -> BoxedStrategy<CacheOp> {
+        prop_oneof![
+            (1..12u64).prop_map(CacheOp::Get),
+            (1..12u64, 1..80usize).prop_map(|(id, bytes)| CacheOp::Insert(id, bytes)),
+            (1..12u64).prop_map(CacheOp::Remove),
+        ]
+        .boxed()
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(300))]
+
+        /// 不变量：序号索引与 `VecDeque` 参照在任意 get/insert/remove 序列后一致，
+        /// 且 `order` 与 `values` 一一对应、字节数等于各条之和。
+        #[test]
+        fn parsed_cache_matches_deque_reference(
+            max_bytes in prop_oneof![Just(0usize), 40..400usize, Just(5000usize)],
+            ops in prop::collection::vec(arb_cache_op(), 1..200),
+        ) {
+            let mut cache = ParsedCache::default();
+            let mut reference = DequeLru::default();
+            let value = Arc::new(serde_json::Value::Null);
+
+            for op in ops {
+                match op {
+                    CacheOp::Get(id) => {
+                        let hit = cache.values.contains_key(&id);
+                        if hit {
+                            cache.touch(id);
+                        }
+                        prop_assert_eq!(hit, reference.hit(id));
+                    }
+                    CacheOp::Insert(id, bytes) => {
+                        if max_bytes == 0 || bytes > max_bytes {
+                            continue;
+                        }
+                        cache.insert(id, Arc::clone(&value), bytes);
+                        cache.evict_to_budget(max_bytes);
+                        reference.insert(id, bytes, max_bytes);
+                    }
+                    CacheOp::Remove(id) => {
+                        cache.remove(id);
+                        reference.remove(id);
+                    }
+                }
+
+                let mut ours = cache.values.iter().map(|(id, entry)| (*id, entry.bytes)).collect::<Vec<_>>();
+                let mut theirs = reference.values.iter().map(|(id, bytes)| (*id, *bytes)).collect::<Vec<_>>();
+                ours.sort_unstable();
+                theirs.sort_unstable();
+                prop_assert_eq!(&ours, &theirs);
+                prop_assert_eq!(cache.bytes, reference.bytes);
+                prop_assert_eq!(cache.evictions, reference.evictions);
+
+                prop_assert_eq!(cache.order.len(), cache.values.len());
+                for (seq, id) in &cache.order {
+                    let entry = cache.values.get(id);
+                    prop_assert!(entry.is_some_and(|entry| entry.seq == *seq));
+                }
+                let sum = cache.values.values().map(|entry| entry.bytes).sum::<usize>();
+                prop_assert_eq!(cache.bytes, sum);
+            }
+        }
     }
 
     #[test]
