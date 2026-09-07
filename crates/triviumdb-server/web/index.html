@@ -668,6 +668,110 @@
     .status-pill--warn { background: var(--warning-bg); color: var(--warning); }
     .status-pill--bad { background: var(--danger-bg); color: var(--danger); }
 
+    /* 向量检索实验台 (Vector Lab) */
+    .vector-lab { display: flex; flex: 1; overflow: hidden; }
+    .vl-config {
+      width: 340px;
+      flex: none;
+      overflow-y: auto;
+      padding: 14px;
+      border-right: 1px solid var(--border-color);
+      background: var(--bg-surface);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .vl-source-tabs { display: flex; gap: 6px; }
+    .vl-source-tab {
+      flex: 1;
+      padding: 6px 8px;
+      font-size: 12px;
+      font-family: inherit;
+      cursor: pointer;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-sm);
+      background: var(--bg-surface);
+      color: var(--text-muted);
+      transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    }
+    .vl-source-tab:hover { color: var(--text-main); border-color: var(--border-strong); }
+    .vl-source-tab.active {
+      color: var(--primary);
+      border-color: var(--primary);
+      background: var(--bg-inset);
+      font-weight: 600;
+    }
+    .vl-source-body { display: flex; flex-direction: column; gap: 8px; }
+    .vl-label { font-size: 11px; color: var(--text-muted); }
+    .vl-input {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 6px 8px;
+      font-size: 12px;
+      font-family: var(--font-mono);
+      color: var(--text-main);
+      background: var(--bg-inset);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-sm);
+    }
+    .vl-input:focus { border-color: var(--primary); outline: none; }
+    .vl-hint {
+      font-size: 11px;
+      color: var(--warning);
+      background: var(--warning-bg);
+      padding: 6px 8px;
+      border-radius: var(--radius-sm);
+      word-break: break-word;
+    }
+    .vl-hint--ok { color: var(--success); background: var(--success-bg); }
+    .vl-error {
+      font-size: 11.5px;
+      color: var(--danger);
+      background: var(--danger-bg);
+      padding: 8px 10px;
+      border-radius: var(--radius-sm);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .vl-params { display: flex; gap: 10px; }
+    .vl-param {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+    }
+    .vl-results {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      padding: 12px 14px;
+      gap: 10px;
+    }
+    .vl-pipeline {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      font-size: 11.5px;
+      font-family: var(--font-mono);
+      color: var(--text-muted);
+    }
+    .vl-stage {
+      padding: 3px 10px;
+      border: 1px solid var(--border-color);
+      border-radius: 9999px;
+      background: var(--bg-surface-secondary);
+      color: var(--text-main);
+      white-space: nowrap;
+    }
+    .vl-stage b { color: var(--primary); }
+    .vl-arrow { color: var(--text-light); }
+    .vl-generation { margin-left: auto; font-size: 11px; color: var(--text-light); }
+
     /* 通用空状态/加载器 */
     .empty-placeholder {
       display: flex;
@@ -811,6 +915,10 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/></svg>
           <span>独立图拓扑探索</span>
         </div>
+        <div class="tab" data-tab="vectorLabPane">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="20" x2="12" y2="12"/><line x1="12" y1="12" x2="20" y2="4"/><circle cx="4" cy="20" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="20" cy="4" r="2"/></svg>
+          <span>向量检索 (Vector Lab)</span>
+        </div>
       </div>
 
       <!-- 标签页 1：TQL 查询与结果控制台 -->
@@ -906,6 +1014,69 @@
         </div>
         <div style="flex: 1; position: relative; background: var(--bg-surface);">
           <canvas id="standaloneGraphCanvas" style="width: 100%; height: 100%; display: block;"></canvas>
+        </div>
+      </div>
+
+      <!-- 标签页 3：向量检索实验台 (Vector Lab) -->
+      <div class="tab-pane" id="vectorLabPane">
+        <div class="vector-lab">
+          <!-- 左侧：查询向量与参数配置 -->
+          <section class="vl-config">
+            <div class="vl-source-tabs">
+              <button class="vl-source-tab active" id="vlSourceTabNode" type="button">① 从节点选取</button>
+              <button class="vl-source-tab" id="vlSourceTabJson" type="button">② 粘贴 JSON</button>
+            </div>
+
+            <!-- 来源 1：节点选择器（主入口） -->
+            <div id="vlSourceNode" class="vl-source-body">
+              <label class="vl-label" for="vlSelectorQuery">候选节点筛选 TQL</label>
+              <input class="vl-input" id="vlSelectorQuery" value='FIND {type: "person"} RETURN * LIMIT 50' spellcheck="false">
+              <button class="btn btn-primary" id="vlLoadCandidatesBtn">加载候选节点</button>
+              <label class="vl-label" for="vlNodeSelect">选择节点（取其 vector 作为查询向量）</label>
+              <select class="vl-input" id="vlNodeSelect" size="6">
+                <option value="" disabled selected>先点击「加载候选节点」</option>
+              </select>
+              <div class="vl-hint" id="vlNodeHint" hidden></div>
+            </div>
+
+            <!-- 来源 2：JSON 粘贴 -->
+            <div id="vlSourceJson" class="vl-source-body" hidden>
+              <label class="vl-label" for="vlJsonInput">查询向量 JSON 数组</label>
+              <textarea class="vl-input" id="vlJsonInput" rows="4" spellcheck="false" placeholder="例如: [0.12, -0.45, 0.78, 0.33]"></textarea>
+              <div class="vl-hint vl-hint--ok" id="vlDimHint">维度校验：选中节点后以该节点 vector 维度为准，否则以服务端返回为准</div>
+            </div>
+
+            <!-- 检索参数 -->
+            <div class="vl-params">
+              <label class="vl-param">top_k
+                <input class="vl-input" id="vlTopK" type="number" min="1" max="10000" value="10">
+              </label>
+              <label class="vl-param">min_score
+                <input class="vl-input" id="vlMinScore" type="number" step="0.05" value="-1">
+              </label>
+            </div>
+            <button class="btn btn-success" id="vlRunBtn">▶ 向量检索</button>
+          </section>
+
+          <!-- 右侧：检索结果 -->
+          <section class="vl-results">
+            <div class="vl-pipeline" id="vlPipeline" hidden>
+              <span class="vl-stage">召回 top_k <b id="vlPipelineTopK">-</b></span>
+              <span class="vl-arrow">→</span>
+              <span class="vl-stage">候选 rerank</span>
+              <span class="vl-arrow">→</span>
+              <span class="vl-stage">返回 hits <b id="vlPipelineHits">-</b></span>
+              <span class="vl-generation" id="vlGeneration"></span>
+            </div>
+            <div class="vl-error" id="vlSearchError" hidden></div>
+            <div style="flex: 1; overflow: auto;">
+              <table class="data-grid" id="vlResultTable" hidden>
+                <thead><tr><th>#</th><th>id</th><th>score</th><th>payload</th></tr></thead>
+                <tbody id="vlResultBody"></tbody>
+              </table>
+              <div class="empty-placeholder" id="vlEmpty">配置查询向量后点击「▶ 向量检索」</div>
+            </div>
+          </section>
         </div>
       </div>
     </main>
@@ -1062,6 +1233,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       setupEventListeners();
       setupTutorial();
       setupTabs();
+      setupVectorLab();
       checkServerHealth();
       renderHistory();
       initCanvas('graphCanvas');
@@ -1425,6 +1597,245 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       </td></tr>`;
       document.getElementById('rawJsonOutput').textContent = JSON.stringify(err, null, 2);
       animateResultsIn();
+    }
+
+    // ==========================================
+    // 向量检索实验台 (Vector Lab)
+    // ==========================================
+    let vlCandidates = [];   // 候选节点缓存（来自选择器 TQL）
+    let vlKnownDim = null;   // 已知服务端维度（取自最近一次选中的节点向量，用于 JSON 来源的长度预校验）
+
+    function setupVectorLab() {
+      document.getElementById('vlSourceTabNode').addEventListener('click', () => switchVectorSource(true));
+      document.getElementById('vlSourceTabJson').addEventListener('click', () => switchVectorSource(false));
+      document.getElementById('vlLoadCandidatesBtn').addEventListener('click', loadVectorCandidates);
+      document.getElementById('vlNodeSelect').addEventListener('change', onVectorNodeSelected);
+      document.getElementById('vlRunBtn').addEventListener('click', runVectorSearch);
+    }
+
+    // 切换查询向量来源（节点选择器 / JSON 粘贴）
+    function switchVectorSource(useNode) {
+      document.getElementById('vlSourceTabNode').classList.toggle('active', useNode);
+      document.getElementById('vlSourceTabJson').classList.toggle('active', !useNode);
+      document.getElementById('vlSourceNode').hidden = !useNode;
+      document.getElementById('vlSourceJson').hidden = useNode;
+    }
+
+    // 执行选择器 TQL 并将返回节点填充到下拉框
+    async function loadVectorCandidates() {
+      const btn = document.getElementById('vlLoadCandidatesBtn');
+      const select = document.getElementById('vlNodeSelect');
+      const hint = document.getElementById('vlNodeHint');
+      const query = document.getElementById('vlSelectorQuery').value.trim();
+      hint.hidden = true;
+
+      if (!query) {
+        hint.hidden = false;
+        hint.textContent = '筛选 TQL 不得为空';
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = '加载中...';
+      try {
+        const res = await fetch(`${API_BASE}/v1/tql`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query, mutation: false, profile: false })
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ title: '请求失败', detail: res.statusText }));
+          hint.hidden = false;
+          hint.textContent = `筛选查询失败: ${err.title || '未知错误'} — ${err.detail || ''}`;
+          return;
+        }
+        const data = await res.json();
+        // 行形状可能是 { 别名: 节点对象 }，提取所有带 id 的节点对象
+        const nodes = [];
+        (data.rows || []).forEach(row => {
+          Object.values(row).forEach(val => {
+            if (val && typeof val === 'object' && val.id !== undefined) nodes.push(val);
+          });
+        });
+        vlCandidates = nodes;
+        select.innerHTML = '';
+
+        if (!nodes.length) {
+          select.innerHTML = '<option value="" disabled selected>查询无结果</option>';
+          hint.hidden = false;
+          hint.textContent = '筛选查询没有返回任何节点，请调整筛选条件';
+          return;
+        }
+
+        nodes.forEach((node, idx) => {
+          const label = node.payload?.name || node.payload?.title || node.id;
+          const dimInfo = Array.isArray(node.vector) ? ` · dim=${node.vector.length}` : ' · 无向量';
+          const option = document.createElement('option');
+          option.value = idx;
+          option.textContent = `#${node.id} ${label}${dimInfo}`;
+          select.appendChild(option);
+        });
+        // 默认选中第一项并触发提示
+        select.value = '0';
+        onVectorNodeSelected();
+      } catch (err) {
+        hint.hidden = false;
+        hint.textContent = `网络请求失败: ${err.message}`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '加载候选节点';
+      }
+    }
+
+    // 选中候选节点后给出向量预览/无向量提示
+    function onVectorNodeSelected() {
+      const select = document.getElementById('vlNodeSelect');
+      const hint = document.getElementById('vlNodeHint');
+      const node = vlCandidates[parseInt(select.value, 10)];
+      if (!node) return;
+
+      hint.hidden = false;
+      if (!Array.isArray(node.vector) || node.vector.length === 0) {
+        hint.className = 'vl-hint';
+        hint.textContent = `节点 ${node.id} 没有向量，无法作为查询向量；请换一个节点或改用 JSON 粘贴来源`;
+        return;
+      }
+      vlKnownDim = node.vector.length;
+      hint.className = 'vl-hint vl-hint--ok';
+      const preview = node.vector.slice(0, 8).map(v => Number(v.toFixed(4))).join(', ');
+      hint.textContent = `已选节点 #${node.id}，dim=${node.vector.length}，前若干维: [${preview}${node.vector.length > 8 ? ', ...' : ''}]`;
+    }
+
+    // 从当前激活来源解析查询向量，非法输入抛出 {title, detail}
+    function resolveQueryVector() {
+      if (!document.getElementById('vlSourceJson').hidden) {
+        const raw = document.getElementById('vlJsonInput').value.trim();
+        if (!raw) throw { title: '输入为空', detail: '请粘贴 JSON 数组形式的查询向量，例如 [0.12, -0.45, 0.78, 0.33]' };
+        let parsed;
+        try {
+          parsed = JSON.parse(raw);
+        } catch (e) {
+          throw { title: 'JSON 解析失败', detail: e.message };
+        }
+        if (!Array.isArray(parsed) || parsed.length === 0) {
+          throw { title: '格式错误', detail: '查询向量必须是非空 JSON 数组' };
+        }
+        if (parsed.some(v => typeof v !== 'number' || !Number.isFinite(v))) {
+          throw { title: '格式错误', detail: '数组元素必须全部为有限数字（不允许 NaN / Infinity / 字符串）' };
+        }
+        if (vlKnownDim !== null && parsed.length !== vlKnownDim) {
+          throw { title: '维度不匹配', detail: `输入维度 ${parsed.length} 与服务端维度 ${vlKnownDim} 不一致（维度来自最近选中的节点向量）` };
+        }
+        return parsed;
+      }
+
+      const select = document.getElementById('vlNodeSelect');
+      const node = vlCandidates[parseInt(select.value, 10)];
+      if (!node) throw { title: '未选择节点', detail: '请先加载候选节点并选择一个节点' };
+      if (!Array.isArray(node.vector) || node.vector.length === 0) {
+        throw { title: '节点无向量', detail: `节点 ${node.id} 没有向量字段，无法作为查询向量` };
+      }
+      return node.vector;
+    }
+
+    // 数值数组 → little-endian f32 二进制 body（DataView 显式小端，不依赖平台字节序）
+    function vectorToBody(values) {
+      const buffer = new ArrayBuffer(values.length * 4);
+      const view = new DataView(buffer);
+      values.forEach((v, i) => view.setFloat32(i * 4, v, true));
+      return buffer;
+    }
+
+    // 执行向量检索
+    async function runVectorSearch() {
+      const btn = document.getElementById('vlRunBtn');
+      const errEl = document.getElementById('vlSearchError');
+      errEl.hidden = true;
+
+      let vector;
+      try {
+        vector = resolveQueryVector();
+      } catch (e) {
+        errEl.textContent = `⚠ ${e.title}：${e.detail}`;
+        errEl.hidden = false;
+        return;
+      }
+
+      const topK = parseInt(document.getElementById('vlTopK').value, 10);
+      const minScore = parseFloat(document.getElementById('vlMinScore').value);
+      if (!Number.isFinite(topK) || topK < 1 || topK > 10000) {
+        errEl.textContent = '⚠ 参数错误：top_k 必须为 1-10000 之间的整数';
+        errEl.hidden = false;
+        return;
+      }
+      if (!Number.isFinite(minScore)) {
+        errEl.textContent = '⚠ 参数错误：min_score 必须为有限数字';
+        errEl.hidden = false;
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = '检索中...';
+      const started = performance.now();
+      try {
+        const res = await fetch(`${API_BASE}/v1/search/vector?top_k=${topK}&min_score=${String(minScore)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/vnd.triviumdb.vector+f32' },
+          body: vectorToBody(vector)
+        });
+        const elapsed = (performance.now() - started).toFixed(1);
+        document.getElementById('statusQueryTime').textContent = `耗时: ${elapsed} ms`;
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ title: '请求失败', detail: res.statusText }));
+          renderVectorSearchError(err);
+          return;
+        }
+        renderVectorResults(await res.json(), topK);
+      } catch (err) {
+        renderVectorSearchError({ title: '网络请求失败', detail: err.message });
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '▶ 向量检索';
+      }
+    }
+
+    // Vector Lab 专用行内错误（风格与 renderError 一致：danger-bg + 标题 + detail）
+    function renderVectorSearchError(err) {
+      const errEl = document.getElementById('vlSearchError');
+      errEl.textContent = `❌ ${err.title || '请求失败'}\n${err.detail || JSON.stringify(err)}`;
+      errEl.hidden = false;
+      document.getElementById('vlPipeline').hidden = true;
+    }
+
+    // 渲染流水线示意 + generation + 命中表格
+    function renderVectorResults(data, topK) {
+      const hits = data.hits || [];
+
+      document.getElementById('vlPipeline').hidden = false;
+      document.getElementById('vlPipelineTopK').textContent = topK;
+      document.getElementById('vlPipelineHits').textContent = hits.length;
+      document.getElementById('vlGeneration').textContent = data.generation ? `generation: ${data.generation}` : '';
+
+      const body = document.getElementById('vlResultBody');
+      body.innerHTML = '';
+      if (!hits.length) {
+        body.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 30px; color: var(--text-light);">没有命中结果（可尝试降低 min_score 或放宽 top_k）</td></tr>';
+      } else {
+        hits.forEach((hit, idx) => {
+          const tr = document.createElement('tr');
+          const payloadText = JSON.stringify(hit.payload ?? null);
+          const payloadShort = payloadText.length > 200 ? payloadText.slice(0, 200) + '…' : payloadText;
+          tr.innerHTML = `
+            <td style="color: var(--text-light);">${idx + 1}</td>
+            <td style="font-family: var(--font-mono);">${hit.id}</td>
+            <td style="font-family: var(--font-mono);" title="${hit.score}">${Number(hit.score).toFixed(6)}</td>
+            <td style="font-family: var(--font-mono); font-size: 11px;" title="${payloadText.replace(/"/g, '&quot;')}">${payloadShort}</td>`;
+          body.appendChild(tr);
+        });
+      }
+      document.getElementById('vlResultTable').hidden = false;
+      document.getElementById('vlEmpty').hidden = true;
     }
 
     // ==========================================
