@@ -526,6 +526,75 @@
     .node-detail-drawer.open { transform: translateX(0); }
     .node-detail-drawer h4 { font-size: 13px; font-weight: 600; }
 
+    /* 节点 360° 视图 (Trinity 三平面) */
+    .inspector-plane { margin-bottom: 14px; }
+    .inspector-plane-title {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 6px;
+    }
+    .inspector-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex: none;
+    }
+    .inspector-vector { font-family: var(--font-mono); font-size: 11px; }
+    .inspector-vector-summary { color: var(--text-muted); margin-bottom: 6px; }
+    .inspector-vector-chip {
+      display: inline-block;
+      padding: 1px 6px;
+      margin: 0 3px 4px 0;
+      background: var(--bg-surface-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-sm);
+      color: var(--text-main);
+    }
+    .inspector-edges { font-size: 12px; color: var(--text-muted); }
+    .inspector-edge-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 6px;
+      border-radius: var(--radius-sm);
+      margin-bottom: 3px;
+      background: var(--bg-surface-secondary);
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+    .inspector-edge-label {
+      padding: 0 6px;
+      border: 1px solid var(--border-color);
+      border-radius: 9999px;
+      background: var(--bg-surface);
+      color: var(--tri-graph);
+      white-space: nowrap;
+    }
+    .inspector-edge-target {
+      cursor: pointer;
+      color: var(--primary);
+      background: none;
+      border: none;
+      padding: 0;
+      font: inherit;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    .inspector-edge-target:hover { color: var(--primary-hover); }
+    .inspector-edge-target:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; border-radius: 4px; }
+    .inspector-hint { font-size: 11px; color: var(--danger); background: var(--danger-bg); padding: 6px 8px; border-radius: var(--radius-sm); }
+
+    /* 可点击数据行（节点 360° 入口） */
+    table.data-grid tbody tr.row-clickable { cursor: pointer; }
+    table.data-grid tbody tr.row-clickable:hover { background: var(--bg-inset); }
+    table.data-grid tbody tr.row-clickable:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
+
     /* 教程抽屉 (Interactive Tutorial Modal / Drawer) */
     .tutorial-overlay {
       position: fixed;
@@ -982,19 +1051,32 @@
                   <button class="btn" id="centerGraphBtn" title="重置居中">居中视角</button>
                   <button class="btn" id="togglePhysicsBtn" title="固定物理模拟">冻结力学</button>
                 </div>
-                <!-- 节点详情抽屉 -->
-                <div class="node-detail-drawer" id="nodeDrawer">
-                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                    <h4 id="drawerNodeTitle">节点详情</h4>
-                    <button class="btn" id="closeDrawerBtn" style="padding: 2px 6px;">✕</button>
-                  </div>
-                  <pre class="json-view" id="drawerNodeContent"></pre>
-                </div>
               </div>
 
               <!-- JSON 树视图 -->
               <div id="viewJson" style="display: none; height: 100%; overflow: auto;">
                 <pre class="json-view" id="rawJsonOutput">{}</pre>
+              </div>
+
+              <!-- 节点 360° 详情抽屉（放在 res-content 层级，表格视图与图视图均可触发） -->
+              <div class="node-detail-drawer" id="nodeDrawer">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                  <h4 id="drawerNodeTitle">节点详情</h4>
+                  <button class="btn" id="closeDrawerBtn" style="padding: 2px 6px;">✕</button>
+                </div>
+                <!-- Trinity 三平面：Payload / Vector / Edges -->
+                <section class="inspector-plane">
+                  <div class="inspector-plane-title"><span class="inspector-dot" style="background: var(--tri-doc);"></span>Payload</div>
+                  <pre class="json-view" id="drawerNodePayload" style="padding: 8px 10px;"></pre>
+                </section>
+                <section class="inspector-plane">
+                  <div class="inspector-plane-title"><span class="inspector-dot" style="background: var(--tri-vector);"></span>Vector</div>
+                  <div id="drawerNodeVector" class="inspector-vector"></div>
+                </section>
+                <section class="inspector-plane">
+                  <div class="inspector-plane-title"><span class="inspector-dot" style="background: var(--tri-graph);"></span>Edges</div>
+                  <div id="drawerNodeEdges" class="inspector-edges">-</div>
+                </section>
               </div>
             </div>
           </div>
@@ -1549,6 +1631,27 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
 
       rows.forEach((row, idx) => {
         const tr = document.createElement('tr');
+        // 节点行可点击：打开 360° 详情抽屉（hover 提示 + 键盘可达）
+        const node = findNodeInRow(row);
+        if (node) {
+          tr.classList.add('row-clickable');
+          tr.tabIndex = 0;
+          tr.setAttribute('role', 'button');
+          tr.title = '点击查看该节点的 360° 视图 (Payload / Vector / Edges)';
+          const openInspector = () => openNodeDrawer({
+            id: node.id,
+            label: node.payload?.name || node.payload?.title || `Node ${node.id}`,
+            payload: node.payload || {},
+            vector: node.vector || []
+          });
+          tr.addEventListener('click', openInspector);
+          tr.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              openInspector();
+            }
+          });
+        }
         cols.forEach(c => {
           const td = document.createElement('td');
           if (c === '#') {
@@ -2133,14 +2236,107 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       ctx.restore();
     }
 
+    // ==========================================
+    // 节点 360° 详情抽屉 (Trinity 三平面: Payload / Vector / Edges)
+    // ==========================================
     function openNodeDrawer(node) {
       document.getElementById('drawerNodeTitle').textContent = `节点: #${node.id} (${node.label})`;
-      document.getElementById('drawerNodeContent').textContent = JSON.stringify({
-        id: node.id,
-        payload: node.payload,
-        vector: node.vector.length > 0 ? `[${node.vector.length} 维向量]` : '无向量'
-      }, null, 2);
+
+      // 平面 1: Payload
+      document.getElementById('drawerNodePayload').textContent = JSON.stringify(node.payload ?? {}, null, 2);
+
+      // 平面 2: Vector（维度 + 前 16 维数值，超长折叠）
+      renderDrawerVector(node.vector || []);
+
+      // 平面 3: Edges（异步拉取 GET /v1/nodes/{id} 的 edgeVersions）
+      loadNodeEdges(node.id);
+
       document.getElementById('nodeDrawer').classList.add('open');
+    }
+
+    // Vector 平面：dim 摘要 + 前 16 维 mono 数值块，其余折叠在 <details>
+    function renderDrawerVector(vector) {
+      const container = document.getElementById('drawerNodeVector');
+      if (!Array.isArray(vector) || vector.length === 0) {
+        container.innerHTML = '<span class="inspector-vector-summary">无向量 (no vector attached)</span>';
+        return;
+      }
+      const previewLimit = 16;
+      const chips = (values) => values.map(v => `<span class="inspector-vector-chip">${Number(v).toFixed(4)}</span>`).join('');
+      let html = `<div class="inspector-vector-summary">dim = ${vector.length}</div>${chips(vector.slice(0, previewLimit))}`;
+      if (vector.length > previewLimit) {
+        html += `<details><summary style="cursor: pointer; color: var(--primary); font-size: 11px;">展开全部 ${vector.length} 维</summary><div style="margin-top: 6px;">${chips(vector)}</div></details>`;
+      }
+      container.innerHTML = html;
+    }
+
+    // Edges 平面：GET /v1/nodes/{id}，渲染 edgeVersions 的 target/label 列表
+    async function loadNodeEdges(nodeId) {
+      const container = document.getElementById('drawerNodeEdges');
+      container.textContent = '加载中...';
+      try {
+        const res = await fetch(`${API_BASE}/v1/nodes/${nodeId}`);
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ title: '请求失败', detail: res.statusText }));
+          container.innerHTML = `<div class="inspector-hint">边信息加载失败: ${err.title || '未知错误'} — ${err.detail || ''}</div>`;
+          return;
+        }
+        const data = await res.json();
+        const edges = data.edgeVersions || [];
+
+        if (!edges.length) {
+          container.textContent = '无出边 (no outgoing edges)';
+          return;
+        }
+        container.innerHTML = '';
+        edges.forEach(edge => {
+          const item = document.createElement('div');
+          item.className = 'inspector-edge-item';
+          // target 可点击：跳转继续查看该节点
+          item.innerHTML = `
+            <span class="inspector-edge-label">${edge.label ?? '-'}</span>
+            <span>→</span>
+            <button class="inspector-edge-target" type="button" title="查看节点 #${edge.targetId} 的 360° 视图">#${edge.targetId}</button>`;
+          item.querySelector('.inspector-edge-target').addEventListener('click', () => jumpToNode(edge.targetId));
+          container.appendChild(item);
+        });
+      } catch (err) {
+        container.innerHTML = `<div class="inspector-hint">网络请求失败: ${err.message}</div>`;
+      }
+    }
+
+    // 从边列表跳转到目标节点：拉取完整节点数据后重新渲染抽屉
+    async function jumpToNode(nodeId) {
+      const container = document.getElementById('drawerNodeEdges');
+      container.textContent = '加载中...';
+      try {
+        const res = await fetch(`${API_BASE}/v1/nodes/${nodeId}`);
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ title: '请求失败', detail: res.statusText }));
+          container.innerHTML = `<div class="inspector-hint">节点 #${nodeId} 加载失败: ${err.title || '未知错误'} — ${err.detail || ''}</div>`;
+          return;
+        }
+        const data = await res.json();
+        const node = data.node || {};
+        openNodeDrawer({
+          id: node.id ?? nodeId,
+          label: node.payload?.name || node.payload?.title || `Node ${nodeId}`,
+          payload: node.payload || {},
+          vector: node.vector || []
+        });
+      } catch (err) {
+        container.innerHTML = `<div class="inspector-hint">网络请求失败: ${err.message}</div>`;
+      }
+    }
+
+    // 从表格行中提取节点对象（行形状可能是 { 别名: 节点对象 } 或混合值）
+    function findNodeInRow(row) {
+      for (const val of Object.values(row)) {
+        if (val && typeof val === 'object' && !Array.isArray(val) && val.id !== undefined && val.type === 'node') {
+          return val;
+        }
+      }
+      return null;
     }
 
     // 独立图拓扑探索标签页
