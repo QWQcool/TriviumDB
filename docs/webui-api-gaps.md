@@ -57,7 +57,7 @@
 ## Gap 5：无子图/批量节点批量获取端点
 
 - **现状**：按 id 列表获取节点只能逐个 `GET /v1/nodes/{id}`；NDJSON 批量端点只有导入
-  （`POST /v1/nodes/ndjson` 等），没有读取。
+  （`POST /v1/import/nodes`、`POST /v1/import/edges`），没有读取。
 - **影响**：与 Gap 1 叠加放大请求数；批量恢复/对比会话中的图快照效率低。
 - **建议草案**：`POST /v1/nodes/batch-get`（body: `{ ids: [...] }`，NDJSON 响应）。
 - **当前 workaround**：逐个请求 + 并发节制（串行）。

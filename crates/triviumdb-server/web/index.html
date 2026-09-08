@@ -3103,7 +3103,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       let frontier = [String(nodeId)];
       const visited = new Set();
       let addedNodes = 0;
-      const seenEdges = new Set(graphEdges.map(e => e.source + '|' + e.target));
+      const pendingEdges = [];
       for (let d = 0; d <= depth; d++) {
         const next = [];
         for (const id of frontier) {
@@ -3123,11 +3123,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
             }
             (data.edgeVersions || []).forEach(ev => {
               const tid = String(ev.targetId);
-              const k = sid + '|' + tid;
-              if (!seenEdges.has(k)) {
-                seenEdges.add(k);
-                graphEdges.push({ source: sid, target: tid, label: ev.label || 'LINK' });
-              }
+              pendingEdges.push({ source: sid, target: tid, label: ev.label || 'LINK' });
               if (!visited.has(tid)) {
                 next.push(tid);
               }
@@ -3136,6 +3132,17 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         }
         frontier = next;
       }
+      // 悬挂边防护：BFS 末轮节点的出边 target 不会再被拉取入库，直接并会产生
+      // 端点缺失的悬挂边（渲染层不可见、导出不一致）。统一在 BFS 结束后过滤，
+      // 只并入两端都在图内的边。
+      const seenEdges = new Set(graphEdges.map(e => e.source + '|' + e.target));
+      pendingEdges.forEach(e => {
+        const k = e.source + '|' + e.target;
+        if (nodeMap.has(e.source) && nodeMap.has(e.target) && !seenEdges.has(k)) {
+          seenEdges.add(k);
+          graphEdges.push(e);
+        }
+      });
       if (addedNodes > 0) {
         graphTotalNodeCount = Math.max(graphTotalNodeCount, graphNodes.length);
         applyGraphPhysicsPolicy();
@@ -3660,22 +3667,25 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       const inst = sigmaInstances[viewId];
       if (!inst) return;
       // 主动释放 WebGL context：浏览器对活跃 context 数量有上限，kill() 不即时回收，
-      // 频繁切换后端/主题会累积 "too many active WebGL contexts" 警告
+      // 频繁切换后端/主题会累积 "too many active WebGL contexts" 警告。
+      // 先捕获层 canvas 列表，kill 后逐个 loseContext（kill 可能重排/移除 DOM）
+      let layerCanvases = [];
       try {
         const container = inst.sigma.getContainer
           ? inst.sigma.getContainer()
           : document.getElementById(viewId === 'query' ? 'graphSigmaContainer' : 'standaloneSigmaContainer');
-        if (container) {
-          container.querySelectorAll('canvas').forEach(cv => {
-            ['webgl2', 'webgl', 'experimental-webgl'].forEach(type => {
-              const gl = cv.getContext(type);
-              const ext = gl && gl.getExtension('WEBGL_lose_context');
-              if (ext) ext.loseContext();
-            });
-          });
-        }
+        if (container) layerCanvases = Array.from(container.querySelectorAll('canvas'));
       } catch (_) { /* 尽力释放，失败不阻断销毁 */ }
       try { inst.sigma.kill(); } catch (_) { /* 已销毁 */ }
+      layerCanvases.forEach(cv => {
+        ['webgl2', 'webgl', 'experimental-webgl'].forEach(type => {
+          try {
+            const gl = cv.getContext(type);
+            const ext = gl && gl.getExtension('WEBGL_lose_context');
+            if (ext) ext.loseContext();
+          } catch (_) { /* canvas 可能已被回收 */ }
+        });
+      });
       sigmaInstances[viewId] = null;
     }
 
@@ -4633,7 +4643,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
             return jsonRes({ node: { type: 'node', id: '99', payload: { name: 'KSeed', type: 'person' }, vector: [] }, edgeVersions: [{ targetId: '98', label: 'KNOWS', version: 1 }] });
           }
           if (id === '98') {
-            return jsonRes({ node: { type: 'node', id: '98', payload: { name: 'KHop2', type: 'person' }, vector: [] }, edgeVersions: [] });
+            // 98 的出边指向图外节点 97（depth=1 不会拉取）——悬挂边回归 fixture
+            return jsonRes({ node: { type: 'node', id: '98', payload: { name: 'KHop2', type: 'person' }, vector: [] }, edgeVersions: [{ targetId: '97', label: 'KNOWS', version: 1 }] });
           }
           const node = id === '1' ? NODE_ALICE : (id === '2' ? NODE_BOB : NODE_PAPER);
           return jsonRes({ node, edgeVersions: id === '1' ? [{ targetId: '2', label: 'KNOWS', version: 1 }] : [] });
@@ -5324,6 +5335,9 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         await waitFor(() => nodeMap.has('98'), 3000, '1 跳邻居 98 应入图');
         assert(graphEdges.some(e => e.source === '99' && e.target === '98' && e.label === 'KNOWS'), '扩展边应带 KNOWS label');
         assert(graphNodes.find(n => n.id === '98').payload.name === 'KHop2', '邻居节点应来自真实节点响应');
+        // 悬挂边回归：98 的出边指向图外节点 97（depth=1 不拉取），不得并入图
+        assert(!nodeMap.has('97'), '图外节点 97 不应被创建');
+        assert(!graphEdges.some(e => e.source === '98' && e.target === '97'), '不得产生端点缺失的悬挂边');
         await waitFor(() => document.querySelector('#toastStack .toast'), 2000, '应有扩展结果 toast');
         document.getElementById('closeDrawerBtn').click();
       });
