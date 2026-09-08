@@ -15,7 +15,7 @@
       --border-focus: #6366f1;
       --text-main: #171c26;
       --text-muted: #5b6572;
-      --text-light: #95a0af;
+      --text-light: #68737f;
       --primary: #4f46e5;
       --primary-hover: #4338ca;
       --primary-bg: #eef2ff;
@@ -52,7 +52,7 @@
       --border-focus: #818cf8;
       --text-main: #e8ebf1;
       --text-muted: #9aa4b2;
-      --text-light: #5f6b7a;
+      --text-light: #7e8998;
       --primary: #818cf8;
       --primary-hover: #a5b4fc;
       --primary-bg: rgba(129, 140, 248, 0.14);
@@ -859,6 +859,48 @@
       color: var(--text-main);
       white-space: pre-wrap;
     }
+
+    /* 可折叠 JSON 树（结果 JSON 视图 / 节点抽屉 Payload 平面 / mutation 结果共用） */
+    .json-tree { font-family: var(--font-mono); font-size: 12px; line-height: 1.6; }
+    .jt-line { display: flex; align-items: baseline; gap: 3px; min-height: 1.6em; flex-wrap: wrap; }
+    .jt-toggle {
+      flex: none; align-self: center; width: 15px; height: 16px; padding: 0;
+      border: none; background: none; color: var(--text-light); cursor: pointer;
+      font-family: var(--font-mono); font-size: 10px; line-height: 16px;
+      text-align: center; border-radius: 4px;
+    }
+    .jt-toggle:hover { color: var(--text-main); background: var(--bg-surface-secondary); }
+    .jt-toggle:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+    .jt-key { color: var(--text-muted); }
+    .jt-badge {
+      flex: none; align-self: center; font-size: 10px; padding: 0 6px;
+      border-radius: 9999px; background: var(--bg-surface-secondary);
+      color: var(--text-light); border: 1px solid var(--border-color);
+    }
+    .jt-val-string { color: var(--success); }
+    .jt-val-number { color: var(--accent); }
+    .jt-val-bool { color: var(--warning); }
+    .jt-val-null { color: var(--text-light); font-style: italic; }
+    .jt-brace { color: var(--text-muted); }
+    .jt-children { margin-left: 8px; padding-left: 12px; border-left: 1px solid var(--border-color); }
+    .jt-children.collapsed { display: none; }
+
+    /* 向量热力条（节点抽屉 Vector 平面 / 向量实验台预览共用） */
+    .heat-summary {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+      font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
+    }
+    .heat-strip {
+      display: flex; height: 14px; border-radius: 4px;
+      overflow: hidden; border: 1px solid var(--border-color);
+    }
+    .heat-strip i { flex: 1 1 0; min-width: 1px; }
+    .heat-strip i:hover { outline: 1px solid var(--text-main); outline-offset: -1px; }
+
+    /* 向量实验台 score 比例条 */
+    .score-cell { display: flex; align-items: center; gap: 8px; min-width: 150px; }
+    .score-bar { flex: 1; height: 6px; border-radius: 9999px; background: var(--bg-inset); overflow: hidden; }
+    .score-bar i { display: block; height: 100%; border-radius: 9999px; }
   </style>
 </head>
 <body>
@@ -1053,9 +1095,9 @@
                 </div>
               </div>
 
-              <!-- JSON 树视图 -->
+              <!-- JSON 树视图（可折叠 JSON 树渲染，导出功能不受影响） -->
               <div id="viewJson" style="display: none; height: 100%; overflow: auto;">
-                <pre class="json-view" id="rawJsonOutput">{}</pre>
+                <div class="json-view" id="rawJsonOutput"></div>
               </div>
 
               <!-- 节点 360° 详情抽屉（放在 res-content 层级，表格视图与图视图均可触发） -->
@@ -1067,7 +1109,7 @@
                 <!-- Trinity 三平面：Payload / Vector / Edges -->
                 <section class="inspector-plane">
                   <div class="inspector-plane-title"><span class="inspector-dot" style="background: var(--tri-doc);"></span>Payload</div>
-                  <pre class="json-view" id="drawerNodePayload" style="padding: 8px 10px;"></pre>
+                  <div class="json-view" id="drawerNodePayload" style="padding: 8px 10px;"></div>
                 </section>
                 <section class="inspector-plane">
                   <div class="inspector-plane-title"><span class="inspector-dot" style="background: var(--tri-vector);"></span>Vector</div>
@@ -1126,6 +1168,7 @@
               <label class="vl-label" for="vlJsonInput">查询向量 JSON 数组</label>
               <textarea class="vl-input" id="vlJsonInput" rows="4" spellcheck="false" placeholder="例如: [0.12, -0.45, 0.78, 0.33]"></textarea>
               <div class="vl-hint vl-hint--ok" id="vlDimHint">维度校验：选中节点后以该节点 vector 维度为准，否则以服务端返回为准</div>
+              <div id="vlVectorPreview"></div>
             </div>
 
             <!-- 检索参数 -->
@@ -1320,6 +1363,9 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       renderHistory();
       initCanvas('graphCanvas');
       setInterval(checkServerHealth, 5000);
+      // 应用初始化完成信号：供 scripts/ui-smoke.mjs 等自动化脚本等待，
+      // 避免在 DOMContentLoaded 监听器挂载前点击按钮导致竞态
+      window.__TRIVIUM_APP_READY = true;
     });
 
     // 主题切换
@@ -1603,6 +1649,151 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     }
 
     // ==========================================
+    // 可折叠 JSON 树渲染（vanilla，无依赖）
+    // 类型着色：字符串绿 / 数字青 / 布尔橙 / null 灰 / 键 muted；
+    // 默认展开前 2 层，更深层折叠；对象/数组带计数徽标
+    // ==========================================
+    const JSON_TREE_MAX_DEPTH = 2;
+
+    function jtSpan(cls, text) {
+      const span = document.createElement('span');
+      span.className = cls;
+      span.textContent = text;
+      return span;
+    }
+
+    function jtPrimitive(value) {
+      if (value === null) return jtSpan('jt-val-null', 'null');
+      switch (typeof value) {
+        case 'string': return jtSpan('jt-val-string', JSON.stringify(value));
+        case 'number': return jtSpan('jt-val-number', String(value));
+        case 'boolean': return jtSpan('jt-val-bool', String(value));
+        default: return jtSpan('jt-val-null', String(value));
+      }
+    }
+
+    // 返回一个 wrapper（容器行 + 可折叠子层），key 为 null 表示根节点
+    function buildJsonTree(key, value, depth, needComma) {
+      const wrap = document.createElement('div');
+      const isObj = value !== null && typeof value === 'object';
+      const isArray = Array.isArray(value);
+      const keyPrefix = key === null ? '' : JSON.stringify(key) + ': ';
+
+      if (!isObj) {
+        const line = document.createElement('div');
+        line.className = 'jt-line';
+        if (key !== null) line.appendChild(jtSpan('jt-key', keyPrefix));
+        line.appendChild(jtPrimitive(value));
+        if (needComma) line.appendChild(jtSpan('jt-brace', ','));
+        wrap.appendChild(line);
+        return wrap;
+      }
+
+      const entries = isArray ? value.map((v, i) => [i, v]) : Object.entries(value);
+      const line = document.createElement('div');
+      line.className = 'jt-line';
+      wrap.appendChild(line);
+
+      // 空对象/数组内联展示，不生成折叠按钮
+      if (entries.length === 0) {
+        if (key !== null) line.appendChild(jtSpan('jt-key', keyPrefix));
+        line.appendChild(jtSpan('jt-brace', isArray ? '[]' : '{}'));
+        if (needComma) line.appendChild(jtSpan('jt-brace', ','));
+        return wrap;
+      }
+
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'jt-toggle';
+      toggle.title = '折叠/展开';
+      line.appendChild(toggle);
+      if (key !== null) line.appendChild(jtSpan('jt-key', keyPrefix));
+      line.appendChild(jtSpan('jt-brace', isArray ? '[' : '{'));
+      line.appendChild(jtSpan('jt-badge', `${entries.length} ${isArray ? 'items' : 'keys'}`));
+
+      const children = document.createElement('div');
+      children.className = 'jt-children';
+      entries.forEach(([k, v], idx) => {
+        children.appendChild(buildJsonTree(k, v, depth + 1, idx < entries.length - 1));
+      });
+      const closeLine = document.createElement('div');
+      closeLine.className = 'jt-line';
+      closeLine.appendChild(jtSpan('jt-brace', (isArray ? ']' : '}') + (needComma ? ',' : '')));
+      children.appendChild(closeLine);
+      wrap.appendChild(children);
+
+      const setCollapsed = (collapsed) => {
+        toggle.setAttribute('aria-expanded', String(!collapsed));
+        toggle.textContent = collapsed ? '▸' : '▾';
+        children.classList.toggle('collapsed', collapsed);
+      };
+      toggle.addEventListener('click', () => {
+        setCollapsed(toggle.getAttribute('aria-expanded') === 'true');
+      });
+      setCollapsed(depth >= JSON_TREE_MAX_DEPTH);
+      return wrap;
+    }
+
+    function renderJsonTree(container, value) {
+      container.textContent = '';
+      container.classList.add('json-tree');
+      container.appendChild(buildJsonTree(null, value, 0, false));
+    }
+
+    // ==========================================
+    // 向量热力条（min-max 归一 → 顺序色带）
+    // ==========================================
+    // 顺序色带：深靛蓝(低) → indigo → cyan → 亮青(高)，双主题均可读
+    function heatColor(t) {
+      const stops = [
+        [30, 41, 89],
+        [79, 70, 229],
+        [6, 182, 212],
+        [165, 243, 252]
+      ];
+      const clamped = Math.min(Math.max(t, 0), 1);
+      const seg = Math.min(Math.floor(clamped * (stops.length - 1)), stops.length - 2);
+      const local = clamped * (stops.length - 1) - seg;
+      const a = stops[seg];
+      const b = stops[seg + 1];
+      const mix = a.map((v, i) => Math.round(v + (b[i] - v) * local));
+      return `rgb(${mix[0]}, ${mix[1]}, ${mix[2]})`;
+    }
+
+    function l2Norm(vector) {
+      return Math.sqrt(vector.reduce((acc, v) => acc + v * v, 0));
+    }
+
+    function renderHeatStrip(vector) {
+      const strip = document.createElement('div');
+      strip.className = 'heat-strip';
+      strip.setAttribute('role', 'img');
+      strip.setAttribute('aria-label', `向量热力条，共 ${vector.length} 维`);
+      let min = Infinity;
+      let max = -Infinity;
+      vector.forEach(v => { if (v < min) min = v; if (v > max) max = v; });
+      const range = max - min || 1;
+      vector.forEach((v, i) => {
+        const cell = document.createElement('i');
+        cell.style.background = heatColor((v - min) / range);
+        cell.title = `dim ${i}: ${Number(v).toFixed(4)}`;
+        strip.appendChild(cell);
+      });
+      return strip;
+    }
+
+    // 带摘要（dim + L2 范数）的热力条组合
+    function renderHeatBlock(vector, prefixLabel) {
+      const frag = document.createDocumentFragment();
+      const summary = document.createElement('div');
+      summary.className = 'heat-summary';
+      summary.textContent = `${prefixLabel ? prefixLabel + ' · ' : ''}dim = ${vector.length} · L2 = ${l2Norm(vector).toFixed(4)}`;
+      frag.appendChild(summary);
+      frag.appendChild(renderHeatStrip(vector));
+      return frag;
+    }
+
+    // ==========================================
     // 视图渲染引擎
     // ==========================================
     function renderGrid(rows) {
@@ -1684,12 +1875,12 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         <td>${data.affected || 0}</td>
         <td><code>${(data.createdIds || []).join(', ') || '无'}</code></td>
       </tr>`;
-      document.getElementById('rawJsonOutput').textContent = JSON.stringify(data, null, 2);
+      renderJsonTree(document.getElementById('rawJsonOutput'), data);
       animateResultsIn();
     }
 
     function renderRawJson(data) {
-      document.getElementById('rawJsonOutput').textContent = JSON.stringify(data, null, 2);
+      renderJsonTree(document.getElementById('rawJsonOutput'), data);
     }
 
     function renderError(err) {
@@ -1698,7 +1889,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         <strong>❌ ${err.title || '执行错误'}</strong><br>
         <span style="font-size: 12px; margin-top: 4px; display:inline-block;">${err.detail || JSON.stringify(err)}</span>
       </td></tr>`;
-      document.getElementById('rawJsonOutput').textContent = JSON.stringify(err, null, 2);
+      renderJsonTree(document.getElementById('rawJsonOutput'), err);
       animateResultsIn();
     }
 
@@ -1713,6 +1904,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       document.getElementById('vlSourceTabJson').addEventListener('click', () => switchVectorSource(false));
       document.getElementById('vlLoadCandidatesBtn').addEventListener('click', loadVectorCandidates);
       document.getElementById('vlNodeSelect').addEventListener('change', onVectorNodeSelected);
+      document.getElementById('vlJsonInput').addEventListener('input', updateVectorJsonPreview);
       document.getElementById('vlRunBtn').addEventListener('click', runVectorSearch);
     }
 
@@ -1722,6 +1914,20 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       document.getElementById('vlSourceTabJson').classList.toggle('active', !useNode);
       document.getElementById('vlSourceNode').hidden = !useNode;
       document.getElementById('vlSourceJson').hidden = useNode;
+      if (!useNode) updateVectorJsonPreview();
+    }
+
+    // JSON 来源实时预览：解析成功则渲染热力条（非法输入清空预览，错误由检索时校验报告）
+    function updateVectorJsonPreview() {
+      const previewEl = document.getElementById('vlVectorPreview');
+      previewEl.textContent = '';
+      let parsed;
+      try {
+        parsed = JSON.parse(document.getElementById('vlJsonInput').value.trim());
+      } catch (_) { return; }
+      if (!Array.isArray(parsed) || !parsed.length
+        || parsed.some(v => typeof v !== 'number' || !Number.isFinite(v))) return;
+      previewEl.appendChild(renderHeatBlock(parsed, '预览'));
     }
 
     // 执行选择器 TQL 并将返回节点填充到下拉框
@@ -1807,6 +2013,10 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       hint.className = 'vl-hint vl-hint--ok';
       const preview = node.vector.slice(0, 8).map(v => Number(v.toFixed(4))).join(', ');
       hint.textContent = `已选节点 #${node.id}，dim=${node.vector.length}，前若干维: [${preview}${node.vector.length > 8 ? ', ...' : ''}]`;
+      // 选中节点即热力条预览
+      const previewEl = document.getElementById('vlVectorPreview');
+      previewEl.textContent = '';
+      previewEl.appendChild(renderHeatBlock(node.vector, '预览'));
     }
 
     // 从当前激活来源解析查询向量，非法输入抛出 {title, detail}
@@ -1925,14 +2135,22 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       if (!hits.length) {
         body.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 30px; color: var(--text-light);">没有命中结果（可尝试降低 min_score 或放宽 top_k）</td></tr>';
       } else {
+        // score 归一化比例条：以本批 hits 的 min-max 为基准；单条命中直接满条
+        const scores = hits.map(h => Number(h.score) || 0);
+        const sMin = Math.min(...scores);
+        const sMax = Math.max(...scores);
+        const sRange = sMax - sMin || 1;
         hits.forEach((hit, idx) => {
           const tr = document.createElement('tr');
           const payloadText = JSON.stringify(hit.payload ?? null);
           const payloadShort = payloadText.length > 200 ? payloadText.slice(0, 200) + '…' : payloadText;
+          const scoreNum = Number(hit.score);
+          // 单条命中或本批 score 全相同时满条，避免全部 0% 不可见
+          const t = (hits.length === 1 || sMax === sMin) ? 1 : ((scoreNum || 0) - sMin) / sRange;
           tr.innerHTML = `
             <td style="color: var(--text-light);">${idx + 1}</td>
             <td style="font-family: var(--font-mono);">${hit.id}</td>
-            <td style="font-family: var(--font-mono);" title="${hit.score}">${Number(hit.score).toFixed(6)}</td>
+            <td><div class="score-cell"><span style="font-family: var(--font-mono);" title="${hit.score}">${scoreNum.toFixed(6)}</span><div class="score-bar" aria-hidden="true"><i style="width: ${(t * 100).toFixed(1)}%; background: ${heatColor(t)};"></i></div></div></td>
             <td style="font-family: var(--font-mono); font-size: 11px;" title="${payloadText.replace(/"/g, '&quot;')}">${payloadShort}</td>`;
           body.appendChild(tr);
         });
@@ -2242,8 +2460,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     function openNodeDrawer(node) {
       document.getElementById('drawerNodeTitle').textContent = `节点: #${node.id} (${node.label})`;
 
-      // 平面 1: Payload
-      document.getElementById('drawerNodePayload').textContent = JSON.stringify(node.payload ?? {}, null, 2);
+      // 平面 1: Payload（可折叠 JSON 树）
+      renderJsonTree(document.getElementById('drawerNodePayload'), node.payload ?? {});
 
       // 平面 2: Vector（维度 + 前 16 维数值，超长折叠）
       renderDrawerVector(node.vector || []);
@@ -2254,20 +2472,26 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       document.getElementById('nodeDrawer').classList.add('open');
     }
 
-    // Vector 平面：dim 摘要 + 前 16 维 mono 数值块，其余折叠在 <details>
+    // Vector 平面：热力条（min-max 归一顺序色带，hover 显示 dim/数值）+ 摘要（dim 数与 L2 范数），
+    // 原始精确数值保留在折叠的 <details> 中
     function renderDrawerVector(vector) {
       const container = document.getElementById('drawerNodeVector');
+      container.textContent = '';
       if (!Array.isArray(vector) || vector.length === 0) {
         container.innerHTML = '<span class="inspector-vector-summary">无向量 (no vector attached)</span>';
         return;
       }
-      const previewLimit = 16;
-      const chips = (values) => values.map(v => `<span class="inspector-vector-chip">${Number(v).toFixed(4)}</span>`).join('');
-      let html = `<div class="inspector-vector-summary">dim = ${vector.length}</div>${chips(vector.slice(0, previewLimit))}`;
-      if (vector.length > previewLimit) {
-        html += `<details><summary style="cursor: pointer; color: var(--primary); font-size: 11px;">展开全部 ${vector.length} 维</summary><div style="margin-top: 6px;">${chips(vector)}</div></details>`;
-      }
-      container.innerHTML = html;
+      container.appendChild(renderHeatBlock(vector));
+      const details = document.createElement('details');
+      const sum = document.createElement('summary');
+      sum.textContent = `全部 ${vector.length} 维数值`;
+      sum.style.cssText = 'cursor: pointer; color: var(--primary); font-size: 11px; margin-top: 6px;';
+      const chips = document.createElement('div');
+      chips.style.cssText = 'margin-top: 6px;';
+      chips.innerHTML = vector.map(v => `<span class="inspector-vector-chip">${Number(v).toFixed(4)}</span>`).join('');
+      details.appendChild(sum);
+      details.appendChild(chips);
+      container.appendChild(details);
     }
 
     // Edges 平面：GET /v1/nodes/{id}，渲染 edgeVersions 的 target/label 列表
@@ -2676,16 +2900,39 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         const body = document.getElementById('gridBody').textContent;
         assert(body.indexOf('写入成功') !== -1, '应显示写入成功');
         assert(body.indexOf('901') !== -1 && body.indexOf('902') !== -1, '应显示两个 createdIds');
-        const json = JSON.parse(document.getElementById('rawJsonOutput').textContent);
-        assert(json.affected === 2 && json.createdIds.length === 2, 'rawJsonOutput 应反映 mutation 数据');
+        const treeText = document.getElementById('rawJsonOutput').textContent;
+        assert(treeText.includes('affected') && treeText.includes('901'), 'JSON 树应反映 mutation 数据');
+        assert(document.querySelector('#rawJsonOutput .jt-toggle'), 'JSON 树应可折叠');
       });
 
       addAssert('错误渲染：标题/详情同时呈现在表格与 JSON 视图', '渲染管线', async () => {
         renderError({ title: '自检注入错误', detail: 'detail-xyz' });
         const body = document.getElementById('gridBody').textContent;
         assert(body.indexOf('自检注入错误') !== -1 && body.indexOf('detail-xyz') !== -1, '错误标题与详情应呈现');
-        const json = JSON.parse(document.getElementById('rawJsonOutput').textContent);
-        assert(json.title === '自检注入错误', 'rawJsonOutput 应承载错误对象');
+        assert(document.getElementById('rawJsonOutput').textContent.includes('自检注入错误'), 'JSON 树应承载错误对象');
+      });
+
+      addAssert('JSON 树：类型着色与计数徽标', '渲染管线', async () => {
+        renderRawJson({ str: 'abc', num: 1.5, bool: true, nul: null, arr: [1, 2], obj: { x: 1 } });
+        const root = document.getElementById('rawJsonOutput');
+        assert(root.querySelector('.jt-val-string'), '字符串值应有类型 span');
+        assert(root.querySelector('.jt-val-number'), '数字值应有类型 span');
+        assert(root.querySelector('.jt-val-bool'), '布尔值应有类型 span');
+        assert(root.querySelector('.jt-val-null'), 'null 应有类型 span');
+        assert(root.querySelectorAll('.jt-badge').length >= 2, '对象/数组应有计数徽标');
+      });
+
+      addAssert('JSON 树：默认展开 2 层、点击可折叠', '渲染管线', async () => {
+        renderRawJson({ a: { b: { c: 1 } } });
+        const root = document.getElementById('rawJsonOutput');
+        const toggles = root.querySelectorAll('.jt-toggle');
+        assert(toggles.length === 3, '三层嵌套对象应有 3 个折叠按钮，实际 ' + toggles.length);
+        const expanded = Array.from(toggles).filter(t => t.getAttribute('aria-expanded') === 'true').length;
+        assert(expanded === 2, '默认应展开前 2 层，实际展开 ' + expanded);
+        toggles[0].click();
+        assert(toggles[0].getAttribute('aria-expanded') === 'false', '点击后 aria-expanded 应变 false');
+        assert(root.querySelector('.jt-children.collapsed'), '点击后子层应隐藏');
+        toggles[0].click();
       });
 
       // 向量实验台
@@ -2731,12 +2978,19 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         assert(document.getElementById('vlResultBody').children.length === 1, '应渲染 1 行命中');
       });
 
+      addAssert('score 比例条：单条命中为满条', '向量实验台', async () => {
+        // 复用上一条 mock 检索的单 hit 结果：归一化后比例条应为满宽
+        const bar = document.querySelector('#vlResultBody .score-bar i');
+        assert(bar, 'score 单元格应含比例条');
+        assert(bar.style.width === '100%', '单条命中比例条应 100%，实际 ' + bar.style.width);
+      });
+
       // 节点抽屉
       addAssert('节点抽屉：Trinity 三平面渲染 (Payload/Vector/Edges)', '节点抽屉', async () => {
         openNodeDrawer({ id: '1', label: 'Alice', payload: NODE_ALICE.payload, vector: NODE_ALICE.vector });
         assert(document.getElementById('nodeDrawer').classList.contains('open'), '抽屉应打开');
-        const payload = JSON.parse(document.getElementById('drawerNodePayload').textContent);
-        assert(payload.name === 'Alice', 'Payload 平面应承载 JSON payload');
+        const payloadText = document.getElementById('drawerNodePayload').textContent;
+        assert(payloadText.includes('Alice') && payloadText.includes('citations'), 'Payload 平面应承载 JSON payload');
         assert(document.getElementById('drawerNodeVector').textContent.indexOf('dim = 4') !== -1, 'Vector 平面应显示维度');
         await waitFor(() => document.querySelector('#drawerNodeEdges .inspector-edge-item'), 3000, '边列表应加载');
         assert(document.getElementById('drawerNodeEdges').textContent.indexOf('KNOWS') !== -1, '边标签应显示');
@@ -2745,10 +2999,21 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       addAssert('节点抽屉：边跳转到目标节点后重渲染', '节点抽屉', async () => {
         document.querySelector('#drawerNodeEdges .inspector-edge-target').click();
         await waitFor(() => document.getElementById('drawerNodeTitle').textContent.indexOf('#2') !== -1, 3000, '标题应跳到 #2');
-        const payload = JSON.parse(document.getElementById('drawerNodePayload').textContent);
-        assert(payload.name === 'Bob', '跳转后 Payload 应为 Bob');
+        assert(document.getElementById('drawerNodePayload').textContent.includes('Bob'), '跳转后 Payload 应为 Bob');
         document.getElementById('closeDrawerBtn').click();
         assert(!document.getElementById('nodeDrawer').classList.contains('open'), '关闭按钮应收起抽屉');
+      });
+
+      addAssert('向量热力条：抽屉色块、tooltip 与 L2 摘要', '节点抽屉', async () => {
+        renderDrawerVector([0, 0.25, 0.5, 1]);
+        const container = document.getElementById('drawerNodeVector');
+        const cells = container.querySelectorAll('.heat-strip i');
+        assert(cells.length === 4, '应有 4 个色块，实际 ' + cells.length);
+        assert(cells[0].style.background !== cells[3].style.background, '首尾色块颜色应不同');
+        assert(cells[0].title === 'dim 0: 0.0000' && cells[3].title === 'dim 3: 1.0000', 'tooltip 应含维度与数值');
+        assert(container.textContent.includes('dim = 4') && container.textContent.includes('L2'), '应显示 dim 与 L2 范数');
+        assert(container.querySelector('details'), '精确数值应折叠在 details');
+        renderDrawerVector(NODE_ALICE.vector); // 恢复抽屉向量平面状态
       });
 
       // 力导向收敛

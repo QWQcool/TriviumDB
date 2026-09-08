@@ -8,18 +8,18 @@
 //
 // 流程：
 //   1. cargo build -p triviumdb-server（HTML 经 include_str! 编译内嵌，必须先构建）
-//   2. 启动临时 server（独立端口 8081+ 探测空闲，--database .tmp/smoke.tdb 临时库）
+//   2. 启动临时 server（独立端口 8081+ 探测空闲，--database .tmp/smoke-<pid>-<ts>.tdb 唯一临时库）
 //   3. 通过 /v1/tql 注入少量种子数据（默认 FIND {type:"person"} 查询才有结果行）
 //   4. Playwright 打开 /ui：运行默认查询出结果 → 打开节点抽屉 → 依次切三个标签
 //   5. 打开 /ui?selftest=1：断言页内自检套件 0 failed
-//   6. 清理：关闭浏览器、杀掉 server 进程、删除临时库文件
+//   6. 清理：关闭浏览器、杀掉 server 进程、删除本轮临时库（删除失败的残留由下轮启动前清扫）
 //
 // 用法：node scripts/ui-smoke.mjs
 // 环境变量：SMOKE_BROWSER=chromium|firefox|webkit（默认 chromium）
 
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
@@ -28,7 +28,9 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TMP_DIR = path.join(ROOT, '.tmp');
-const DB_PATH = path.join(TMP_DIR, 'smoke.tdb');
+// 每轮使用唯一库名：即使上轮进程句柄释放延迟导致删除失败，残留脏库也不会污染本轮
+// （数据在 WAL 中，同名库会被重放）；历史残留由启动前的清扫兜底删除
+const DB_PATH = path.join(TMP_DIR, `smoke-${process.pid}-${Date.now()}.tdb`);
 const BROWSER = process.env.SMOKE_BROWSER || 'chromium';
 const PORT_CANDIDATES = [8081, 8082, 8083, 8084, 8085];
 const EXE = process.platform === 'win32'
@@ -137,16 +139,36 @@ let serverProc = null;
 let browser = null;
 let cleaned = false;
 
-function cleanup(exitCode) {
+async function cleanup(exitCode) {
   if (cleaned) return;
   cleaned = true;
-  try { if (browser) { browser.close(); } } catch (_) {}
-  try { if (serverProc && serverProc.exitCode === null) { serverProc.kill(); } } catch (_) {}
-  try {
-    for (const suffix of ['', '-wal', '-shm', '-lock']) {
-      rmSync(DB_PATH + suffix, { force: true });
+  try { if (browser) { await browser.close(); } } catch (_) {}
+  if (serverProc && serverProc.exitCode === null) {
+    try { serverProc.kill(); } catch (_) {}
+    // Windows 下 kill() 是异步的：必须等进程真正退出、释放库文件句柄后才能删除临时库
+    await new Promise((resolve) => {
+      const timer = setTimeout(resolve, 5000);
+      serverProc.once('exit', () => { clearTimeout(timer); resolve(); });
+    });
+  }
+  // 临时库删除：进程退出后句柄可能仍被短暂占用（Windows 文件锁/杀软扫描），重试至多 15s；
+  // 即使最终失败也不影响后续轮次（每轮库名唯一）
+  let lastRmError = null;
+  for (let attempt = 0; attempt < 30; attempt++) {
+    try {
+      for (const suffix of ['', '-wal', '-shm', '-lock']) {
+        rmSync(DB_PATH + suffix, { force: true });
+      }
+      lastRmError = null;
+      break;
+    } catch (err) {
+      lastRmError = err;
+      await sleep(500);
     }
-  } catch (_) {}
+  }
+  if (lastRmError) {
+    console.error(`[ui-smoke] 警告：临时库删除失败 (${lastRmError.code || lastRmError.message})，残留文件将由下一轮启动前清扫`);
+  }
   process.exit(exitCode);
 }
 
@@ -195,7 +217,14 @@ const BASE = `http://127.0.0.1:${PORT}`;
 
 log(`2/6 启动临时 server: 127.0.0.1:${PORT}, db=${DB_PATH}`);
 mkdirSync(TMP_DIR, { recursive: true });
-for (const suffix of ['', '-wal', '-shm']) rmSync(DB_PATH + suffix, { force: true });
+// 清扫历史残留的 smoke-*.tdb*（上轮删除失败遗留；当前轮文件名唯一，互不影响）
+try {
+  for (const f of readdirSync(TMP_DIR)) {
+    if (/^smoke-\d+-\d+\.tdb/.test(f)) {
+      try { rmSync(path.join(TMP_DIR, f), { force: true }); } catch (_) { /* 被占用则留给下轮 */ }
+    }
+  }
+} catch (_) { /* .tmp 可能尚不存在 */ }
 serverProc = spawn(EXE, ['--dim', '4', '--database', DB_PATH, '--listen', `127.0.0.1:${PORT}`], {
   cwd: ROOT,
   stdio: ['ignore', 'pipe', 'pipe'],
@@ -214,7 +243,7 @@ process.on('SIGTERM', () => cleanup(1));
 log('3/6 等待 /health/ready 就绪');
 if (!(await waitForReady(30000))) {
   console.error('[ui-smoke] server 30s 内未就绪\n' + serverStderr.slice(-2000));
-  cleanup(1);
+  await cleanup(1);
 }
 
 log('3/6 注入种子数据 (2 个 person 节点 + 1 条 KNOWS 边)');
@@ -225,20 +254,39 @@ const seed = (query) => request('POST', '/v1/tql', {
 const seedRes = await seed('CREATE ({name: "Smoke Alice", type: "person", citations: 10})-[:KNOWS]->({name: "Smoke Bob", type: "person", citations: 20})');
 if (seedRes.status !== 200) {
   console.error('[ui-smoke] 种子数据写入失败: ' + seedRes.text);
-  cleanup(1);
+  await cleanup(1);
+}
+// 种子生效性检查：唯一全新库中恰好应有 2 个 person
+const probeRows = await request('POST', '/v1/tql', {
+  body: JSON.stringify({ query: 'FIND {type: "person"} RETURN * LIMIT 100' }),
+  headers: { 'Content-Type': 'application/json' },
+});
+const seededCount = (probeRows.json && probeRows.json.rows ? probeRows.json.rows.length : 0);
+if (seededCount !== 2) {
+  console.error(`[ui-smoke] 种子数据校验失败（person=${seededCount}，应为 2）`);
+  await cleanup(1);
 }
 
 let failures = 0;
+let page = null;
 
 try {
   log(`4/6 打开 ${BASE}/ui 执行冒烟路径`);
   browser = await playwright[BROWSER].launch();
-  const page = await browser.newPage();
+  page = await browser.newPage();
   page.on('pageerror', (err) => {
     console.error('[ui-smoke] 页面 JS 异常: ' + err.message);
   });
+  page.on('console', (msg) => {
+    if (msg.type() === 'error') console.error('[ui-smoke] 页面 console.error: ' + msg.text().slice(0, 300));
+  });
+  page.on('requestfailed', (r) => {
+    console.error('[ui-smoke] 请求失败: ' + r.url() + ' — ' + (r.failure() && r.failure().errorText));
+  });
 
   await page.goto(`${BASE}/ui`, { waitUntil: 'domcontentloaded', timeout: 20000 });
+  // 等待应用初始化完成（DOMContentLoaded 监听器全部挂载后再交互，避免竞态）
+  await page.waitForFunction(() => window.__TRIVIUM_APP_READY === true, null, { timeout: 10000 });
   await page.waitForSelector('#runQueryBtn', { timeout: 10000 });
 
   // 冒烟 1：运行默认查询，表格应出现结果行
@@ -269,6 +317,7 @@ try {
 
   log(`5/6 打开 ${BASE}/ui?selftest=1 断言自检套件`);
   await page.goto(`${BASE}/ui?selftest=1`, { waitUntil: 'domcontentloaded', timeout: 20000 });
+  await page.waitForFunction(() => window.__TRIVIUM_APP_READY === true, null, { timeout: 10000 });
   await page.waitForSelector('#selftestBar', { timeout: 15000 });
   await page.waitForFunction(() => window.__selftestDone === true, null, { timeout: 60000 });
   const selftest = await page.evaluate(() => ({
@@ -287,8 +336,23 @@ try {
   }
 } catch (err) {
   console.error('[ui-smoke] 冒烟失败: ' + (err && err.message ? err.message : String(err)));
+  // 失败时转储页面关键状态，便于远程定位
+  try {
+    if (page) {
+      const dump = await page.evaluate(() => ({
+        url: location.href,
+        appReady: window.__TRIVIUM_APP_READY === true,
+        statusRowCount: document.getElementById('statusRowCount')?.textContent,
+        statusQueryTime: document.getElementById('statusQueryTime')?.textContent,
+        gridRows: document.querySelectorAll('#gridBody tr').length,
+        gridHead: document.getElementById('gridBody')?.textContent?.slice(0, 200),
+        connText: document.getElementById('connText')?.textContent,
+      }));
+      console.error('[ui-smoke] 页面状态: ' + JSON.stringify(dump, null, 2));
+    }
+  } catch (_) { /* page may be gone */ }
   failures += 1;
 } finally {
   log('6/6 清理浏览器进程 / server 进程 / 临时库');
-  cleanup(failures === 0 ? 0 : 1);
+  await cleanup(failures === 0 ? 0 : 1);
 }
