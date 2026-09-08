@@ -1996,6 +1996,14 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       // 流结束收尾：冲掉残余批次（此后 rAF 里的迟到 flush 对空批次是 no-op）
       flushBatch();
 
+      // 流完整性守卫：未收到 summary 行说明流被提前截断（网络中断/代理断连等），
+      // 记入 streamErrors 并内联提示，避免静默按部分结果落地
+      if (!summary) {
+        const detail = '流式响应提前结束（未收到 summary），结果可能不完整';
+        streamErrors.push(detail);
+        if (grid) grid.appendErrorRow(detail);
+      }
+
       // 组装与 JSON 响应同形状的结果对象（rows 全量在内存，导出/视图行为一致）
       currentResultData = Object.assign(
         { rows, row_count: rows.length },
@@ -2420,7 +2428,12 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         const firstVisible = Math.max(0, Math.floor((container.scrollTop - cTop) / rowH));
         const start = Math.max(0, firstVisible - VIRTUAL_GRID_BUFFER);
         const end = Math.min(total, firstVisible + Math.ceil(container.clientHeight / rowH) + VIRTUAL_GRID_BUFFER + 1);
-        if (start === winStart && end === winEnd) return;
+        if (start === winStart && end === winEnd) {
+          // 窗口未变但数据总量可能已增长（流式追加、视口停在原位）：
+          // bottom spacer 依赖 total，必须随 total 刷新，否则可滚动范围固化在迁移时刻
+          setSpacer(bottomSpacer, (total - end) * rowH);
+          return;
+        }
         for (const [idx, tr] of Array.from(renderedIdx)) {
           if (idx < start || idx >= end) {
             renderedIdx.delete(idx);
@@ -3911,6 +3924,11 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
             controllerRef = controller;
             // 首个 chunk：meta + 前 head-1 行一次性发出，之后暂停等待放行
             controller.enqueue(enc.encode(lines.slice(0, head).map(l => JSON.stringify(l) + '\n').join('')));
+          },
+          // 未放行时显式挂起 pull（永不 resolve 的 promise）：部分引擎（WebKit）对
+          // start-only 流会在队列耗尽后提前结束读取，导致「流未结束」语义失效
+          pull() {
+            return window.__ndjsonGate.released ? undefined : new Promise(() => {});
           }
         }), { status: 200, headers: NDJSON_CT });
       }
@@ -4428,6 +4446,14 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         await done;
         await waitFor(() => (currentResultData.rows || []).length === 600, 3000, '放行后应收到全部 600 行');
         assert(container.scrollTop === 0, '不在底部时视口位置应保持（不跟随增长）');
+        // 回归守护：非钉底追加期间 bottom spacer 必须随 total 刷新
+        // （曾因 syncWindow 窗口未变 early-return 固化在迁移时刻，滚动范围停在 200 行）
+        const spacerTr = document.querySelector('#gridBody tr.virtual-spacer');
+        const cTop = spacerTr.getBoundingClientRect().top
+          - container.getBoundingClientRect().top + container.scrollTop;
+        const expectTotal = cTop + 600 * gridVirtual.rowH();
+        assert(Math.abs(container.scrollHeight - expectTotal) <= gridVirtual.rowH(),
+          '流结束后滚动范围应覆盖全部 600 行，实际 scrollHeight=' + container.scrollHeight + ' 期望≈' + expectTotal);
       });
 
       addAssert('虚拟滑窗：流式底部跟随 — 用户钉在底部时自动跟随增长', '虚拟滑窗', async () => {
@@ -4589,12 +4615,13 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         const done = executeCurrentQuery();
         // 闸门流在 meta + 3 行后暂停：此刻流未结束，首批必须已经渲染
         await waitFor(() => document.getElementById('statusRowCount').textContent === '返回: 3 行', 3000, '暂停点前应已渲染 3 行');
-        // 失败现场诊断（PR-11 验收遗留：WebKit 冷启动偶发 1/45）：附带流状态与赋值点线索
+        // 失败现场诊断（PR-11 验收遗留：WebKit 冷启动偶发失败）：附带流状态与赋值点线索
         assert(currentResultData === before,
           '流未结束时 currentResultData 不应提前落地' +
           ' [诊断: gate released=' + window.__ndjsonGate.released +
           ', 状态栏=' + document.getElementById('statusRowCount').textContent +
-          ', 已渲染行=' + document.querySelectorAll('#gridBody tr').length +
+          ', 数据行=' + document.querySelectorAll('#gridBody tr[data-row-index]').length +
+          ', 全部tr=' + document.querySelectorAll('#gridBody tr').length +
           ', 结果行数=' + (currentResultData && currentResultData.rows ? currentResultData.rows.length : 'n/a') + ']');
         assert(document.querySelectorAll('#gridBody tr').length === 3, '首批 3 行应已进 DOM');
         // 放行余下事件：error 行 + 2 行 + summary
