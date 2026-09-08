@@ -901,6 +901,92 @@
     .score-cell { display: flex; align-items: center; gap: 8px; min-width: 150px; }
     .score-bar { flex: 1; height: 6px; border-radius: 9999px; background: var(--bg-inset); overflow: hidden; }
     .score-bar i { display: block; height: 100%; border-radius: 9999px; }
+
+    /* TQL 语法高亮叠加层（pre 与 textarea 必须完全对齐：同字体/行高/padding/white-space/tab-size/换行策略） */
+    .editor-highlight {
+      position: absolute; inset: 0; margin: 0; overflow: hidden;
+      padding: 14px 64px 12px 16px;
+      font-family: var(--font-mono); font-size: 13px; line-height: 1.6;
+      white-space: pre-wrap; overflow-wrap: break-word; word-break: normal; tab-size: 2;
+      color: var(--text-main); pointer-events: none;
+    }
+    .editor-textarea { position: relative; color: transparent; }
+    .editor-textarea::placeholder { color: var(--text-light); }
+    .editor-textarea::selection { background: rgba(99, 102, 241, 0.25); }
+    .tk-keyword { color: var(--primary); font-weight: 700; }
+    .tk-string { color: var(--warning); }
+    .tk-number { color: var(--accent); }
+    .tk-comment { color: var(--text-light); font-style: italic; }
+
+    /* 查询骨架屏（reduced-motion 下由全局规则退化为静态灰块） */
+    .sk-line {
+      height: 10px; border-radius: 4px;
+      background: linear-gradient(90deg, var(--bg-inset) 25%, var(--bg-surface-secondary) 45%, var(--bg-inset) 65%);
+      background-size: 300% 100%;
+      animation: sk-shimmer 1.2s ease infinite;
+    }
+    @keyframes sk-shimmer {
+      0% { background-position: 120% 50%; }
+      100% { background-position: -20% 50%; }
+    }
+
+    /* 结果区空态 CTA */
+    .empty-cta {
+      display: flex; flex-direction: column; align-items: center; gap: 10px;
+      padding: 34px 20px; color: var(--text-light);
+    }
+    .empty-cta svg { opacity: 0.55; }
+
+    /* 命令面板 (Ctrl/Cmd + K) */
+    .palette-overlay {
+      position: fixed; inset: 0; z-index: 300;
+      background: rgba(10, 13, 17, 0.45);
+      backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+      display: none; align-items: flex-start; justify-content: center;
+      padding: 10vh 16px 16px;
+    }
+    .palette-overlay.open { display: flex; }
+    .palette {
+      width: 560px; max-width: 92vw; max-height: 62vh;
+      display: flex; flex-direction: column;
+      background: var(--bg-surface); border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
+      overflow: hidden;
+    }
+    .palette-input {
+      flex: none; padding: 13px 16px; border: none; outline: none;
+      background: transparent; color: var(--text-main);
+      font-size: 14px; font-family: inherit;
+      border-bottom: 1px solid var(--border-color);
+    }
+    .palette-input::placeholder { color: var(--text-light); }
+    .palette-list { flex: 1; overflow-y: auto; padding: 6px; }
+    .palette-group {
+      padding: 8px 10px 4px; font-size: 10.5px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-light);
+    }
+    .palette-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 10px; border-radius: var(--radius-sm);
+      cursor: pointer; color: var(--text-main); font-size: 12.5px;
+    }
+    .palette-item:hover { background: var(--bg-surface-secondary); }
+    .palette-item.active { background: var(--primary-bg); color: var(--primary); }
+    .palette-item > span:first-child {
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .palette-item mark { background: transparent; color: var(--primary); font-weight: 700; padding: 0; }
+    .palette-item.active mark { color: var(--primary-hover); }
+    .pi-kind {
+      margin-left: auto; flex: none; font-size: 10px;
+      color: var(--text-light); font-family: var(--font-mono);
+    }
+    .palette-empty { padding: 26px; text-align: center; color: var(--text-light); }
+    .palette-footer {
+      flex: none; display: flex; gap: 14px; padding: 8px 14px;
+      border-top: 1px solid var(--border-color);
+      font-size: 10.5px; color: var(--text-light); user-select: none;
+    }
   </style>
 </head>
 <body>
@@ -1055,8 +1141,9 @@
         </div>
 
         <div class="query-layout">
-          <!-- 查询输入区 -->
+          <!-- 查询输入区（叠加层语法高亮：pre 与 textarea 文本对齐，textarea 文字透明仅露光标） -->
           <div class="editor-container">
+            <pre class="editor-highlight" id="tqlHighlight" aria-hidden="true"></pre>
             <textarea class="editor-textarea" id="tqlInput" spellcheck="false" placeholder="在此输入 TQL 语句，例如: FIND {type: &quot;person&quot;} RETURN * LIMIT 10 (按 Ctrl+Enter 运行)">FIND {type: "person"} RETURN * LIMIT 25</textarea>
             <span class="editor-chip">TQL</span>
           </div>
@@ -1081,7 +1168,13 @@
                 <table class="data-grid" id="gridTable">
                   <thead><tr id="gridHead"><th>#</th><th>数据</th></tr></thead>
                   <tbody id="gridBody">
-                    <tr><td colspan="2" style="text-align: center; padding: 40px; color: var(--text-light);">点击“运行”执行查询并呈现结果</td></tr>
+                    <tr><td colspan="2">
+                      <div class="empty-cta">
+                        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                        <div>还没有查询结果</div>
+                        <button class="btn btn-primary" id="emptyRunBtn" type="button">运行第一条查询</button>
+                      </div>
+                    </td></tr>
                   </tbody>
                 </table>
               </div>
@@ -1223,6 +1316,19 @@
     </div>
   </footer>
 
+  <!-- 命令面板 (Ctrl/Cmd + K 呼出) -->
+  <div class="palette-overlay" id="paletteOverlay">
+    <div class="palette" role="dialog" aria-modal="true" aria-label="命令面板">
+      <input class="palette-input" id="paletteInput" type="text" autocomplete="off" spellcheck="false"
+        placeholder="搜索命令、代码片段或查询历史… (↑↓ 选择，Enter 执行，Esc 关闭)"
+        aria-controls="paletteList" aria-activedescendant="" role="combobox" aria-expanded="true">
+      <div class="palette-list" id="paletteList" role="listbox" aria-label="命令列表"></div>
+      <div class="palette-footer" aria-hidden="true">
+        <span>↑↓ 选择</span><span>Enter 执行</span><span>Esc 关闭</span><span>Ctrl+K 呼出</span>
+      </div>
+    </div>
+  </div>
+
   <!-- 可视化交互教程弹窗 (Interactive Tutorial Modal) -->
   <div class="tutorial-overlay" id="tutorialOverlay">
     <div class="tutorial-modal">
@@ -1363,15 +1469,19 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       renderHistory();
       initCanvas('graphCanvas');
       setInterval(checkServerHealth, 5000);
+      setupPalette();
+      updateTqlHighlight();
       // 应用初始化完成信号：供 scripts/ui-smoke.mjs 等自动化脚本等待，
       // 避免在 DOMContentLoaded 监听器挂载前点击按钮导致竞态
       window.__TRIVIUM_APP_READY = true;
     });
 
-    // 主题切换
+    // 主题切换（localStorage 优先；无保存值时跟随系统 prefers-color-scheme）
     function setupTheme() {
-      const saved = localStorage.getItem('tdb_theme') || 'light';
-      document.documentElement.setAttribute('data-theme', saved);
+      const saved = localStorage.getItem('tdb_theme');
+      const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      const initial = saved || (prefersDark ? 'dark' : 'light');
+      document.documentElement.setAttribute('data-theme', initial);
       document.getElementById('themeToggleBtn').addEventListener('click', () => {
         const current = document.documentElement.getAttribute('data-theme');
         const next = current === 'dark' ? 'light' : 'dark';
@@ -1418,6 +1528,36 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       });
     }
 
+    function prefersReducedMotion() {
+      return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    }
+
+    // 标签面板切换过渡：120ms fade + 4px 位移（GSAP 存在且未开启 reduced-motion 时生效，否则直接切换）
+    function animateTabIn(paneId) {
+      if (!window.gsap || prefersReducedMotion()) return;
+      const pane = document.getElementById(paneId);
+      if (!pane) return;
+      gsap.fromTo(pane,
+        { opacity: 0, y: 4 },
+        { opacity: 1, y: 0, duration: 0.12, ease: 'power1.out', overwrite: true, clearProps: 'opacity,transform' }
+      );
+    }
+
+    // 查询骨架屏：结果区 7 行 shimmer 占位，成功/失败后由渲染函数整体替换
+    function showSkeleton() {
+      const head = document.getElementById('gridHead');
+      const body = document.getElementById('gridBody');
+      head.innerHTML = '<th>#</th><th>执行中…</th>';
+      body.innerHTML = '';
+      const widths = [85, 58, 72, 40, 90, 52, 64];
+      widths.forEach((w, idx) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td style="width: 40px;"><div class="sk-line" style="width: ${20 + (idx % 3) * 15}px;"></div></td>` +
+          `<td><div class="sk-line" style="width: ${w}%;"></div></td>`;
+        body.appendChild(tr);
+      });
+    }
+
     function animateResultsIn() {
       if (!window.gsap) return;
       const target = document.getElementById('viewGrid');
@@ -1452,10 +1592,25 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       document.getElementById('runQueryBtn').addEventListener('click', executeCurrentQuery);
       document.getElementById('clearEditorBtn').addEventListener('click', () => {
         document.getElementById('tqlInput').value = '';
+        updateTqlHighlight();
       });
       document.getElementById('formatTqlBtn').addEventListener('click', formatTql);
       document.getElementById('exportJsonBtn').addEventListener('click', exportJson);
       document.getElementById('refreshMetaBtn').addEventListener('click', checkServerHealth);
+
+      // 语法高亮：输入同步渲染 + 滚动同步
+      const tqlArea = document.getElementById('tqlInput');
+      tqlArea.addEventListener('input', updateTqlHighlight);
+      tqlArea.addEventListener('scroll', () => {
+        const pre = document.getElementById('tqlHighlight');
+        pre.scrollTop = tqlArea.scrollTop;
+        pre.scrollLeft = tqlArea.scrollLeft;
+      });
+
+      // 空态 CTA（事件委托：初始空态与查询空结果共用）
+      document.addEventListener('click', (e) => {
+        if (e.target && e.target.id === 'emptyRunBtn') executeCurrentQuery();
+      });
 
       // 快捷键: Ctrl+Enter 运行
       document.getElementById('tqlInput').addEventListener('keydown', (e) => {
@@ -1468,7 +1623,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       // 快捷查询片段点击
       document.querySelectorAll('[data-snippet]').forEach(el => {
         el.addEventListener('click', () => {
-          document.getElementById('tqlInput').value = el.dataset.snippet;
+          setEditorValue(el.dataset.snippet);
           if (el.dataset.snippet.startsWith('CREATE')) {
             document.getElementById('mutationCheck').checked = true;
           } else {
@@ -1483,13 +1638,13 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         el.addEventListener('click', () => {
           const action = el.dataset.action;
           if (action === 'quick-find') {
-            document.getElementById('tqlInput').value = 'FIND {type: "person"} RETURN * LIMIT 25';
+            setEditorValue('FIND {type: "person"} RETURN * LIMIT 25');
             document.getElementById('mutationCheck').checked = false;
           } else if (action === 'quick-match') {
-            document.getElementById('tqlInput').value = 'MATCH (a)-[]->(b) RETURN a, b LIMIT 25';
+            setEditorValue('MATCH (a)-[]->(b) RETURN a, b LIMIT 25');
             document.getElementById('mutationCheck').checked = false;
           } else if (action === 'quick-search') {
-            document.getElementById('tqlInput').value = 'SEARCH VECTOR [0.1, 0.2, 0.3, 0.4] TOP 5 RETURN *';
+            setEditorValue('SEARCH VECTOR [0.1, 0.2, 0.3, 0.4] TOP 5 RETURN *');
             document.getElementById('mutationCheck').checked = false;
           }
           executeCurrentQuery();
@@ -1506,6 +1661,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           tab.classList.add('active');
           const targetId = tab.dataset.tab;
           document.getElementById(targetId).classList.add('active');
+          animateTabIn(targetId);
           if (targetId === 'graphExplorePane') {
             initStandaloneGraph();
           }
@@ -1596,6 +1752,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       const runBtn = document.getElementById('runQueryBtn');
       runBtn.disabled = true;
       runBtn.innerHTML = `<span>执行中...</span>`;
+      showSkeleton();
 
       const startTime = performance.now();
 
@@ -1804,7 +1961,11 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
 
       if (!rows || rows.length === 0) {
         head.innerHTML = '<th>#</th><th>结果</th>';
-        body.innerHTML = '<tr><td colspan="2" style="text-align:center; padding:30px; color:var(--text-light);">查询成功，但没有匹配的行</td></tr>';
+        body.innerHTML = `<tr><td colspan="2"><div class="empty-cta">
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
+          <div>查询成功，但没有匹配的行</div>
+          <button class="btn" id="emptyRunBtn" type="button">重新运行查询</button>
+        </div></td></tr>`;
         animateResultsIn();
         return;
       }
@@ -2568,7 +2729,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       document.getElementById('loadWholeGraphBtn').onclick = () => {
         // TQL 边模式必须用匿名 -[]-> 语法（-[r]-> 会被解析器拒绝并返回 400）；
         // MATCH 投影无法返回边对象，改由 renderGraph 按行内节点出现顺序推断连线
-        document.getElementById('tqlInput').value = 'MATCH (a)-[]->(b) RETURN a, b LIMIT 100';
+        setEditorValue('MATCH (a)-[]->(b) RETURN a, b LIMIT 100');
         document.querySelector('[data-tab="queryPane"]').click();
         document.querySelector('[data-view="graph"]').click();
         executeCurrentQuery();
@@ -2613,7 +2774,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     }
 
     window.runTutorialCode = function(code, isMutation, targetTab = 'grid') {
-      document.getElementById('tqlInput').value = code;
+      setEditorValue(code);
       document.getElementById('mutationCheck').checked = !!isMutation;
       document.getElementById('tutorialOverlay').classList.remove('open');
 
@@ -2655,6 +2816,285 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     };
 
     // ==========================================
+    // TQL 语法高亮（叠加层方案：pre 与 textarea 文本对齐，textarea 文字透明仅露光标）
+    // 关键词主色加粗 / 字符串琥珀 / 数字青 / 注释灰
+    // ==========================================
+    const TQL_KEYWORDS = [
+      'EXPLAIN', 'ANALYZE', 'FIND', 'MATCH', 'SEARCH', 'VECTOR', 'WHERE', 'RETURN',
+      'WITH', 'LIMIT', 'CREATE', 'LINK', 'DELETE', 'AND', 'OR', 'TOP',
+      'ORDER', 'BY', 'ASC', 'DESC', 'SET'
+    ];
+
+    function highlightTql(text) {
+      const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const re = new RegExp(
+        '(\\/\\/[^\\n]*|#[^\\n]*)' +            // 1: 注释
+        '|("(?:[^"\\\\]|\\\\.)*")' +            // 2: 字符串（支持 \" 转义）
+        '|(-?\\d+(?:\\.\\d+)?)' +               // 3: 数字
+        '|\\b(' + TQL_KEYWORDS.join('|') + ')\\b', // 4: 关键词
+        'gi'
+      );
+      let out = '';
+      let last = 0;
+      let m;
+      while ((m = re.exec(text)) !== null) {
+        out += esc(text.slice(last, m.index));
+        if (m[1] !== undefined) out += `<span class="tk-comment">${esc(m[1])}</span>`;
+        else if (m[2] !== undefined) out += `<span class="tk-string">${esc(m[2])}</span>`;
+        else if (m[3] !== undefined) out += `<span class="tk-number">${esc(m[3])}</span>`;
+        else out += `<span class="tk-keyword">${esc(m[4])}</span>`;
+        last = m.index + m[0].length;
+        if (m[0].length === 0) re.lastIndex += 1; // 空匹配保护
+      }
+      out += esc(text.slice(last));
+      return out;
+    }
+
+    function updateTqlHighlight() {
+      const area = document.getElementById('tqlInput');
+      const pre = document.getElementById('tqlHighlight');
+      if (!area || !pre) return;
+      // 尾部补换行：保证 pre 与 textarea 的滚动高度一致（textarea 末行下方有缓冲）
+      pre.innerHTML = highlightTql(area.value) + '\n';
+      pre.scrollTop = area.scrollTop;
+      pre.scrollLeft = area.scrollLeft;
+    }
+
+    // 统一编辑器赋值入口：程序化 .value 赋值不触发 input 事件，必须手动同步高亮
+    function setEditorValue(value) {
+      document.getElementById('tqlInput').value = value;
+      updateTqlHighlight();
+    }
+
+    // ==========================================
+    // 命令面板 (Ctrl/Cmd + K)
+    // 数据源：侧栏代码片段(data-snippet) / 快速动作(data-action) / 查询历史 /
+    //        主题切换 / 美化 TQL / 清空编辑器 / 导出 JSON / 打开教程 / 切换标签
+    // 交互：子序列模糊匹配（命中字符高亮）、↑↓ 选择 + Enter 执行、鼠标点击执行、
+    //        空查询按分组显示全部、无结果显示「无匹配命令」、focus trap + Esc 关闭、
+    //        reduced-motion / 无 GSAP 时无动画
+    // ==========================================
+    const paletteState = { items: [], filtered: [], active: -1 };
+
+    function buildPaletteItems() {
+      const items = [];
+      document.querySelectorAll('[data-snippet]').forEach((el) => {
+        const nameEl = el.querySelector('span');
+        items.push({
+          group: '代码片段',
+          label: (nameEl ? nameEl.textContent + ' — ' : '') + el.dataset.snippet,
+          keywords: el.dataset.snippet,
+          run: () => el.click()
+        });
+      });
+      document.querySelectorAll('[data-action]').forEach((el) => {
+        const nameEl = el.querySelector('span');
+        items.push({
+          group: '快速动作',
+          label: nameEl ? nameEl.textContent : el.dataset.action,
+          keywords: el.dataset.action,
+          run: () => el.click()
+        });
+      });
+      queryHistory.slice(0, 10).forEach((q) => {
+        items.push({
+          group: '查询历史',
+          label: q,
+          run: () => {
+            setEditorValue(q);
+            executeCurrentQuery();
+          }
+        });
+      });
+      items.push(
+        { group: '操作', label: '切换主题 (深色/浅色)', run: () => document.getElementById('themeToggleBtn').click() },
+        { group: '操作', label: '美化 TQL', run: () => formatTql() },
+        { group: '操作', label: '清空编辑器', run: () => document.getElementById('clearEditorBtn').click() },
+        { group: '操作', label: '导出 JSON 结果', run: () => exportJson() },
+        { group: '操作', label: '打开可视化教程', run: () => document.getElementById('openTutorialBtn').click() },
+        { group: '导航', label: '切换到 TQL 查询控制台', run: () => document.querySelector('[data-tab="queryPane"]').click() },
+        { group: '导航', label: '切换到独立图拓扑探索', run: () => document.querySelector('[data-tab="graphExplorePane"]').click() },
+        { group: '导航', label: '切换到向量检索 (Vector Lab)', run: () => document.querySelector('[data-tab="vectorLabPane"]').click() }
+      );
+      return items;
+    }
+
+    // 子序列模糊匹配：按顺序消费 query 字符，返回命中下标数组（用于高亮），不匹配返回 null
+    function subsequenceMatch(query, text) {
+      const q = query.toLowerCase();
+      const t = text.toLowerCase();
+      const idxs = [];
+      let i = 0;
+      for (let j = 0; j < t.length && i < q.length; j++) {
+        if (t[j] === q[i]) { idxs.push(j); i += 1; }
+      }
+      return i === q.length ? idxs : null;
+    }
+
+    function paletteEntryText(entry) {
+      // 空查询下高亮为 null；搜索时优先标签命中，其次 keywords 命中（无高亮）
+      return entry.hit || null;
+    }
+
+    function renderPaletteList() {
+      const list = document.getElementById('paletteList');
+      const query = document.getElementById('paletteInput').value.trim();
+      list.innerHTML = '';
+      paletteState.filtered = [];
+
+      paletteState.items.forEach((item) => {
+        if (query) {
+          let hit = subsequenceMatch(query, item.label);
+          if (!hit) {
+            // 标签未命中时回退 keywords 命中（无 keywords 或 keywords 也未命中则排除）
+            if (!item.keywords || !subsequenceMatch(query, item.keywords)) return;
+          }
+          paletteState.filtered.push({ item, hit });
+        } else {
+          paletteState.filtered.push({ item, hit: null });
+        }
+      });
+
+      if (!paletteState.filtered.length) {
+        const empty = document.createElement('div');
+        empty.className = 'palette-empty';
+        empty.textContent = '无匹配命令';
+        list.appendChild(empty);
+      } else {
+        let lastGroup = null;
+        paletteState.filtered.forEach((entry, idx) => {
+          if (entry.item.group !== lastGroup) {
+            const g = document.createElement('div');
+            g.className = 'palette-group';
+            g.textContent = entry.item.group;
+            list.appendChild(g);
+            lastGroup = entry.item.group;
+          }
+          list.appendChild(buildPaletteItemEl(entry, idx));
+        });
+      }
+
+      paletteState.active = paletteState.filtered.length ? 0 : -1;
+      applyActivePaletteItem();
+    }
+
+    function buildPaletteItemEl(entry, idx) {
+      const el = document.createElement('div');
+      el.className = 'palette-item';
+      el.id = `palette-opt-${idx}`;
+      el.setAttribute('role', 'option');
+      el.dataset.index = String(idx);
+      const labelSpan = document.createElement('span');
+      const hit = paletteEntryText(entry);
+      if (hit) {
+        let last = 0;
+        hit.forEach((i) => {
+          if (i > last) labelSpan.appendChild(document.createTextNode(entry.item.label.slice(last, i)));
+          const mark = document.createElement('mark');
+          mark.textContent = entry.item.label[i];
+          labelSpan.appendChild(mark);
+          last = i + 1;
+        });
+        labelSpan.appendChild(document.createTextNode(entry.item.label.slice(last)));
+      } else {
+        labelSpan.textContent = entry.item.label;
+      }
+      el.appendChild(labelSpan);
+      const kind = document.createElement('span');
+      kind.className = 'pi-kind';
+      kind.textContent = entry.item.group;
+      el.appendChild(kind);
+      el.addEventListener('click', () => executePaletteItem(paletteState.filtered[idx]));
+      el.addEventListener('mousemove', () => applyActivePaletteItem(idx));
+      return el;
+    }
+
+    function applyActivePaletteItem() {
+      const list = document.getElementById('paletteList');
+      const input = document.getElementById('paletteInput');
+      const els = list.querySelectorAll('.palette-item');
+      els.forEach((el, i) => {
+        const active = i === paletteState.active;
+        el.classList.toggle('active', active);
+        el.setAttribute('aria-selected', String(active));
+        if (active) {
+          input.setAttribute('aria-activedescendant', el.id);
+          el.scrollIntoView({ block: 'nearest' });
+        }
+      });
+      if (paletteState.active === -1) input.removeAttribute('aria-activedescendant');
+    }
+
+    function movePaletteActive(delta) {
+      if (!paletteState.filtered.length) return;
+      const next = (paletteState.active + delta + paletteState.filtered.length) % paletteState.filtered.length;
+      paletteState.active = next;
+      applyActivePaletteItem();
+    }
+
+    function executePaletteItem(entry) {
+      closePalette();
+      if (entry && entry.item && typeof entry.item.run === 'function') entry.item.run();
+    }
+
+    function openPalette() {
+      const overlay = document.getElementById('paletteOverlay');
+      const input = document.getElementById('paletteInput');
+      overlay.classList.add('open');
+      input.value = '';
+      paletteState.items = buildPaletteItems(); // 打开时重建，保证查询历史最新
+      renderPaletteList();
+      input.focus();
+      if (window.gsap && !prefersReducedMotion()) {
+        gsap.fromTo('.palette',
+          { opacity: 0, y: -8 },
+          { opacity: 1, y: 0, duration: 0.16, ease: 'power2.out', overwrite: true, clearProps: 'opacity,transform' }
+        );
+      }
+    }
+
+    function closePalette() {
+      const overlay = document.getElementById('paletteOverlay');
+      overlay.classList.remove('open');
+      document.getElementById('paletteInput').value = '';
+    }
+
+    function setupPalette() {
+      const overlay = document.getElementById('paletteOverlay');
+      const input = document.getElementById('paletteInput');
+
+      // 全局快捷键：Ctrl/Cmd + K 呼出/关闭，Esc 关闭
+      document.addEventListener('keydown', (e) => {
+        const isOpen = overlay.classList.contains('open');
+        if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+          e.preventDefault();
+          if (isOpen) closePalette(); else openPalette();
+        } else if (isOpen && e.key === 'Escape') {
+          e.preventDefault();
+          closePalette();
+        }
+      });
+
+      // 输入过滤 + 键盘导航（focus trap：面板内仅 input 可聚焦，Tab 拦截）
+      input.addEventListener('input', renderPaletteList);
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown') { e.preventDefault(); movePaletteActive(1); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); movePaletteActive(-1); }
+        else if (e.key === 'Enter') {
+          e.preventDefault();
+          if (paletteState.active >= 0) executePaletteItem(paletteState.filtered[paletteState.active]);
+        } else if (e.key === 'Tab') {
+          e.preventDefault();
+        }
+      });
+
+      // 点击遮罩关闭
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) closePalette();
+      });
+    }
+
+    // ==========================================
     // 实用工具 (格式化 / 导出 / 历史)
     // ==========================================
     function formatTql() {
@@ -2665,7 +3105,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         const reg = new RegExp(`\\b${kw}\\b`, 'gi');
         text = text.replace(reg, kw);
       });
-      area.value = text;
+      setEditorValue(text);
     }
 
     function exportJson() {
@@ -2701,7 +3141,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         item.style.padding = '5px 14px';
         item.innerHTML = `<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${q}</span>`;
         item.onclick = () => {
-          document.getElementById('tqlInput').value = q;
+          setEditorValue(q);
           executeCurrentQuery();
         };
         container.appendChild(item);
@@ -3052,6 +3492,71 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         assert(document.getElementById('viewGraph').style.display === 'block', '应切换到图视图');
         assert((currentResultData.rows || []).length === 2, '应返回 2 行');
         await waitFor(() => graphNodes.length === 3, 3000, '图节点应渲染');
+      });
+
+      // 语法高亮
+      addAssert('语法高亮：叠加层与 textarea 完全对齐（中文/换行/长行）', '渲染管线', async () => {
+        const area = document.getElementById('tqlInput');
+        const pre = document.getElementById('tqlHighlight');
+        area.value = 'MATCH (a)-[]->(b)\nWHERE a.name == "很长的中文内容测试对齐情况一二三四五六七八九十十一十二十三十四" RETURN a, b LIMIT 100 // 注释测试';
+        updateTqlHighlight();
+        assert(pre.scrollHeight === area.scrollHeight && pre.scrollWidth === area.scrollWidth,
+          `高亮层未对齐: pre ${pre.scrollWidth}x${pre.scrollHeight} vs area ${area.scrollWidth}x${area.scrollHeight}`);
+        assert(pre.querySelector('.tk-keyword'), '关键词应高亮');
+        assert(pre.querySelector('.tk-string'), '字符串应高亮');
+        assert(pre.querySelector('.tk-number'), '数字应高亮');
+        assert(pre.querySelector('.tk-comment'), '注释应高亮');
+        setEditorValue('FIND {type: "person"} RETURN * LIMIT 25');
+      });
+
+      // 命令面板
+      addAssert('命令面板：Ctrl+K 呼出、Esc 关闭', '命令面板', async () => {
+        const overlay = document.getElementById('paletteOverlay');
+        assert(!overlay.classList.contains('open'), '初始应关闭');
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));
+        assert(overlay.classList.contains('open'), 'Ctrl+K 应呼出');
+        assert(document.activeElement === document.getElementById('paletteInput'), '呼出后搜索框应聚焦');
+        document.getElementById('paletteInput').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        assert(!overlay.classList.contains('open'), 'Esc 应关闭');
+      });
+
+      addAssert('命令面板：子序列搜索过滤 + 命中高亮', '命令面板', async () => {
+        document.getElementById('paletteOverlay').classList.remove('open'); // 确保从关闭态开始
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));
+        const input = document.getElementById('paletteInput');
+        input.value = '主题';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        const items = document.querySelectorAll('#paletteList .palette-item');
+        assert(items.length === 1, `搜索「主题」应只剩主题命令，实际 ${items.length}`);
+        assert(items[0].textContent.includes('切换主题'), '应为主题命令');
+        assert(items[0].querySelector('mark'), '命中字符应高亮');
+        assert(items[0].getAttribute('role') === 'option', '列表项应为 option 角色');
+        document.getElementById('paletteInput').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      });
+
+      addAssert('命令面板：Enter 键盘执行第一条（代码片段填充并运行）', '命令面板', async () => {
+        document.getElementById('paletteOverlay').classList.remove('open'); // 确保从关闭态开始
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));
+        const input = document.getElementById('paletteInput');
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        assert(!document.getElementById('paletteOverlay').classList.contains('open'), '执行后面板应关闭');
+        assert(document.getElementById('tqlInput').value === 'FIND {type: "person"} RETURN * LIMIT 20',
+          '第一条片段应填充编辑器，实际: ' + document.getElementById('tqlInput').value);
+        await waitFor(() => document.getElementById('statusRowCount').textContent.indexOf('返回:') === 0, 3000, '片段应已执行');
+      });
+
+      addAssert('命令面板：主题切换命令生效', '命令面板', async () => {
+        document.getElementById('paletteOverlay').classList.remove('open'); // 确保从关闭态开始
+        document.documentElement.setAttribute('data-theme', 'light');
+        localStorage.setItem('tdb_theme', 'light');
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));
+        const input = document.getElementById('paletteInput');
+        input.value = '主题';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        assert(document.documentElement.getAttribute('data-theme') === 'dark', '主题命令应切到 dark');
+        assert(localStorage.getItem('tdb_theme') === 'dark', '主题命令应持久化');
+        document.getElementById('themeToggleBtn').click(); // 还原 light
       });
 
       // 命令面板（预留扩展点，阶段 2 补齐真实断言）
