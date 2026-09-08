@@ -3138,6 +3138,14 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     // 力导向布局引擎（斥力 + 弹簧 + 向心力，冷却收敛后自动停止）
     // ==========================================
     function startSimulation(alpha) {
+      // prefers-reduced-motion：跳过布局动画，同步收敛到静态布局后直接绘制
+      //（引擎坐标不变，WebGL 后端同样受益；物理锁定的静态布局本就不进动画）
+      if (prefersReducedMotion() && graphNodes.length > 0 && !physicsLockedByScale) {
+        for (let i = 0; i < 60; i++) tickPhysics();
+        simulationAlpha = 0.005; // 视为已收敛
+        redrawGraph();
+        return;
+      }
       simulationAlpha = Math.max(simulationAlpha, alpha);
       if (simulationRafId === null) {
         simulationRafId = requestAnimationFrame(simulationStep);
@@ -3531,6 +3539,22 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     function destroySigmaInstance(viewId) {
       const inst = sigmaInstances[viewId];
       if (!inst) return;
+      // 主动释放 WebGL context：浏览器对活跃 context 数量有上限，kill() 不即时回收，
+      // 频繁切换后端/主题会累积 "too many active WebGL contexts" 警告
+      try {
+        const container = inst.sigma.getContainer
+          ? inst.sigma.getContainer()
+          : document.getElementById(viewId === 'query' ? 'graphSigmaContainer' : 'standaloneSigmaContainer');
+        if (container) {
+          container.querySelectorAll('canvas').forEach(cv => {
+            ['webgl2', 'webgl', 'experimental-webgl'].forEach(type => {
+              const gl = cv.getContext(type);
+              const ext = gl && gl.getExtension('WEBGL_lose_context');
+              if (ext) ext.loseContext();
+            });
+          });
+        }
+      } catch (_) { /* 尽力释放，失败不阻断销毁 */ }
       try { inst.sigma.kill(); } catch (_) { /* 已销毁 */ }
       sigmaInstances[viewId] = null;
     }
@@ -3571,7 +3595,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       const buttons = ['toggleWebGLBtn', 'toggleWebGLBtnStandalone']
         .map(id => document.getElementById(id)).filter(Boolean);
       if (mode === 'sigma') {
-        buttons.forEach(b => { b.disabled = true; });
+        buttons.forEach(b => { b.disabled = true; b.textContent = '加载中…'; });
         let libs;
         try {
           libs = await loadSigmaLibs();
@@ -5109,6 +5133,24 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         loadScriptTag = origLoadScriptTag; // 还原 loader
         loadCommunitiesModule = origLoadCommunitiesModule;
         renderGrid(FIND_ROWS); // 还原网格状态
+      });
+
+      addAssert('动效降级：prefers-reduced-motion 下力导向同步收敛不进 rAF 循环', 'WebGL 图渲染', async () => {
+        const origPrefersReducedMotion = prefersReducedMotion;
+        prefersReducedMotion = () => true;
+        try {
+          // 停掉前序测试可能遗留的 rAF 模拟循环，保证断言只反映 reduced-motion 路径
+          simulationRunning = false;
+          if (simulationRafId !== null) { cancelAnimationFrame(simulationRafId); simulationRafId = null; }
+          renderGraph(MATCH_ROWS);
+          await waitFor(() => graphNodes.length === 3, 3000, '图数据应就绪');
+          // 布局应同步收敛：未调度 rAF 动画循环，且节点已离开初始黄金角螺旋位置
+          assert(simulationRafId === null, 'reduced-motion 下不应进入 rAF 模拟循环');
+          assert(graphNodes.some(n => Math.abs(n.x) > 1 || Math.abs(n.y) > 1), '节点应已被物理收敛移动');
+        } finally {
+          prefersReducedMotion = origPrefersReducedMotion;
+        }
+        renderGraph(MATCH_ROWS); // 还原常规状态
       });
 
       // 语法高亮
