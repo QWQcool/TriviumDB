@@ -2047,6 +2047,9 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       }
     }
 
+    let __activeQueryCount = 0; // 未决查询计数：selftest runner 据此设置「排空屏障」，
+                                // 防止 fire-and-forget 查询的迟到渲染/落地跨测试边界污染断言
+
     async function executeCurrentQuery() {
       const query = document.getElementById('tqlInput').value.trim();
       if (!query) return;
@@ -2055,6 +2058,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       const isProfile = document.getElementById('profileCheck').checked;
 
       const runBtn = document.getElementById('runQueryBtn');
+      __activeQueryCount++;
       runBtn.disabled = true;
       runBtn.innerHTML = `<span>执行中...</span>`;
       showSkeleton();
@@ -2097,6 +2101,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       } catch (err) {
         renderError({ title: '网络请求失败', detail: err.message });
       } finally {
+        __activeQueryCount--;
         runBtn.disabled = false;
         runBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>运行 (Run)</span>`;
       }
@@ -4580,7 +4585,11 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         assert(!document.getElementById('paletteOverlay').classList.contains('open'), '执行后面板应关闭');
         assert(document.getElementById('tqlInput').value === 'FIND {type: "person"} RETURN * LIMIT 20',
           '第一条片段应填充编辑器，实际: ' + document.getElementById('tqlInput').value);
-        await waitFor(() => document.getElementById('statusRowCount').textContent.indexOf('返回:') === 0, 3000, '片段应已执行');
+        // 精确等待该片段的流式查询完整落地（此前 indexOf('返回:')===0 会被前序测试
+        // 遗留的 '返回: 600 行' 立即满足，fire-and-forget 查询跨界污染后续断言）
+        await waitFor(() => document.getElementById('statusRowCount').textContent === '返回: 3 行'
+          && currentResultData && currentResultData.rows && currentResultData.rows.length === 3,
+        3000, '片段应已执行且流式结果完整落地');
       });
 
       addAssert('命令面板：主题切换命令生效', '命令面板', async () => {
@@ -4703,6 +4712,10 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           item.status = 'running';
           renderBar();
           try {
+            // 未决流排空屏障：前序断言 fire-and-forget 的查询（如命令面板片段执行）
+            // 其迟到 flushBatch/落地可能跨界污染后续断言（webkit rAF 节流放大此窗口），
+            // 每条断言开始前先等 __activeQueryCount 归零
+            await waitFor(() => __activeQueryCount === 0, 10000, '前序未决流排空屏障');
             await item.fn();
             item.status = 'pass';
           } catch (err) {
