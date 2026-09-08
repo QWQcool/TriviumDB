@@ -227,13 +227,20 @@ try {
 } catch (_) { /* .tmp 可能尚不存在 */ }
 serverProc = spawn(EXE, ['--dim', '4', '--database', DB_PATH, '--listen', `127.0.0.1:${PORT}`], {
   cwd: ROOT,
+  // stdout/stderr 均需持续消费：管道缓冲区 (64KB) 一旦写满，server 会阻塞在日志写入上
+  // （规模注入会产生大量逐请求日志，不消费就会把整个 server 卡死）
   stdio: ['ignore', 'pipe', 'pipe'],
+});
+let serverStdout = '';
+serverProc.stdout.on('data', (d) => {
+  serverStdout += d.toString();
+  if (serverStdout.length > 200000) serverStdout = serverStdout.slice(-100000);
 });
 let serverStderr = '';
 serverProc.stderr.on('data', (d) => { serverStderr += d.toString(); });
 serverProc.on('exit', (code) => {
   if (!cleaned && code !== 0 && code !== null) {
-    console.error(`[ui-smoke] server 提前退出 (code=${code})\n${serverStderr.slice(-2000)}`);
+    console.error(`[ui-smoke] server 提前退出 (code=${code})\n${serverStderr.slice(-2000)}\n${serverStdout.slice(-2000)}`);
     cleanup(1);
   }
 });
@@ -315,11 +322,40 @@ try {
   }
   log('  ✓ 三个主标签切换');
 
+  // 冒烟 4：图规模护栏 —— 注入 700 节点，用 LIMIT 500 的 MATCH 出图验证不冻结：
+  // >300 节点应自动暂停力学模拟（O(n²) tick 护栏）并显示提示条
+  log('  注入 700 个规模节点 (350 次链式 CREATE)');
+  for (let i = 0; i < 350; i++) {
+    const res = await seed(`CREATE ({name: "ScaleA${i}", type: "person"})-[:KNOWS]->({name: "ScaleB${i}", type: "person"})`);
+    if (res.status !== 200) throw new Error(`规模种子写入失败 (i=${i}): ` + res.text);
+  }
+  await page.evaluate(() => {
+    setEditorValue('MATCH (a)-[]->(b) RETURN a, b LIMIT 500');
+  });
+  await page.click('#runQueryBtn');
+  // 351 行 = 1 条种子 KNOWS 边 + 350 条注入边（MATCH 按边返回行）
+  await page.waitForFunction(
+    () => document.getElementById('statusRowCount').textContent.includes('返回: 351 行'),
+    null, { timeout: 15000 }
+  );
+  const guard = await page.evaluate(() => ({
+    gridRows: document.querySelectorAll('#gridBody tr').length,
+    physicsBtn: document.getElementById('togglePhysicsBtn').textContent,
+    noticeHidden: document.getElementById('graphScaleNotice').hidden,
+    noticeText: document.getElementById('graphScaleNotice').textContent,
+  }));
+  if (guard.gridRows !== 351) throw new Error('LIMIT 500 MATCH 应返回 351 行，实际 ' + guard.gridRows);
+  if (guard.physicsBtn !== '恢复力学') throw new Error('700 节点应自动暂停力学（按钮应为「恢复力学」），实际: ' + guard.physicsBtn);
+  if (guard.noticeHidden) throw new Error('图规模提示条应显示');
+  if (!guard.noticeText.includes('300')) throw new Error('图规模提示条应说明 300 阈值: ' + guard.noticeText);
+  log('  ✓ 图规模护栏生效 (700 节点 → 力学暂停 + 提示条，页面未冻结)');
+
   log(`5/6 打开 ${BASE}/ui?selftest=1 断言自检套件`);
   await page.goto(`${BASE}/ui?selftest=1`, { waitUntil: 'domcontentloaded', timeout: 20000 });
   await page.waitForFunction(() => window.__TRIVIUM_APP_READY === true, null, { timeout: 10000 });
   await page.waitForSelector('#selftestBar', { timeout: 15000 });
-  await page.waitForFunction(() => window.__selftestDone === true, null, { timeout: 60000 });
+  // 边界加固断言含万行网格分块渲染与万元素 JSON 树懒渲染，整体预算放宽到 120s
+  await page.waitForFunction(() => window.__selftestDone === true, null, { timeout: 120000 });
   const selftest = await page.evaluate(() => ({
     failed: window.__selftestFailedCount,
     results: window.__selftestResults,

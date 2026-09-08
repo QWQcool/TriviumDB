@@ -706,6 +706,33 @@
     }
     .toast.show { opacity: 1; transform: translateY(0); }
 
+    /* 规模护栏提示条（图拓扑规模 / 查询行数上限共用；颜色全部走 CSS 变量，深浅主题自适应） */
+    .result-notice {
+      display: flex; align-items: center; gap: 10px;
+      margin: 0 0 8px; padding: 6px 8px 6px 12px;
+      border-radius: 8px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      color: var(--text-main); font-size: 12.5px;
+      box-shadow: var(--shadow-md);
+      max-width: 100%;
+    }
+    .result-notice--floating {
+      position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+      margin: 0; z-index: 20; max-width: 90%;
+    }
+    .result-notice-close {
+      flex: none; margin-left: auto; padding: 1px 5px;
+      border: none; background: none; cursor: pointer;
+      color: var(--text-light); font-size: 13px; line-height: 1.2;
+      border-radius: 4px;
+    }
+    .result-notice-close:hover { color: var(--text-main); }
+    .result-notice-close:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+    @media (prefers-reduced-motion: reduce) {
+      .result-notice { transition: none; }
+    }
+
     /* 底部状态栏 */
     footer.app-status-bar {
       height: var(--status-height);
@@ -884,6 +911,10 @@
     .jt-brace { color: var(--text-muted); }
     .jt-children { margin-left: 8px; padding-left: 12px; border-left: 1px solid var(--border-color); }
     .jt-children.collapsed { display: none; }
+    .jt-deep-marker {
+      flex: none; align-self: center; margin-left: 6px;
+      color: var(--text-light); font-style: italic; font-size: 10.5px;
+    }
 
     /* 向量热力条（节点抽屉 Vector 平面 / 向量实验台预览共用） */
     .heat-summary {
@@ -1182,6 +1213,11 @@
               <!-- 图拓扑画布视图 -->
               <div id="viewGraph" style="display: none; width: 100%; height: 100%; position: relative;">
                 <canvas id="graphCanvas"></canvas>
+                <!-- 规模护栏提示条：节点数超过阈值时显示（可关闭，role=status） -->
+                <div class="result-notice result-notice--floating" id="graphScaleNotice" role="status" hidden>
+                  <span></span>
+                  <button class="result-notice-close" type="button" aria-label="关闭提示">✕</button>
+                </div>
                 <div class="graph-controls">
                   <button class="btn" id="centerGraphBtn" title="重置居中">居中视角</button>
                   <button class="btn" id="togglePhysicsBtn" title="固定物理模拟">冻结力学</button>
@@ -1360,6 +1396,11 @@
     let currentResultData = null;
 
     // 力导向图模拟器状态
+    // 规模护栏：力导向为 O(n²) tick 循环，节点规模超阈值时逐级降级防主线程冻结
+    const GRAPH_PHYSICS_MAX_NODES = 300;   // 超过后自动关闭物理模拟（静态黄金角螺旋布局）
+    const GRAPH_RENDER_MAX_NODES = 1500;   // 超过后只渲染前 N 个节点（按返回顺序）
+    let physicsLockedByScale = false;      // 当前物理模拟是否因规模护栏被禁用（区别于用户手动冻结）
+    let graphTotalNodeCount = 0;           // 本次结果中的真实节点总数（截断渲染时用于提示文案）
     let graphNodes = [];
     let graphEdges = [];
     let nodeMap = new Map();
@@ -1612,6 +1653,14 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         if (e.target && e.target.id === 'emptyRunBtn') executeCurrentQuery();
       });
 
+      // 图规模提示条关闭按钮（静态模板元素，无法在创建时绑定）
+      const graphNotice = document.getElementById('graphScaleNotice');
+      if (graphNotice) {
+        graphNotice.querySelector('.result-notice-close').addEventListener('click', () => {
+          graphNotice.hidden = true;
+        });
+      }
+
       // 快捷键: Ctrl+Enter 运行
       document.getElementById('tqlInput').addEventListener('keydown', (e) => {
         if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
@@ -1809,8 +1858,23 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     // 可折叠 JSON 树渲染（vanilla，无依赖）
     // 类型着色：字符串绿 / 数字青 / 布尔橙 / null 灰 / 键 muted；
     // 默认展开前 2 层，更深层折叠；对象/数组带计数徽标
+    // 深嵌套防护：子节点懒渲染（首次展开才构建 DOM），深度超阈值显示省略标记
     // ==========================================
-    const JSON_TREE_MAX_DEPTH = 2;
+    const JSON_TREE_MAX_DEPTH = 2;       // 默认展开深度
+    const JSON_TREE_EAGER_MAX = 200;     // 默认展开层的子节点直建上限（超出改懒渲染）
+    const JSON_TREE_MARKER_DEPTH = 20;   // 超过该深度的层级显示「… 更深 N 层」省略标记
+
+    // 有界子树深度测量：最多下探 cap 层、每层最多采样 50 个子节点（避免万行数组全量遍历）
+    function measureJsonDepth(value, cap) {
+      if (cap <= 0 || value === null || typeof value !== 'object') return 0;
+      const entries = Array.isArray(value) ? value.slice(0, 50) : Object.values(value).slice(0, 50);
+      let max = 0;
+      for (const v of entries) {
+        const d = measureJsonDepth(v, cap - 1);
+        if (d > max) max = d;
+      }
+      return max + 1;
+    }
 
     function jtSpan(cls, text) {
       const span = document.createElement('span');
@@ -1867,17 +1931,32 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       if (key !== null) line.appendChild(jtSpan('jt-key', keyPrefix));
       line.appendChild(jtSpan('jt-brace', isArray ? '[' : '{'));
       line.appendChild(jtSpan('jt-badge', `${entries.length} ${isArray ? 'items' : 'keys'}`));
+      // 深嵌套省略标记：超过阈值深度的层级提示还有多少层（点击折叠按钮逐层展开）
+      if (depth >= JSON_TREE_MARKER_DEPTH) {
+        line.appendChild(jtSpan('jt-deep-marker', `… 更深 ${measureJsonDepth(value, 25)} 层`));
+      }
 
+      // 子层懒渲染：容器与闭合行先建，子节点首次展开时才构建（防深嵌套/大数组一次性全量建 DOM）
       const children = document.createElement('div');
       children.className = 'jt-children';
-      entries.forEach(([k, v], idx) => {
-        children.appendChild(buildJsonTree(k, v, depth + 1, idx < entries.length - 1));
-      });
       const closeLine = document.createElement('div');
       closeLine.className = 'jt-line';
       closeLine.appendChild(jtSpan('jt-brace', (isArray ? ']' : '}') + (needComma ? ',' : '')));
       children.appendChild(closeLine);
       wrap.appendChild(children);
+
+      let built = false;
+      const ensureChildren = () => {
+        if (built) return;
+        built = true;
+        entries.forEach(([k, v], idx) => {
+          children.insertBefore(buildJsonTree(k, v, depth + 1, idx < entries.length - 1), closeLine);
+        });
+      };
+
+      // 默认展开条件：深度在前 2 层内且子节点数不超过直建上限，否则初始折叠 + 懒渲染
+      const eager = depth < JSON_TREE_MAX_DEPTH && entries.length <= JSON_TREE_EAGER_MAX;
+      if (eager) ensureChildren();
 
       const setCollapsed = (collapsed) => {
         toggle.setAttribute('aria-expanded', String(!collapsed));
@@ -1885,9 +1964,11 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         children.classList.toggle('collapsed', collapsed);
       };
       toggle.addEventListener('click', () => {
-        setCollapsed(toggle.getAttribute('aria-expanded') === 'true');
+        const willCollapse = toggle.getAttribute('aria-expanded') === 'true';
+        setCollapsed(willCollapse);
+        if (!willCollapse) ensureChildren();
       });
-      setCollapsed(depth >= JSON_TREE_MAX_DEPTH);
+      setCollapsed(!eager);
       return wrap;
     }
 
@@ -1953,11 +2034,37 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     // ==========================================
     // 视图渲染引擎
     // ==========================================
+    // 网格大数据防护：>GRID_CHUNK_SIZE 行走 rAF 分块构建（每帧让出主线程，渲染期间页面可响应）
+    const GRID_CHUNK_SIZE = 1000;
+    // 服务端 max_query_rows=10000：结果达到该行数说明可能被截断，需提示
+    const SERVER_MAX_QUERY_ROWS = 10000;
+
+    // 行数上限提示条（结果区顶部，可关闭；隐藏/显示随每次查询结果行数刷新）
+    function showRowLimitNotice(visible) {
+      let notice = document.getElementById('rowLimitNotice');
+      if (!notice) {
+        notice = document.createElement('div');
+        notice.id = 'rowLimitNotice';
+        notice.className = 'result-notice';
+        notice.setAttribute('role', 'status');
+        notice.innerHTML = '<span>结果达到服务端行数上限 (10000)，可能被截断，建议增加 LIMIT 或使用属性投影</span>' +
+          '<button class="result-notice-close" type="button" aria-label="关闭提示">✕</button>';
+        const view = document.getElementById('viewGrid');
+        view.insertBefore(notice, view.firstChild);
+        notice.querySelector('.result-notice-close').addEventListener('click', () => {
+          notice.hidden = true;
+        });
+      }
+      notice.hidden = !visible;
+    }
+
     function renderGrid(rows) {
       const head = document.getElementById('gridHead');
       const body = document.getElementById('gridBody');
       head.innerHTML = '';
       body.innerHTML = '';
+      // 行数上限提示只在达到阈值时显示，其余结果（含空结果）一律隐藏
+      showRowLimitNotice(!!rows && rows.length >= SERVER_MAX_QUERY_ROWS);
 
       if (!rows || rows.length === 0) {
         head.innerHTML = '<th>#</th><th>结果</th>';
@@ -1981,7 +2088,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         head.appendChild(th);
       });
 
-      rows.forEach((row, idx) => {
+      // 单行构建（textContent 渲染路径保持不变：XSS 安全，超长字符串走 CSS ellipsis）
+      const buildRow = (row, idx) => {
         const tr = document.createElement('tr');
         // 节点行可点击：打开 360° 详情抽屉（hover 提示 + 键盘可达）
         const node = findNodeInRow(row);
@@ -2022,9 +2130,34 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           }
           tr.appendChild(td);
         });
-        body.appendChild(tr);
-      });
-      animateResultsIn();
+        return tr;
+      };
+
+      if (rows.length <= GRID_CHUNK_SIZE) {
+        // 小结果集：同步一次性构建（与历史行为一致，自检断言可直接读取 DOM）
+        const frag = document.createDocumentFragment();
+        rows.forEach((row, idx) => frag.appendChild(buildRow(row, idx)));
+        body.appendChild(frag);
+        animateResultsIn();
+        return;
+      }
+
+      // 大结果集：DocumentFragment 分块构建，每帧一批，rAF 间隙让出主线程
+      let start = 0;
+      const appendChunk = () => {
+        const frag = document.createDocumentFragment();
+        const end = Math.min(start + GRID_CHUNK_SIZE, rows.length);
+        for (; start < end; start++) {
+          frag.appendChild(buildRow(rows[start], start));
+        }
+        body.appendChild(frag);
+        if (start < rows.length) {
+          requestAnimationFrame(appendChunk);
+        } else {
+          animateResultsIn();
+        }
+      };
+      requestAnimationFrame(appendChunk);
     }
 
     function renderMutationResult(data) {
@@ -2327,34 +2460,44 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       graphNodes = [];
       graphEdges = [];
       nodeMap = new Map();
+      graphTotalNodeCount = 0;
+      const seenIds = new Set(); // 全量节点计数去重（含被截断未渲染的节点）
 
       // 从结果中抽取所有节点与边对象
-      rows.forEach((row, rowIdx) => {
+      rows.forEach((row) => {
         const rowNodeIds = [];
         Object.entries(row).forEach(([key, val]) => {
           if (val && typeof val === 'object') {
             if (val.id !== undefined) {
-              // 节点
+              // 节点：先无差别计数（真实总节点数），再按渲染上限截断
               const id = String(val.id);
-              rowNodeIds.push(id);
-              if (!nodeMap.has(id)) {
-                // 黄金角螺旋初始位置：相比纯随机可显著减少初始重叠
-                const idx = nodeMap.size;
-                const radius = 30 + idx * 11;
-                const node = {
-                  id,
-                  label: val.payload?.name || val.payload?.title || `Node ${id}`,
-                  payload: val.payload || {},
-                  vector: val.vector || [],
-                  x: Math.cos(idx * 2.399963) * radius,
-                  y: Math.sin(idx * 2.399963) * radius,
-                  vx: 0,
-                  vy: 0,
-                  color: getNodeColor(val.payload?.type || key)
-                };
-                nodeMap.set(id, node);
-                graphNodes.push(node);
+              if (!seenIds.has(id)) {
+                seenIds.add(id);
+                graphTotalNodeCount++;
               }
+              if (nodeMap.has(id) || graphNodes.length >= GRAPH_RENDER_MAX_NODES) {
+                // 已渲染过、或达到渲染上限：只参与计数，不再创建；
+                // 连线推断也只对已渲染节点做，避免无效边堆积
+                if (nodeMap.has(id)) rowNodeIds.push(id);
+                return;
+              }
+              // 黄金角螺旋初始位置：相比纯随机可显著减少初始重叠
+              const idx = nodeMap.size;
+              const radius = 30 + idx * 11;
+              const node = {
+                id,
+                label: val.payload?.name || val.payload?.title || `Node ${id}`,
+                payload: val.payload || {},
+                vector: val.vector || [],
+                x: Math.cos(idx * 2.399963) * radius,
+                y: Math.sin(idx * 2.399963) * radius,
+                vx: 0,
+                vy: 0,
+                color: getNodeColor(val.payload?.type || key)
+              };
+              nodeMap.set(id, node);
+              graphNodes.push(node);
+              rowNodeIds.push(id);
             } else if (val.source !== undefined && val.target !== undefined) {
               // 边
               graphEdges.push({
@@ -2366,14 +2509,52 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           }
         });
         // TQL 的 MATCH 投影只能返回节点对象而无法返回边，
-        // 同一行内先后出现的节点按返回顺序推断连线关系
+        // 同一行内先后出现的节点按返回顺序推断连线关系（仅限已渲染节点）
         for (let i = 1; i < rowNodeIds.length; i++) {
           graphEdges.push({ source: rowNodeIds[i - 1], target: rowNodeIds[i], label: '' });
         }
       });
 
-      // 如果只有节点没有明确边，则做基础网状互连展示
-      startSimulation(1);
+      applyGraphPhysicsPolicy();
+    }
+
+    // 规模护栏分流：>1500 只渲染（物理必关），300<n≤1500 关物理保静态布局，
+    // ≤300 维持原力导向行为（用户手动冻结状态不受影响）
+    function applyGraphPhysicsPolicy() {
+      const btn = document.getElementById('togglePhysicsBtn');
+      if (graphNodes.length > GRAPH_PHYSICS_MAX_NODES) {
+        physicsLockedByScale = true;
+        simulationRunning = false;
+        if (btn) btn.textContent = '恢复力学';
+      } else {
+        // 上一轮因规模被锁、本轮规模回落：自动恢复可模拟状态；
+        // 用户主动冻结（physicsLockedByScale=false 且 simulationRunning=false）则保持冻结
+        const resumeAfterScaleLock = physicsLockedByScale;
+        physicsLockedByScale = false;
+        if (resumeAfterScaleLock) {
+          simulationRunning = true;
+          if (btn) btn.textContent = '冻结力学';
+        }
+        startSimulation(1);
+      }
+      updateGraphScaleNotice();
+      // 物理被禁用时没有 rAF 重绘循环，需立即绘制一次静态布局
+      // （画布容器隐藏时 redrawGraph 内部会跳过尺寸同步，切到图视图时还有一次重绘兜底）
+      if (physicsLockedByScale) redrawGraph();
+    }
+
+    // 图视图规模提示条：>1500 显示截断文案，300<n≤1500 显示暂停力学文案，≤300 隐藏
+    function updateGraphScaleNotice() {
+      const notice = document.getElementById('graphScaleNotice');
+      if (!notice) return;
+      let msg = '';
+      if (graphNodes.length >= GRAPH_RENDER_MAX_NODES && graphTotalNodeCount > graphNodes.length) {
+        msg = `共 ${graphTotalNodeCount} 个节点，仅渲染前 ${GRAPH_RENDER_MAX_NODES}（已暂停力学模拟以保持流畅）`;
+      } else if (physicsLockedByScale) {
+        msg = `节点数 ${graphNodes.length} 超过 ${GRAPH_PHYSICS_MAX_NODES}，已暂停力学模拟以保持流畅`;
+      }
+      notice.hidden = !msg;
+      if (msg) notice.querySelector('span').textContent = msg;
     }
 
     // ==========================================
@@ -2542,6 +2723,11 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       });
 
       document.getElementById('togglePhysicsBtn').addEventListener('click', () => {
+        // 规模护栏禁用物理时（>300 节点），「恢复力学」不被允许，给出 toast 说明
+        if (physicsLockedByScale) {
+          showToast(`节点数超过 ${GRAPH_PHYSICS_MAX_NODES}，力学模拟已停用以保持流畅`);
+          return;
+        }
         simulationRunning = !simulationRunning;
         document.getElementById('togglePhysicsBtn').textContent = simulationRunning ? '冻结力学' : '恢复力学';
         if (simulationRunning) startSimulation(0.5);
@@ -3492,6 +3678,123 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         assert(document.getElementById('viewGraph').style.display === 'block', '应切换到图视图');
         assert((currentResultData.rows || []).length === 2, '应返回 2 行');
         await waitFor(() => graphNodes.length === 3, 3000, '图节点应渲染');
+      });
+
+      // ---------- 边界加固（PR-10）：XSS / 深嵌套 / 大数组 / 万行网格 / 图规模护栏 ----------
+      const mkBoundaryNode = (id, name) => ({ type: 'node', id: String(id), payload: { name, type: 'person' }, vector: [] });
+
+      addAssert('XSS 防护：payload 含 img onerror / script 均以文本渲染', '边界加固', async () => {
+        window.__xssHit = false;
+        const evil = '<img src=x onerror="window.__xssHit=true">';
+        renderGrid([{ node: mkBoundaryNode('x1', evil) }]);
+        const body = document.getElementById('gridBody');
+        assert(!body.querySelector('img'), '网格不应注入 img 元素');
+        assert(!body.querySelector('script'), '网格不应注入 script 元素');
+        assert(body.textContent.includes('<img src=x'), '恶意串应以文本呈现');
+        assert(window.__xssHit === false, 'onerror 处理器不应被执行');
+        renderRawJson({ s: '<script>window.__xssJsonHit = 1<\/script>' });
+        const jsonRoot = document.getElementById('rawJsonOutput');
+        assert(!jsonRoot.querySelector('script'), 'JSON 树不应注入 script 元素');
+        assert(jsonRoot.textContent.includes('<script>'), 'JSON 树中 script 字样应以文本呈现');
+        assert(window.__xssJsonHit === undefined, 'JSON 树中的脚本不应执行');
+        renderGrid(FIND_ROWS); // 还原网格状态
+      });
+
+      addAssert('JSON 树：40 层深嵌套可渲染、带省略标记并可逐层展开', '边界加固', async () => {
+        let deep = { v: 0 };
+        for (let i = 1; i <= 40; i++) deep = { n: deep };
+        renderRawJson(deep);
+        const root = document.getElementById('rawJsonOutput');
+        // 懒渲染：首屏只构建默认展开的前几层 DOM，深层节点不存在（防一次性全量构建）
+        assert(root.querySelectorAll('.jt-toggle').length === 3,
+          '首屏应只构建 3 层折叠按钮（懒渲染），实际 ' + root.querySelectorAll('.jt-toggle').length);
+        // 逐层展开：点击当前最深的折叠按钮，每次只构建下一层
+        for (let i = 0; i < 40 && root.querySelectorAll('.jt-toggle').length < 40; i++) {
+          const ts = root.querySelectorAll('.jt-toggle');
+          ts[ts.length - 1].click();
+        }
+        const toggles = root.querySelectorAll('.jt-toggle');
+        assert(toggles.length === 40, '逐层展开后应有 40 个折叠按钮，实际 ' + toggles.length);
+        assert(root.querySelector('.jt-deep-marker'), '超过 20 层的层级应显示省略标记');
+        assert(root.textContent.includes('更深'), '标记应含「更深」文案');
+        // 最深层节点默认折叠且子 DOM 懒构建（仅占位闭合行），点击后只展开一层
+        const deepest = toggles[toggles.length - 1];
+        const deepestWrap = deepest.parentElement.parentElement;
+        const deepestKids = deepestWrap.querySelector('.jt-children');
+        assert(deepestKids.children.length === 1, '未展开的深层节点子 DOM 应懒构建，实际 ' + deepestKids.children.length);
+        deepest.click();
+        assert(deepestKids.children.length === 2, '展开后应构建下一层子节点');
+        assert(deepest.getAttribute('aria-expanded') === 'true', '展开后 aria-expanded 应为 true');
+      });
+
+      addAssert('JSON 树：10000 元素数组懒渲染，首屏 DOM 受限且展开可用', '边界加固', async () => {
+        renderRawJson({ big: Array.from({ length: 10000 }, (_, i) => i) });
+        const root = document.getElementById('rawJsonOutput');
+        const before = root.querySelectorAll('.jt-line').length;
+        assert(before < 300, '首屏 DOM 行数应受限（懒渲染），实际 ' + before);
+        const badge = Array.from(root.querySelectorAll('.jt-badge')).find(b => b.textContent.includes('10000'));
+        assert(badge, '应显示 10000 items 计数徽标');
+        badge.parentElement.querySelector('.jt-toggle').click();
+        await waitFor(() => root.querySelectorAll('.jt-line').length >= 10001, 3000, '展开后应构建全部元素');
+        // 再次点击应收起（折叠回去），验证大数组展开后可折叠
+        badge.parentElement.querySelector('.jt-toggle').click();
+        assert(root.querySelector('.jt-children.collapsed'), '再次点击后大数组子层应折叠');
+      });
+
+      addAssert('网格：10000 行分块渲染完成且行数与首尾内容正确', '边界加固', async () => {
+        const bigRows = Array.from({ length: 10000 }, (_, i) => ({ node: mkBoundaryNode(i + 1, 'N' + (i + 1)) }));
+        const t0 = performance.now();
+        renderGrid(bigRows);
+        await waitFor(() => document.querySelectorAll('#gridBody tr').length === 10000, 3000, '分块渲染应完成');
+        const elapsed = performance.now() - t0;
+        assert(elapsed < 3000, '万行渲染应 < 3000ms，实际 ' + elapsed.toFixed(0) + 'ms');
+        const firstCell = document.querySelector('#gridBody tr td:nth-child(2)').textContent;
+        assert(firstCell.includes('N1'), '首行应包含 N1');
+        assert(document.getElementById('gridBody').lastElementChild.textContent.includes('N10000'), '末行应包含 N10000');
+        assert(document.getElementById('statusRowCount') !== null, '渲染完成后页面应可响应');
+      });
+
+      addAssert('行数上限：rows=10000 时提示条出现且可关闭', '边界加固', async () => {
+        const notice = document.getElementById('rowLimitNotice');
+        assert(notice, '应存在行数上限提示条元素');
+        assert(!notice.hidden, '万行结果后提示条应显示');
+        assert(notice.textContent.includes('10000'), '提示应含上限 10000');
+        assert(notice.textContent.includes('LIMIT'), '提示应含增加 LIMIT 建议');
+        notice.querySelector('.result-notice-close').click();
+        assert(notice.hidden, '点击关闭后提示条应隐藏');
+      });
+
+      addAssert('图护栏：700 节点自动暂停力学并显示提示条', '边界加固', async () => {
+        const rows700 = Array.from({ length: 700 }, (_, i) => ({ n: mkBoundaryNode(i + 1, 'G' + (i + 1)) }));
+        simulationRunning = true; // 先置为可模拟，证明 renderGraph 会因规模自动关闭
+        renderGraph(rows700);
+        assert(graphNodes.length === 700, '应渲染 700 节点，实际 ' + graphNodes.length);
+        assert(simulationRunning === false, '超过 300 节点应自动关闭物理模拟');
+        assert(document.getElementById('togglePhysicsBtn').textContent === '恢复力学', '冻结按钮应显示「恢复力学」');
+        const notice = document.getElementById('graphScaleNotice');
+        assert(notice && !notice.hidden, '应显示规模提示条');
+        assert(notice.textContent.includes('300') && notice.textContent.includes('力学'), '提示应说明暂停力学原因');
+        notice.querySelector('.result-notice-close').click();
+        assert(notice.hidden, '提示条应可关闭');
+      });
+
+      addAssert('图护栏：1600 节点只渲染前 1500 且提示总数', '边界加固', async () => {
+        const rows1600 = Array.from({ length: 1600 }, (_, i) => ({ n: mkBoundaryNode(i + 1, 'G' + (i + 1)) }));
+        renderGraph(rows1600);
+        assert(graphNodes.length === 1500, '应只渲染 1500 节点，实际 ' + graphNodes.length);
+        const notice = document.getElementById('graphScaleNotice');
+        assert(notice && !notice.hidden, '应显示截断提示条');
+        assert(notice.textContent.includes('仅渲染前 1500'), '提示应含「仅渲染前 1500」，实际: ' + notice.textContent);
+        assert(notice.textContent.includes('1600'), '提示应含真实总节点数 1600');
+      });
+
+      addAssert('图护栏：规模禁用下点「恢复力学」仅提示不恢复，随后还原状态', '边界加固', async () => {
+        document.getElementById('togglePhysicsBtn').click();
+        assert(simulationRunning === false, '物理模拟不应被恢复');
+        await waitFor(() => document.querySelector('#toastStack .toast'), 2000, '应出现不支持恢复的 toast 提示');
+        // 还原常规小结果状态，避免影响后续/人工检查
+        renderGrid(FIND_ROWS);
+        renderGraph(MATCH_ROWS);
       });
 
       // 语法高亮
