@@ -2342,7 +2342,9 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     // 独立图拓扑探索标签页
     function initStandaloneGraph() {
       document.getElementById('loadWholeGraphBtn').onclick = () => {
-        document.getElementById('tqlInput').value = 'MATCH (a)-[r]->(b) RETURN a, r, b LIMIT 100';
+        // TQL 边模式必须用匿名 -[]-> 语法（-[r]-> 会被解析器拒绝并返回 400）；
+        // MATCH 投影无法返回边对象，改由 renderGraph 按行内节点出现顺序推断连线
+        document.getElementById('tqlInput').value = 'MATCH (a)-[]->(b) RETURN a, b LIMIT 100';
         document.querySelector('[data-tab="queryPane"]').click();
         document.querySelector('[data-view="graph"]').click();
         executeCurrentQuery();
@@ -2481,6 +2483,351 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         container.appendChild(item);
       });
     }
+  </script>
+  <script>
+    // ==========================================
+    // 页内自检套件 (In-page Selftest) —— 仅当 URL 带 ?selftest=1 时启用。
+    // 零依赖 vanilla JS，集中在本 IIFE：
+    //   1) fetch mock 层：拦截全部 API 调用返回固定 fixture（离线可测、结果确定）；
+    //   2) 命名断言集：覆盖主题/标签页/渲染管线/mutation/错误/向量校验/节点抽屉/力导向收敛；
+    //   3) 顶部固定结果条：N passed / M failed，每条断言可展开详情，结束后 console.table 摘要。
+    // 正常模式（无参数）下 IIFE 第一行即返回：不安装拦截器、不注入 DOM，零开销。
+    // 阶段 2 的命令面板断言通过 window.__selftestRegister 扩展点在同一轮补齐。
+    // ==========================================
+    (function () {
+      'use strict';
+      if (!new URLSearchParams(window.location.search).get('selftest')) return;
+      if (window.__TRIVIUM_SELFTEST__) return;
+      window.__TRIVIUM_SELFTEST__ = true;
+
+      // ---------- 结果条样式（JS 注入，避免污染正常模式 CSS） ----------
+      const style = document.createElement('style');
+      style.textContent = [
+        'body.selftest-running { padding-top: 36px; }',
+        '#selftestBar { position: fixed; top: 0; left: 0; right: 0; z-index: 9999;',
+        '  display: flex; align-items: center; gap: 12px; padding: 6px 14px;',
+        '  background: var(--bg-surface); border-bottom: 2px solid var(--border-focus);',
+        '  font-family: var(--font-sans); font-size: 12px; box-shadow: var(--shadow-md); }',
+        '#selftestBar .st-pass { color: var(--success); font-weight: 600; }',
+        '#selftestBar .st-fail { color: var(--danger); font-weight: 600; }',
+        '#selftestDetails { position: fixed; top: 34px; left: 0; right: 0; z-index: 9999;',
+        '  max-height: 45vh; overflow: auto; padding: 8px 14px;',
+        '  background: var(--bg-surface); border-bottom: 1px solid var(--border-color);',
+        '  box-shadow: var(--shadow-md); font-family: var(--font-sans); font-size: 12px; }',
+        '#selftestDetails details { margin: 3px 0; }',
+        '#selftestDetails summary { cursor: pointer; font-family: var(--font-mono); font-size: 11.5px; }',
+        '#selftestDetails .st-group { color: var(--text-light); margin-left: 6px; }',
+        '#selftestDetails .st-err { color: var(--danger); font-family: var(--font-mono); font-size: 11px;',
+        '  white-space: pre-wrap; padding: 4px 0 6px 20px; }'
+      ].join('\n');
+      document.head.appendChild(style);
+
+      // ---------- fetch mock 层（fixture 形状与后端 protocol.rs encode_node/encode_rows 对齐） ----------
+      const NODE_ALICE = { type: 'node', id: '1', payload: { name: 'Alice', type: 'person', citations: 150, department: 'AI Lab' }, vector: [0.1, 0.2, 0.3, 0.4], edges: [] };
+      const NODE_BOB = { type: 'node', id: '2', payload: { name: 'Bob', type: 'person', citations: 45, department: 'Systems' }, vector: [0.5, 0.4, 0.3, 0.2], edges: [] };
+      const NODE_PAPER = { type: 'node', id: '3', payload: { title: 'TriviumDB Architecture', type: 'paper', year: 2026 }, vector: [0.9, 0.8, 0.7, 0.6], edges: [] };
+      const FIND_ROWS = [{ node: NODE_ALICE }, { node: NODE_BOB }, { node: NODE_PAPER }];
+      const MATCH_ROWS = [{ a: NODE_ALICE, b: NODE_BOB }, { a: NODE_BOB, b: NODE_PAPER }];
+      const GEN = 'gen-selftest';
+      const jsonRes = (body, status) => new Response(JSON.stringify(body), {
+        status: status || 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      window.fetch = async function (input, init) {
+        const url = typeof input === 'string' ? input : (input && input.url) || '';
+        const path = url.replace(/^https?:\/\/[^/]+/, '');
+        if (path.indexOf('/health/ready') === 0) return jsonRes({ status: 'ok', version: '9.9.9-selftest' });
+        if (path.indexOf('/health/details') === 0) {
+          return jsonRes({ status: 'ready', writeQueueDepth: 0, writeQueueCapacity: 256, activeReads: 0, quiverWarmup: 'ready' });
+        }
+        if (path.indexOf('/v1/tql') === 0) {
+          let req = {};
+          try { req = JSON.parse((init && init.body) || '{}'); } catch (_) {}
+          const q = String(req.query || '');
+          if (req.mutation) return jsonRes({ rows: [], row_count: 0, affected: 1, createdIds: ['901'], generation: GEN });
+          if (q.indexOf('MATCH') === 0) return jsonRes({ rows: MATCH_ROWS, row_count: MATCH_ROWS.length, generation: GEN });
+          if (q.indexOf('SEARCH') === 0) {
+            return jsonRes({ rows: [{ hit: NODE_ALICE, score: { type: 'float', value: 0.98 } }], row_count: 1, generation: GEN });
+          }
+          return jsonRes({ rows: FIND_ROWS, row_count: FIND_ROWS.length, generation: GEN });
+        }
+        const nodeMatch = path.match(/^\/v1\/nodes\/([^/?]+)/);
+        if (nodeMatch) {
+          const id = nodeMatch[1];
+          const node = id === '1' ? NODE_ALICE : (id === '2' ? NODE_BOB : NODE_PAPER);
+          return jsonRes({ node, edgeVersions: id === '1' ? [{ targetId: '2', label: 'KNOWS', version: 1 }] : [] });
+        }
+        if (path.indexOf('/v1/search/vector') === 0) {
+          return jsonRes({ hits: [{ id: '1', score: 0.98, payload: NODE_ALICE.payload }], generation: GEN });
+        }
+        return jsonRes({ title: 'SELFTEST_MOCK_MISS', detail: path }, 404);
+      };
+
+      // ---------- 断言注册表与结果条 ----------
+      const suite = [];
+      function addAssert(name, group, fn) { suite.push({ name, group, fn, status: 'pending', error: null }); }
+      // 扩展点：阶段 2 命令面板等后续功能的断言经此注入，与内置断言同一轮执行
+      window.__selftestRegister = addAssert;
+
+      const assert = (cond, msg) => { if (!cond) throw new Error(msg || 'assertion failed'); };
+      const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+      async function waitFor(fn, timeout, label) {
+        const deadline = Date.now() + (timeout || 3000);
+        while (Date.now() < deadline) {
+          try { const v = fn(); if (v) return v; } catch (_) {}
+          await sleep(50);
+        }
+        throw new Error('waitFor 超时: ' + (label || '条件未满足'));
+      }
+
+      // 结果条 DOM
+      const bar = document.createElement('div');
+      bar.id = 'selftestBar';
+      bar.setAttribute('role', 'status');
+      bar.innerHTML = '<strong>Selftest</strong><span id="selftestSummary">准备中...</span>' +
+        '<button type="button" class="btn" id="selftestDetailsBtn" aria-expanded="false">详情</button>';
+      document.body.classList.add('selftest-running');
+      document.body.insertBefore(bar, document.body.firstChild);
+      const detailsBox = document.createElement('div');
+      detailsBox.id = 'selftestDetails';
+      detailsBox.hidden = true;
+      document.body.insertBefore(detailsBox, bar.nextSibling);
+      document.getElementById('selftestDetailsBtn').addEventListener('click', () => {
+        detailsBox.hidden = !detailsBox.hidden;
+        document.getElementById('selftestDetailsBtn').setAttribute('aria-expanded', String(!detailsBox.hidden));
+      });
+
+      function renderBar() {
+        const passed = suite.filter(i => i.status === 'pass').length;
+        const failed = suite.filter(i => i.status === 'fail').length;
+        const done = passed + failed === suite.length;
+        document.getElementById('selftestSummary').innerHTML =
+          '<span class="st-pass">' + passed + ' passed</span> / ' +
+          '<span class="st-fail">' + failed + ' failed</span>' +
+          (done ? '' : ' / 运行中 ' + (suite.length - passed - failed));
+        detailsBox.innerHTML = suite.map(item =>
+          '<details' + (item.status === 'fail' ? ' open' : '') + '><summary>' +
+          (item.status === 'pass' ? '✅' : item.status === 'fail' ? '❌' : '⏳') +
+          ' ' + item.name + '<span class="st-group">[' + item.group + ']</span></summary>' +
+          (item.error ? '<div class="st-err">' + item.error + '</div>' : '') +
+          '</details>'
+        ).join('');
+      }
+
+      // ---------- 内置断言集 ----------
+      // 自检基建
+      addAssert('fetch mock 生效：/health/ready 驱动连接徽章', '自检基建', async () => {
+        await waitFor(() => document.getElementById('connText').textContent.indexOf('在线') === 0, 3000, '连接徽章应显示在线');
+      });
+
+      // 主题
+      addAssert('主题切换：light→dark→light 并持久化到 localStorage', '主题', async () => {
+        document.documentElement.setAttribute('data-theme', 'light');
+        localStorage.setItem('tdb_theme', 'light');
+        document.getElementById('themeToggleBtn').click();
+        assert(document.documentElement.getAttribute('data-theme') === 'dark', '第一次点击后应为 dark');
+        assert(localStorage.getItem('tdb_theme') === 'dark', 'localStorage 应记录 dark');
+        document.getElementById('themeToggleBtn').click();
+        assert(document.documentElement.getAttribute('data-theme') === 'light', '第二次点击应回到 light');
+        assert(localStorage.getItem('tdb_theme') === 'light', 'localStorage 应记录 light');
+      });
+
+      // 标签页
+      addAssert('标签页切换：三个主标签互斥激活', '标签页', async () => {
+        document.querySelector('[data-tab="vectorLabPane"]').click();
+        assert(document.getElementById('vectorLabPane').classList.contains('active'), 'vectorLabPane 应激活');
+        assert(!document.getElementById('queryPane').classList.contains('active'), 'queryPane 应失活');
+        document.querySelector('[data-tab="graphExplorePane"]').click();
+        assert(document.getElementById('graphExplorePane').classList.contains('active'), 'graphExplorePane 应激活');
+        document.querySelector('[data-tab="queryPane"]').click();
+        assert(document.getElementById('queryPane').classList.contains('active'), 'queryPane 应恢复激活');
+      });
+
+      addAssert('结果视图切换：grid/graph/json 三视图互斥', '标签页', async () => {
+        document.querySelector('[data-view="json"]').click();
+        assert(document.getElementById('viewJson').style.display === 'block', 'json 视图应显示');
+        assert(document.getElementById('viewGrid').style.display === 'none', 'grid 视图应隐藏');
+        document.querySelector('[data-view="grid"]').click();
+        assert(document.getElementById('viewGrid').style.display === 'block', 'grid 视图应恢复');
+      });
+
+      // 渲染管线
+      addAssert('renderGrid：列数/行数/单元格内容', '渲染管线', async () => {
+        renderGrid(FIND_ROWS);
+        const headCols = document.getElementById('gridHead').querySelectorAll('th').length;
+        assert(headCols === 2, '应有 2 列 (# + node)，实际 ' + headCols);
+        const rows = document.getElementById('gridBody').querySelectorAll('tr');
+        assert(rows.length === FIND_ROWS.length, '应有 ' + FIND_ROWS.length + ' 行，实际 ' + rows.length);
+        assert(rows[0].textContent.indexOf('Alice') !== -1, '首行应包含 Alice');
+        renderGrid([]);
+        assert(document.getElementById('gridBody').textContent.indexOf('没有匹配的行') !== -1, '空结果应显示占位文案');
+        renderGrid(FIND_ROWS);
+      });
+
+      addAssert('renderGrid：节点行携带可点击 360° 入口', '渲染管线', async () => {
+        const clickable = document.querySelectorAll('#gridBody tr.row-clickable');
+        assert(clickable.length === FIND_ROWS.length, '所有节点行应可点击，实际 ' + clickable.length);
+        assert(clickable[0].getAttribute('role') === 'button' && clickable[0].tabIndex === 0, '节点行应键盘可达 (role=button + tabIndex)');
+      });
+
+      addAssert('mutation 结果渲染：受影响行数与 createdIds', '渲染管线', async () => {
+        renderMutationResult({ affected: 2, createdIds: ['901', '902'], generation: GEN });
+        const body = document.getElementById('gridBody').textContent;
+        assert(body.indexOf('写入成功') !== -1, '应显示写入成功');
+        assert(body.indexOf('901') !== -1 && body.indexOf('902') !== -1, '应显示两个 createdIds');
+        const json = JSON.parse(document.getElementById('rawJsonOutput').textContent);
+        assert(json.affected === 2 && json.createdIds.length === 2, 'rawJsonOutput 应反映 mutation 数据');
+      });
+
+      addAssert('错误渲染：标题/详情同时呈现在表格与 JSON 视图', '渲染管线', async () => {
+        renderError({ title: '自检注入错误', detail: 'detail-xyz' });
+        const body = document.getElementById('gridBody').textContent;
+        assert(body.indexOf('自检注入错误') !== -1 && body.indexOf('detail-xyz') !== -1, '错误标题与详情应呈现');
+        const json = JSON.parse(document.getElementById('rawJsonOutput').textContent);
+        assert(json.title === '自检注入错误', 'rawJsonOutput 应承载错误对象');
+      });
+
+      // 向量实验台
+      addAssert('向量实验台：非法 JSON 报「JSON 解析失败」', '向量实验台', async () => {
+        switchVectorSource(false);
+        document.getElementById('vlJsonInput').value = '{not json';
+        let err = null;
+        try { resolveQueryVector(); } catch (e) { err = e; }
+        assert(err && err.title === 'JSON 解析失败', '应抛出 JSON 解析失败，实际 ' + (err && err.title));
+      });
+
+      addAssert('向量实验台：维度不匹配报「维度不匹配」', '向量实验台', async () => {
+        vlKnownDim = 4;
+        document.getElementById('vlJsonInput').value = '[0.1, 0.2]';
+        let err = null;
+        try { resolveQueryVector(); } catch (e) { err = e; }
+        vlKnownDim = null;
+        assert(err && err.title === '维度不匹配', '应抛出维度不匹配，实际 ' + (err && err.title));
+      });
+
+      addAssert('向量实验台：无向量节点报「节点无向量」', '向量实验台', async () => {
+        switchVectorSource(true);
+        vlCandidates = [{ id: '7', payload: { name: 'NoVec' } }];
+        const select = document.getElementById('vlNodeSelect');
+        select.innerHTML = '<option value="0">#7 NoVec</option>';
+        select.value = '0';
+        let err = null;
+        try { resolveQueryVector(); } catch (e) { err = e; }
+        vlCandidates = [];
+        assert(err && err.title === '节点无向量', '应抛出节点无向量，实际 ' + (err && err.title));
+      });
+
+      addAssert('向量实验台：mock 检索流水线渲染 hits 表格', '向量实验台', async () => {
+        switchVectorSource(false);
+        vlKnownDim = 4;
+        document.getElementById('vlJsonInput').value = '[0.1, 0.2, 0.3, 0.4]';
+        await runVectorSearch();
+        vlKnownDim = null;
+        switchVectorSource(true);
+        assert(!document.getElementById('vlResultTable').hidden, '结果表格应显示');
+        assert(!document.getElementById('vlPipeline').hidden, '流水线条应显示');
+        assert(document.getElementById('vlPipelineHits').textContent === '1', 'hits 计数应为 1');
+        assert(document.getElementById('vlResultBody').children.length === 1, '应渲染 1 行命中');
+      });
+
+      // 节点抽屉
+      addAssert('节点抽屉：Trinity 三平面渲染 (Payload/Vector/Edges)', '节点抽屉', async () => {
+        openNodeDrawer({ id: '1', label: 'Alice', payload: NODE_ALICE.payload, vector: NODE_ALICE.vector });
+        assert(document.getElementById('nodeDrawer').classList.contains('open'), '抽屉应打开');
+        const payload = JSON.parse(document.getElementById('drawerNodePayload').textContent);
+        assert(payload.name === 'Alice', 'Payload 平面应承载 JSON payload');
+        assert(document.getElementById('drawerNodeVector').textContent.indexOf('dim = 4') !== -1, 'Vector 平面应显示维度');
+        await waitFor(() => document.querySelector('#drawerNodeEdges .inspector-edge-item'), 3000, '边列表应加载');
+        assert(document.getElementById('drawerNodeEdges').textContent.indexOf('KNOWS') !== -1, '边标签应显示');
+      });
+
+      addAssert('节点抽屉：边跳转到目标节点后重渲染', '节点抽屉', async () => {
+        document.querySelector('#drawerNodeEdges .inspector-edge-target').click();
+        await waitFor(() => document.getElementById('drawerNodeTitle').textContent.indexOf('#2') !== -1, 3000, '标题应跳到 #2');
+        const payload = JSON.parse(document.getElementById('drawerNodePayload').textContent);
+        assert(payload.name === 'Bob', '跳转后 Payload 应为 Bob');
+        document.getElementById('closeDrawerBtn').click();
+        assert(!document.getElementById('nodeDrawer').classList.contains('open'), '关闭按钮应收起抽屉');
+      });
+
+      // 力导向收敛
+      addAssert('力导向收敛：400 tick 后节点无重叠且在界内', '力导向', async () => {
+        document.querySelector('[data-view="graph"]').click();
+        redrawGraph(); // 同步完成画布尺寸同步（父容器此刻可见）
+        const canvas = document.getElementById('graphCanvas');
+        assert(canvas.width > 0 && canvas.height > 0, '画布应有非零尺寸');
+        renderGraph(MATCH_ROWS);
+        simulationRunning = false; // 停掉 rAF 循环，改为确定性手动 tick
+        assert(graphNodes.length === 3, '应有 3 个节点，实际 ' + graphNodes.length);
+        assert(graphEdges.length >= 2, '至少应推断出 2 条边，实际 ' + graphEdges.length);
+        const halfW = canvas.width / 2 - 70;
+        const halfH = canvas.height / 2 - 70;
+        for (let i = 0; i < 400; i++) { simulationAlpha = 0.6; tickPhysics(); }
+        simulationAlpha = 0.005;
+        for (let i = 0; i < graphNodes.length; i++) {
+          for (let j = i + 1; j < graphNodes.length; j++) {
+            const d = Math.hypot(graphNodes[i].x - graphNodes[j].x, graphNodes[i].y - graphNodes[j].y);
+            assert(d > 40, '节点 ' + i + ' 与 ' + j + ' 重叠: dist=' + d.toFixed(1));
+          }
+          const n = graphNodes[i];
+          assert(Math.abs(n.x) <= halfW + 50 && Math.abs(n.y) <= halfH + 50,
+            '节点 ' + i + ' 越界: (' + n.x.toFixed(0) + ', ' + n.y.toFixed(0) + ')');
+        }
+        document.querySelector('[data-view="grid"]').click();
+      });
+
+      // 死按钮回归修复
+      addAssert('死按钮修复：加载全图拓扑用合法语法出图', '回归修复', async () => {
+        const before = currentResultData;
+        document.getElementById('loadWholeGraphBtn').click();
+        await waitFor(() => currentResultData && currentResultData !== before, 3000, '查询应完成');
+        assert(document.getElementById('tqlInput').value === 'MATCH (a)-[]->(b) RETURN a, b LIMIT 100',
+          '应使用 -[]-> 合法语法');
+        assert(document.getElementById('viewGraph').style.display === 'block', '应切换到图视图');
+        assert((currentResultData.rows || []).length === 2, '应返回 2 行');
+        await waitFor(() => graphNodes.length === 3, 3000, '图节点应渲染');
+      });
+
+      // 命令面板（预留扩展点，阶段 2 补齐真实断言）
+      addAssert('扩展点就绪：__selftestRegister 可动态注入断言', '命令面板（预留）', async () => {
+        assert(typeof window.__selftestRegister === 'function', '应暴露 window.__selftestRegister');
+        window.__selftestRegister('扩展点自证：动态注册的断言被执行', '命令面板（预留）', async () => {
+          assert(document.title.indexOf('TriviumDB') !== -1, '动态断言应能访问页面环境');
+        });
+      });
+
+      // ---------- 执行器（支持运行中动态追加的断言） ----------
+      async function runSuite() {
+        renderBar();
+        let i = 0;
+        while (i < suite.length) {
+          const item = suite[i++];
+          item.status = 'running';
+          renderBar();
+          try {
+            await item.fn();
+            item.status = 'pass';
+          } catch (err) {
+            item.status = 'fail';
+            item.error = (err && err.message) ? err.message : String(err);
+          }
+          renderBar();
+        }
+        const failed = suite.filter(x => x.status === 'fail');
+        // eslint-disable-next-line no-console
+        console.table(suite.map(x => ({
+          group: x.group, name: x.name, status: x.status, error: x.error || ''
+        })));
+        // 供仓库冒烟脚本 (scripts/ui-smoke.mjs) 读取
+        window.__selftestResults = suite.map(x => ({ group: x.group, name: x.name, status: x.status, error: x.error }));
+        window.__selftestFailedCount = failed.length;
+        window.__selftestDone = true;
+      }
+
+      if (document.readyState === 'complete') runSuite();
+      else window.addEventListener('load', () => setTimeout(runSuite, 50));
+    })();
   </script>
   <script>
     // 动效层：GSAP 按需从 CDN 加载；加载失败（如离线环境）时界面完整可用，仅退化为无动画。
