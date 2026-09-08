@@ -485,6 +485,12 @@
     }
     table.data-grid tbody tr { transition: background-color 0.1s ease; }
     table.data-grid tbody tr:hover { background: var(--bg-surface-secondary); }
+    /* 虚拟滑窗（PR-12）：固定行高 + table-layout:fixed 显式列宽（首列 # 窄宽，其余均分）。
+       单元格单行省略与全局规则一致；行距以首窗渲染后实测为准，CSS 高度只是目标值。 */
+    table.data-grid.virtual-grid { table-layout: fixed; }
+    table.data-grid.virtual-grid th { overflow: hidden; text-overflow: ellipsis; }
+    table.data-grid.virtual-grid tbody tr:not(.virtual-spacer) { height: 32px; }
+    table.data-grid.virtual-grid tbody td { vertical-align: middle; }
 
     /* Canvas 拓扑图 */
     #graphCanvas {
@@ -1630,6 +1636,19 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
 
     // 事件监听绑定
     function setupEventListeners() {
+      // 网格行事件委托（tbody 一次性绑定；虚拟滑窗下严禁逐行绑定）
+      setupGridDelegation();
+      // 虚拟滑窗滚动驱动：scroll（passive）+ rAF 节流重算可视窗口；
+      // 粘底状态同步更新（不进 rAF，避免流式追加时判定滞后一帧）
+      document.getElementById('viewGrid').addEventListener('scroll', () => {
+        if (!gridVirtual) return;
+        gridVirtual.onScroll();
+        if (gridScrollRaf) return;
+        gridScrollRaf = requestAnimationFrame(() => {
+          gridScrollRaf = 0;
+          if (gridVirtual) gridVirtual.syncWindow();
+        });
+      }, { passive: true });
       document.getElementById('runQueryBtn').addEventListener('click', executeCurrentQuery);
       document.getElementById('clearEditorBtn').addEventListener('click', () => {
         document.getElementById('tqlInput').value = '';
@@ -1834,15 +1853,20 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
 
     // 流式网格增量渲染器：首行到达即建表头与首批行，之后逐批 append。
     // NDJSON 流式下列集合无法预先得知：新列在流中动态出现时补 <th>。
+    // 行数达到虚拟阈值时从直建模式迁移到虚拟滑窗（保留滚动位置），
+    // 后续批次只更新数据数组 + 通知窗口重算（钉底跟随/视口保持由控制器处理）。
     function createStreamGrid() {
       const head = document.getElementById('gridHead');
       const body = document.getElementById('gridBody');
       const cols = ['#'];
       const seen = new Set(cols);
-      let rendered = 0;
+      const allRows = [];   // 流式累计数据（供事件委托解析行 + 虚拟迁移）
+      let rendered = 0;     // 已直建行数（迁移到虚拟后停增）
+      let virtual = null;   // 虚拟滑窗控制器（行数达阈值后接管渲染）
       const grid = {
         cols,
         begin() {
+          teardownVirtualGrid();
           head.innerHTML = '';
           body.innerHTML = '';
           cols.forEach(c => {
@@ -1850,22 +1874,40 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
             th.textContent = c;
             head.appendChild(th);
           });
+          gridDataRows = allRows;
         },
         ensureCols(row) {
           Object.keys(row).forEach(k => {
             if (seen.has(k)) return;
             seen.add(k);
             cols.push(k);
-            const th = document.createElement('th');
-            th.textContent = k;
-            head.appendChild(th);
+            if (virtual) {
+              virtual.addCol(k);
+            } else {
+              const th = document.createElement('th');
+              th.textContent = k;
+              head.appendChild(th);
+            }
           });
         },
         appendRows(batchRows) {
+          if (virtual) {
+            // 虚拟接管：只更新数据与窗口（spacer 总高/可视行随批次刷新）
+            batchRows.forEach(r => grid.ensureCols(r));
+            allRows.push(...batchRows);
+            virtual.notifyAppend();
+            return;
+          }
           batchRows.forEach(r => grid.ensureCols(r));
           const frag = document.createDocumentFragment();
           batchRows.forEach(row => frag.appendChild(buildGridRow(row, rendered++, cols)));
           body.appendChild(frag);
+          allRows.push(...batchRows);
+          // 达到虚拟阈值：从直建模式迁移到虚拟滑窗（保留滚动位置，后续批次走增量通知）
+          if (rendered >= VIRTUAL_GRID_MIN_ROWS) {
+            virtual = createVirtualGrid(allRows, cols, true);
+            gridVirtual = virtual;
+          }
         },
         appendErrorRow(detail) {
           // 行级错误：textContent 渲染（XSS 安全），不中断流
@@ -2232,10 +2274,277 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     // ==========================================
     // 视图渲染引擎
     // ==========================================
-    // 网格大数据防护：>GRID_CHUNK_SIZE 行走 rAF 分块构建（每帧让出主线程，渲染期间页面可响应）
-    const GRID_CHUNK_SIZE = 1000;
     // 服务端 max_query_rows=10000：结果达到该行数说明可能被截断，需提示
     const SERVER_MAX_QUERY_ROWS = 10000;
+
+    // ==========================================
+    // 虚拟滑窗网格（PR-12）
+    // 数据全量在内存数组（gridDataRows），DOM 只构建可视窗口 ± 缓冲行：
+    //   - tbody 用 top/bottom 两个 spacer <tr> 撑出总滚动高度（height = 不可见行总高）
+    //   - scroll 事件（passive）+ rAF 节流驱动窗口重算，行池复用避免每帧 createElement
+    //   - 行高定值（CSS 目标 32px），首窗渲染后实测行距作为 spacer/窗口换算基准
+    //   - table-layout: fixed + colgroup 显式列宽（首列 # 固定窄宽，其余均分）
+    //   - 内容起始偏移（行数提示条 + sticky 表头）以 topSpacer 流内位置实测，避免换算漂移
+    // ==========================================
+    const VIRTUAL_GRID_MIN_ROWS = 200;  // 超过该行数启用虚拟滑窗（以下保持全量渲染路径）
+    const VIRTUAL_GRID_BUFFER = 5;      // 窗口上下缓冲行数
+    const GRID_ROW_HEIGHT = 32;         // 目标行高（实测行距失败时的兜底值）
+
+    let gridDataRows = null;  // 当前网格数据数组引用（事件委托据此解析行 → 节点抽屉）
+    let gridVirtual = null;   // 虚拟滑窗控制器（非虚拟模式为 null）
+    let gridScrollRaf = 0;    // 滚动 rAF 节流句柄
+
+    function teardownVirtualGrid() {
+      if (gridScrollRaf) { cancelAnimationFrame(gridScrollRaf); gridScrollRaf = 0; }
+      if (gridVirtual && gridVirtual.dispose) gridVirtual.dispose();
+      gridVirtual = null;
+      gridDataRows = null;
+      const table = document.getElementById('gridTable');
+      table.classList.remove('virtual-grid');
+      const cg = table.querySelector('colgroup');
+      if (cg) cg.remove();
+    }
+
+    // 行距实测：取前两行 rect top 差（border-collapse 下即行距）；单行/隐藏/异常时兜底
+    function measureGridRowPitch(body) {
+      const trs = body.querySelectorAll('tr:not(.virtual-spacer)');
+      if (trs.length >= 2) {
+        const pitch = trs[1].getBoundingClientRect().top - trs[0].getBoundingClientRect().top;
+        if (pitch > 0) return Math.round(pitch * 2) / 2;
+      }
+      if (trs.length === 1) {
+        const h = trs[0].getBoundingClientRect().height;
+        if (h > 0) return Math.round(h);
+      }
+      return GRID_ROW_HEIGHT;
+    }
+
+    function createVirtualGrid(rows, cols, preserveScroll) {
+      const container = document.getElementById('viewGrid');
+      const table = document.getElementById('gridTable');
+      const head = document.getElementById('gridHead');
+      const body = document.getElementById('gridBody');
+
+      table.classList.add('virtual-grid');
+      let colgroup = table.querySelector('colgroup');
+      if (!colgroup) {
+        colgroup = document.createElement('colgroup');
+        table.insertBefore(colgroup, table.firstChild);
+      }
+      // colgroup 显式列宽：首列 # 固定窄宽，其余列不设宽 → fixed 布局下均分剩余空间
+      colgroup.replaceChildren(...cols.map((c, i) => {
+        const col = document.createElement('col');
+        if (i === 0) col.style.width = '56px';
+        return col;
+      }));
+
+      head.innerHTML = '';
+      cols.forEach(c => {
+        const th = document.createElement('th');
+        th.textContent = c;
+        head.appendChild(th);
+      });
+
+      body.innerHTML = '';
+      const makeSpacer = () => {
+        const tr = document.createElement('tr');
+        tr.className = 'virtual-spacer';
+        const td = document.createElement('td');
+        td.colSpan = cols.length;
+        td.style.cssText = 'padding:0;border:none;line-height:0;';
+        tr.appendChild(td);
+        return tr;
+      };
+      const topSpacer = makeSpacer();
+      const bottomSpacer = makeSpacer();
+      body.appendChild(topSpacer);
+      body.appendChild(bottomSpacer);
+
+      let rowH = GRID_ROW_HEIGHT;
+      let winStart = -1;
+      let winEnd = -1;
+      let disposed = false;
+      let colsVersion = 0;
+      let pinnedBottom = false; // 粘底状态：流式追加时据此决定是否跟随滚动
+      const pool = [];
+      const renderedIdx = new Map(); // dataIndex -> tr
+
+      const setSpacer = (tr, px) => { tr.firstChild.style.height = px + 'px'; };
+      // 粘底判定：scrollTop+clientH 距内容底部不足 2 行。注意必须在 spacer 更新后
+      // 读取（scrollHeight 随 spacer 变化），流式追加的判定走 sticky 状态而非临时计算
+      const isAtBottom = () => container.scrollTop + container.clientHeight >= container.scrollHeight - rowH * 2;
+      // 内容起始偏移（行数提示条高度 + sticky 表头）：topSpacer 是 tbody 首行，
+      // 其流内位置不受自身/底部 spacer 高度影响，实测可避免 sticky 场景下的换算漂移
+      const contentTop = () => topSpacer.getBoundingClientRect().top
+        - container.getBoundingClientRect().top + container.scrollTop;
+
+      // 行池复用：优先复用既有 tr 就地更新（文本写入），仅对换列/换索引的行重新 patch
+      function patchRow(tr, row, idx) {
+        tr.dataset.rowIndex = String(idx);
+        const node = findNodeInRow(row);
+        tr.classList.toggle('row-clickable', !!node);
+        if (node) {
+          tr.tabIndex = 0;
+          tr.setAttribute('role', 'button');
+          tr.title = '点击查看该节点的 360° 视图 (Payload / Vector / Edges)';
+        } else {
+          tr.removeAttribute('tabindex');
+          tr.removeAttribute('role');
+          tr.removeAttribute('title');
+        }
+        if (tr.children.length !== cols.length) {
+          tr.replaceChildren(...cols.map(() => document.createElement('td')));
+        }
+        cols.forEach((c, i) => {
+          const td = tr.children[i];
+          if (c === '#') {
+            td.textContent = idx + 1;
+            td.style.color = 'var(--text-light)';
+          } else {
+            const val = row[c];
+            if (val === undefined || val === null) {
+              td.textContent = 'null';
+              td.style.color = 'var(--text-light)';
+            } else {
+              td.textContent = typeof val === 'object' ? JSON.stringify(val) : String(val);
+              td.style.color = '';
+            }
+          }
+        });
+      }
+
+      function syncWindow() {
+        if (disposed || !rows.length) return;
+        const total = rows.length;
+        const cTop = contentTop();
+        const firstVisible = Math.max(0, Math.floor((container.scrollTop - cTop) / rowH));
+        const start = Math.max(0, firstVisible - VIRTUAL_GRID_BUFFER);
+        const end = Math.min(total, firstVisible + Math.ceil(container.clientHeight / rowH) + VIRTUAL_GRID_BUFFER + 1);
+        if (start === winStart && end === winEnd) return;
+        for (const [idx, tr] of Array.from(renderedIdx)) {
+          if (idx < start || idx >= end) {
+            renderedIdx.delete(idx);
+            pool.push(tr);
+            // 必须从 DOM 移除：孤儿行会累积抬高内容高度，破坏 spacer 换算与贴底判定
+            tr.remove();
+          }
+        }
+        for (let i = start; i < end; i++) {
+          let tr = renderedIdx.get(i);
+          if (!tr) {
+            tr = pool.pop() || document.createElement('tr');
+            renderedIdx.set(i, tr);
+          }
+          if (tr.dataset.colsVersion !== String(colsVersion) || Number(tr.dataset.rowIndex) !== i) {
+            patchRow(tr, rows[i], i);
+            tr.dataset.colsVersion = String(colsVersion);
+          }
+          body.insertBefore(tr, bottomSpacer);
+        }
+        setSpacer(topSpacer, start * rowH);
+        setSpacer(bottomSpacer, (total - end) * rowH);
+        winStart = start;
+        winEnd = end;
+        pinnedBottom = isAtBottom();
+      }
+
+      // 首窗：以兜底行高换算并渲染，再实测行距重算一次（spacer 换算随之校准）
+      if (!preserveScroll) container.scrollTop = 0;
+      syncWindow();
+      rowH = measureGridRowPitch(body);
+      syncWindow();
+
+      const api = {
+        rowH: () => rowH,
+        contentTop,
+        syncWindow,
+        dispose() { disposed = true; },
+        addCol(key) {
+          cols.push(key);
+          colsVersion++;
+          const th = document.createElement('th');
+          th.textContent = key;
+          head.appendChild(th);
+          colgroup.appendChild(document.createElement('col'));
+        },
+        // 滚动事件入口：同步更新粘底状态（rAF 窗口重算另行节流）。
+        // 必须同步：流式追加可能在下一次 rAF 前发生，粘底判定不能滞后一帧
+        onScroll() { pinnedBottom = isAtBottom(); },
+        // 流式追加：数据增长后重算 spacer 与窗口；粘底时跟随，否则保持视口。
+        // 判定 = sticky 状态 || 同步兜底计算：scroll 事件是异步任务，「钉底 → 立即追加」
+        // 时 pinnedBottom 可能尚未经 onScroll 更新；而后续批次 scrollHeight 已随
+        // spacer 变化，纯临时计算会因基准漂移误判「不在底部」而中断跟随 —— 两者取或
+        notifyAppend() {
+          const wasPinned = pinnedBottom || isAtBottom();
+          syncWindow();
+          if (wasPinned) {
+            // 贴底三步：先按新数据重算 spacer，再用新鲜布局精确钳到最大滚动位
+            // （scrollTop = scrollHeight 会按赋值瞬间的布局快照钳位，spacer/窗口
+            // 重排后高度基准变化会累积偏差），最后按新滚动位对齐可视窗口
+            syncWindow();
+            container.scrollTop = container.scrollHeight - container.clientHeight;
+            syncWindow();
+          }
+        }
+      };
+      return api;
+    }
+
+    // 键盘焦点移动：目标行滚入视口（必要时同步重算窗口，绕过 rAF 保证焦点立即落位）
+    function focusGridRow(idx) {
+      if (gridVirtual) {
+        const container = document.getElementById('viewGrid');
+        const rowH = gridVirtual.rowH();
+        const y = gridVirtual.contentTop() + idx * rowH;
+        if (y < container.scrollTop) {
+          container.scrollTop = y;
+        } else if (y + rowH > container.scrollTop + container.clientHeight) {
+          container.scrollTop = y + rowH - container.clientHeight;
+        }
+        gridVirtual.syncWindow();
+      }
+      const tr = document.querySelector(`#gridBody tr[data-row-index="${idx}"]`);
+      if (tr) tr.focus();
+    }
+
+    // 网格行事件委托（tbody 一次性绑定，虚拟/非虚拟路径共用；不得逐行绑定）：
+    // 点击/回车/空格打开节点 360° 抽屉；上下箭头在数据行间移动焦点并滚动跟随
+    function setupGridDelegation() {
+      const body = document.getElementById('gridBody');
+      const openRowDrawer = (tr) => {
+        const idx = Number(tr.dataset.rowIndex);
+        const row = gridDataRows ? gridDataRows[idx] : null;
+        if (row === undefined || row === null) return;
+        const node = findNodeInRow(row);
+        if (!node) return;
+        openNodeDrawer({
+          id: node.id,
+          label: node.payload?.name || node.payload?.title || `Node ${node.id}`,
+          payload: node.payload || {},
+          vector: node.vector || []
+        });
+      };
+      body.addEventListener('click', (e) => {
+        const tr = e.target.closest('tr[data-row-index]');
+        if (tr) openRowDrawer(tr);
+      });
+      body.addEventListener('keydown', (e) => {
+        const tr = e.target.closest('tr[data-row-index]');
+        if (!tr) return;
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          openRowDrawer(tr);
+          return;
+        }
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          const idx = Number(tr.dataset.rowIndex);
+          const next = e.key === 'ArrowDown' ? idx + 1 : idx - 1;
+          if (next < 0 || !gridDataRows || next >= gridDataRows.length) return;
+          e.preventDefault();
+          focusGridRow(next);
+        }
+      });
+    }
 
     // 行数上限提示条（结果区顶部，可关闭；隐藏/显示随每次查询结果行数刷新）
     function showRowLimitNotice(visible) {
@@ -2258,29 +2567,18 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
 
     // 单行构建（textContent 渲染路径保持不变：XSS 安全，超长字符串走 CSS ellipsis）。
     // 模块级函数：renderGrid 与 NDJSON 流式增量渲染（createStreamGrid）共用同一套
-    // 单元格渲染与节点行 360° 抽屉入口逻辑，保证两条路径视觉/行为一致。
+    // 单元格渲染逻辑。点击/键盘打开抽屉的行为由 tbody 事件委托统一处理
+    // （虚拟滑窗下逐行绑定监听器会随窗口重建反复创建/丢弃，改为一次性委托）。
     function buildGridRow(row, idx, cols) {
       const tr = document.createElement('tr');
-      // 节点行可点击：打开 360° 详情抽屉（hover 提示 + 键盘可达）
+      tr.dataset.rowIndex = String(idx);
+      // 节点行可点击标记（hover 提示 + 键盘可达；行为在 tbody 委托层）
       const node = findNodeInRow(row);
       if (node) {
         tr.classList.add('row-clickable');
         tr.tabIndex = 0;
         tr.setAttribute('role', 'button');
         tr.title = '点击查看该节点的 360° 视图 (Payload / Vector / Edges)';
-        const openInspector = () => openNodeDrawer({
-          id: node.id,
-          label: node.payload?.name || node.payload?.title || `Node ${node.id}`,
-          payload: node.payload || {},
-          vector: node.vector || []
-        });
-        tr.addEventListener('click', openInspector);
-        tr.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            openInspector();
-          }
-        });
       }
       cols.forEach(c => {
         const td = document.createElement('td');
@@ -2304,6 +2602,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     }
 
     function renderGrid(rows) {
+      teardownVirtualGrid();
       const head = document.getElementById('gridHead');
       const body = document.getElementById('gridBody');
       head.innerHTML = '';
@@ -2327,40 +2626,29 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       rows.forEach(r => Object.keys(r).forEach(k => colSet.add(k)));
       const cols = Array.from(colSet);
 
+      // 大结果集：虚拟滑窗 —— 数据全量在内存，DOM 只建可视窗口行，spacer 撑出总滚动高度
+      if (rows.length > VIRTUAL_GRID_MIN_ROWS) {
+        gridDataRows = rows;
+        gridVirtual = createVirtualGrid(rows, cols, false);
+        animateResultsIn();
+        return;
+      }
+
+      // 小结果集：同步一次性构建（与历史行为一致，自检断言可直接读取 DOM）
       cols.forEach(c => {
         const th = document.createElement('th');
         th.textContent = c;
         head.appendChild(th);
       });
-
-      // 小结果集：同步一次性构建（与历史行为一致，自检断言可直接读取 DOM）
-      if (rows.length <= GRID_CHUNK_SIZE) {
-        const frag = document.createDocumentFragment();
-        rows.forEach((row, idx) => frag.appendChild(buildGridRow(row, idx, cols)));
-        body.appendChild(frag);
-        animateResultsIn();
-        return;
-      }
-
-      // 大结果集：DocumentFragment 分块构建，每帧一批，rAF 间隙让出主线程
-      let start = 0;
-      const appendChunk = () => {
-        const frag = document.createDocumentFragment();
-        const end = Math.min(start + GRID_CHUNK_SIZE, rows.length);
-        for (; start < end; start++) {
-          frag.appendChild(buildGridRow(rows[start], start, cols));
-        }
-        body.appendChild(frag);
-        if (start < rows.length) {
-          requestAnimationFrame(appendChunk);
-        } else {
-          animateResultsIn();
-        }
-      };
-      requestAnimationFrame(appendChunk);
+      gridDataRows = rows;
+      const frag = document.createDocumentFragment();
+      rows.forEach((row, idx) => frag.appendChild(buildGridRow(row, idx, cols)));
+      body.appendChild(frag);
+      animateResultsIn();
     }
 
     function renderMutationResult(data) {
+      teardownVirtualGrid();
       const head = document.getElementById('gridHead');
       const body = document.getElementById('gridBody');
       head.innerHTML = '<th>状态</th><th>受影响行数</th><th>生成节点 ID</th>';
@@ -2378,6 +2666,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     }
 
     function renderError(err) {
+      teardownVirtualGrid();
       const body = document.getElementById('gridBody');
       body.innerHTML = `<tr><td colspan="5" style="padding: 20px; background: var(--danger-bg); color: var(--danger);">
         <strong>❌ ${err.title || '执行错误'}</strong><br>
@@ -3675,6 +3964,15 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
             // 首个 chunk 发 meta + 3 行后暂停：验证「流未结束首批已渲染」
             return gatedNdjsonRes(lines, 4);
           }
+          if (q.indexOf('GATED_BIG_STREAM') === 0) {
+            // 600 行大流：meta + 210 行（>虚拟阈值 200，先迁移虚拟窗口）后暂停，
+            // release 后补 390 行 + summary —— 验证流式迁移、视口保持与钉底跟随
+            const bigRows = Array.from({ length: 600 }, (_, i) => (
+              { node: { type: 'node', id: String(1000 + i), payload: { name: 'V' + i, type: 'person' }, vector: [] } }
+            ));
+            window.__ndjsonGate.released = false;
+            return gatedNdjsonRes([metaLine, ...rowLines(bigRows), summaryLine(600)], 211);
+          }
           // 无 NDJSON Accept：走旧 JSON 形状（Vector Lab 候选加载等内部调用不带 Accept）
           const wantsNdjson = accept.split(',').some(s => s.trim() === 'application/x-ndjson');
           if (!wantsNdjson) {
@@ -4021,27 +4319,158 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         assert(root.querySelector('.jt-children.collapsed'), '再次点击后大数组子层应折叠');
       });
 
-      addAssert('网格：10000 行分块渲染完成且行数与首尾内容正确', '边界加固', async () => {
+      addAssert('虚拟滑窗：10000 行窗口化渲染（tbody < 100 行）+ spacer 总高一致 + 固定行高列宽', '虚拟滑窗', async () => {
+        document.querySelector('[data-view="grid"]').click();
         const bigRows = Array.from({ length: 10000 }, (_, i) => ({ node: mkBoundaryNode(i + 1, 'N' + (i + 1)) }));
         const t0 = performance.now();
         renderGrid(bigRows);
-        await waitFor(() => document.querySelectorAll('#gridBody tr').length === 10000, 3000, '分块渲染应完成');
+        await waitFor(() => document.querySelectorAll('#gridBody tr:not(.virtual-spacer)').length > 10, 3000, '窗口行应渲染');
         const elapsed = performance.now() - t0;
-        assert(elapsed < 3000, '万行渲染应 < 3000ms，实际 ' + elapsed.toFixed(0) + 'ms');
-        const firstCell = document.querySelector('#gridBody tr td:nth-child(2)').textContent;
-        assert(firstCell.includes('N1'), '首行应包含 N1');
-        assert(document.getElementById('gridBody').lastElementChild.textContent.includes('N10000'), '末行应包含 N10000');
-        assert(document.getElementById('statusRowCount') !== null, '渲染完成后页面应可响应');
+        assert(elapsed < 1500, '万行窗口化渲染应 < 1500ms，实际 ' + elapsed.toFixed(0) + 'ms');
+        // 窗口化证据：数据 10000 行，DOM 实际行数（含 2 个 spacer）必须远小于数据量
+        const trs = document.querySelectorAll('#gridBody tr');
+        assert(trs.length < 100, 'tbody 实际行数应 < 100（窗口化），实际 ' + trs.length);
+        const table = document.getElementById('gridTable');
+        assert(table.classList.contains('virtual-grid'), '应带 virtual-grid 类（table-layout:fixed）');
+        assert(table.querySelector('colgroup col'), '应有 colgroup 显式列宽策略');
+        // spacer 总高 + 窗口行 = 数据总高（换算行距一致，无漂移）
+        const spacerTds = document.querySelectorAll('#gridBody tr.virtual-spacer td');
+        const rowH = gridVirtual.rowH();
+        const topH = parseFloat(spacerTds[0].style.height);
+        const bottomH = parseFloat(spacerTds[1].style.height);
+        const totalH = topH + bottomH + (trs.length - 2) * rowH;
+        assert(Math.abs(totalH - 10000 * rowH) < rowH,
+          'spacer+窗口总高应等于数据总高，实际 ' + totalH.toFixed(1) + ' vs ' + (10000 * rowH));
+        assert(document.querySelector('#gridBody tr[data-row-index="0"]').textContent.includes('N1'), '首行应包含 N1');
+        // 实测行距应接近 CSS 目标 32px（±2px 容差，含 border-collapse 影响）
+        assert(Math.abs(rowH - 32) <= 2, '实测行距应 ≈ 32px，实际 ' + rowH);
+        // 行数上限提示条仍由 10000 行触发（与流式路径语义一致）
+        assert(!document.getElementById('rowLimitNotice').hidden, '万行数据应触发行数上限提示');
+        // 提示条可关闭（原「行数上限」断言随万行测试就地校验，避免依赖测试间状态残留）
+        const noticeEl = document.getElementById('rowLimitNotice');
+        assert(noticeEl.textContent.includes('10000') && noticeEl.textContent.includes('LIMIT'), '提示应含上限 10000 与 LIMIT 建议');
+        noticeEl.querySelector('.result-notice-close').click();
+        assert(noticeEl.hidden, '点击关闭后提示条应隐藏');
       });
 
-      addAssert('行数上限：rows=10000 时提示条出现且可关闭', '边界加固', async () => {
-        const notice = document.getElementById('rowLimitNotice');
-        assert(notice, '应存在行数上限提示条元素');
-        assert(!notice.hidden, '万行结果后提示条应显示');
-        assert(notice.textContent.includes('10000'), '提示应含上限 10000');
-        assert(notice.textContent.includes('LIMIT'), '提示应含增加 LIMIT 建议');
-        notice.querySelector('.result-notice-close').click();
-        assert(notice.hidden, '点击关闭后提示条应隐藏');
+      addAssert('虚拟滑窗：滚动到中部后窗口行号/内容正确，回顶还原', '虚拟滑窗', async () => {
+        // 复用上一条断言的 10000 行虚拟网格
+        const container = document.getElementById('viewGrid');
+        // 滚动到「数据第 5000 行」的内容位置（contentTop 为 tbody 首行流内偏移）
+        const spacer = document.querySelector('#gridBody tr.virtual-spacer');
+        const contentTop = spacer.getBoundingClientRect().top
+          - container.getBoundingClientRect().top + container.scrollTop;
+        container.scrollTop = contentTop + gridVirtual.rowH() * 5000;
+        container.dispatchEvent(new Event('scroll'));
+        await waitFor(() => {
+          const tr = document.querySelector('#gridBody tr[data-row-index="5000"]');
+          return tr && tr.children[0].textContent === '5001';
+        }, 3000, '滚动后第 5000 行应渲染且行号为 5001');
+        const mid = document.querySelector('#gridBody tr[data-row-index="5000"]');
+        assert(mid.textContent.includes('N5001'), '第 5000 行应包含 N5001');
+        // 回顶还原
+        container.scrollTop = 0;
+        container.dispatchEvent(new Event('scroll'));
+        await waitFor(() => document.querySelector('#gridBody tr[data-row-index="0"]'), 3000, '回顶后首行应渲染');
+      });
+
+      addAssert('虚拟滑窗：tbody 事件委托 — 窗口内行点击打开 360° 抽屉', '虚拟滑窗', async () => {
+        const tr = document.querySelector('#gridBody tr[data-row-index="3"]');
+        assert(tr && tr.classList.contains('row-clickable'), '节点行应可点击');
+        tr.click();
+        assert(document.getElementById('nodeDrawer').classList.contains('open'), '点击虚拟行应经委托打开抽屉');
+        assert(document.getElementById('drawerNodePayload').textContent.includes('N4'), '抽屉应显示第 4 行节点的 Payload');
+        document.getElementById('closeDrawerBtn').click();
+        assert(!document.getElementById('nodeDrawer').classList.contains('open'), '抽屉应关闭');
+      });
+
+      addAssert('虚拟滑窗：键盘导航 — 焦点行 ArrowDown 跨窗口滚动跟随', '虚拟滑窗', async () => {
+        const first = document.querySelector('#gridBody tr[data-row-index="0"]');
+        first.focus();
+        assert(document.activeElement === first, '首行应可聚焦');
+        // 连续 ArrowDown 60 次：窗口（约 20-40 行）必然滑动，焦点应始终跟随到新窗口内的行
+        for (let i = 0; i < 60; i++) {
+          const cur = document.activeElement;
+          if (!cur || !cur.dataset || cur.dataset.rowIndex === undefined) break;
+          cur.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+        }
+        await waitFor(() => document.querySelector('#gridBody tr[data-row-index="60"]'), 3000, '第 60 行应因窗口滑动而渲染');
+        const focused = document.querySelector('#gridBody tr[data-row-index="60"]');
+        assert(document.activeElement === focused, '焦点应跟随到第 60 行');
+        // 焦点行应滚入可视区
+        const container = document.getElementById('viewGrid');
+        const cRect = container.getBoundingClientRect();
+        const top = focused.getBoundingClientRect().top;
+        assert(top >= cRect.top && top < cRect.bottom, '焦点行应在可视区内 (top=' + (top - cRect.top).toFixed(0) + ')');
+      });
+
+      addAssert('虚拟滑窗：阈值以下（150 行）仍全量渲染且委托行为一致', '虚拟滑窗', async () => {
+        const small = Array.from({ length: 150 }, (_, i) => ({ node: mkBoundaryNode(i + 1, 'S' + (i + 1)) }));
+        renderGrid(small);
+        assert(!document.getElementById('gridTable').classList.contains('virtual-grid'), '150 行不应启用虚拟滑窗');
+        assert(document.querySelectorAll('#gridBody tr').length === 150, '应全量渲染 150 行');
+        assert(document.querySelector('#gridBody tr[data-row-index="149"]').textContent.includes('S150'), '末行内容正确');
+        document.querySelector('#gridBody tr[data-row-index="0"]').click();
+        assert(document.getElementById('nodeDrawer').classList.contains('open'), '委托点击应打开抽屉');
+        document.getElementById('closeDrawerBtn').click();
+      });
+
+      addAssert('虚拟滑窗：流式迁移 — 大流式结果切虚拟窗口且视口位置保持', '虚拟滑窗', async () => {
+        setEditorValue('GATED_BIG_STREAM RETURN *');
+        const done = executeCurrentQuery();
+        // 首 chunk：meta + 210 行 → 超过阈值迁移为虚拟窗口
+        await waitFor(() => document.getElementById('statusRowCount').textContent === '返回: 210 行', 3000, '暂停点前应已渲染 210 行');
+        assert(gridVirtual, '超过阈值后应迁移为虚拟滑窗');
+        assert(document.querySelectorAll('#gridBody tr').length < 60, '虚拟窗口下 DOM 行数应远小于 210');
+        const container = document.getElementById('viewGrid');
+        assert(container.scrollTop === 0, '流式增长时顶部视口应保持');
+        window.__ndjsonGate.release();
+        await done;
+        await waitFor(() => (currentResultData.rows || []).length === 600, 3000, '放行后应收到全部 600 行');
+        assert(container.scrollTop === 0, '不在底部时视口位置应保持（不跟随增长）');
+      });
+
+      addAssert('虚拟滑窗：流式底部跟随 — 用户钉在底部时自动跟随增长', '虚拟滑窗', async () => {
+        setEditorValue('GATED_BIG_STREAM RETURN *');
+        const done = executeCurrentQuery();
+        await waitFor(() => document.getElementById('statusRowCount').textContent === '返回: 210 行', 3000, '暂停点前应已渲染 210 行');
+        const container = document.getElementById('viewGrid');
+        // 钉在底部后放行：增长应自动跟随
+        container.scrollTop = container.scrollHeight;
+        window.__ndjsonGate.release();
+        await done;
+        await waitFor(() => (currentResultData.rows || []).length === 600, 3000, '放行后应收到全部 600 行');
+        await waitFor(() => document.querySelector('#gridBody tr[data-row-index="599"]'), 3000, '末行应在窗口内渲染');
+        const atBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - gridVirtual.rowH() * 2;
+        assert(atBottom, '钉底时流式增长应自动跟随');
+        renderGrid(FIND_ROWS); // 还原非虚拟状态
+      });
+
+      addAssert('虚拟滑窗：连续往返滚动不产生孤儿行（DOM 行数有界、spacer 一致）', '虚拟滑窗', async () => {
+        // 回归守护：窗口滑出行必须从 DOM 移除（曾因孤儿行累积导致内容高度漂移）
+        const bigRows = Array.from({ length: 10000 }, (_, i) => ({ node: mkBoundaryNode(i + 1, 'N' + (i + 1)) }));
+        renderGrid(bigRows);
+        await waitFor(() => document.querySelectorAll('#gridBody tr:not(.virtual-spacer)').length > 10, 3000, '窗口行应渲染');
+        const container = document.getElementById('viewGrid');
+        for (let i = 0; i < 12; i++) {
+          container.scrollTop = (i % 2 === 0) ? gridVirtual.rowH() * 3000 : gridVirtual.rowH() * 100;
+          container.dispatchEvent(new Event('scroll'));
+          // 等两帧：让 rAF 节流的窗口重算真实执行，往返间窗口滑出/滑入各发生一次
+          await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+        }
+        await waitFor(() => document.querySelector('#gridBody tr[data-row-index="100"]'), 3000, '窗口应对齐最后一次滚动位置');
+        const trCount = document.querySelectorAll('#gridBody tr').length;
+        assert(trCount < 100, '往返滚动后 DOM 行数应有界（无孤儿行累积），实际 ' + trCount);
+        assert(document.querySelectorAll('#gridBody tr.virtual-spacer').length === 2, 'spacer 应恒为 2 个');
+        // top spacer 与最终滚动位置一致（contentTop 实测，含提示条/sticky 表头偏移）
+        const spacerTr = document.querySelector('#gridBody tr.virtual-spacer');
+        const contentTop = spacerTr.getBoundingClientRect().top
+          - container.getBoundingClientRect().top + container.scrollTop;
+        const expectedStart = Math.max(0, Math.floor((container.scrollTop - contentTop) / gridVirtual.rowH()) - 5);
+        const topH = parseFloat(spacerTr.querySelector('td').style.height);
+        assert(topH === expectedStart * gridVirtual.rowH(),
+          'top spacer 应与最终滚动位置一致，实际 ' + topH + ' 期望 ' + expectedStart * gridVirtual.rowH());
+        renderGrid(FIND_ROWS); // 还原
       });
 
       addAssert('图护栏：700 节点自动暂停力学并显示提示条', '边界加固', async () => {
@@ -4160,7 +4589,13 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         const done = executeCurrentQuery();
         // 闸门流在 meta + 3 行后暂停：此刻流未结束，首批必须已经渲染
         await waitFor(() => document.getElementById('statusRowCount').textContent === '返回: 3 行', 3000, '暂停点前应已渲染 3 行');
-        assert(currentResultData === before, '流未结束时 currentResultData 不应提前落地');
+        // 失败现场诊断（PR-11 验收遗留：WebKit 冷启动偶发 1/45）：附带流状态与赋值点线索
+        assert(currentResultData === before,
+          '流未结束时 currentResultData 不应提前落地' +
+          ' [诊断: gate released=' + window.__ndjsonGate.released +
+          ', 状态栏=' + document.getElementById('statusRowCount').textContent +
+          ', 已渲染行=' + document.querySelectorAll('#gridBody tr').length +
+          ', 结果行数=' + (currentResultData && currentResultData.rows ? currentResultData.rows.length : 'n/a') + ']');
         assert(document.querySelectorAll('#gridBody tr').length === 3, '首批 3 行应已进 DOM');
         // 放行余下事件：error 行 + 2 行 + summary
         window.__ndjsonGate.release();

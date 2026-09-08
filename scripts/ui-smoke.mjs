@@ -344,11 +344,27 @@ try {
     noticeHidden: document.getElementById('graphScaleNotice').hidden,
     noticeText: document.getElementById('graphScaleNotice').textContent,
   }));
-  if (guard.gridRows !== 351) throw new Error('LIMIT 500 MATCH 应返回 351 行，实际 ' + guard.gridRows);
+  // 虚拟滑窗（PR-12）：351 行 > 阈值 200 → DOM 只渲染可视窗口（远小于数据量）
+  if (guard.gridRows >= 100) throw new Error('351 行应走虚拟滑窗（tbody DOM 行数 < 100），实际 ' + guard.gridRows);
   if (guard.physicsBtn !== '恢复力学') throw new Error('700 节点应自动暂停力学（按钮应为「恢复力学」），实际: ' + guard.physicsBtn);
   if (guard.noticeHidden) throw new Error('图规模提示条应显示');
   if (!guard.noticeText.includes('300')) throw new Error('图规模提示条应说明 300 阈值: ' + guard.noticeText);
   log('  ✓ 图规模护栏生效 (700 节点 → 力学暂停 + 提示条，页面未冻结)');
+
+  // 冒烟 5：虚拟滑窗滚动 —— 滚到中部后窗口行号/内容必须正确（spacer 换算与实测行距一致）
+  await page.evaluate(() => {
+    const c = document.getElementById('viewGrid');
+    c.scrollTop = 3000;
+    c.dispatchEvent(new Event('scroll'));
+  });
+  await page.waitForFunction(
+    () => {
+      const tr = document.querySelector('#gridBody tr[data-row-index="90"]');
+      return tr && tr.children[0].textContent === '91' && tr.textContent.length > 5;
+    },
+    null, { timeout: 5000 }
+  );
+  log('  ✓ 虚拟滑窗滚动正确 (351 行窗口化，滚动后行号 91 / 内容一致)');
 
   log(`5/6 打开 ${BASE}/ui?selftest=1 断言自检套件`);
   await page.goto(`${BASE}/ui?selftest=1`, { waitUntil: 'domcontentloaded', timeout: 20000 });
