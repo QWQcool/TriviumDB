@@ -315,6 +315,15 @@ try {
   await page.waitForSelector('#nodeDrawer.open', { state: 'hidden', timeout: 5000 });
   log('  ✓ 节点 360° 抽屉打开/关闭');
 
+  // 冒烟 2.5：混合搜索种子 —— 查询结果并入图探索
+  await page.evaluate(() => document.querySelector('[data-view="graph"]').click());
+  await page.waitForSelector('#graphMergeBtn', { state: 'visible', timeout: 5000 });
+  await page.click('#graphMergeBtn');
+  await page.waitForFunction(() => graphNodes.length >= 2, null, { timeout: 5000 });
+  const mergedCount = await page.evaluate(() => graphNodes.length);
+  log('  ✓ 查询结果并入图探索 (graphNodes=' + mergedCount + ')');
+  await page.evaluate(() => document.querySelector('[data-view="grid"]').click());
+
   // 冒烟 3：依次切换三个主标签
   for (const tabId of ['graphExplorePane', 'vectorLabPane', 'queryPane']) {
     await page.click(`[data-tab="${tabId}"]`);

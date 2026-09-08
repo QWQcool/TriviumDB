@@ -1274,6 +1274,7 @@
                 <div class="graph-controls">
                   <button class="btn" id="centerGraphBtn" title="重置居中">居中视角</button>
                   <button class="btn" id="togglePhysicsBtn" title="固定物理模拟">冻结力学</button>
+                  <button class="btn" id="graphMergeBtn" title="把当前查询/检索结果并入图探索（增量 merge）">并入图探索</button>
                   <button class="btn" id="toggleWebGLBtn" title="切换 WebGL/Canvas 渲染后端（加载失败自动回退 Canvas）">WebGL 渲染</button>
                   <button class="btn active" id="colorModeTypeBtn" title="按节点类型着色">按类型</button>
                   <button class="btn" id="colorModeCommunityBtn" title="Louvain 社区检测着色（按需加载）">按社区</button>
@@ -1305,6 +1306,7 @@
                 <section class="inspector-plane">
                   <div class="inspector-plane-title"><span class="inspector-dot" style="background: var(--tri-graph);"></span>Edges</div>
                   <div id="drawerNodeEdges" class="inspector-edges">-</div>
+                  <button class="btn" id="expandNeighborhoodBtn" type="button" title="以当前节点为种子拉取 1 跳邻域并入图探索">⤷ 扩展邻域入图 (+1 跳)</button>
                 </section>
               </div>
             </div>
@@ -1329,6 +1331,7 @@
           <div class="graph-sigma-container" id="standaloneSigmaContainer" hidden></div>
           <div class="graph-controls">
             <button class="btn" id="centerStandaloneBtn" title="重置居中">居中视角</button>
+            <button class="btn" id="graphMergeBtnStandalone" title="把当前查询/检索结果并入图探索（增量 merge）">并入图探索</button>
             <button class="btn" id="toggleWebGLBtnStandalone" title="切换 WebGL/Canvas 渲染后端（加载失败自动回退 Canvas）">WebGL 渲染</button>
             <button class="btn active" id="colorModeTypeBtnStandalone" title="按节点类型着色">按类型</button>
             <button class="btn" id="colorModeCommunityBtnStandalone" title="Louvain 社区检测着色（按需加载）">按社区</button>
@@ -3027,6 +3030,123 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     // ==========================================
     // 拓扑图解析与 Force-Directed Canvas 渲染
     // ==========================================
+    // 节点工厂：renderGraph（全量重建）与搜索驱动探索（增量并入）共用同一创建逻辑
+    function createGraphNode(id, val, key) {
+      const idx = nodeMap.size;
+      const radius = 30 + idx * 11;
+      return {
+        id,
+        label: val.payload?.name || val.payload?.title || `Node ${id}`,
+        typeKey: val.payload?.type || key, // 着色模式切回「按类型」时的还原依据
+        payload: val.payload || {},
+        vector: val.vector || [],
+        x: Math.cos(idx * 2.399963) * radius,
+        y: Math.sin(idx * 2.399963) * radius,
+        vx: 0,
+        vy: 0,
+        color: getNodeColor(val.payload?.type || key)
+      };
+    }
+
+    // 混合搜索种子：把任意查询/检索结果行并入当前图（增量 merge，不重建已有布局）。
+    // 行形状与 renderGraph 相同：{ 别名: 节点对象 } / 混合值 / {source,target} 边；
+    // 同行内先后节点按顺序推断连线；节点与边均去重（幂等，可重复并入）
+    function mergeRowsIntoGraph(rows) {
+      let addedNodes = 0;
+      const seenEdges = new Set(graphEdges.map(e => e.source + '|' + e.target));
+      rows.forEach(row => {
+        const rowNodeIds = [];
+        Object.entries(row).forEach(([key, val]) => {
+          if (!val || typeof val !== 'object') return;
+          if (val.id !== undefined) {
+            const id = String(val.id);
+            if (!nodeMap.has(id)) {
+              const node = createGraphNode(id, val, key);
+              nodeMap.set(id, node);
+              graphNodes.push(node);
+              addedNodes++;
+            }
+            rowNodeIds.push(id);
+          } else if (val.source !== undefined && val.target !== undefined) {
+            const k = val.source + '|' + val.target;
+            if (!seenEdges.has(k)) {
+              seenEdges.add(k);
+              graphEdges.push({ source: String(val.source), target: String(val.target), label: val.label || 'LINK' });
+            }
+          }
+        });
+        for (let i = 1; i < rowNodeIds.length; i++) {
+          const k = rowNodeIds[i - 1] + '|' + rowNodeIds[i];
+          if (!seenEdges.has(k)) {
+            seenEdges.add(k);
+            graphEdges.push({ source: rowNodeIds[i - 1], target: rowNodeIds[i], label: '' });
+          }
+        }
+      });
+      if (addedNodes > 0) {
+        graphTotalNodeCount = Math.max(graphTotalNodeCount, graphNodes.length);
+        applyGraphPhysicsPolicy();
+        if (graphBackend === 'sigma') {
+          if (graphColorMode === 'community') applyCommunityColors();
+          else rebuildSigmaInstances();
+        }
+      }
+      return addedNodes;
+    }
+
+    // k-hop 邻域扩展：以指定节点为种子，用 GET /v1/nodes/{id} 的 edgeVersions 逐跳
+    // 拉取邻居并入图（现有 API 组合；服务端无批量 k-hop 端点，N+1 请求的代价见
+    // docs/webui-api-gaps.md）。单点请求失败不阻断整轮扩展。
+    async function expandNeighborhoodIntoGraph(nodeId, depth) {
+      // 轮次定义：第 0 轮拉种子详情，其后每轮拉上一轮发现的邻居（共 depth+1 轮），
+      // 即 depth=1 → 种子 + 全部 1 跳邻居的节点对象都入库
+      let frontier = [String(nodeId)];
+      const visited = new Set();
+      let addedNodes = 0;
+      const seenEdges = new Set(graphEdges.map(e => e.source + '|' + e.target));
+      for (let d = 0; d <= depth; d++) {
+        const next = [];
+        for (const id of frontier) {
+          if (visited.has(id)) continue;
+          visited.add(id);
+          try {
+            const res = await fetch(`${API_BASE}/v1/nodes/${id}`);
+            if (!res.ok) continue;
+            const data = await res.json();
+            const node = data.node || {};
+            const sid = String(node.id ?? id);
+            if (!nodeMap.has(sid)) {
+              const gn = createGraphNode(sid, node, node.payload?.type);
+              nodeMap.set(sid, gn);
+              graphNodes.push(gn);
+              addedNodes++;
+            }
+            (data.edgeVersions || []).forEach(ev => {
+              const tid = String(ev.targetId);
+              const k = sid + '|' + tid;
+              if (!seenEdges.has(k)) {
+                seenEdges.add(k);
+                graphEdges.push({ source: sid, target: tid, label: ev.label || 'LINK' });
+              }
+              if (!visited.has(tid)) {
+                next.push(tid);
+              }
+            });
+          } catch (_) { /* 单点失败不阻断整轮扩展 */ }
+        }
+        frontier = next;
+      }
+      if (addedNodes > 0) {
+        graphTotalNodeCount = Math.max(graphTotalNodeCount, graphNodes.length);
+        applyGraphPhysicsPolicy();
+        if (graphBackend === 'sigma') {
+          if (graphColorMode === 'community') applyCommunityColors();
+          else rebuildSigmaInstances();
+        }
+      }
+      return addedNodes;
+    }
+
     function renderGraph(rows) {
       graphNodes = [];
       graphEdges = [];
@@ -3053,20 +3173,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
                 return;
               }
               // 黄金角螺旋初始位置：相比纯随机可显著减少初始重叠
-              const idx = nodeMap.size;
-              const radius = 30 + idx * 11;
-              const node = {
-                id,
-                label: val.payload?.name || val.payload?.title || `Node ${id}`,
-                typeKey: val.payload?.type || key, // 着色模式切回「按类型」时的还原依据
-                payload: val.payload || {},
-                vector: val.vector || [],
-                x: Math.cos(idx * 2.399963) * radius,
-                y: Math.sin(idx * 2.399963) * radius,
-                vx: 0,
-                vy: 0,
-                color: getNodeColor(val.payload?.type || key)
-              };
+              const node = createGraphNode(id, val, key);
               nodeMap.set(id, node);
               graphNodes.push(node);
               rowNodeIds.push(id);
@@ -3320,6 +3427,19 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
 
       document.getElementById('closeDrawerBtn').addEventListener('click', () => {
         document.getElementById('nodeDrawer').classList.remove('open');
+      });
+
+      // k-hop 邻域扩展：以抽屉当前节点为种子拉取 1 跳邻域并入图
+      document.getElementById('expandNeighborhoodBtn').addEventListener('click', async (e) => {
+        if (currentDrawerNodeId === null) return;
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        try {
+          const added = await expandNeighborhoodIntoGraph(currentDrawerNodeId, 1);
+          showToast(added > 0 ? `已扩展 ${added} 个邻域节点入图` : '邻域节点均已在图中');
+        } finally {
+          btn.disabled = false;
+        }
       });
     }
 
@@ -3761,6 +3881,21 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         redrawGraph();
       });
 
+      // 混合搜索种子：当前查询/检索结果并入图探索（两视图按钮同语义）
+      ['graphMergeBtn', 'graphMergeBtnStandalone'].forEach(id => {
+        document.getElementById(id).addEventListener('click', () => {
+          const rows = currentResultData && currentResultData.rows;
+          if (!rows || !rows.length) {
+            showToast('当前没有可并入的查询结果');
+            return;
+          }
+          const added = mergeRowsIntoGraph(rows);
+          showToast(added > 0
+            ? `已并入 ${added} 个新节点（图内现共 ${graphNodes.length} 个）`
+            : '结果节点均已在图中');
+        });
+      });
+
       // 独立画布交互：点击节点开抽屉 / 拖拽平移 / 滚轮缩放（与查询图视图行为一致）
       const saCanvas = document.getElementById('standaloneGraphCanvas');
       let saDragging = false;
@@ -3795,7 +3930,10 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     // ==========================================
     // 节点 360° 详情抽屉 (Trinity 三平面: Payload / Vector / Edges)
     // ==========================================
+    let currentDrawerNodeId = null; // 当前抽屉节点（k-hop 邻域扩展的种子）
+
     function openNodeDrawer(node) {
+      currentDrawerNodeId = node.id !== undefined ? String(node.id) : null;
       document.getElementById('drawerNodeTitle').textContent = `节点: #${node.id} (${node.label})`;
 
       // 平面 1: Payload（可折叠 JSON 树）
@@ -4490,6 +4628,13 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         const nodeMatch = path.match(/^\/v1\/nodes\/([^/?]+)/);
         if (nodeMatch) {
           const id = nodeMatch[1];
+          // k-hop 扩展 fixture：99 --KNOWS--> 98（98 无出边）
+          if (id === '99') {
+            return jsonRes({ node: { type: 'node', id: '99', payload: { name: 'KSeed', type: 'person' }, vector: [] }, edgeVersions: [{ targetId: '98', label: 'KNOWS', version: 1 }] });
+          }
+          if (id === '98') {
+            return jsonRes({ node: { type: 'node', id: '98', payload: { name: 'KHop2', type: 'person' }, vector: [] }, edgeVersions: [] });
+          }
           const node = id === '1' ? NODE_ALICE : (id === '2' ? NODE_BOB : NODE_PAPER);
           return jsonRes({ node, edgeVersions: id === '1' ? [{ targetId: '2', label: 'KNOWS', version: 1 }] : [] });
         }
@@ -5151,6 +5296,45 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           prefersReducedMotion = origPrefersReducedMotion;
         }
         renderGraph(MATCH_ROWS); // 还原常规状态
+      });
+
+      // ---------- 搜索驱动探索（PR-14）：混合搜索种子 / k-hop 邻域扩展 ----------
+      addAssert('混合搜索种子：查询结果并入图（增量 merge + 幂等去重）', '搜索驱动探索', async () => {
+        document.querySelector('[data-view="graph"]').click();
+        renderGraph(MATCH_ROWS);
+        assert(graphNodes.length === 3, '初始图应有 3 节点');
+        const kSeedRow = { node: { type: 'node', id: '99', payload: { name: 'KSeed', type: 'person' }, vector: [] } };
+        assert(mergeRowsIntoGraph([kSeedRow]) === 1, '并入应新增 1 节点');
+        assert(graphNodes.length === 4, '合并后应 4 节点，实际 ' + graphNodes.length);
+        assert(mergeRowsIntoGraph([kSeedRow]) === 0, '重复并入应幂等（0 新增）');
+        assert(graphNodes.length === 4, '幂等后仍 4 节点');
+        // 双节点行：同行节点按顺序推断连线
+        const pairRow = { node: kSeedRow.node, node2: { type: 'node', id: '98', payload: { name: 'KPeer' }, vector: [] } };
+        assert(mergeRowsIntoGraph([pairRow]) === 1, '双节点行应新增 1 节点');
+        assert(graphEdges.some(e => e.source === '99' && e.target === '98'), '同行节点应推断连线 99→98');
+      });
+
+      addAssert('k-hop 邻域扩展：抽屉按钮以当前节点为种子拉取邻居入图', '搜索驱动探索', async () => {
+        // 重建干净图（test 1 的 pairRow 已推断过 99→98 空标签边，会触发边去重）
+        renderGraph(MATCH_ROWS);
+        mergeRowsIntoGraph([{ node: { type: 'node', id: '99', payload: { name: 'KSeed', type: 'person' }, vector: [] } }]);
+        openNodeDrawer({ id: '99', label: 'KSeed', payload: { name: 'KSeed' }, vector: [] });
+        assert(currentDrawerNodeId === '99', '抽屉应记录种子节点 id');
+        document.getElementById('expandNeighborhoodBtn').click();
+        await waitFor(() => nodeMap.has('98'), 3000, '1 跳邻居 98 应入图');
+        assert(graphEdges.some(e => e.source === '99' && e.target === '98' && e.label === 'KNOWS'), '扩展边应带 KNOWS label');
+        assert(graphNodes.find(n => n.id === '98').payload.name === 'KHop2', '邻居节点应来自真实节点响应');
+        await waitFor(() => document.querySelector('#toastStack .toast'), 2000, '应有扩展结果 toast');
+        document.getElementById('closeDrawerBtn').click();
+      });
+
+      addAssert('混合搜索种子：无查询结果时并入按钮给出提示', '搜索驱动探索', async () => {
+        const saved = currentResultData;
+        currentResultData = null;
+        document.getElementById('graphMergeBtn').click();
+        await waitFor(() => document.querySelector('#toastStack .toast'), 2000, '应出现无可并入结果提示');
+        currentResultData = saved;
+        renderGrid(FIND_ROWS); // 还原
       });
 
       // 语法高亮
