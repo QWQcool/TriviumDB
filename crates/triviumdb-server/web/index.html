@@ -1790,7 +1790,213 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       }
     }
 
+    // ==========================================
     // 执行当前 TQL
+    // 只读查询携带 Accept: application/x-ndjson 走流式路径（PR-11）：
+    //   {"type":"meta"} → {"type":"row","row":{...}}* → {"type":"summary"}，
+    // 行级错误行 {"type":"error","detail":...} 不中断流，作为错误行内联显示。
+    // mutation 与 JSON 兜底（服务端 400/500 或老版本忽略 Accept）保持原 JSON 路径。
+    // ==========================================
+    const NDJSON_BATCH_SIZE = 200; // 流式渲染批次：缓冲满立即 flush，否则每帧一次（rAF）
+    let __lastTqlRequest = null;   // 自检观测点：最近一次 /v1/tql 请求头快照（mutation 是否携带 NDJSON Accept）
+
+    // 行级 JSON 解析：坏行不致命，转为 error 事件继续消费流
+    function parseNdjsonLine(line) {
+      try {
+        return JSON.parse(line);
+      } catch (e) {
+        return { type: 'error', detail: 'NDJSON 行解析失败: ' + e.message };
+      }
+    }
+
+    // 逐行消费 NDJSON 流：跨 chunk 残行缓冲，按 \n 切分，流末残余行兜底
+    async function consumeNdjsonStream(response, onEvent) {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      const emitLine = (raw) => {
+        const line = raw.trim();
+        if (line) onEvent(parseNdjsonLine(line));
+      };
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let nl;
+        while ((nl = buffer.indexOf('\n')) !== -1) {
+          emitLine(buffer.slice(0, nl));
+          buffer = buffer.slice(nl + 1);
+        }
+      }
+      buffer += decoder.decode();
+      emitLine(buffer);
+    }
+
+    // 流式网格增量渲染器：首行到达即建表头与首批行，之后逐批 append。
+    // NDJSON 流式下列集合无法预先得知：新列在流中动态出现时补 <th>。
+    function createStreamGrid() {
+      const head = document.getElementById('gridHead');
+      const body = document.getElementById('gridBody');
+      const cols = ['#'];
+      const seen = new Set(cols);
+      let rendered = 0;
+      const grid = {
+        cols,
+        begin() {
+          head.innerHTML = '';
+          body.innerHTML = '';
+          cols.forEach(c => {
+            const th = document.createElement('th');
+            th.textContent = c;
+            head.appendChild(th);
+          });
+        },
+        ensureCols(row) {
+          Object.keys(row).forEach(k => {
+            if (seen.has(k)) return;
+            seen.add(k);
+            cols.push(k);
+            const th = document.createElement('th');
+            th.textContent = k;
+            head.appendChild(th);
+          });
+        },
+        appendRows(batchRows) {
+          batchRows.forEach(r => grid.ensureCols(r));
+          const frag = document.createDocumentFragment();
+          batchRows.forEach(row => frag.appendChild(buildGridRow(row, rendered++, cols)));
+          body.appendChild(frag);
+        },
+        appendErrorRow(detail) {
+          // 行级错误：textContent 渲染（XSS 安全），不中断流
+          const tr = document.createElement('tr');
+          const td = document.createElement('td');
+          td.colSpan = cols.length;
+          td.style.background = 'var(--danger-bg)';
+          td.style.color = 'var(--danger)';
+          td.style.padding = '10px 12px';
+          td.textContent = '⚠ 流式行错误: ' + detail;
+          tr.appendChild(td);
+          body.appendChild(tr);
+        }
+      };
+      return grid;
+    }
+
+    // NDJSON 流式消费与增量渲染：meta 更新 Generation；row 批量缓冲入网格；
+    // summary 终态收尾；结束后组装与 JSON 路径同形状的 currentResultData
+    // （导出 JSON / 图拓扑 / JSON 树视图共用，导出仍为全量行）
+    async function consumeNdjsonResult(response, query, startTime) {
+      const rows = [];
+      const streamErrors = [];
+      let generation = null;
+      let summary = null;
+      let grid = null;
+      let batch = [];
+      let flushScheduled = false;
+
+      const updateRowCount = () => {
+        document.getElementById('statusRowCount').textContent = `返回: ${rows.length} 行`;
+        // 10000 行上限提示改为基于流式累计行数（语义不变）
+        showRowLimitNotice(rows.length >= SERVER_MAX_QUERY_ROWS);
+      };
+      const flushBatch = () => {
+        flushScheduled = false;
+        if (!batch.length) return;
+        grid.appendRows(batch);
+        batch = [];
+        updateRowCount();
+      };
+      const scheduleFlush = () => {
+        if (flushScheduled) return;
+        flushScheduled = true;
+        requestAnimationFrame(flushBatch);
+      };
+
+      document.getElementById('statusAffected').textContent = '只读';
+
+      await consumeNdjsonStream(response, (evt) => {
+        if (!evt || typeof evt !== 'object' || !evt.type) return;
+        switch (evt.type) {
+          case 'meta':
+            generation = evt.generation || generation;
+            if (generation) {
+              currentGeneration = generation;
+              document.getElementById('headerGeneration').textContent = `Generation: ${generation}`;
+            }
+            break;
+          case 'row':
+            if (!grid) {
+              grid = createStreamGrid();
+              grid.begin();
+            }
+            rows.push(evt.row);
+            batch.push(evt.row);
+            if (batch.length >= NDJSON_BATCH_SIZE) flushBatch();
+            else scheduleFlush();
+            break;
+          case 'error':
+            streamErrors.push(evt.detail || String(evt));
+            if (!grid) {
+              grid = createStreamGrid();
+              grid.begin();
+            }
+            grid.appendErrorRow(evt.detail || '未知流式错误');
+            break;
+          case 'summary':
+            summary = evt;
+            break;
+          default:
+            break;
+        }
+      });
+
+      // 流结束收尾：冲掉残余批次（此后 rAF 里的迟到 flush 对空批次是 no-op）
+      flushBatch();
+
+      // 组装与 JSON 响应同形状的结果对象（rows 全量在内存，导出/视图行为一致）
+      currentResultData = Object.assign(
+        { rows, row_count: rows.length },
+        generation ? { generation } : {},
+        summary ? { rowCount: summary.rowCount, profile: summary.profile, indexAdvice: summary.indexAdvice } : {},
+        streamErrors.length ? { streamErrors } : {}
+      );
+      saveHistory(query);
+      updateRowCount();
+      document.getElementById('statusAffected').textContent = '只读';
+      document.getElementById('statusQueryTime').textContent = `耗时: ${(performance.now() - startTime).toFixed(1)} ms`;
+
+      if (!grid) {
+        // 空结果（仅 meta + summary rowCount 0）：与既有空态渲染保持一致
+        renderGrid([]);
+      }
+      renderGraph(rows);
+      renderRawJson(currentResultData);
+      animateResultsIn();
+    }
+
+    // JSON 结果统一落地（mutation 与流式兜底共用，行为与历史版本一致）
+    function applyJsonResult(data, isMutation, query) {
+      currentResultData = data;
+      saveHistory(query);
+      if (data.generation) {
+        currentGeneration = data.generation;
+        document.getElementById('headerGeneration').textContent = `Generation: ${data.generation}`;
+      }
+      if (isMutation) {
+        document.getElementById('statusAffected').textContent = `影响: ${data.affected || 0} 行`;
+        document.getElementById('statusRowCount').textContent = `创建: ${(data.createdIds || []).length} 个`;
+        renderMutationResult(data);
+      } else {
+        const rows = data.rows || [];
+        document.getElementById('statusRowCount').textContent = `返回: ${rows.length} 行`;
+        document.getElementById('statusAffected').textContent = '只读';
+        renderGrid(rows);
+        renderGraph(rows);
+        renderRawJson(data);
+      }
+    }
+
     async function executeCurrentQuery() {
       const query = document.getElementById('tqlInput').value.trim();
       if (!query) return;
@@ -1804,48 +2010,40 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       showSkeleton();
 
       const startTime = performance.now();
+      const requestHeaders = { 'Content-Type': 'application/json' };
+      // 只读查询声明可接受流式 NDJSON；mutation 不携带
+      // （服务端 mutation 恒返回 JSON，且避免向老版本服务器声明无法兑现的 Accept）
+      if (!isMutation) requestHeaders['Accept'] = 'application/x-ndjson';
+      __lastTqlRequest = { accept: requestHeaders['Accept'] || '', mutation: isMutation };
 
       try {
         const response = await fetch(`${API_BASE}/v1/tql`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: requestHeaders,
           body: JSON.stringify({ query, mutation: isMutation, profile: isProfile })
         });
 
         const elapsed = (performance.now() - startTime).toFixed(1);
         document.getElementById('statusQueryTime').textContent = `耗时: ${elapsed} ms`;
 
+        // 非 2xx：服务端错误（400/500）恒为 JSON 错误体，走既有渲染
         if (!response.ok) {
           const errorJson = await response.json().catch(() => ({ title: '未知错误', detail: response.statusText }));
           renderError(errorJson);
           return;
         }
 
-        const data = await response.json();
-        currentResultData = data;
+        // 流式判定以响应 Content-Type 为准：老版本服务器忽略 Accept 返回 JSON 时自动兜底
+        const contentType = response.headers.get('Content-Type') || '';
+        const isNdjson = !isMutation && contentType.indexOf('application/x-ndjson') !== -1;
 
-        // 保存历史
-        saveHistory(query);
-
-        // 更新 Generation
-        if (data.generation) {
-          currentGeneration = data.generation;
-          document.getElementById('headerGeneration').textContent = `Generation: ${data.generation}`;
+        if (!isNdjson) {
+          const data = await response.json();
+          applyJsonResult(data, isMutation, query);
+          return;
         }
 
-        if (isMutation) {
-          document.getElementById('statusAffected').textContent = `影响: ${data.affected || 0} 行`;
-          document.getElementById('statusRowCount').textContent = `创建: ${(data.createdIds || []).length} 个`;
-          renderMutationResult(data);
-        } else {
-          const rows = data.rows || [];
-          document.getElementById('statusRowCount').textContent = `返回: ${rows.length} 行`;
-          document.getElementById('statusAffected').textContent = '只读';
-          renderGrid(rows);
-          renderGraph(rows);
-          renderRawJson(data);
-        }
-
+        await consumeNdjsonResult(response, query, startTime);
       } catch (err) {
         renderError({ title: '网络请求失败', detail: err.message });
       } finally {
@@ -2058,6 +2256,53 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       notice.hidden = !visible;
     }
 
+    // 单行构建（textContent 渲染路径保持不变：XSS 安全，超长字符串走 CSS ellipsis）。
+    // 模块级函数：renderGrid 与 NDJSON 流式增量渲染（createStreamGrid）共用同一套
+    // 单元格渲染与节点行 360° 抽屉入口逻辑，保证两条路径视觉/行为一致。
+    function buildGridRow(row, idx, cols) {
+      const tr = document.createElement('tr');
+      // 节点行可点击：打开 360° 详情抽屉（hover 提示 + 键盘可达）
+      const node = findNodeInRow(row);
+      if (node) {
+        tr.classList.add('row-clickable');
+        tr.tabIndex = 0;
+        tr.setAttribute('role', 'button');
+        tr.title = '点击查看该节点的 360° 视图 (Payload / Vector / Edges)';
+        const openInspector = () => openNodeDrawer({
+          id: node.id,
+          label: node.payload?.name || node.payload?.title || `Node ${node.id}`,
+          payload: node.payload || {},
+          vector: node.vector || []
+        });
+        tr.addEventListener('click', openInspector);
+        tr.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            openInspector();
+          }
+        });
+      }
+      cols.forEach(c => {
+        const td = document.createElement('td');
+        if (c === '#') {
+          td.textContent = idx + 1;
+          td.style.color = 'var(--text-light)';
+        } else {
+          const val = row[c];
+          if (val === undefined || val === null) {
+            td.textContent = 'null';
+            td.style.color = 'var(--text-light)';
+          } else if (typeof val === 'object') {
+            td.textContent = JSON.stringify(val);
+          } else {
+            td.textContent = String(val);
+          }
+        }
+        tr.appendChild(td);
+      });
+      return tr;
+    }
+
     function renderGrid(rows) {
       const head = document.getElementById('gridHead');
       const body = document.getElementById('gridBody');
@@ -2088,55 +2333,10 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         head.appendChild(th);
       });
 
-      // 单行构建（textContent 渲染路径保持不变：XSS 安全，超长字符串走 CSS ellipsis）
-      const buildRow = (row, idx) => {
-        const tr = document.createElement('tr');
-        // 节点行可点击：打开 360° 详情抽屉（hover 提示 + 键盘可达）
-        const node = findNodeInRow(row);
-        if (node) {
-          tr.classList.add('row-clickable');
-          tr.tabIndex = 0;
-          tr.setAttribute('role', 'button');
-          tr.title = '点击查看该节点的 360° 视图 (Payload / Vector / Edges)';
-          const openInspector = () => openNodeDrawer({
-            id: node.id,
-            label: node.payload?.name || node.payload?.title || `Node ${node.id}`,
-            payload: node.payload || {},
-            vector: node.vector || []
-          });
-          tr.addEventListener('click', openInspector);
-          tr.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              openInspector();
-            }
-          });
-        }
-        cols.forEach(c => {
-          const td = document.createElement('td');
-          if (c === '#') {
-            td.textContent = idx + 1;
-            td.style.color = 'var(--text-light)';
-          } else {
-            const val = row[c];
-            if (val === undefined || val === null) {
-              td.textContent = 'null';
-              td.style.color = 'var(--text-light)';
-            } else if (typeof val === 'object') {
-              td.textContent = JSON.stringify(val);
-            } else {
-              td.textContent = String(val);
-            }
-          }
-          tr.appendChild(td);
-        });
-        return tr;
-      };
-
+      // 小结果集：同步一次性构建（与历史行为一致，自检断言可直接读取 DOM）
       if (rows.length <= GRID_CHUNK_SIZE) {
-        // 小结果集：同步一次性构建（与历史行为一致，自检断言可直接读取 DOM）
         const frag = document.createDocumentFragment();
-        rows.forEach((row, idx) => frag.appendChild(buildRow(row, idx)));
+        rows.forEach((row, idx) => frag.appendChild(buildGridRow(row, idx, cols)));
         body.appendChild(frag);
         animateResultsIn();
         return;
@@ -2148,7 +2348,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         const frag = document.createDocumentFragment();
         const end = Math.min(start + GRID_CHUNK_SIZE, rows.length);
         for (; start < end; start++) {
-          frag.appendChild(buildRow(rows[start], start));
+          frag.appendChild(buildGridRow(rows[start], start, cols));
         }
         body.appendChild(frag);
         if (start < rows.length) {
@@ -3384,6 +3584,52 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         headers: { 'Content-Type': 'application/json' }
       });
 
+      // ---------- NDJSON 流式 mock（PR-11）：模拟服务端流式响应 ----------
+      const NDJSON_CT = { 'Content-Type': 'application/x-ndjson; charset=utf-8' };
+      // 定长切块故意不与行边界对齐：单行 JSON 被拆进多个 chunk，验证跨 chunk 残行拼接
+      function ndjsonRes(lines, chunkSize) {
+        const enc = new TextEncoder();
+        const size = chunkSize || 64;
+        const payload = lines.map(l => JSON.stringify(l) + '\n').join('');
+        const chunks = [];
+        for (let i = 0; i < payload.length; i += size) chunks.push(payload.slice(i, i + size));
+        let sent = 0;
+        return new Response(new ReadableStream({
+          pull(controller) {
+            if (sent < chunks.length) controller.enqueue(enc.encode(chunks[sent++]));
+            else controller.close();
+          }
+        }), { status: 200, headers: NDJSON_CT });
+      }
+      // 可控放行的流：start 发出前 headCount 个事件后暂停，release 时一次性 enqueue 余下事件并关闭。
+      // 不依赖 pull 协议（pull 中不 enqueue 会导致读取端挂起行为因引擎实现而异），
+      // 直接持有 controller 引用主动推送 —— 行为确定，用于验证「流未结束已渲染首批」。
+      window.__ndjsonGate = { released: false, release() { window.__ndjsonGate.released = true; } };
+      function gatedNdjsonRes(lines, headCount) {
+        const enc = new TextEncoder();
+        const head = headCount || 1;
+        let controllerRef = null;
+        window.__ndjsonGate.release = () => {
+          window.__ndjsonGate.released = true;
+          if (!controllerRef) return;
+          for (let i = head; i < lines.length; i++) {
+            controllerRef.enqueue(enc.encode(JSON.stringify(lines[i]) + '\n'));
+          }
+          controllerRef.close();
+        };
+        return new Response(new ReadableStream({
+          start(controller) {
+            controllerRef = controller;
+            // 首个 chunk：meta + 前 head-1 行一次性发出，之后暂停等待放行
+            controller.enqueue(enc.encode(lines.slice(0, head).map(l => JSON.stringify(l) + '\n').join('')));
+          }
+        }), { status: 200, headers: NDJSON_CT });
+      }
+      // NDJSON 事件行组装：meta → row* → summary（与后端 query_response 的流式形状一致）
+      const metaLine = { type: 'meta', generation: GEN };
+      const summaryLine = (n) => ({ type: 'summary', rowCount: n, profile: { totalMicros: 1234, executionMicros: 900 }, indexAdvice: [] });
+      const rowLines = (rows) => rows.map(r => ({ type: 'row', row: r }));
+
       window.fetch = async function (input, init) {
         const url = typeof input === 'string' ? input : (input && input.url) || '';
         const path = url.replace(/^https?:\/\/[^/]+/, '');
@@ -3395,12 +3641,46 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           let req = {};
           try { req = JSON.parse((init && init.body) || '{}'); } catch (_) {}
           const q = String(req.query || '');
+          const h = (init && init.headers) || {};
+          const accept = String(h['Accept'] || h['accept'] || '');
+          // 自检观测点：请求头快照（验证 mutation 不携带 NDJSON Accept）
+          window.__lastTqlObserved = { accept, mutation: !!req.mutation, query: q };
           if (req.mutation) return jsonRes({ rows: [], row_count: 0, affected: 1, createdIds: ['901'], generation: GEN });
-          if (q.indexOf('MATCH') === 0) return jsonRes({ rows: MATCH_ROWS, row_count: MATCH_ROWS.length, generation: GEN });
-          if (q.indexOf('SEARCH') === 0) {
-            return jsonRes({ rows: [{ hit: NODE_ALICE, score: { type: 'float', value: 0.98 } }], row_count: 1, generation: GEN });
+          // 强制 JSON 400：验证非流式错误体走 renderError 兜底
+          if (q.indexOf('FORCE_ERROR') === 0) return jsonRes({ title: '流式兜底错误', detail: 'SELFTEST_FORCE_400' }, 400);
+          // 行集合按查询语义选择（与 JSON mock 一致）
+          let rows;
+          if (q.indexOf('MATCH') === 0) rows = MATCH_ROWS;
+          else if (q.indexOf('SEARCH') === 0) rows = [{ hit: NODE_ALICE, score: { type: 'float', value: 0.98 } }];
+          else rows = FIND_ROWS;
+          // 特殊流式 fixture（NDJSON 自检专用）
+          if (q.indexOf('EMPTY_STREAM') === 0) {
+            return ndjsonRes([metaLine, summaryLine(0)]);
           }
-          return jsonRes({ rows: FIND_ROWS, row_count: FIND_ROWS.length, generation: GEN });
+          if (q.indexOf('STREAM_ERR') === 0) {
+            const errRows = [{ node: { type: 'node', id: '81', payload: { name: 'StreamA', type: 'person' }, vector: [] } },
+              { node: { type: 'node', id: '82', payload: { name: 'StreamE1', type: 'person' }, vector: [] } },
+              { node: { type: 'node', id: '83', payload: { name: 'StreamE2', type: 'person' }, vector: [] } }];
+            const errLine = { type: 'error', detail: 'SELFTEST_STREAM_ERROR row encoding failed' };
+            return ndjsonRes([metaLine, rowLines([errRows[0]])[0], errLine, rowLines([errRows[1]])[0], rowLines([errRows[2]])[0], summaryLine(3)]);
+          }
+          if (q.indexOf('GATED_STREAM') === 0) {
+            const gateRows = FIND_ROWS.concat([
+              { node: { type: 'node', id: '91', payload: { name: 'StreamG4', type: 'person' }, vector: [] } },
+              { node: { type: 'node', id: '92', payload: { name: 'StreamG5', type: 'person' }, vector: [] } }
+            ]);
+            const errLine = { type: 'error', detail: 'SELFTEST_GATED_ERROR' };
+            const lines = [metaLine, ...rowLines(gateRows.slice(0, 3)), errLine, ...rowLines(gateRows.slice(3)), summaryLine(5)];
+            window.__ndjsonGate.released = false;
+            // 首个 chunk 发 meta + 3 行后暂停：验证「流未结束首批已渲染」
+            return gatedNdjsonRes(lines, 4);
+          }
+          // 无 NDJSON Accept：走旧 JSON 形状（Vector Lab 候选加载等内部调用不带 Accept）
+          const wantsNdjson = accept.split(',').some(s => s.trim() === 'application/x-ndjson');
+          if (!wantsNdjson) {
+            return jsonRes({ rows, row_count: rows.length, generation: GEN });
+          }
+          return ndjsonRes([metaLine, ...rowLines(rows), summaryLine(rows.length)]);
         }
         const nodeMatch = path.match(/^\/v1\/nodes\/([^/?]+)/);
         if (nodeMatch) {
@@ -3860,6 +4140,88 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         assert(document.documentElement.getAttribute('data-theme') === 'dark', '主题命令应切到 dark');
         assert(localStorage.getItem('tdb_theme') === 'dark', '主题命令应持久化');
         document.getElementById('themeToggleBtn').click(); // 还原 light
+      });
+
+      // ---------- NDJSON 流式（PR-11）：流式解析/批量渲染/错误兜底/结果完整性 ----------
+      addAssert('NDJSON 流式：mutation 请求不携带 NDJSON Accept 且仍走 JSON 渲染', 'NDJSON 流式', async () => {
+        document.getElementById('mutationCheck').checked = true;
+        document.getElementById('tqlInput').value = 'CREATE ({name: "StreamMut"})';
+        await executeCurrentQuery();
+        document.getElementById('mutationCheck').checked = false;
+        const obs = window.__lastTqlObserved;
+        assert(obs && obs.mutation === true, '观测点应记录 mutation 请求');
+        assert(obs.accept.indexOf('application/x-ndjson') === -1, 'mutation 不应携带 NDJSON Accept，实际: ' + obs.accept);
+        assert(document.getElementById('gridBody').textContent.indexOf('写入成功') !== -1, 'mutation 应保持 JSON 渲染路径');
+      });
+
+      addAssert('NDJSON 流式：首行早现（流未结束已渲染首批）且行计数递增', 'NDJSON 流式', async () => {
+        setEditorValue('GATED_STREAM FIND {type: "person"} RETURN *');
+        const before = currentResultData;
+        const done = executeCurrentQuery();
+        // 闸门流在 meta + 3 行后暂停：此刻流未结束，首批必须已经渲染
+        await waitFor(() => document.getElementById('statusRowCount').textContent === '返回: 3 行', 3000, '暂停点前应已渲染 3 行');
+        assert(currentResultData === before, '流未结束时 currentResultData 不应提前落地');
+        assert(document.querySelectorAll('#gridBody tr').length === 3, '首批 3 行应已进 DOM');
+        // 放行余下事件：error 行 + 2 行 + summary
+        window.__ndjsonGate.release();
+        await done;
+        await waitFor(() => (currentResultData.rows || []).length === 5, 3000, '放行后应收到全部 5 行');
+        assert(document.getElementById('gridBody').textContent.indexOf('StreamG5') !== -1, '末批行应渲染');
+        assert(document.getElementById('gridBody').textContent.indexOf('SELFTEST_GATED_ERROR') !== -1, '放行后的 error 行应内联显示');
+      });
+
+      addAssert('NDJSON 流式：跨 chunk 残行拼接 + meta/summary 落地（Generation/profile/indexAdvice）', 'NDJSON 流式', async () => {
+        setEditorValue('FIND {type: "person"} RETURN * LIMIT 25');
+        await executeCurrentQuery();
+        assert((currentResultData.rows || []).length === 3, '残行拼接后应得 3 行');
+        assert(document.getElementById('headerGeneration').textContent.indexOf(GEN) !== -1, 'meta 应更新 Generation 徽标');
+        assert(currentResultData.profile && currentResultData.indexAdvice, 'summary 应写入 profile/indexAdvice');
+        assert(currentResultData.rowCount === 3, 'summary.rowCount 应落地');
+        // JSON 树懒渲染：根/一层内容（generation/row_count）默认展开可见，深层 payload 需手动展开
+        assert(document.getElementById('rawJsonOutput').textContent.includes(GEN), 'JSON 树应承载流式最终结果 (generation)');
+        assert(document.getElementById('statusAffected').textContent === '只读', '只读查询应标记只读');
+      });
+
+      addAssert('NDJSON 流式：error 行不中断流，错误内联且后续行继续渲染', 'NDJSON 流式', async () => {
+        setEditorValue('STREAM_ERR FIND {type: "person"} RETURN *');
+        await executeCurrentQuery();
+        assert((currentResultData.rows || []).length === 3, 'error 行前后的数据行都应到达');
+        const body = document.getElementById('gridBody').textContent;
+        assert(body.indexOf('SELFTEST_STREAM_ERROR') !== -1, '行级错误应内联显示');
+        assert(body.indexOf('StreamE1') !== -1 && body.indexOf('StreamE2') !== -1, 'error 后续行应继续渲染');
+        assert((currentResultData.streamErrors || []).length === 1, 'streamErrors 应记录 1 条，实际 ' + (currentResultData.streamErrors || []).length);
+        assert(!document.querySelector('#gridBody img') && !document.querySelector('#gridBody script'), '错误行应文本渲染（XSS 安全）');
+      });
+
+      addAssert('NDJSON 流式：空流（仅 meta+summary rowCount 0）显示空态', 'NDJSON 流式', async () => {
+        setEditorValue('EMPTY_STREAM FIND {type: "ghost"} RETURN *');
+        await executeCurrentQuery();
+        assert(document.getElementById('gridBody').textContent.indexOf('没有匹配的行') !== -1, '空流应显示空结果占位');
+        assert((currentResultData.rows || []).length === 0, '空流 rows 应为 0');
+        assert(currentResultData.rowCount === 0, '空流 summary.rowCount 应为 0');
+        assert(document.getElementById('rowLimitNotice').hidden, '空流不应触发行数上限提示');
+      });
+
+      addAssert('NDJSON 流式：非 2xx JSON 错误体走 renderError 兜底', 'NDJSON 流式', async () => {
+        setEditorValue('FORCE_ERROR FIND {x: 1}');
+        await executeCurrentQuery();
+        const body = document.getElementById('gridBody').textContent;
+        assert(body.indexOf('流式兜底错误') !== -1 && body.indexOf('SELFTEST_FORCE_400') !== -1, '应渲染 JSON 错误体');
+        assert(document.getElementById('rawJsonOutput').textContent.includes('SELFTEST_FORCE_400'), '错误对象应进 JSON 视图');
+        renderGrid(FIND_ROWS); // 还原网格状态
+      });
+
+      addAssert('NDJSON 流式：currentResultData 形状完整可供导出（rows 全量 + generation + profile）', 'NDJSON 流式', async () => {
+        setEditorValue('FIND {type: "person"} RETURN * LIMIT 25');
+        await executeCurrentQuery();
+        assert(currentResultData, '流式查询后 currentResultData 应存在');
+        assert(Array.isArray(currentResultData.rows), 'rows 应为数组（导出全量行）');
+        assert(JSON.stringify(currentResultData).indexOf('"node"') !== -1, '导出对象应含完整行数据');
+        assert((currentResultData.streamErrors || []).length === 0, '正常流不应产生 streamErrors');
+        assert(currentResultData.generation === GEN, 'generation 应来自 meta 行');
+        // 批量 flush 观测：默认 3 行查询走 rAF flush，不应留下残余批次（行计数与 DOM 一致）
+        assert(document.querySelectorAll('#gridBody tr').length === 3, '行计数与 DOM 行数应一致');
+        renderGrid(FIND_ROWS);
       });
 
       // 命令面板（预留扩展点，阶段 2 补齐真实断言）
