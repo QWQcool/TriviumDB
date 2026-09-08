@@ -512,6 +512,51 @@
       border: 1px solid var(--border-color);
       box-shadow: var(--shadow-md);
       z-index: 5;
+      flex-wrap: wrap;
+      max-width: calc(100% - 32px);
+    }
+    /* 图视图后端/着色切换按钮的激活态 */
+    .graph-controls .btn.active {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: #ffffff;
+    }
+    /* Sigma WebGL 渲染容器：覆盖在 canvas 之上（canvas 后端时 hidden） */
+    .graph-sigma-container {
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      background: var(--bg-surface);
+    }
+    /* 社区着色图例（按社区模式显示） */
+    .graph-legend {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      z-index: 5;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 12px;
+      max-width: 60%;
+      background: var(--bg-surface);
+      padding: 6px 10px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border-color);
+      box-shadow: var(--shadow-md);
+      font-size: 11px;
+      color: var(--text-main);
+    }
+    .graph-legend .legend-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+    }
+    .graph-legend .legend-swatch {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex: none;
     }
     .node-detail-drawer {
       position: absolute;
@@ -1219,6 +1264,8 @@
               <!-- 图拓扑画布视图 -->
               <div id="viewGraph" style="display: none; width: 100%; height: 100%; position: relative;">
                 <canvas id="graphCanvas"></canvas>
+                <!-- Sigma WebGL 渲染容器（WebGL 后端启用时显示，覆盖 canvas） -->
+                <div class="graph-sigma-container" id="graphSigmaContainer" hidden></div>
                 <!-- 规模护栏提示条：节点数超过阈值时显示（可关闭，role=status） -->
                 <div class="result-notice result-notice--floating" id="graphScaleNotice" role="status" hidden>
                   <span></span>
@@ -1227,7 +1274,12 @@
                 <div class="graph-controls">
                   <button class="btn" id="centerGraphBtn" title="重置居中">居中视角</button>
                   <button class="btn" id="togglePhysicsBtn" title="固定物理模拟">冻结力学</button>
+                  <button class="btn" id="toggleWebGLBtn" title="切换 WebGL/Canvas 渲染后端（加载失败自动回退 Canvas）">WebGL 渲染</button>
+                  <button class="btn active" id="colorModeTypeBtn" title="按节点类型着色">按类型</button>
+                  <button class="btn" id="colorModeCommunityBtn" title="Louvain 社区检测着色（按需加载）">按社区</button>
                 </div>
+                <!-- 社区着色图例（按社区模式显示） -->
+                <div class="graph-legend" id="graphLegend" hidden></div>
               </div>
 
               <!-- JSON 树视图（可折叠 JSON 树渲染，导出功能不受影响） -->
@@ -1273,6 +1325,15 @@
         </div>
         <div style="flex: 1; position: relative; background: var(--bg-surface);">
           <canvas id="standaloneGraphCanvas" style="width: 100%; height: 100%; display: block;"></canvas>
+          <!-- Sigma WebGL 渲染容器（独立画布的第二视图实例，共享同一图数据） -->
+          <div class="graph-sigma-container" id="standaloneSigmaContainer" hidden></div>
+          <div class="graph-controls">
+            <button class="btn" id="centerStandaloneBtn" title="重置居中">居中视角</button>
+            <button class="btn" id="toggleWebGLBtnStandalone" title="切换 WebGL/Canvas 渲染后端（加载失败自动回退 Canvas）">WebGL 渲染</button>
+            <button class="btn active" id="colorModeTypeBtnStandalone" title="按节点类型着色">按类型</button>
+            <button class="btn" id="colorModeCommunityBtnStandalone" title="Louvain 社区检测着色（按需加载）">按社区</button>
+          </div>
+          <div class="graph-legend" id="graphLegendStandalone" hidden></div>
         </div>
       </div>
 
@@ -1515,6 +1576,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       checkServerHealth();
       renderHistory();
       initCanvas('graphCanvas');
+      setupGraphRenderers();
       setInterval(checkServerHealth, 5000);
       setupPalette();
       updateTqlHighlight();
@@ -1535,6 +1597,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         document.documentElement.setAttribute('data-theme', next);
         localStorage.setItem('tdb_theme', next);
         redrawGraph();
+        // Sigma 实例的主题相关配色（节点边/画布底色）随主题重建
+        if (graphBackend === 'sigma') rebuildSigmaInstances();
       });
     }
 
@@ -2994,6 +3058,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
               const node = {
                 id,
                 label: val.payload?.name || val.payload?.title || `Node ${id}`,
+                typeKey: val.payload?.type || key, // 着色模式切回「按类型」时的还原依据
                 payload: val.payload || {},
                 vector: val.vector || [],
                 x: Math.cos(idx * 2.399963) * radius,
@@ -3023,6 +3088,11 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       });
 
       applyGraphPhysicsPolicy();
+      // WebGL 后端下新数据到达：按当前着色模式重建 Sigma 实例
+      if (graphBackend === 'sigma') {
+        if (graphColorMode === 'community') applyCommunityColors();
+        else rebuildSigmaInstances();
+      }
     }
 
     // 规模护栏分流：>1500 只渲染（物理必关），300<n≤1500 关物理保静态布局，
@@ -3250,20 +3320,44 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       if (!canvas) return;
       // 画布可能在容器隐藏（display:none）时被初始化为 0 尺寸，
       // 切换到图视图后需先同步到当前布局，否则永远画不出内容
+      if (syncCanvasSize(canvas)) {
+        transform.x = canvas.width / 2;
+        transform.y = canvas.height / 2;
+      }
+      if (graphBackend === 'canvas') {
+        drawGraphScene(canvas.getContext('2d'), transform, canvas);
+      }
+      // 独立探索画布：同一图数据的第二 canvas 视图（可见且 canvas 后端时绘制）
+      const sa = document.getElementById('standaloneGraphCanvas');
+      if (sa && graphBackend === 'canvas' && sa.parentElement && sa.parentElement.clientWidth > 0) {
+        if (syncCanvasSize(sa)) {
+          standaloneTransform.x = sa.width / 2;
+          standaloneTransform.y = sa.height / 2;
+        }
+        drawGraphScene(sa.getContext('2d'), standaloneTransform, sa);
+      }
+      syncSigmaPositions();
+    }
+
+    // 画布尺寸与父容器同步（隐藏容器 clientWidth=0 时跳过）
+    function syncCanvasSize(canvas) {
       const parent = canvas.parentElement;
       if (parent && parent.clientWidth > 0
         && (canvas.width !== parent.clientWidth || canvas.height !== parent.clientHeight)) {
         canvas.width = parent.clientWidth;
         canvas.height = parent.clientHeight;
-        transform.x = canvas.width / 2;
-        transform.y = canvas.height / 2;
+        return true;
       }
-      const ctx = canvas.getContext('2d');
+      return false;
+    }
+
+    // 场景绘制：把当前图数据按相机变换画到一个 canvas 上
+    function drawGraphScene(ctx, t, canvas) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       ctx.save();
-      ctx.translate(transform.x, transform.y);
-      ctx.scale(transform.k, transform.k);
+      ctx.translate(t.x, t.y);
+      ctx.scale(t.k, t.k);
 
       // 绘制连线
       graphEdges.forEach(edge => {
@@ -3306,6 +3400,372 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       });
 
       ctx.restore();
+    }
+
+    // ==========================================
+    // 图渲染器抽象（PR-13）：Canvas（内建力导向）与 Sigma.js WebGL 双后端
+    // 两个图入口（查询图视图 graphCanvas / 独立探索 standaloneGraphCanvas）共享
+    // graphNodes/graphEdges 数据；后端与着色模式为全局状态，两视图按钮同步。
+    // graphology / sigma / graphology-communities 均经 CDN 按需加载，
+    // 加载失败自动回退 Canvas 并 toast 提示（离线环境功能不降级缺失）。
+    // ==========================================
+    const SIGMA_CDN = {
+      graphology: 'https://cdn.jsdelivr.net/npm/graphology@0.25.4/dist/graphology.umd.min.js',
+      // sigma@2.4.0 的浏览器 IIFE 构建在包根目录（var Sigma = ...），dist 下只有 CJS
+      sigma: 'https://cdn.jsdelivr.net/npm/sigma@2.4.0/build/sigma.min.js',
+      // graphology-communities-louvain 无 UMD 构建：走 jsDelivr ESM CDN（/+esm）动态 import
+      communities: 'https://cdn.jsdelivr.net/npm/graphology-communities-louvain@2.0.2/+esm'
+    };
+    const COMMUNITY_PALETTE = [
+      '#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4',
+      '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080',
+      '#9a6324', '#800000', '#808000', '#000075', '#a9a9a9'
+    ];
+    let graphBackend = 'canvas';     // 'canvas' | 'sigma'（全局后端，两视图一致）
+    let graphColorMode = 'type';     // 'type' | 'community'（全局着色模式）
+    let standaloneTransform = { x: 0, y: 0, k: 1 }; // 独立画布独立相机
+    let sigmaLibs = null;            // { Sigma, Graph }（CDN 加载后缓存）
+    let communitiesLib = null;       // { louvain }
+    let sigmaLoadPromise = null;
+    let communitiesLoadPromise = null;
+    let nodeCommunities = new Map(); // nodeId -> 社区 key（社区着色模式下）
+    const sigmaInstances = { query: null, standalone: null }; // { sigma, graph, mapFn }
+
+    // 脚本标签加载器（selftest 可整体替换以注入 fake 库，离线可测）
+    function loadScriptTag(src) {
+      return new Promise((resolve, reject) => {
+        const el = document.createElement('script');
+        el.src = src;
+        el.async = true;
+        el.onload = () => resolve();
+        el.onerror = () => { el.remove(); reject(new Error('脚本加载失败: ' + src)); };
+        document.head.appendChild(el);
+      });
+    }
+
+    // Sigma + graphology 按需加载（promise 缓存；失败清缓存允许重试）
+    function loadSigmaLibs() {
+      if (sigmaLibs) return Promise.resolve(sigmaLibs);
+      if (!sigmaLoadPromise) {
+        sigmaLoadPromise = (async () => {
+          if (!window.graphology) await loadScriptTag(SIGMA_CDN.graphology);
+          if (!window.Sigma) await loadScriptTag(SIGMA_CDN.sigma);
+          if (!window.graphology || !window.Sigma) throw new Error('CDN 库加载不完整');
+          sigmaLibs = { Sigma: window.Sigma, Graph: window.graphology.Graph };
+          return sigmaLibs;
+        })().catch((err) => { sigmaLoadPromise = null; throw err; });
+      }
+      return sigmaLoadPromise;
+    }
+
+    // Louvain 社区检测模块加载器（可注入点：selftest 替换为 fake，离线可测）。
+    // louvain 包无 UMD 构建，默认走 jsDelivr ESM CDN（/+esm）动态 import
+    let loadCommunitiesModule = () => import(SIGMA_CDN.communities);
+
+    function loadCommunitiesLib() {
+      if (communitiesLib) return Promise.resolve(communitiesLib);
+      if (!communitiesLoadPromise) {
+        communitiesLoadPromise = (async () => {
+          if (!window.graphology) await loadScriptTag(SIGMA_CDN.graphology);
+          const mod = await loadCommunitiesModule();
+          // ESM 构建的导出形状兼容：{ louvain } / { default: louvainFn } / { default: { louvain } }
+          const louvain = mod.louvain
+            || (mod.default && (typeof mod.default === 'function' ? mod.default : mod.default.louvain));
+          if (!louvain) throw new Error('社区检测库加载不完整');
+          communitiesLib = { louvain };
+          return communitiesLib;
+        })().catch((err) => { communitiesLoadPromise = null; throw err; });
+      }
+      return communitiesLoadPromise;
+    }
+
+    // 引擎坐标（画布像素、中心原点）→ Sigma 图空间 [0,1]，线性映射随 bbox 重建
+    function sigmaMapFactory() {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      graphNodes.forEach(n => {
+        if (n.x < minX) minX = n.x;
+        if (n.x > maxX) maxX = n.x;
+        if (n.y < minY) minY = n.y;
+        if (n.y > maxY) maxY = n.y;
+      });
+      const span = Math.max(maxX - minX, maxY - minY) * 1.1 || 1;
+      const cx = (minX + maxX) / 2;
+      const cy = (minY + maxY) / 2;
+      return (n) => ({ x: (n.x - cx) / span + 0.5, y: (n.y - cy) / span + 0.5 });
+    }
+
+    // 为单个视图构建 Sigma 实例（位置来自共享力导向引擎，WebGL 只负责渲染加速）
+    function buildSigmaForView(viewId) {
+      if (!sigmaLibs) return;
+      const container = document.getElementById(viewId === 'query' ? 'graphSigmaContainer' : 'standaloneSigmaContainer');
+      if (!container) return;
+      destroySigmaInstance(viewId);
+      const mapFn = sigmaMapFactory();
+      const graph = new sigmaLibs.Graph();
+      const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+      graphNodes.forEach(n => {
+        const p = mapFn(n);
+        graph.addNode(n.id, { x: p.x, y: p.y, size: 7, label: n.label, color: n.color });
+      });
+      graphEdges.forEach(e => {
+        if (graph.hasNode(e.source) && graph.hasNode(e.target) && !graph.hasEdge(e.source, e.target)) {
+          graph.addEdge(e.source, e.target, { size: 1, color: dark ? '#334155' : '#cbd5e1' });
+        }
+      });
+      const sigma = new sigmaLibs.Sigma(graph, container, {
+        allowInvalidContainer: true,
+        defaultEdgeColor: dark ? '#334155' : '#cbd5e1',
+        labelColor: { color: dark ? '#f1f5f9' : '#1e293b' },
+        labelDensity: 1.2,
+        minCameraRatio: 0.05,
+        maxCameraRatio: 20
+      });
+      // 节点点击 → 360° 抽屉（与 Canvas 后端行为一致）
+      sigma.on('clickNode', ({ node }) => {
+        const gnode = nodeMap.get(node);
+        if (gnode) openNodeDrawer(gnode);
+      });
+      sigmaInstances[viewId] = { sigma, graph, mapFn };
+    }
+
+    function destroySigmaInstance(viewId) {
+      const inst = sigmaInstances[viewId];
+      if (!inst) return;
+      try { inst.sigma.kill(); } catch (_) { /* 已销毁 */ }
+      sigmaInstances[viewId] = null;
+    }
+
+    function destroySigmaInstances() {
+      destroySigmaInstance('query');
+      destroySigmaInstance('standalone');
+    }
+
+    function rebuildSigmaInstances() {
+      if (!sigmaLibs) return;
+      buildSigmaForView('query');
+      buildSigmaForView('standalone');
+    }
+
+    // 力导向引擎每帧推进共享坐标后，把位置同步进 Sigma 并刷新（WebGL 渲染循环）
+    function syncSigmaPositions() {
+      if (graphBackend !== 'sigma') return;
+      for (const viewId of ['query', 'standalone']) {
+        const inst = sigmaInstances[viewId];
+        if (!inst || inst.sigma.killed) continue;
+        const container = inst.sigma.getContainer ? inst.sigma.getContainer() : null;
+        if (container && (container.offsetParent === null || container.clientWidth === 0)) continue;
+        inst.graph.forEachNode((id) => {
+          const n = nodeMap.get(id);
+          if (!n) return;
+          const p = inst.mapFn(n);
+          inst.graph.setNodeAttribute(id, 'x', p.x);
+          inst.graph.setNodeAttribute(id, 'y', p.y);
+        });
+        inst.sigma.refresh();
+      }
+    }
+
+    // 后端切换：sigma 需先按需加载 CDN 库，失败则回退 canvas + toast（离线降级）
+    async function setGraphBackend(mode) {
+      if (mode === graphBackend) return;
+      const buttons = ['toggleWebGLBtn', 'toggleWebGLBtnStandalone']
+        .map(id => document.getElementById(id)).filter(Boolean);
+      if (mode === 'sigma') {
+        buttons.forEach(b => { b.disabled = true; });
+        let libs;
+        try {
+          libs = await loadSigmaLibs();
+        } catch (err) {
+          buttons.forEach(b => { b.disabled = false; });
+          showToast('WebGL 渲染库加载失败（离线或 CDN 不可达），已保持 Canvas 渲染');
+          syncBackendButtons();
+          return;
+        }
+        graphBackend = 'sigma';
+        ['graphSigmaContainer', 'standaloneSigmaContainer'].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) el.hidden = false;
+        });
+        rebuildSigmaInstances();
+        buttons.forEach(b => { b.disabled = false; });
+      } else {
+        graphBackend = 'canvas';
+        destroySigmaInstances();
+        ['graphSigmaContainer', 'standaloneSigmaContainer'].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) el.hidden = true;
+        });
+        redrawGraph();
+      }
+      syncBackendButtons();
+    }
+
+    function syncBackendButtons() {
+      ['toggleWebGLBtn', 'toggleWebGLBtnStandalone'].forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn) btn.textContent = graphBackend === 'sigma' ? 'Canvas 渲染' : 'WebGL 渲染';
+      });
+    }
+
+    // 着色模式切换：按类型（三模语义色）/ 按社区（Louvain，按需加载，默认按类型）
+    async function setGraphColorMode(mode) {
+      if (mode === graphColorMode) return;
+      if (mode === 'type') {
+        graphColorMode = 'type';
+        nodeCommunities = new Map();
+        graphNodes.forEach(n => { n.color = getNodeColor(n.typeKey); });
+        updateGraphLegend();
+        refreshGraphColors();
+        syncColorModeButtons();
+        return;
+      }
+      graphColorMode = 'community';
+      syncColorModeButtons();
+      const ok = await applyCommunityColors();
+      if (!ok) {
+        graphColorMode = 'type';
+        syncColorModeButtons();
+      }
+    }
+
+    // 对当前图跑 Louvain 社区检测并按社区重新着色 + 更新图例；失败返回 false
+    async function applyCommunityColors() {
+      let louvain;
+      try {
+        ({ louvain } = await loadCommunitiesLib());
+      } catch (err) {
+        showToast('社区检测库加载失败（离线或 CDN 不可达），已回退按类型着色');
+        graphNodes.forEach(n => { n.color = getNodeColor(n.typeKey); });
+        nodeCommunities = new Map();
+        updateGraphLegend();
+        refreshGraphColors();
+        return false;
+      }
+      const GraphCtor = (sigmaLibs && sigmaLibs.Graph) || window.graphology.Graph;
+      const g = new GraphCtor();
+      graphNodes.forEach(n => { try { g.addNode(n.id); } catch (_) { /* 重复 id */ } });
+      const ids = new Set(graphNodes.map(n => n.id));
+      const seen = new Set();
+      graphEdges.forEach(e => {
+        const key = [e.source, e.target].sort().join('|');
+        if (!ids.has(e.source) || !ids.has(e.target) || seen.has(key) || e.source === e.target) return;
+        seen.add(key);
+        try { g.addEdge(e.source, e.target); } catch (_) { /* 非法边 */ }
+      });
+      const result = louvain(g) || {};
+      // 加载期间用户切回按类型：丢弃社区结果（graphColorMode 已被同步改写）
+      if (graphColorMode !== 'community') { updateGraphLegend(); return true; }
+      nodeCommunities = new Map(Object.entries(result));
+      const communityKeys = [];
+      nodeCommunities.forEach(k => { if (!communityKeys.includes(k)) communityKeys.push(k); });
+      nodeCommunities.forEach((k, id) => {
+        const node = nodeMap.get(id);
+        if (node) node.color = COMMUNITY_PALETTE[communityKeys.indexOf(k) % COMMUNITY_PALETTE.length];
+      });
+      updateGraphLegend(communityKeys);
+      refreshGraphColors();
+      return true;
+    }
+
+    // 图例：仅社区模式显示（社区 N + 节点数），两个视图同步
+    function updateGraphLegend(communityKeys) {
+      ['graphLegend', 'graphLegendStandalone'].forEach(legendId => {
+        const legend = document.getElementById(legendId);
+        if (!legend) return;
+        legend.textContent = '';
+        if (graphColorMode !== 'community' || !communityKeys || !communityKeys.length || !nodeCommunities.size) {
+          legend.hidden = true;
+          return;
+        }
+        legend.hidden = false;
+        communityKeys.forEach((key, i) => {
+          let count = 0;
+          nodeCommunities.forEach(k => { if (k === key) count++; });
+          const chip = document.createElement('span');
+          chip.className = 'legend-chip';
+          const swatch = document.createElement('i');
+          swatch.className = 'legend-swatch';
+          swatch.style.background = COMMUNITY_PALETTE[i % COMMUNITY_PALETTE.length];
+          chip.appendChild(swatch);
+          const text = document.createElement('span');
+          text.textContent = `社区 ${i + 1} (${count})`;
+          chip.appendChild(text);
+          legend.appendChild(chip);
+        });
+      });
+    }
+
+    function refreshGraphColors() {
+      if (graphBackend === 'sigma') {
+        for (const viewId of ['query', 'standalone']) {
+          const inst = sigmaInstances[viewId];
+          if (!inst || inst.sigma.killed) continue;
+          graphNodes.forEach(n => {
+            if (inst.graph.hasNode(n.id)) inst.graph.setNodeAttribute(n.id, 'color', n.color);
+          });
+          inst.sigma.refresh();
+        }
+      } else {
+        redrawGraph();
+      }
+    }
+
+    function syncColorModeButtons() {
+      [['colorModeTypeBtn', 'type'], ['colorModeTypeBtnStandalone', 'type'],
+       ['colorModeCommunityBtn', 'community'], ['colorModeCommunityBtnStandalone', 'community']]
+        .forEach(([id, mode]) => {
+          const btn = document.getElementById(id);
+          if (btn) btn.classList.toggle('active', graphColorMode === mode);
+        });
+    }
+
+    // 渲染器控制按钮绑定（DOMContentLoaded 调用一次）
+    function setupGraphRenderers() {
+      ['toggleWebGLBtn', 'toggleWebGLBtnStandalone'].forEach(id => {
+        document.getElementById(id).addEventListener('click', () => {
+          setGraphBackend(graphBackend === 'canvas' ? 'sigma' : 'canvas');
+        });
+      });
+      [['colorModeTypeBtn', 'type'], ['colorModeTypeBtnStandalone', 'type'],
+       ['colorModeCommunityBtn', 'community'], ['colorModeCommunityBtnStandalone', 'community']]
+        .forEach(([id, mode]) => {
+          document.getElementById(id).addEventListener('click', () => { setGraphColorMode(mode); });
+        });
+      document.getElementById('centerStandaloneBtn').addEventListener('click', () => {
+        const sa = document.getElementById('standaloneGraphCanvas');
+        standaloneTransform = { x: sa.width / 2, y: sa.height / 2, k: 1 };
+        redrawGraph();
+      });
+
+      // 独立画布交互：点击节点开抽屉 / 拖拽平移 / 滚轮缩放（与查询图视图行为一致）
+      const saCanvas = document.getElementById('standaloneGraphCanvas');
+      let saDragging = false;
+      let saDragStart = null;
+      saCanvas.addEventListener('mousedown', (e) => {
+        const rect = saCanvas.getBoundingClientRect();
+        const mx = (e.clientX - rect.left - standaloneTransform.x) / standaloneTransform.k;
+        const my = (e.clientY - rect.top - standaloneTransform.y) / standaloneTransform.k;
+        const hit = graphNodes.find(n => Math.hypot(n.x - mx, n.y - my) < 20);
+        if (hit) {
+          openNodeDrawer(hit);
+        } else {
+          saDragging = true;
+          saDragStart = { x: e.clientX, y: e.clientY };
+        }
+      });
+      window.addEventListener('mousemove', (e) => {
+        if (!saDragging) return;
+        standaloneTransform.x += e.clientX - saDragStart.x;
+        standaloneTransform.y += e.clientY - saDragStart.y;
+        saDragStart = { x: e.clientX, y: e.clientY };
+        redrawGraph();
+      });
+      window.addEventListener('mouseup', () => { saDragging = false; });
+      saCanvas.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        standaloneTransform.k *= e.deltaY < 0 ? 1.1 : 0.9;
+        redrawGraph();
+      });
     }
 
     // ==========================================
@@ -4535,6 +4995,120 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         // 还原常规小结果状态，避免影响后续/人工检查
         renderGrid(FIND_ROWS);
         renderGraph(MATCH_ROWS);
+      });
+
+      // ---------- WebGL 图渲染（PR-13）：CDN 按需加载 / 后端切换 / 社区着色 / 离线降级 ----------
+      // fake 库：graphology.Graph / Sigma / louvain 的最小实现（仅覆盖本 PR 用到的 API）
+      class FakeGraph {
+        constructor() { this._nodes = new Map(); this._edges = []; this._edgeKeys = new Set(); }
+        addNode(id, attrs) { this._nodes.set(String(id), attrs || {}); }
+        addEdge(s, t, attrs) {
+          const k = String(s) + '|' + String(t);
+          if (!this._edgeKeys.has(k)) { this._edgeKeys.add(k); this._edges.push({ s: String(s), t: String(t), attrs: attrs || {} }); }
+        }
+        hasNode(id) { return this._nodes.has(String(id)); }
+        hasEdge(s, t) { return this._edgeKeys.has(String(s) + '|' + String(t)); }
+        setNodeAttribute(id, key, val) { if (this._nodes.has(String(id))) this._nodes.get(String(id))[key] = val; }
+        forEachNode(cb) { this._nodes.forEach((a, id) => cb(id, a)); }
+        order() { return this._nodes.size; }
+        size() { return this._edges.length; }
+      }
+      class FakeSigma {
+        constructor(graph, container, settings) {
+          FakeSigma.instances.push(this);
+          this.graph = graph;
+          this.container = container;
+          this.settings = settings || {};
+          this.handlers = {};
+          this.refreshCount = 0;
+          this.killed = false;
+        }
+        on(ev, cb) { (this.handlers[ev] = this.handlers[ev] || []).push(cb); }
+        refresh() { this.refreshCount++; }
+        kill() { this.killed = true; }
+        emit(ev, payload) { (this.handlers[ev] || []).forEach(cb => cb(payload)); }
+      }
+      FakeSigma.instances = [];
+      let fakeLouvainCalls = 0;
+      const origLoadScriptTag = loadScriptTag;
+      const origLoadCommunitiesModule = loadCommunitiesModule;
+      loadScriptTag = (src) => {
+        if (src.indexOf('graphology.umd') !== -1 && !window.graphology) {
+          window.graphology = { Graph: FakeGraph };
+        } else if (src.indexOf('sigma.min.js') !== -1 && !window.Sigma) {
+          window.Sigma = FakeSigma;
+        }
+        return Promise.resolve();
+      };
+      // louvain 走 ESM 动态 import，无法用 script 标签拦截 → 替换专用加载器
+      loadCommunitiesModule = async () => ({
+        louvain: (g) => {
+          fakeLouvainCalls++;
+          const out = {};
+          g._nodes.forEach((_, id) => { out[id] = 'C' + (Number(id) % 2); });
+          return out;
+        }
+      });
+
+      addAssert('WebGL 图渲染：CDN 按需加载 Sigma 成功并接管图视图', 'WebGL 图渲染', async () => {
+        document.querySelector('[data-view="graph"]').click();
+        renderGraph(MATCH_ROWS);
+        document.getElementById('toggleWebGLBtn').click();
+        await waitFor(() => graphBackend === 'sigma' && sigmaInstances.query, 3000, 'Sigma 实例应创建');
+        assert(sigmaInstances.query.graph.order() === 3, 'Sigma 图应有 3 节点，实际 ' + sigmaInstances.query.graph.order());
+        assert(sigmaInstances.query.graph.size() >= 2, 'Sigma 图应至少 2 边');
+        assert(!document.getElementById('graphSigmaContainer').hidden, 'Sigma 容器应显示');
+        assert(document.getElementById('toggleWebGLBtn').textContent === 'Canvas 渲染', '按钮应提示切回 Canvas');
+      });
+
+      addAssert('WebGL 图渲染：Sigma 节点点击打开 360° 抽屉', 'WebGL 图渲染', async () => {
+        sigmaInstances.query.sigma.emit('clickNode', { node: '1' });
+        assert(document.getElementById('nodeDrawer').classList.contains('open'), '点击 Sigma 节点应打开抽屉');
+        assert(document.getElementById('drawerNodeTitle').textContent.includes('Alice'), '抽屉应显示 Alice');
+        document.getElementById('closeDrawerBtn').click();
+        assert(!document.getElementById('nodeDrawer').classList.contains('open'), '抽屉应可关闭');
+      });
+
+      addAssert('WebGL 图渲染：Louvain 社区着色 + 图例，切回按类型还原', 'WebGL 图渲染', async () => {
+        document.getElementById('colorModeCommunityBtn').click();
+        await waitFor(() => graphColorMode === 'community' && nodeCommunities.size > 0, 3000, '社区检测应完成');
+        assert(!document.getElementById('graphLegend').hidden, '社区图例应显示');
+        assert(document.getElementById('graphLegend').querySelectorAll('.legend-chip').length >= 2, '图例应含社区条目');
+        assert(graphNodes.every(n => n.color !== getNodeColor(n.typeKey)), '所有节点应按社区重新着色');
+        document.getElementById('colorModeTypeBtn').click();
+        await waitFor(() => graphColorMode === 'type' && document.getElementById('graphLegend').hidden, 3000, '应切回按类型且图例隐藏');
+        assert(graphNodes.every(n => n.color === getNodeColor(n.typeKey)), '节点颜色应还原为类型色');
+        assert(document.getElementById('colorModeTypeBtnStandalone').classList.contains('active'),
+          '独立视图着色按钮应与全局状态同步');
+      });
+
+      addAssert('WebGL 图渲染：独立探索画布同一数据同一后端，加载全图拓扑路径不回归', 'WebGL 图渲染', async () => {
+        document.querySelector('[data-tab="graphExplorePane"]').click();
+        assert(sigmaInstances.standalone, '独立画布 Sigma 实例应存在（后端全局共享）');
+        assert(sigmaInstances.standalone.graph.order() === 3, '独立画布应渲染同一图数据');
+        document.getElementById('loadWholeGraphBtn').click();
+        await waitFor(() => document.getElementById('tqlInput').value.indexOf('MATCH') === 0, 3000, '按钮应填充 MATCH 查询');
+        await waitFor(() => currentResultData && (currentResultData.rows || []).length === 2, 3000, '查询应完成并渲染 2 行');
+        assert(graphNodes.length === 3, '共享图数据应更新');
+      });
+
+      addAssert('WebGL 图渲染：CDN 加载失败回退 Canvas 并 toast 提示', 'WebGL 图渲染', async () => {
+        document.getElementById('toggleWebGLBtn').click(); // sigma -> canvas（同步路径）
+        assert(graphBackend === 'canvas', '应切回 Canvas');
+        assert(document.getElementById('graphSigmaContainer').hidden, '切回后 Sigma 容器应隐藏');
+        loadScriptTag = () => Promise.reject(new Error('offline'));
+        // 清空已缓存的库与全局：让 loadSigmaLibs 重新走（失败注入的）loader
+        sigmaLibs = null;
+        sigmaLoadPromise = null;
+        window.graphology = undefined;
+        window.Sigma = undefined;
+        document.getElementById('toggleWebGLBtn').click();
+        await waitFor(() => document.querySelector('#toastStack .toast'), 2000, '应出现回退 toast');
+        assert(graphBackend === 'canvas', '加载失败应保持 Canvas 渲染');
+        assert(document.getElementById('graphSigmaContainer').hidden, 'Sigma 容器应保持隐藏');
+        loadScriptTag = origLoadScriptTag; // 还原 loader
+        loadCommunitiesModule = origLoadCommunitiesModule;
+        renderGrid(FIND_ROWS); // 还原网格状态
       });
 
       // 语法高亮

@@ -366,6 +366,31 @@ try {
   );
   log('  ✓ 虚拟滑窗滚动正确 (351 行窗口化，滚动后行号 91 / 内容一致)');
 
+  // 冒烟 5：WebGL 渲染后端切换（Sigma CDN 按需加载；离线/CDN 不可达时回退 Canvas + toast）
+  await page.evaluate(() => document.querySelector('[data-view="graph"]').click());
+  await page.waitForSelector('#toggleWebGLBtn', { state: 'visible', timeout: 5000 });
+  await page.click('#toggleWebGLBtn');
+  await page.waitForFunction(
+    () => (typeof graphBackend !== 'undefined' && graphBackend === 'sigma')
+      || document.querySelector('#toastStack .toast'),
+    null, { timeout: 20000 }
+  );
+  const webglState = await page.evaluate(() => ({
+    backend: graphBackend,
+    sigmaVisible: !document.getElementById('graphSigmaContainer').hidden,
+    toast: (document.querySelector('#toastStack .toast') || {}).textContent || '',
+  }));
+  if (webglState.backend === 'sigma') {
+    if (!webglState.sigmaVisible) throw new Error('WebGL 模式下 Sigma 容器应显示');
+    log('  ✓ WebGL (Sigma) 渲染后端加载成功并接管图视图');
+  } else {
+    if (!webglState.toast) throw new Error('WebGL 库不可达时应出现回退 toast');
+    log('  ✓ WebGL 库不可达，按设计回退 Canvas（toast 提示）');
+  }
+  await page.click('#toggleWebGLBtn');
+  await page.waitForFunction(() => graphBackend === 'canvas', null, { timeout: 5000 });
+  log('  ✓ 图渲染后端切换往返正常');
+
   log(`5/6 打开 ${BASE}/ui?selftest=1 断言自检套件`);
   await page.goto(`${BASE}/ui?selftest=1`, { waitUntil: 'domcontentloaded', timeout: 20000 });
   await page.waitForFunction(() => window.__TRIVIUM_APP_READY === true, null, { timeout: 10000 });
