@@ -1640,6 +1640,12 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     });
 
     // 主题切换（localStorage 优先；无保存值时跟随系统 prefers-color-scheme）
+    function applyThemeAttributes(theme) {
+      document.documentElement.setAttribute('data-theme', theme);
+      redrawGraph();
+      // Sigma 实例的主题相关配色（节点边/画布底色）随主题重建
+      if (graphBackend === 'sigma') rebuildSigmaInstances();
+    }
     function setupTheme() {
       const saved = localStorage.getItem('tdb_theme');
       const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -1648,12 +1654,23 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       document.getElementById('themeToggleBtn').addEventListener('click', () => {
         const current = document.documentElement.getAttribute('data-theme');
         const next = current === 'dark' ? 'light' : 'dark';
-        document.documentElement.setAttribute('data-theme', next);
+        applyThemeAttributes(next);
         safeStorageSet('tdb_theme', next);
-        redrawGraph();
-        // Sigma 实例的主题相关配色（节点边/画布底色）随主题重建
-        if (graphBackend === 'sigma') rebuildSigmaInstances();
       });
+      // 多标签页主题同步：其它标签页切主题时本页跟随（storage 事件只在异地标签触发）
+      window.addEventListener('storage', (e) => {
+        if (e.key !== 'tdb_theme' || !e.newValue) return;
+        if (e.newValue !== document.documentElement.getAttribute('data-theme')) {
+          applyThemeAttributes(e.newValue);
+        }
+      });
+      // 跟随系统模式（未手动保存过主题）下系统偏好变化也即时跟随
+      if (window.matchMedia) {
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+          if (localStorage.getItem('tdb_theme')) return;
+          applyThemeAttributes(e.matches ? 'dark' : 'light');
+        });
+      }
     }
 
     // ==========================================
@@ -1731,6 +1748,19 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         { opacity: 0 },
         { opacity: 1, duration: 0.35, ease: 'power2.out', overwrite: true }
       );
+    }
+
+    // Generation 徽标统一入口：完整 hash 可能很长（如 sha 类 generation），
+    // 徽标只显示前 12 字符 + 省略号，完整值放 title 悬浮可见
+    const GENERATION_BADGE_MAX = 12;
+    function updateGenerationBadge(gen) {
+      const el = document.getElementById('headerGeneration');
+      if (!el) return;
+      const full = String(gen);
+      el.textContent = full.length > GENERATION_BADGE_MAX
+        ? `Generation: ${full.slice(0, GENERATION_BADGE_MAX)}…`
+        : `Generation: ${full}`;
+      el.title = `Generation: ${full}`;
     }
 
     function showToast(message, duration = 2600) {
@@ -2115,7 +2145,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
             generation = evt.generation || generation;
             if (generation) {
               currentGeneration = generation;
-              document.getElementById('headerGeneration').textContent = `Generation: ${generation}`;
+              updateGenerationBadge(generation);
             }
             break;
           case 'row':
@@ -2185,7 +2215,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       saveHistory(query);
       if (data.generation) {
         currentGeneration = data.generation;
-        document.getElementById('headerGeneration').textContent = `Generation: ${data.generation}`;
+        updateGenerationBadge(data.generation);
       }
       if (isMutation) {
         document.getElementById('statusAffected').textContent = `影响: ${data.affected || 0} 行`;
@@ -4659,6 +4689,9 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     }
 
     function saveHistory(q) {
+      // selftest 页内自检会真实执行大量 mock 查询：不得写入用户的
+      // tdb_query_history（同浏览器档案下运行 ?selftest=1 会污染真实查询历史）
+      if (window.__TRIVIUM_SELFTEST__) return;
       if (!queryHistory.includes(q)) {
         queryHistory.unshift(q);
         if (queryHistory.length > 30) queryHistory.pop();
@@ -5893,6 +5926,33 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         assert(!overlay.classList.contains('open'), 'Enter 应执行高亮项并关闭面板');
         await waitFor(() => currentResultData && currentResultData.rows && currentResultData.rows.length === 3,
           3000, '第一条片段应经 Enter 兜底执行并落地');
+      });
+
+      addAssert('体验加固：命令面板点击执行片段后面板关闭 + 编辑器被填充（P2 回归钉）', '体验加固', async () => {
+        const overlay = document.getElementById('paletteOverlay');
+        overlay.classList.remove('open');
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));
+        assert(overlay.classList.contains('open'), '前置条件：面板应打开');
+        // 鼠标路径：直接点击第一条代码片段条目（executePaletteItem → closePalette → run）
+        const firstItem = document.querySelector('#paletteList .palette-item');
+        assert(firstItem, '前置条件：应有可执行条目');
+        firstItem.click();
+        assert(!overlay.classList.contains('open'), '执行片段后面板应关闭（不得驻留遮挡工作台）');
+        await waitFor(() => document.getElementById('tqlInput').value.length > 0, 2000, '片段应填入编辑器');
+      });
+
+      addAssert('体验加固：selftest 模式不写用户查询历史（P2 回归钉）', '体验加固', async () => {
+        const prev = safeStorageGet('tdb_query_history');
+        const SENTINEL = '["__user_real_history__"]';
+        localStorage.setItem('tdb_query_history', SENTINEL);
+        // 触发一次完整查询落地（走 saveHistory 路径）
+        setEditorValue('FIND {type: "person"} RETURN * LIMIT 1');
+        await executeCurrentQuery();
+        await waitFor(() => currentResultData && (currentResultData.rows || []).length === 3, 3000, '查询应落地');
+        assert(localStorage.getItem('tdb_query_history') === SENTINEL,
+          'selftest 下 saveHistory 应为 no-op（用户历史不得被 mock 查询污染）');
+        if (prev === null) localStorage.removeItem('tdb_query_history');
+        else localStorage.setItem('tdb_query_history', prev);
       });
 
       addAssert('体验加固：超长单行查询（滚动条出现）高亮层 scroll 尺寸仍全等', '体验加固', async () => {
