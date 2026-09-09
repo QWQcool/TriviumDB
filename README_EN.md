@@ -307,10 +307,10 @@ Every TriviumDB node can carry a **vector, JSON document, sparse text, and graph
 -- Document query: filter JSON fields (property indexes skip full scans when hit)
 FIND {type: "paper", year: {$gte: 2024}} RETURN * LIMIT 10
 
--- Graph query: match structural relationships
-MATCH (author)-[:wrote]->(paper)
+-- Graph query: bind an edge as a first-class value with direction, label, weight, and metadata
+MATCH (author)-[relation:wrote]->(paper)
 WHERE author.name == "Alice"
-RETURN paper
+RETURN paper, relation
 
 -- Locate vector anchors, then deterministically expand over incoming and outgoing edges
 SEARCH VECTOR [0.12, -0.45, 0.78] TOP 5
@@ -362,7 +362,7 @@ print(prepared.parameter_names())          # ['bonus']
 rows = db.execute_prepared_tql(prepared, {"bonus": 4})
 ```
 
-Rust, Python, and Node.js share the same TQL, Prepared queries, four property indexes, and first-class query values. See the **[TQL Reference](docs/tql-reference.md)** for the complete syntax.
+Rust, Python, and Node.js share the same TQL, Prepared queries, four property-index kinds, and first-class query values; the HTTP Server additionally exposes bounded neighborhood subgraphs, directional edge paging, batch node reads, and paths with per-hop edge details. See the **[TQL Reference](docs/tql-reference.md)** for the complete syntax.
 
 ### Graph and Hybrid Query Modes
 

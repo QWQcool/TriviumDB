@@ -15,7 +15,7 @@ use super::tql_ast::*;
 use crate::VectorType;
 use crate::error::TriviumError;
 use crate::filter::Filter;
-use crate::node::{Node, NodeId};
+use crate::node::{EdgeView, Node, NodeId};
 use crate::storage::memtable::MemTable;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{
@@ -62,6 +62,7 @@ pub type TqlResult<T> = Vec<HashMap<String, Node<T>>>;
 #[derive(Debug, Clone)]
 pub enum TqlValue<T> {
     Node(Node<T>),
+    Edge(EdgeView),
     Int(i64),
     Float(f64),
     String(String),
@@ -1126,6 +1127,12 @@ pub fn execute_tql_values_with_limits<T: VectorType>(
 ) -> Result<TqlValueResult<T>, TriviumError> {
     limits.check_cancelled()?;
     ensure_search_vector_bound(query)?;
+    if query.pipeline.is_empty()
+        && let QueryEntry::Match { pattern } = &query.entry
+        && pattern.edges.iter().any(|edge| edge.var.is_some())
+    {
+        return execute_single_edge_values(query, pattern, mt, limits);
+    }
     if query.pipeline.is_empty() {
         return execute_tql_with_limits(query, mt, limits)?
             .into_iter()
@@ -1147,6 +1154,93 @@ pub fn execute_tql_values_with_limits<T: VectorType>(
             project_pipeline_row(query, &current_name, &scalar_aliases, &pipeline_row, mt)
         })
         .collect()
+}
+
+fn execute_single_edge_values<T: VectorType>(
+    query: &TqlQuery,
+    pattern: &TqlPattern,
+    mt: &MemTable<T>,
+    limits: TqlLimits,
+) -> Result<TqlValueResult<T>, TriviumError> {
+    if pattern.edges.len() != 1 || pattern.edges[0].hop_range.is_some() {
+        return Err(TriviumError::QueryExecution(
+            "边变量目前仅支持单跳 MATCH (Edge variables currently support single-hop MATCH only)"
+                .into(),
+        ));
+    }
+    let edge_pattern = &pattern.edges[0];
+    let edge_var = edge_pattern
+        .var
+        .as_ref()
+        .ok_or_else(|| TriviumError::QueryExecution("缺少边变量 (Missing edge variable)".into()))?;
+    let (Some(left_var), Some(right_var)) =
+        (pattern.nodes[0].var.as_ref(), pattern.nodes[1].var.as_ref())
+    else {
+        return Err(TriviumError::QueryExecution(
+            "边投影要求两端节点都有变量 (Edge projection requires variables on both nodes)".into(),
+        ));
+    };
+    let mut node_query = query.clone();
+    node_query.limit = None;
+    node_query.offset = None;
+    node_query.returns = ReturnClause::Variables(vec![left_var.clone(), right_var.clone()]);
+    let rows = execute_tql_with_limits(&node_query, mt, limits)?;
+    let requested_vars = match &query.returns {
+        ReturnClause::Variables(vars) => Some(vars),
+        _ => None,
+    };
+    let mut output = Vec::new();
+    let mut seen_pairs = HashSet::new();
+    for row in rows {
+        let (Some(left), Some(right)) = (row.get(left_var), row.get(right_var)) else {
+            continue;
+        };
+        if !seen_pairs.insert((left.id, right.id)) {
+            continue;
+        }
+        let candidates = match edge_pattern.direction {
+            EdgeDirection::Forward => vec![(left.id, right.id)],
+            EdgeDirection::Backward => vec![(right.id, left.id)],
+            EdgeDirection::Both => vec![(left.id, right.id), (right.id, left.id)],
+        };
+        for (source, target) in candidates {
+            let Some(edges) = mt.get_edges(source) else {
+                continue;
+            };
+            for edge in edges {
+                if edge.target_id != target
+                    || (!edge_pattern.labels.is_empty()
+                        && !edge_pattern.labels.contains(&edge.label))
+                {
+                    continue;
+                }
+                let mut values = row
+                    .clone()
+                    .into_iter()
+                    .filter(|(name, _)| requested_vars.is_none_or(|vars| vars.contains(name)))
+                    .map(|(name, node)| (name, TqlValue::Node(node)))
+                    .collect::<HashMap<_, _>>();
+                values.insert(
+                    edge_var.clone(),
+                    TqlValue::Edge(EdgeView {
+                        source_id: source,
+                        target_id: target,
+                        label: edge.label.clone(),
+                        weight: edge.weight,
+                        metadata: edge.metadata.clone(),
+                    }),
+                );
+                output.push(values);
+            }
+        }
+    }
+    if let Some(offset) = query.offset {
+        output = output.into_iter().skip(offset).collect();
+    }
+    if let Some(limit) = query.limit {
+        output.truncate(limit);
+    }
+    Ok(output)
 }
 
 fn sort_pipeline_rows<T: VectorType>(
@@ -1431,6 +1525,13 @@ fn pipeline_kind_json<T: VectorType>(
     Ok(
         match pipeline_kind_value(kind, current_name, scalar_aliases, row, mt)? {
             TqlValue::Node(node) => serde_json::json!(node.id),
+            TqlValue::Edge(edge) => serde_json::json!({
+                "source": edge.source_id,
+                "target": edge.target_id,
+                "label": edge.label,
+                "weight": edge.weight,
+                "metadata": edge.metadata,
+            }),
             TqlValue::Int(value) => serde_json::json!(value),
             TqlValue::Float(value) => serde_json::json!(value),
             TqlValue::String(value) => serde_json::json!(value),
@@ -1880,8 +1981,8 @@ fn execute_find<T: VectorType>(
             continue;
         }
 
-        let node = match build_node(id, mt) {
-            Some(n) => n,
+        let node = match build_node_with_payload(id, payload, mt) {
+            Some(node) => node,
             None => continue,
         };
 
@@ -2784,9 +2885,19 @@ fn compare_for_sort(a: &RuntimeValue, b: &RuntimeValue) -> std::cmp::Ordering {
 
 /// 从 MemTable 构建完整 Node
 fn build_node<T: VectorType>(id: NodeId, mt: &MemTable<T>) -> Option<Node<T>> {
+    build_node_with_payload(id, mt.get_payload(id)?, mt)
+}
+
+fn build_node_with_payload<T: VectorType>(
+    id: NodeId,
+    payload: std::sync::Arc<serde_json::Value>,
+    mt: &MemTable<T>,
+) -> Option<Node<T>> {
     let vector = mt.get_vector(id)?;
-    let payload = mt.get_payload(id)?;
-    let edges = mt.get_edges(id).map(|e| e.to_vec()).unwrap_or_default();
+    let edges = mt
+        .get_edges(id)
+        .map(|edges| edges.to_vec())
+        .unwrap_or_default();
     Some(Node {
         id,
         vector: vector.to_vec(),

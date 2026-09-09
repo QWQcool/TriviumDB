@@ -307,6 +307,8 @@ pub enum EdgeDirection {
 /// 边模式：-[:label1|label2*min..max]->
 #[derive(Debug, Clone)]
 pub struct TqlEdgePattern {
+    /// 单跳边绑定变量。
+    pub var: Option<String>,
     /// 边标签过滤（多标签 OR，Q2 决策 A）
     pub labels: Vec<String>,
     /// 可变长跳数范围（None 表示恰好 1 跳）

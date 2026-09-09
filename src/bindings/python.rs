@@ -83,6 +83,14 @@ pub mod python {
                     "payload": node.payload,
                     "num_edges": node.edges.len(),
                 }),
+                TqlValue::Edge(edge) => serde_json::json!({
+                    "type": "edge",
+                    "source": edge.source_id,
+                    "target": edge.target_id,
+                    "label": edge.label,
+                    "weight": edge.weight,
+                    "metadata": edge.metadata,
+                }),
                 TqlValue::Int(value) => serde_json::json!(value),
                 TqlValue::Float(value) => serde_json::json!(value),
                 TqlValue::String(value) => serde_json::json!(value),
@@ -2007,6 +2015,17 @@ pub mod python {
                                     .set_item("payload", json_to_pyobject(py, &node.payload));
                                 let _ = node_dict.set_item("num_edges", node.edges.len());
                                 let _ = py_row.set_item(name, node_dict);
+                            }
+                            TqlValue::Edge(edge) => {
+                                let edge_dict = PyDict::new(py);
+                                let _ = edge_dict.set_item("type", "edge");
+                                let _ = edge_dict.set_item("source", edge.source_id);
+                                let _ = edge_dict.set_item("target", edge.target_id);
+                                let _ = edge_dict.set_item("label", edge.label);
+                                let _ = edge_dict.set_item("weight", edge.weight);
+                                let _ = edge_dict
+                                    .set_item("metadata", json_to_pyobject(py, &edge.metadata));
+                                let _ = py_row.set_item(name, edge_dict);
                             }
                             TqlValue::Int(value) => {
                                 let _ = py_row.set_item(name, value);

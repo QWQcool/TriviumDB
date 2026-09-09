@@ -54,6 +54,20 @@ pub struct TqlResponse {
     pub rows: Vec<BTreeMap<String, serde_json::Value>>,
     pub row_count: usize,
     pub generation: String,
+    pub columns: Vec<ProjectionColumn>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectionColumn {
+    pub name: String,
+    pub kind: &'static str,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BatchGetRequest {
+    pub ids: Vec<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -465,6 +479,7 @@ pub fn encode_row(
 
 pub fn encode_rows(rows: TqlValueResult<f32>, generation: String) -> Result<TqlResponse, ApiError> {
     let row_count = rows.len();
+    let columns = projection_columns(&rows);
     let rows = rows
         .into_iter()
         .map(|row| {
@@ -477,7 +492,39 @@ pub fn encode_rows(rows: TqlValueResult<f32>, generation: String) -> Result<TqlR
         rows,
         row_count,
         generation,
+        columns,
     })
+}
+
+pub fn projection_columns(rows: &TqlValueResult<f32>) -> Vec<ProjectionColumn> {
+    let mut columns = BTreeMap::new();
+    for row in rows {
+        for (name, value) in row {
+            let kind = match value {
+                TqlValue::Node(_) => "node",
+                TqlValue::Edge(_) => "edge",
+                TqlValue::Int(_) => "int",
+                TqlValue::Float(_) => "float",
+                TqlValue::String(_) => "string",
+                TqlValue::Bool(_) => "bool",
+                TqlValue::Path(_) => "path",
+                TqlValue::List(_) => "list",
+                TqlValue::Null => "null",
+            };
+            columns
+                .entry(name.clone())
+                .and_modify(|current| {
+                    if *current == "null" {
+                        *current = kind;
+                    }
+                })
+                .or_insert(kind);
+        }
+    }
+    columns
+        .into_iter()
+        .map(|(name, kind)| ProjectionColumn { name, kind })
+        .collect()
 }
 
 pub fn encode_node(node: triviumdb::node::NodeView<f32>) -> serde_json::Value {
@@ -498,6 +545,14 @@ pub fn encode_node(node: triviumdb::node::NodeView<f32>) -> serde_json::Value {
 fn encode_value(value: TqlValue<f32>) -> Result<serde_json::Value, ApiError> {
     Ok(match value {
         TqlValue::Node(node) => encode_node(node),
+        TqlValue::Edge(edge) => serde_json::json!({
+            "type": "edge",
+            "source": edge.source_id.to_string(),
+            "target": edge.target_id.to_string(),
+            "label": edge.label,
+            "weight": edge.weight,
+            "metadata": edge.metadata,
+        }),
         TqlValue::Int(value) => serde_json::json!({"type": "int", "value": value}),
         TqlValue::Float(value) => serde_json::json!({"type": "float", "value": value}),
         TqlValue::String(value) => serde_json::json!({"type": "string", "value": value}),

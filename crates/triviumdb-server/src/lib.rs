@@ -13,10 +13,11 @@ use axum::{
 };
 use engine::{EngineConfig, EngineHandle};
 use protocol::{
-    ApiError, BulkEdgeRecord, BulkNodeRecord, ConditionalMutationRequest, DeleteManyRequest,
-    ExecutePreparedRequest, HealthDetailsResponse, HealthResponse, IndexRequest,
+    ApiError, BatchGetRequest, BulkEdgeRecord, BulkNodeRecord, ConditionalMutationRequest,
+    DeleteManyRequest, ExecutePreparedRequest, HealthDetailsResponse, HealthResponse, IndexRequest,
     IndexedLookupRequest, PrepareRequest, SubstringLookupRequest, TqlRequest, TransactionOperation,
     TransactionRequest, TransactionResponse, encode_node, encode_row, encode_rows,
+    projection_columns,
 };
 use serde::Deserialize;
 use std::{
@@ -75,6 +76,62 @@ struct RequestContext {
     id: String,
     started: Instant,
     telemetry: Arc<engine::RequestTelemetry>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NeighborsQuery {
+    #[serde(default = "default_graph_depth")]
+    depth: usize,
+    #[serde(default = "default_graph_limit")]
+    limit: usize,
+    #[serde(default)]
+    labels: Option<String>,
+    #[serde(default)]
+    types: Option<String>,
+    #[serde(default)]
+    direction: GraphDirection,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EdgesQuery {
+    #[serde(default)]
+    direction: GraphDirection,
+    #[serde(default)]
+    label: Option<String>,
+    #[serde(default)]
+    offset: usize,
+    #[serde(default = "default_graph_limit")]
+    limit: usize,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PathsQuery {
+    #[serde(default = "default_path_hops")]
+    max_hops: usize,
+    #[serde(default)]
+    label: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum GraphDirection {
+    #[default]
+    Out,
+    In,
+    Both,
+}
+
+fn default_graph_depth() -> usize {
+    1
+}
+fn default_graph_limit() -> usize {
+    1_000
+}
+fn default_path_hops() -> usize {
+    4
 }
 
 impl RequestContext {
@@ -142,6 +199,10 @@ pub async fn build_app(config: ServerConfig) -> Result<Router, ApiError> {
         .route("/v1/search/vector", post(search_vector))
         .route("/v1/transactions", post(transaction))
         .route("/v1/nodes/delete-many", post(delete_many))
+        .route("/v1/nodes/batch-get", post(batch_get_nodes))
+        .route("/v1/nodes/{id}/neighbors", get(get_neighbors))
+        .route("/v1/nodes/{id}/edges", get(get_edges))
+        .route("/v1/nodes/{from}/paths/to/{to}", get(get_paths))
         .route(
             "/v1/nodes/{id}/compare-and-set",
             post(compare_and_set_payload_field),
@@ -649,10 +710,15 @@ fn query_response(
         });
     if wants_ndjson {
         let row_count = rows.len();
+        let columns = projection_columns(&rows);
         let stream_etag = etag.clone();
         let stream = async_stream::stream! {
             yield Ok::<_, std::convert::Infallible>(bytes::Bytes::from(
-                format!("{}\n", serde_json::json!({"type": "meta", "generation": stream_etag}))
+                format!("{}\n", serde_json::json!({
+                    "type": "meta",
+                    "generation": stream_etag,
+                    "columns": columns,
+                }))
             ));
             for row in rows {
                 let line = match encode_row(row) {
@@ -767,6 +833,218 @@ async fn get_node(
     .into_response();
     insert_etag(response.headers_mut(), &node_etag)?;
     Ok(response)
+}
+
+fn reachability_direction(
+    direction: GraphDirection,
+) -> triviumdb::graph::reachability::ReachabilityDirection {
+    match direction {
+        GraphDirection::Out => triviumdb::graph::reachability::ReachabilityDirection::Outgoing,
+        GraphDirection::In => triviumdb::graph::reachability::ReachabilityDirection::Incoming,
+        GraphDirection::Both => triviumdb::graph::reachability::ReachabilityDirection::Both,
+    }
+}
+
+fn graph_config(
+    depth: usize,
+    limit: usize,
+    labels: Option<String>,
+    direction: GraphDirection,
+) -> Result<triviumdb::graph::reachability::ReachabilityConfig, ApiError> {
+    if !(1..=3).contains(&depth) || !(1..=10_000).contains(&limit) {
+        return Err(ApiError::invalid_request(
+            "depth 必须为 1..=3，limit 必须为 1..=10000 (depth must be 1..=3 and limit must be 1..=10000)",
+        ));
+    }
+    let labels = labels.map(|value| {
+        value
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+            .collect()
+    });
+    Ok(triviumdb::graph::reachability::ReachabilityConfig {
+        min_depth: 1,
+        max_depth: depth,
+        labels,
+        direction: reachability_direction(direction),
+        max_visited_nodes: limit.saturating_add(1),
+        max_results: limit,
+        max_edges: limit.saturating_mul(16).max(1),
+        max_frontier_size: limit,
+        exhaustion_policy: triviumdb::graph::budget::BudgetExhaustionPolicy::Partial,
+    })
+}
+
+async fn get_neighbors(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<u64>,
+    Query(query): Query<NeighborsQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    let config = graph_config(query.depth, query.limit, query.labels, query.direction)?;
+    let (mut result, version) = state
+        .engine
+        .query_subgraph(id, config, Instant::now() + state.request_timeout)
+        .await?;
+    if let Some(types) = query.types {
+        let types = types
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .collect::<std::collections::HashSet<_>>();
+        let retained = result
+            .nodes
+            .iter()
+            .filter(|node| {
+                node.id == id
+                    || node
+                        .payload
+                        .get("type")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|value| types.contains(value))
+            })
+            .map(|node| node.id)
+            .collect::<std::collections::HashSet<_>>();
+        result.nodes.retain(|node| retained.contains(&node.id));
+        result.edges.retain(|edge| {
+            retained.contains(&edge.source_id) && retained.contains(&edge.target_id)
+        });
+    }
+    Ok(Json(serde_json::json!({
+        "nodes": result.nodes.into_iter().map(|node| serde_json::json!({
+            "type": "node", "id": node.id.to_string(), "payload": node.payload
+        })).collect::<Vec<_>>(),
+        "edges": result.edges.into_iter().map(encode_graph_edge).collect::<Vec<_>>(),
+        "visitedNodes": result.visited_nodes,
+        "traversedEdges": result.traversed_edges,
+        "truncated": result.truncated,
+        "generation": version.global_etag(),
+    })))
+}
+
+async fn get_edges(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<u64>,
+    Query(query): Query<EdgesQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    if query.limit == 0 || query.limit > 10_000 {
+        return Err(ApiError::invalid_request(
+            "limit 必须为 1..=10000 (limit must be 1..=10000)",
+        ));
+    }
+    let (edges, version) = state
+        .engine
+        .list_edges(
+            id,
+            reachability_direction(query.direction),
+            query.label,
+            Instant::now() + state.request_timeout,
+        )
+        .await?;
+    let total = edges.len();
+    let edges = edges
+        .into_iter()
+        .skip(query.offset)
+        .take(query.limit)
+        .map(encode_graph_edge)
+        .collect::<Vec<_>>();
+    Ok(Json(serde_json::json!({
+        "edges": edges,
+        "total": total,
+        "offset": query.offset,
+        "limit": query.limit,
+        "hasMore": query.offset.saturating_add(edges.len()) < total,
+        "generation": version.global_etag(),
+    })))
+}
+
+async fn batch_get_nodes(
+    State(state): State<Arc<AppState>>,
+    request: Result<Json<BatchGetRequest>, JsonRejection>,
+) -> Result<impl IntoResponse, ApiError> {
+    let Json(request) = decode_json(request)?;
+    if request.ids.is_empty() || request.ids.len() > 10_000 {
+        return Err(ApiError::invalid_request(
+            "ids 数量必须为 1..=10000 (ids count must be 1..=10000)",
+        ));
+    }
+    let requested = request.ids.clone();
+    let (nodes, version) = state
+        .engine
+        .batch_get_nodes(request.ids, Instant::now() + state.request_timeout)
+        .await?;
+    let found = nodes
+        .iter()
+        .map(|node| node.id)
+        .collect::<std::collections::HashSet<_>>();
+    let missing_ids = requested
+        .into_iter()
+        .filter(|id| !found.contains(id))
+        .map(|id| id.to_string())
+        .collect::<Vec<_>>();
+    Ok(Json(serde_json::json!({
+        "nodes": nodes.into_iter().map(encode_node).collect::<Vec<_>>(),
+        "missingIds": missing_ids,
+        "generation": version.global_etag(),
+    })))
+}
+
+async fn get_paths(
+    State(state): State<Arc<AppState>>,
+    Path((from, to)): Path<(u64, u64)>,
+    Query(query): Query<PathsQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    if query.max_hops == 0 || query.max_hops > 64 {
+        return Err(ApiError::invalid_request(
+            "maxHops 必须为 1..=64 (maxHops must be 1..=64)",
+        ));
+    }
+    let config = triviumdb::graph::reachability::ReachabilityConfig {
+        min_depth: 1,
+        max_depth: query.max_hops,
+        labels: query.label.map(|label| vec![label]),
+        direction: triviumdb::graph::reachability::ReachabilityDirection::Outgoing,
+        ..Default::default()
+    };
+    let (result, version) = state
+        .engine
+        .reachable(from, config, Instant::now() + state.request_timeout)
+        .await?;
+    let paths = result
+        .results
+        .into_iter()
+        .filter(|result| result.target_id == to)
+        .map(|result| {
+            serde_json::json!({
+                "nodes": result.path.into_iter().map(|id| id.to_string()).collect::<Vec<_>>(),
+                "edges": result.steps.into_iter().map(|step| serde_json::json!({
+                    "type": "edge",
+                    "source": step.edge_source.to_string(),
+                    "target": step.edge_target.to_string(),
+                    "label": step.label,
+                    "weight": step.weight,
+                    "metadata": step.metadata,
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok(Json(serde_json::json!({
+        "paths": paths,
+        "truncated": result.truncated,
+        "generation": version.global_etag(),
+    })))
+}
+
+fn encode_graph_edge(edge: triviumdb::graph::reachability::SubgraphEdge) -> serde_json::Value {
+    serde_json::json!({
+        "type": "edge",
+        "source": edge.source_id.to_string(),
+        "target": edge.target_id.to_string(),
+        "label": edge.label,
+        "weight": edge.weight,
+        "metadata": edge.metadata,
+    })
 }
 
 async fn indexed_lookup(
