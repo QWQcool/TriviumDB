@@ -494,6 +494,34 @@ try {
     log('  ✓ 星云模式因 WebGL 库不可达中止并 toast（按设计）');
   }
 
+  // 冒烟 5.8：右侧统一面板（PR-19）—— 打开节点 → 详情 tab；收起 → 导航条切过滤器 tab；再收起
+  await page.evaluate(() => {
+    const n = graphNodes[0];
+    openNodeDrawer({ id: n.id, label: n.label, payload: n.payload, vector: [] });
+  });
+  await page.waitForFunction(() => uspActiveTab === 'detail', null, { timeout: 5000 });
+  const upanel = await page.evaluate(() => ({
+    panelOpen: document.getElementById('unifiedSidePanel').classList.contains('open'),
+    detailVisible: !document.getElementById('uspBodyDetail').hidden,
+    shellOpen: document.getElementById('nodeDrawer').classList.contains('open'),
+    title: document.getElementById('drawerNodeTitle').textContent,
+  }));
+  if (!upanel.panelOpen || !upanel.detailVisible || !upanel.shellOpen) {
+    throw new Error('统一面板详情 tab 映射失败: ' + JSON.stringify(upanel));
+  }
+  log(`  ✓ 统一面板：打开节点 → 详情 tab (${upanel.title})`);
+  await page.click('#uspCollapseBtn');
+  await page.waitForFunction(() => uspActiveTab === null, null, { timeout: 5000 });
+  await page.click('#uspRailFilterBtn');
+  await page.waitForFunction(() => uspActiveTab === 'filter'
+    && !document.getElementById('graphFilterPanel').hidden, null, { timeout: 5000 });
+  const filterSummary = await page.evaluate(() => document.getElementById('gfSummary').textContent);
+  if (!filterSummary.includes('节点')) throw new Error('过滤器 tab 应渲染统计摘要: ' + filterSummary);
+  log(`  ✓ 统一面板：收起 → 导航条切过滤器 tab (${filterSummary})`);
+  await page.click('#uspCollapseBtn');
+  await page.waitForFunction(() => uspActiveTab === null, null, { timeout: 5000 });
+  log('  ✓ 统一面板：收起回导航条');
+
   log(`5/6 打开 ${BASE}/ui?selftest=1 断言自检套件`);
   await page.goto(`${BASE}/ui?selftest=1`, { waitUntil: 'domcontentloaded', timeout: 20000 });
   await page.waitForFunction(() => window.__TRIVIUM_APP_READY === true, null, { timeout: 10000 });
