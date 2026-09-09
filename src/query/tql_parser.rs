@@ -338,6 +338,11 @@ impl TqlParser {
 
         let mut labels = Vec::new();
         let mut hop_range = None;
+        let var = if matches!(self.peek(), TqlToken::Ident(_)) {
+            Some(self.parse_ident()?)
+        } else {
+            None
+        };
 
         // 标签部分（可选）
         if self.at(&TqlToken::Colon) {
@@ -386,6 +391,7 @@ impl TqlParser {
         };
 
         Ok(TqlEdgePattern {
+            var,
             labels,
             hop_range,
             direction,

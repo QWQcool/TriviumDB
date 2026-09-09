@@ -75,6 +75,29 @@ fn build_test_db(name: &str) -> (Database<f32>, String) {
 }
 
 #[test]
+fn MATCH边变量返回真实边对象() {
+    let (db, path) = build_test_db("edge_projection");
+    let rows = db
+        .tql_values("MATCH (a {name: \"Alice\"})-[r:knows]->(b {name: \"Bob\"}) RETURN a, r, b")
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    match rows[0].get("r").unwrap() {
+        triviumdb::query::tql_executor::TqlValue::Edge(edge) => {
+            assert_eq!((edge.source_id, edge.target_id), (1, 2));
+            assert_eq!(edge.label, "knows");
+            assert_eq!(edge.weight, 1.0);
+        }
+        _ => panic!("r 应为边对象"),
+    }
+    let edge_only = db
+        .tql_values("MATCH (a {name: \"Alice\"})-[r:knows]->(b {name: \"Bob\"}) RETURN r")
+        .unwrap();
+    assert_eq!(edge_only[0].len(), 1);
+    assert!(edge_only[0].contains_key("r"));
+    cleanup(&path);
+}
+
+#[test]
 fn GraphFirst在图匹配集合内精确排序并去重Anchor() {
     let path = tmp_db("graph_first_rank");
     cleanup(&path);
@@ -251,8 +274,43 @@ fn cooperative_cancellation在全表扫描前和扫描中fail_closed() {
 #[test]
 fn TQL_FIND_简单等值() {
     let (db, path) = build_test_db("find_eq");
+    let before = db.payload_memory_stats();
     let results = db.tql_nodes(r#"FIND {type: "person"} RETURN *"#).unwrap();
+    let after = db.payload_memory_stats();
     assert_eq!(results.len(), 3, "应找到 Alice, Bob, Carol");
+    assert_eq!(
+        after.payload_lookups - before.payload_lookups,
+        5,
+        "全扫描每个候选只允许读取一次 Payload，投影不得重复触碰缓存"
+    );
+    drop(db);
+    cleanup(&path);
+}
+
+#[test]
+fn FIND零命中与聚合全扫描读取次数保持线性() {
+    let (db, path) = build_test_db("bulk_payload_scan_count");
+    let before = db.payload_memory_stats();
+    assert!(
+        db.tql_nodes(r#"FIND {type: "missing", region: "none"} RETURN * LIMIT 10"#)
+            .unwrap()
+            .is_empty()
+    );
+    let after_zero_hit = db.payload_memory_stats();
+    assert_eq!(after_zero_hit.payload_lookups - before.payload_lookups, 5);
+
+    let rows = db
+        .tql_values(r#"MATCH (n) WHERE n.type == "person" RETURN count(n) AS total"#)
+        .unwrap();
+    let after_count = db.payload_memory_stats();
+    assert!(
+        after_count.payload_lookups - after_zero_hit.payload_lookups <= 10,
+        "MATCH 谓词与聚合的 Payload 读取必须随节点数保持线性"
+    );
+    assert!(matches!(
+        rows[0].get("total"),
+        Some(triviumdb::query::tql_executor::TqlValue::Int(3))
+    ));
     drop(db);
     cleanup(&path);
 }

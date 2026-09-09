@@ -101,20 +101,6 @@ pub fn plan_filter_with_limit<T: VectorType>(
     limit: Option<usize>,
     mt: &MemTable<T>,
 ) -> NodeAccessPlan {
-    let ordered = ordered_range(filter);
-    let has_ordered_index = matches!(
-        filter,
-        Filter::Gt(..) | Filter::Gte(..) | Filter::Lt(..) | Filter::Lte(..) | Filter::Range(..)
-    ) && ordered
-        .as_ref()
-        .is_some_and(|(field, ..)| mt.has_ordered_property_index(field));
-    if limit.is_some() && !filter_has_usable_index(filter, mt) && !has_ordered_index {
-        return NodeAccessPlan {
-            access_path: AccessPath::FullNodeScan,
-            estimated_rows: mt.node_count(),
-            candidates: Vec::new(),
-        };
-    }
     if let Filter::Eq(field, value) = filter
         && field != "id"
         && let Some(candidates) = mt.find_by_property_index_limit(field, value, limit)
@@ -135,7 +121,7 @@ pub fn plan_filter_with_limit<T: VectorType>(
             inclusive,
             &value,
             false,
-            limit,
+            None,
         )
     {
         return NodeAccessPlan {
@@ -146,7 +132,7 @@ pub fn plan_filter_with_limit<T: VectorType>(
     }
     if let Some((field, op, inclusive, value)) = ordered_range(filter)
         && let Some(candidates) =
-            mt.find_by_property_range(field, op, inclusive, &value, false, limit)
+            mt.find_by_property_range(field, op, inclusive, &value, false, None)
     {
         return NodeAccessPlan {
             access_path: AccessPath::OrderedPropertyIndex {
@@ -518,21 +504,6 @@ fn difference_sorted(left: &[NodeId], right: &[NodeId]) -> Vec<NodeId> {
         left_index += 1;
     }
     output
-}
-
-fn filter_has_usable_index<T: VectorType>(filter: &Filter, mt: &MemTable<T>) -> bool {
-    match filter {
-        Filter::Eq(field, _) if field != "id" => {
-            mt.has_property_index(field)
-                || mt
-                    .find_by_bitmap_property_index(field, &serde_json::Value::Null)
-                    .is_some()
-        }
-        Filter::And(filters) | Filter::Or(filters) => filters
-            .iter()
-            .any(|filter| filter_has_usable_index(filter, mt)),
-        _ => false,
-    }
 }
 
 fn filter_equalities(filter: &Filter) -> Vec<(String, serde_json::Value)> {

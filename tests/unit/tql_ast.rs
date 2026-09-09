@@ -196,6 +196,7 @@ fn node_pattern_和_edge_pattern() {
         filter: None,
     };
     let _ep = TqlEdgePattern {
+        var: None,
         labels: vec!["knows".into()],
         hop_range: Some(HopRange { min: 1, max: 3 }),
         direction: EdgeDirection::Forward,

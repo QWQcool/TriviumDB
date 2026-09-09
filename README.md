@@ -228,10 +228,10 @@ TriviumDB 中的一个节点可以同时拥有**向量、JSON 文档、稀疏文
 -- 文档查询：按 JSON 字段过滤（命中属性索引则跳过全表扫描）
 FIND {type: "paper", year: {$gte: 2024}} RETURN * LIMIT 10
 
--- 图查询：匹配结构关系
-MATCH (author)-[:wrote]->(paper)
+-- 图查询：边可绑定为一等值并返回真实方向、标签、权重和 metadata
+MATCH (author)-[relation:wrote]->(paper)
 WHERE author.name == "Alice"
-RETURN paper
+RETURN paper, relation
 
 -- 向量锚定后，沿入边与出边做确定性结构扩展
 SEARCH VECTOR [0.12, -0.45, 0.78] TOP 5
@@ -283,7 +283,7 @@ print(prepared.parameter_names())          # ['bonus']
 rows = db.execute_prepared_tql(prepared, {"bonus": 4})
 ```
 
-Rust / Python / Node.js 三语言共享同一套 TQL、Prepared、四类属性索引与一等查询值。详细语法参见 **[TQL 查询语言参考](docs/tql-reference.md)**。
+Rust / Python / Node.js 三语言共享同一套 TQL、Prepared、四类属性索引与一等查询值；HTTP Server 另提供有界邻域子图、方向化边分页、批量节点读取和带逐跳边信息的路径端点。详细语法参见 **[TQL 查询语言参考](docs/tql-reference.md)**。
 
 ### 多种图谱与混合查询
 

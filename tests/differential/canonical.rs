@@ -11,6 +11,7 @@ pub enum CanonicalValue {
     Float(u64),
     String(String),
     Node(u64),
+    Edge(u64, u64, String),
     Path(Vec<u64>),
     List(Vec<CanonicalValue>),
 }
@@ -50,6 +51,9 @@ fn json_value(value: &serde_json::Value) -> CanonicalValue {
 pub fn from_tql_value(value: &TqlValue<f32>) -> CanonicalValue {
     match value {
         TqlValue::Node(node) => CanonicalValue::Node(node.id),
+        TqlValue::Edge(edge) => {
+            CanonicalValue::Edge(edge.source_id, edge.target_id, edge.label.clone())
+        }
         TqlValue::Int(value) => CanonicalValue::Integer(*value),
         TqlValue::Float(value) => CanonicalValue::Float(value.to_bits()),
         TqlValue::String(value) => CanonicalValue::String(value.clone()),

@@ -243,8 +243,9 @@ This is the project's release-channel and acceptance-level ordering, not a redef
 
 The repository permits only these two kinds of Git tags, both of which must be interpreted consistently by Cargo/crates.io, NPM, and PyPI:
 
-- **Beta tag**: `vX.Y.Z-beta.N`, only for candidates ready for public testing; publish it to the prerelease channels on all three registries, never over or as stable;
-- **Stable tag**: `vX.Y.Z`, only on a validated Release Commit in `master`, triggering the official three-registry release; a hotfix uses the next stable patch tag;
+- **Beta tag**: `vX.Y.Z-beta.N`, only for candidates ready for public testing; it enters prerelease channels and must never overwrite or impersonate stable;
+- **Stable tag**: `vX.Y.Z`, only on a validated Release Commit in `master`; a hotfix uses the next stable patch tag;
+- GitHub Actions publishes PyPI and NPM artifacts from the tag. The maintainer publishes crates.io locally from the same Release Commit with `cargo publish --locked`; repository workflows must not store or use a crates.io publishing token;
 - Pushed tags are immutable (protected by a Tag Ruleset);
 - Before opening a Release PR, verify that `Cargo.toml`, Python, Node, CLI/Server versions and prerelease identifiers are fully aligned.
 

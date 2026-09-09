@@ -168,6 +168,21 @@ fn planner_复合与_bitmap_访问路径和扫描结果一致() {
         r#"EXPLAIN FIND {group: "group_7", rare: "rare_7"} RETURN *"#,
     );
     assert_eq!(composite["access_path"]["kind"], "composite_property_index");
+    let before = db.payload_memory_stats();
+    assert!(
+        db.tql_nodes(r#"FIND {group: "group_7", rare: "missing"} RETURN * LIMIT 10"#)
+            .unwrap()
+            .is_empty()
+    );
+    let after = db.payload_memory_stats();
+    assert_eq!(after.payload_lookups, before.payload_lookups);
+    assert_eq!(after.payload_parsed_bytes, before.payload_parsed_bytes);
+    let empty = plan(
+        &db,
+        r#"EXPLAIN FIND {group: "group_7", rare: "missing"} RETURN * LIMIT 10"#,
+    );
+    assert_eq!(empty["access_path"]["kind"], "composite_property_index");
+    assert_eq!(empty["estimated_rows"], 0);
     let bitmap = plan(
         &db,
         r#"EXPLAIN FIND {$or: [{group: "group_1"}, {group: "group_3"}]} RETURN *"#,

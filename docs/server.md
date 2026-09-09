@@ -1,6 +1,6 @@
 # TriviumDB Server（HTTP 服务端版）
 
-> **版本**: v0.8.6 开发分支（nightly 预览）
+> **版本**: v0.8.7 开发分支（nightly 预览）
 > **语言**: Rust（Axum + Tokio，仅服务端 crate，嵌入式核心零依赖侵入）
 > **许可**: Apache-2.0
 
@@ -119,6 +119,10 @@ RUST_LOG=triviumdb_server=info,triviumdb=warn ./triviumdb-server
 | POST | `/v1/search/vector` | little-endian f32 二进制向量搜索 |
 | POST | `/v1/transactions` | 多操作原子事务和 OCC precondition |
 | GET | `/v1/nodes/{id}` | 节点详情及节点/边 ETag |
+| POST | `/v1/nodes/batch-get` | 按 ID 批量读取节点并报告缺失 ID |
+| GET | `/v1/nodes/{id}/neighbors` | 有界多跳邻域子图，返回真实节点、边和截断状态 |
+| GET | `/v1/nodes/{id}/edges` | 按方向、标签和分页列举真实边 |
+| GET | `/v1/nodes/{from}/paths/to/{to}` | 有界最短路径及逐跳边标签 |
 | GET | `/v1/indexes` | 查询四类属性索引及统计 |
 | POST | `/v1/indexes` | 创建属性索引 |
 | DELETE | `/v1/indexes/delete` | 删除属性索引 |
@@ -147,7 +151,7 @@ Server 不为认知算子维护另一套 HTTP API；`TEXT`、`RESIDUAL`、`DIVER
 
 普通 JSON 查询响应有 16 MiB 硬上限。超限返回 `413 RESPONSE_TOO_LARGE`；应改用属性投影、`LIMIT` 或 NDJSON 响应。
 
-请求头设置 `Accept: application/x-ndjson` 时，响应按 `meta → row... → summary` 输出。HTTP 输出逐行生成，但排序、聚合和 Top-K 等 Core 算子仍可能先物化结果。
+请求头设置 `Accept: application/x-ndjson` 时，响应按 `meta → row... → summary` 输出；`meta.columns` 明确声明每个投影列的 `node`、`edge`、`path` 或标量类型。普通 JSON 响应也在顶层 `columns` 返回相同元数据。HTTP 输出逐行生成，但排序、聚合和 Top-K 等 Core 算子仍可能先物化结果。
 
 ### 属性索引
 
