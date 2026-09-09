@@ -80,11 +80,29 @@ fn 复合与_bitmap_索引_v4_重启更新删除无幽灵命中() {
             .len(),
         1
     );
+    let before = db.payload_memory_stats();
     assert!(
         db.tql_nodes(r#"FIND {tenant: "a", kind: "person"} RETURN *"#)
             .unwrap()
             .is_empty()
     );
+    let after = db.payload_memory_stats();
+    assert_eq!(
+        after.payload_lookups, before.payload_lookups,
+        "重启后的复合索引零命中必须权威返回空集，不得回退 Payload 扫描"
+    );
+    assert_eq!(
+        after.payload_parsed_bytes, before.payload_parsed_bytes,
+        "复合索引零命中不得解析任何冷 Payload"
+    );
+    let explain = db
+        .tql_nodes(r#"EXPLAIN FIND {tenant: "a", kind: "person"} RETURN *"#)
+        .unwrap();
+    assert_eq!(
+        explain[0]["plan"].payload["access_path"]["kind"],
+        "composite_property_index"
+    );
+    assert_eq!(explain[0]["plan"].payload["estimated_rows"], 0);
     assert!(db.list_indexes().contains(&"state".to_owned()));
     drop(db);
     cleanup(&path);

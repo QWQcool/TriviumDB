@@ -985,6 +985,7 @@ async fn ndjson分块协议包含meta_rows_summary与profile() {
         .map(|line| serde_json::from_str::<Value>(line).unwrap())
         .collect::<Vec<_>>();
     assert_eq!(frames[0]["type"], "meta");
+    assert_eq!(frames[0]["columns"][0]["kind"], "node");
     assert_eq!(frames[1]["type"], "row");
     assert_eq!(frames[2]["type"], "summary");
     assert_eq!(frames[2]["profile"]["preparedCacheHit"], false);
@@ -1051,6 +1052,108 @@ async fn 索引管理quiver状态与ndjson导入形成完整http契约() {
     )
     .await;
     assert_eq!(malformed.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn 图探索端点批量返回真实节点边和路径() {
+    let (app, _directory) = app("graph_exploration").await;
+    let seeded = request(
+        app.clone(),
+        "POST",
+        "/v1/transactions",
+        Some(serde_json::json!({"operations": [
+            {"op":"insert","id":1,"vector":[1.0,0.0],"payload":{"name":"a"}},
+            {"op":"insert","id":2,"vector":[0.0,1.0],"payload":{"name":"b"}},
+            {"op":"insert","id":3,"vector":[0.5,0.5],"payload":{"name":"c"}},
+            {"op":"link","source":1,"target":2,"label":"knows","weight":1.0},
+            {"op":"link","source":2,"target":3,"label":"knows","weight":0.5}
+        ]})),
+        &[],
+    )
+    .await;
+    assert_eq!(seeded.status(), StatusCode::OK);
+
+    let neighbors = json(
+        request(
+            app.clone(),
+            "GET",
+            "/v1/nodes/1/neighbors?depth=2&direction=both",
+            None,
+            &[],
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(neighbors["nodes"].as_array().unwrap().len(), 3);
+    assert_eq!(neighbors["edges"].as_array().unwrap().len(), 2);
+    assert_eq!(neighbors["truncated"], false);
+
+    let edges = json(
+        request(
+            app.clone(),
+            "GET",
+            "/v1/nodes/2/edges?direction=both&limit=1",
+            None,
+            &[],
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(edges["edges"].as_array().unwrap().len(), 1);
+    assert_eq!(edges["total"], 2);
+    assert_eq!(edges["hasMore"], true);
+
+    let batch = json(
+        request(
+            app.clone(),
+            "POST",
+            "/v1/nodes/batch-get",
+            Some(serde_json::json!({"ids":[3,1,404]})),
+            &[],
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(batch["nodes"].as_array().unwrap().len(), 2);
+    assert_eq!(batch["missingIds"], serde_json::json!(["404"]));
+
+    let paths = json(
+        request(
+            app.clone(),
+            "GET",
+            "/v1/nodes/1/paths/to/3?maxHops=3",
+            None,
+            &[],
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(
+        paths["paths"][0]["nodes"],
+        serde_json::json!(["1", "2", "3"])
+    );
+    assert_eq!(paths["paths"][0]["edges"][0]["label"], "knows");
+
+    let tql = json(
+        request(
+            app,
+            "POST",
+            "/v1/tql",
+            Some(serde_json::json!({"query":"MATCH (a)-[r:knows]->(b) RETURN a, r, b LIMIT 1"})),
+            &[],
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(tql["rows"][0]["r"]["type"], "edge");
+    assert_eq!(tql["columns"][1]["kind"], "node");
+    assert!(
+        tql["columns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|column| column["kind"] == "edge")
+    );
 }
 
 #[tokio::test]

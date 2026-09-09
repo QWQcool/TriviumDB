@@ -29,6 +29,16 @@ pub struct IncomingEdge {
     pub metadata: serde_json::Value,
 }
 
+/// 查询投影使用的拥有型边视图。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EdgeView {
+    pub source_id: NodeId,
+    pub target_id: NodeId,
+    pub label: Label,
+    pub weight: Weight,
+    pub metadata: serde_json::Value,
+}
+
 /// 用户在查询时返回的统一节点数据视图
 #[derive(Debug, Clone)]
 pub struct NodeView<T> {

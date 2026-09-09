@@ -12,6 +12,16 @@ use triviumdb::query::tql_ast::*;
 use triviumdb::query::tql_parser::{parse_tql, parse_tql_statement};
 
 #[test]
+fn MATCH支持单跳边变量() {
+    let query = parse_tql("MATCH (a)-[r:knows]->(b) RETURN a, r, b").unwrap();
+    let QueryEntry::Match { pattern } = query.entry else {
+        panic!("应解析为 MATCH");
+    };
+    assert_eq!(pattern.edges[0].var.as_deref(), Some("r"));
+    assert_eq!(pattern.edges[0].labels, vec!["knows"]);
+}
+
+#[test]
 fn JSON数组嵌套超过解析预算时安全拒绝() {
     let depth = 256;
     let query = format!(

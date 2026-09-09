@@ -1,6 +1,6 @@
 # TriviumDB API 完整参考
 
-> **版本**: v0.8.6
+> **版本**: v0.8.7
 > **语言**: Rust 核心 + Python 绑定 (PyO3) + Node.js 绑定 (napi-rs)  
 > **许可**: Apache-2.0
 
@@ -1166,6 +1166,7 @@ Prepared 参数只接受 null/bool/string/number；缺参、额外参数、数�
 | TQL 值 | Python | Node |
 |---|---|---|
 | Node | dict | object，NodeId 为字符串 |
+| Edge | `{type, source, target, label, weight, metadata}` | `{type, source, target, label, weight, metadata}`，NodeId 为字符串 |
 | Int/Float/String/Bool | 原生标量 | 原生标量 |
 | Path | `list[int]` | `string[]`，避免 u64 精度损失 |
 | List | list | array |

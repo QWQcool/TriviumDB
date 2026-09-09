@@ -1,4 +1,4 @@
-name: Publish to crates.io, PyPI & NPM
+name: Publish to PyPI & NPM
 
 # GitHub 使用 glob 过滤 Tag；版本门禁再严格限定 beta/stable
 on:
@@ -14,7 +14,6 @@ jobs:
     name: Version Gate
     runs-on: ubuntu-latest
     outputs:
-      crates_should_publish: ${{ steps.check_crates.outputs.should_publish }}
       pypi_should_publish: ${{ steps.check_pypi.outputs.should_publish }}
       npm_should_publish: ${{ steps.check_npm.outputs.should_publish }}
       version: ${{ steps.extract.outputs.version }}
@@ -53,19 +52,6 @@ jobs:
             fi
           fi
 
-      - name: 检查 crates.io 是否已发布
-        id: check_crates
-        shell: bash
-        run: |
-          VERSION="${{ steps.extract.outputs.version }}"
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://crates.io/api/v1/crates/triviumdb/${VERSION}")
-          if [ "$HTTP_CODE" = "200" ]; then
-            echo "crates.io 已存在 triviumdb@${VERSION}，跳过发布"
-            echo "should_publish=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "crates.io 未找到 triviumdb@${VERSION}，准备发布"
-            echo "should_publish=true" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: 检查 PyPI 是否已发布
         id: check_pypi
@@ -98,7 +84,7 @@ jobs:
     name: Release Quality Gate
     runs-on: ubuntu-latest
     needs: version-gate
-    if: needs.version-gate.outputs.crates_should_publish == 'true' || needs.version-gate.outputs.pypi_should_publish == 'true' || needs.version-gate.outputs.npm_should_publish == 'true'
+    if: needs.version-gate.outputs.pypi_should_publish == 'true' || needs.version-gate.outputs.npm_should_publish == 'true'
     steps:
       - uses: actions/checkout@v4
 
@@ -111,8 +97,16 @@ jobs:
       - name: 校验发布版本
         shell: bash
         run: |
-          test "$(cargo metadata --no-deps --format-version 1 | python -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "triviumdb"))')" = "${{ needs.version-gate.outputs.version }}"
-          test "$(node -p "require('./package.json').version")" = "${{ needs.version-gate.outputs.version }}"
+          VERSION="${{ needs.version-gate.outputs.version }}"
+          test "$(cargo metadata --no-deps --format-version 1 | python -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "triviumdb"))')" = "$VERSION"
+          test "$(node -p "require('./package.json').version")" = "$VERSION"
+          PYTHON_VERSION=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          if [[ "${{ needs.version-gate.outputs.channel }}" == "beta" ]]; then
+            EXPECTED_PYTHON_VERSION=$(echo "$VERSION" | sed -E 's/-beta\.([0-9]+)$/b\1/')
+          else
+            EXPECTED_PYTHON_VERSION="$VERSION"
+          fi
+          test "$PYTHON_VERSION" = "$EXPECTED_PYTHON_VERSION"
 
       - name: 运行发布质量门禁
         run: |
@@ -126,23 +120,7 @@ jobs:
           npx --yes --package typescript tsc --noEmit --skipLibCheck triviumdb.d.ts
 
   # ═══════════════════════════════════════════════════════════
-  #  阶段 1: 发布 Rust Core 到 crates.io
-  # ═══════════════════════════════════════════════════════════
-  release-crates:
-    name: Release to crates.io
-    runs-on: ubuntu-latest
-    needs: [version-gate, quality-gate]
-    if: needs.version-gate.outputs.crates_should_publish == 'true'
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: 发布 Rust Core
-        run: cargo publish -p triviumdb --locked
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-
-  # ═══════════════════════════════════════════════════════════
-  #  阶段 2: 编译 Python Wheels（含 ARM64）
+  #  阶段 1: 编译 Python Wheels（含 ARM64）
   # ═══════════════════════════════════════════════════════════
   build-wheels:
     name: Build wheels (${{ matrix.name }})
@@ -344,18 +322,14 @@ jobs:
   summary:
     name: Release Summary
     runs-on: ubuntu-latest
-    needs: [version-gate, release-crates, release, release-npm]
+    needs: [version-gate, release, release-npm]
     if: always()
     steps:
       - name: 输出发布摘要
         run: |
           echo "## Release Summary: v${{ needs.version-gate.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ needs.version-gate.outputs.crates_should_publish }}" = "true" ]; then
-            echo "- **crates.io**: 已发布 triviumdb@${{ needs.version-gate.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "- **crates.io**: 跳过（版本已存在）" >> $GITHUB_STEP_SUMMARY
-          fi
+          echo "- **crates.io**: 由维护者在本地手动发布" >> $GITHUB_STEP_SUMMARY
           if [ "${{ needs.version-gate.outputs.pypi_should_publish }}" = "true" ]; then
             echo "- **PyPI**: ✅ 已发布 triviumdb==${{ needs.version-gate.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           else

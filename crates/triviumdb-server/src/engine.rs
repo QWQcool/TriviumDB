@@ -20,6 +20,7 @@ use tokio::sync::{Notify, Semaphore, mpsc, oneshot};
 use triviumdb::{
     Database,
     database::Config,
+    graph::reachability::{ReachabilityConfig, ReachabilityOutput, SubgraphEdge, SubgraphResult},
     node::{NodeView, SearchHit},
     query::{
         tql_executor::QueryControl,
@@ -582,6 +583,121 @@ impl EngineHandle {
         .await
     }
 
+    pub async fn batch_get_nodes(
+        &self,
+        ids: Vec<u64>,
+        deadline: Instant,
+    ) -> Result<(Vec<NodeView<f32>>, VersionSnapshot), ApiError> {
+        let versions = self.inner.versions.clone();
+        let control = QueryControl::with_deadline(deadline);
+        self.run_read(deadline, control.clone(), move |database| {
+            let mut nodes = Vec::with_capacity(ids.len());
+            for (index, id) in ids.into_iter().enumerate() {
+                if index & 0xff == 0 {
+                    control.check().map_err(ApiError::from)?;
+                }
+                if let Some(node) = database.get(id) {
+                    nodes.push(node);
+                }
+            }
+            Ok((nodes, lock_or_recover(&versions).snapshot()))
+        })
+        .await
+    }
+
+    pub async fn query_subgraph(
+        &self,
+        id: u64,
+        config: ReachabilityConfig,
+        deadline: Instant,
+    ) -> Result<(SubgraphResult, VersionSnapshot), ApiError> {
+        let versions = self.inner.versions.clone();
+        let control = QueryControl::with_deadline(deadline);
+        self.run_read(deadline, control.clone(), move |database| {
+            control.check().map_err(ApiError::from)?;
+            let result = database
+                .query_subgraph(id, &config)
+                .map_err(ApiError::from)?;
+            control.check().map_err(ApiError::from)?;
+            Ok((result, lock_or_recover(&versions).snapshot()))
+        })
+        .await
+    }
+
+    pub async fn reachable(
+        &self,
+        id: u64,
+        config: ReachabilityConfig,
+        deadline: Instant,
+    ) -> Result<(ReachabilityOutput, VersionSnapshot), ApiError> {
+        let versions = self.inner.versions.clone();
+        let control = QueryControl::with_deadline(deadline);
+        self.run_read(deadline, control.clone(), move |database| {
+            control.check().map_err(ApiError::from)?;
+            let result = database
+                .reachable_detailed(id, &config)
+                .map_err(ApiError::from)?;
+            control.check().map_err(ApiError::from)?;
+            Ok((result, lock_or_recover(&versions).snapshot()))
+        })
+        .await
+    }
+
+    pub async fn list_edges(
+        &self,
+        id: u64,
+        direction: triviumdb::graph::reachability::ReachabilityDirection,
+        label: Option<String>,
+        deadline: Instant,
+    ) -> Result<(Vec<SubgraphEdge>, VersionSnapshot), ApiError> {
+        let versions = self.inner.versions.clone();
+        let control = QueryControl::with_deadline(deadline);
+        self.run_read(deadline, control, move |database| {
+            if database.get(id).is_none() {
+                return Err(ApiError::from(
+                    triviumdb::error::TriviumError::NodeNotFound(id),
+                ));
+            }
+            let mut edges = Vec::new();
+            if direction != triviumdb::graph::reachability::ReachabilityDirection::Incoming {
+                for edge in database.get_edges(id) {
+                    if label.as_ref().is_none_or(|label| label == &edge.label) {
+                        edges.push(SubgraphEdge {
+                            source_id: id,
+                            target_id: edge.target_id,
+                            label: edge.label,
+                            weight: edge.weight,
+                            metadata: edge.metadata,
+                        });
+                    }
+                }
+            }
+            if direction != triviumdb::graph::reachability::ReachabilityDirection::Outgoing {
+                for edge in database.get_incoming_edges(id, label.as_deref()) {
+                    edges.push(SubgraphEdge {
+                        source_id: edge.source_id,
+                        target_id: edge.target_id,
+                        label: edge.label,
+                        weight: edge.weight,
+                        metadata: edge.metadata,
+                    });
+                }
+            }
+            edges.sort_by(|a, b| {
+                (a.source_id, a.target_id, a.label.as_str()).cmp(&(
+                    b.source_id,
+                    b.target_id,
+                    b.label.as_str(),
+                ))
+            });
+            edges.dedup_by(|a, b| {
+                a.source_id == b.source_id && a.target_id == b.target_id && a.label == b.label
+            });
+            Ok((edges, lock_or_recover(&versions).snapshot()))
+        })
+        .await
+    }
+
     pub async fn mutate(
         &self,
         query: String,
@@ -640,21 +756,73 @@ impl EngineHandle {
         let handle = read_or_recover(&self.inner.database).quiver_build_handle();
         self.inner
             .metrics
+            .warmup_state
+            .store(WarmupState::Preparing as usize, Ordering::Release);
+        self.inner
+            .metrics
             .active_blocking_tasks
             .fetch_add(1, Ordering::AcqRel);
         let inner = self.inner.clone();
         let task = tokio::task::spawn_blocking(move || {
             let _blocking_guard =
                 AtomicGaugeGuard::enter_existing(&inner.metrics.active_blocking_tasks);
-            let Some(build) = handle.prepare_auto_build().map_err(ApiError::from)? else {
-                return Ok(false);
+            let build = match handle.prepare_auto_build() {
+                Ok(Some(build)) => build,
+                Ok(None) => {
+                    inner
+                        .metrics
+                        .warmup_state
+                        .store(WarmupState::Skipped as usize, Ordering::Release);
+                    return Ok(false);
+                }
+                Err(error) => {
+                    inner
+                        .metrics
+                        .warmup_state
+                        .store(WarmupState::Failed as usize, Ordering::Release);
+                    return Err(ApiError::from(error));
+                }
             };
-            build.execute().map_err(ApiError::from)
+            inner
+                .metrics
+                .warmup_state
+                .store(WarmupState::Building as usize, Ordering::Release);
+            match build.execute() {
+                Ok(published) => {
+                    let state = if published {
+                        WarmupState::Ready
+                    } else {
+                        WarmupState::Skipped
+                    };
+                    inner
+                        .metrics
+                        .warmup_state
+                        .store(state as usize, Ordering::Release);
+                    Ok(published)
+                }
+                Err(error) => {
+                    inner
+                        .metrics
+                        .warmup_state
+                        .store(WarmupState::Failed as usize, Ordering::Release);
+                    Err(ApiError::from(error))
+                }
+            }
         });
         tokio::time::timeout(deadline.saturating_duration_since(Instant::now()), task)
             .await
-            .map_err(|_| ApiError::timeout())?
+            .map_err(|_| {
+                self.inner
+                    .metrics
+                    .warmup_state
+                    .store(WarmupState::Failed as usize, Ordering::Release);
+                ApiError::timeout()
+            })?
             .map_err(|error| {
+                self.inner
+                    .metrics
+                    .warmup_state
+                    .store(WarmupState::Failed as usize, Ordering::Release);
                 ApiError::internal(format!(
                     "QuIVer 构建任务失败 (QuIVer build task failed): {error}"
                 ))
@@ -1674,6 +1842,27 @@ mod tests {
             "后台构建任务存在时 Server 外层写锁必须立即可获取"
         );
         drop(prepared);
+    }
+
+    #[tokio::test]
+    async fn 手动quiver构建同步更新可观测状态() {
+        let (engine, _directory) = test_engine("manual_quiver_status", 4, 1).await;
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while matches!(
+                engine.metrics().warmup_state,
+                WarmupState::Preparing | WarmupState::Building
+            ) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let published = engine
+            .build_quiver(Instant::now() + Duration::from_secs(1))
+            .await
+            .unwrap();
+        assert!(!published);
+        assert_eq!(engine.metrics().warmup_state, WarmupState::Skipped);
     }
 
     #[test]

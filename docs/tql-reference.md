@@ -1,6 +1,6 @@
 # TQL (Trivium Query Language) 完整参考
 
-> **版本**: v0.8.6
+> **版本**: v0.8.7
 > **定位**: 统一查询 DSL — 融合文档过滤、图模式匹配、向量检索于一体  
 > **前置依赖**: 零外部依赖，纯 Rust 实现
 
@@ -230,6 +230,9 @@ MATCH (a {id: 42}) RETURN a
 ```sql
 -- 按标签过滤
 MATCH (a)-[:knows]->(b) RETURN b
+
+-- 单跳边变量是一等投影值
+MATCH (a)-[r:knows]->(b) RETURN a, r, b
 
 -- 通配边（匹配任意标签）
 MATCH (a)-[]->(b) RETURN b
