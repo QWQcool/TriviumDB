@@ -3,7 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- 深色模式下原生控件（select/滚动条等）跟随主题，避免控件保持亮色割裂 -->
+  <meta name="color-scheme" content="light dark">
   <title>TriviumDB Web Console</title>
+  <!-- favicon 内联 SVG（三模三点品牌标记，配色与 .brand-dot 一致），消除 /favicon.ico 404 -->
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath stroke='%23d2d9e3' stroke-width='1.4' stroke-linecap='round' fill='none' d='M8.6 7.4 15.3 8.6M7.3 9.3l2.2 6.1M16.5 11.7l-5.1 4.4'/%3E%3Ccircle cx='6' cy='6.5' r='3' fill='%2306b6d4'/%3E%3Ccircle cx='18' cy='9' r='3' fill='%23f59e0b'/%3E%3Ccircle cx='10.5' cy='18' r='3' fill='%238b5cf6'/%3E%3C/svg%3E">
   <style>
     :root {
       --bg-app: #f6f7f9;
@@ -69,6 +73,11 @@
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    /* hidden 属性兜底：UA 的 [hidden]{display:none} 会被作者样式里类选择器的
+       display:flex（.result-notice/.vl-pipeline/.graph-legend/.vl-source-body/.empty-placeholder）
+       覆盖，导致元素设置 hidden 后仍然可见——截断/图规模提示条「关不掉的误报」、
+       Vector Lab pipeline 常驻等均源于此。统一以 !important 压制 */
+    [hidden] { display: none !important; }
     html { height: 100%; }
     body {
       font-family: var(--font-sans);
@@ -1184,24 +1193,24 @@
 
     <!-- 中央多标签页工作台 -->
     <main class="workspace">
-      <!-- 标签栏 -->
-      <div class="tabs-bar">
-        <div class="tab active" data-tab="queryPane">
+      <!-- 标签栏（键盘可达：role=tab + tabindex + aria-selected，激活在 setupTabs） -->
+      <div class="tabs-bar" role="tablist" aria-label="工作台标签页">
+        <div class="tab active" data-tab="queryPane" role="tab" id="tab-queryPane" aria-controls="queryPane" aria-selected="true" tabindex="0">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
           <span>TQL 查询控制台</span>
         </div>
-        <div class="tab" data-tab="graphExplorePane">
+        <div class="tab" data-tab="graphExplorePane" role="tab" id="tab-graphExplorePane" aria-controls="graphExplorePane" aria-selected="false" tabindex="0">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/></svg>
           <span>独立图拓扑探索</span>
         </div>
-        <div class="tab" data-tab="vectorLabPane">
+        <div class="tab" data-tab="vectorLabPane" role="tab" id="tab-vectorLabPane" aria-controls="vectorLabPane" aria-selected="false" tabindex="0">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="20" x2="12" y2="12"/><line x1="12" y1="12" x2="20" y2="4"/><circle cx="4" cy="20" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="20" cy="4" r="2"/></svg>
           <span>向量检索 (Vector Lab)</span>
         </div>
       </div>
 
       <!-- 标签页 1：TQL 查询与结果控制台 -->
-      <div class="tab-pane active" id="queryPane">
+      <div class="tab-pane active" id="queryPane" role="tabpanel" aria-labelledby="tab-queryPane">
         <div class="editor-toolbar">
           <div class="toolbar-left">
             <button class="btn btn-success" id="runQueryBtn" title="运行查询 (快捷键: Ctrl + Enter)">
@@ -1232,14 +1241,14 @@
 
           <!-- 结果展示区 -->
           <div class="results-container">
-            <div class="results-tabs">
-              <div class="res-tab active" data-view="grid">
+            <div class="results-tabs" role="tablist" aria-label="结果视图切换">
+              <div class="res-tab active" data-view="grid" role="tab" aria-controls="viewGrid" aria-selected="true" tabindex="0">
                 <span>表格网格 (Data Grid)</span>
               </div>
-              <div class="res-tab" data-view="graph">
+              <div class="res-tab" data-view="graph" role="tab" aria-controls="viewGraph" aria-selected="false" tabindex="0">
                 <span>交互拓扑图 (Graph Canvas)</span>
               </div>
-              <div class="res-tab" data-view="json">
+              <div class="res-tab" data-view="json" role="tab" aria-controls="viewJson" aria-selected="false" tabindex="0">
                 <span>JSON 原始树</span>
               </div>
             </div>
@@ -1315,7 +1324,7 @@
       </div>
 
       <!-- 标签页 2：独立图拓扑探索 -->
-      <div class="tab-pane" id="graphExplorePane">
+      <div class="tab-pane" id="graphExplorePane" role="tabpanel" aria-labelledby="tab-graphExplorePane">
         <div class="editor-toolbar">
           <div class="toolbar-left">
             <button class="btn btn-primary" id="loadWholeGraphBtn">
@@ -1341,7 +1350,7 @@
       </div>
 
       <!-- 标签页 3：向量检索实验台 (Vector Lab) -->
-      <div class="tab-pane" id="vectorLabPane">
+      <div class="tab-pane" id="vectorLabPane" role="tabpanel" aria-labelledby="tab-vectorLabPane">
         <div class="vector-lab">
           <!-- 左侧：查询向量与参数配置 -->
           <section class="vl-config">
@@ -1408,7 +1417,8 @@
 
   <!-- 底部状态与可观测性栏 -->
   <footer class="app-status-bar">
-    <div class="status-left">
+    <!-- aria-live=polite：查询耗时/行数/影响行数变化时向读屏播报（查询完成感知） -->
+    <div class="status-left" aria-live="polite">
       <span id="statusQueryTime">耗时: -</span>
       <span id="statusRowCount">返回: 0 行</span>
       <span id="statusAffected">影响: -</span>
@@ -1462,8 +1472,49 @@
     // ==========================================
     const API_BASE = window.location.origin.startsWith('http') ? window.location.origin : 'http://127.0.0.1:8080';
     let currentGeneration = '-';
-    let queryHistory = JSON.parse(localStorage.getItem('tdb_query_history') || '[]');
     let currentResultData = null;
+
+    // ==========================================
+    // localStorage 安全访问：隐私模式/禁用存储/配额溢出时静默降级，
+    // 防止顶层访问抛异常导致整个脚本崩溃白屏
+    // ==========================================
+    function safeStorageGet(key) {
+      try { return localStorage.getItem(key); } catch (_) { return null; }
+    }
+    function safeStorageSet(key, value) {
+      try { localStorage.setItem(key, value); } catch (_) { /* 存储不可用时降级为内存态 */ }
+    }
+    // 历史记录装载：存储值损坏（非法 JSON / 非字符串数组）时回退空数组
+    function loadQueryHistory() {
+      try {
+        const parsed = JSON.parse(safeStorageGet('tdb_query_history') || '[]');
+        if (!Array.isArray(parsed)) return [];
+        return parsed.filter(x => typeof x === 'string').slice(0, 30);
+      } catch (_) {
+        return [];
+      }
+    }
+    let queryHistory = loadQueryHistory();
+
+    // 按语句类型推断写入模式：CREATE/LINK/DELETE → mutation，其余（FIND/MATCH/SEARCH/EXPLAIN）→ 只读。
+    // 仅挂在「程序化填充编辑器」的路径（侧栏片段/查询历史/命令面板），手动 Run 不调用，
+    // 保留用户手动勾选的覆盖能力
+    function inferMutationFromQuery(query) {
+      return /^\s*(CREATE|LINK|DELETE)\b/i.test(query || '');
+    }
+    function applyInferredMutation(query) {
+      document.getElementById('mutationCheck').checked = inferMutationFromQuery(query);
+    }
+
+    // 键盘激活：div 类可点击元素（标签页/导航项）支持 Enter / Space 触发点击
+    function enableKeyboardActivation(el) {
+      el.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          el.click();
+        }
+      });
+    }
 
     // 力导向图模拟器状态
     // 规模护栏：力导向为 O(n²) tick 循环，节点规模超阈值时逐级降级防主线程冻结
@@ -1580,7 +1631,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       renderHistory();
       initCanvas('graphCanvas');
       setupGraphRenderers();
-      setInterval(checkServerHealth, 5000);
+      startHealthPolling();
       setupPalette();
       updateTqlHighlight();
       // 应用初始化完成信号：供 scripts/ui-smoke.mjs 等自动化脚本等待，
@@ -1598,7 +1649,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         const current = document.documentElement.getAttribute('data-theme');
         const next = current === 'dark' ? 'light' : 'dark';
         document.documentElement.setAttribute('data-theme', next);
-        localStorage.setItem('tdb_theme', next);
+        safeStorageSet('tdb_theme', next);
         redrawGraph();
         // Sigma 实例的主题相关配色（节点边/画布底色）随主题重建
         if (graphBackend === 'sigma') rebuildSigmaInstances();
@@ -1725,9 +1776,10 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       document.getElementById('exportJsonBtn').addEventListener('click', exportJson);
       document.getElementById('refreshMetaBtn').addEventListener('click', checkServerHealth);
 
-      // 语法高亮：输入同步渲染 + 滚动同步
+      // 语法高亮：输入同步渲染 + 滚动同步（resize 时滚动条出现/消失也需重算补偿）
       const tqlArea = document.getElementById('tqlInput');
       tqlArea.addEventListener('input', updateTqlHighlight);
+      window.addEventListener('resize', updateTqlHighlight);
       tqlArea.addEventListener('scroll', () => {
         const pre = document.getElementById('tqlHighlight');
         pre.scrollTop = tqlArea.scrollTop;
@@ -1755,45 +1807,52 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         }
       });
 
-      // 快捷查询片段点击
+      // 快捷查询片段点击（写入模式按语句类型自动推断，修复残留）
       document.querySelectorAll('[data-snippet]').forEach(el => {
         el.addEventListener('click', () => {
           setEditorValue(el.dataset.snippet);
-          if (el.dataset.snippet.startsWith('CREATE')) {
-            document.getElementById('mutationCheck').checked = true;
-          } else {
-            document.getElementById('mutationCheck').checked = false;
-          }
+          applyInferredMutation(el.dataset.snippet);
           executeCurrentQuery();
         });
       });
 
-      // 快速动作
+      // 快速动作（同上：按填充的语句类型自动推断）
       document.querySelectorAll('[data-action]').forEach(el => {
         el.addEventListener('click', () => {
           const action = el.dataset.action;
           if (action === 'quick-find') {
             setEditorValue('FIND {type: "person"} RETURN * LIMIT 25');
-            document.getElementById('mutationCheck').checked = false;
           } else if (action === 'quick-match') {
             setEditorValue('MATCH (a)-[]->(b) RETURN a, b LIMIT 25');
-            document.getElementById('mutationCheck').checked = false;
           } else if (action === 'quick-search') {
             setEditorValue('SEARCH VECTOR [0.1, 0.2, 0.3, 0.4] TOP 5 RETURN *');
-            document.getElementById('mutationCheck').checked = false;
           }
+          applyInferredMutation(document.getElementById('tqlInput').value);
           executeCurrentQuery();
         });
       });
+
+      // 侧栏导航项键盘可达（div+click 模式统一补 role/tabindex/Enter-Space；
+      // 动态创建的历史项在 renderHistory 内单独补齐）
+      document.querySelectorAll('.sidebar .nav-item').forEach(el => {
+        el.setAttribute('role', 'button');
+        el.setAttribute('tabindex', '0');
+        enableKeyboardActivation(el);
+      });
     }
 
-    // 工作台标签页与结果视图切换
+    // 工作台标签页与结果视图切换（含 aria-selected 同步与 Enter/Space 键盘激活）
     function setupTabs() {
       document.querySelectorAll('.tabs-bar .tab').forEach(tab => {
+        enableKeyboardActivation(tab);
         tab.addEventListener('click', () => {
-          document.querySelectorAll('.tabs-bar .tab').forEach(t => t.classList.remove('active'));
+          document.querySelectorAll('.tabs-bar .tab').forEach(t => {
+            t.classList.remove('active');
+            t.setAttribute('aria-selected', 'false');
+          });
           document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
           tab.classList.add('active');
+          tab.setAttribute('aria-selected', 'true');
           const targetId = tab.dataset.tab;
           document.getElementById(targetId).classList.add('active');
           animateTabIn(targetId);
@@ -1804,9 +1863,14 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       });
 
       document.querySelectorAll('.results-tabs .res-tab').forEach(tab => {
+        enableKeyboardActivation(tab);
         tab.addEventListener('click', () => {
-          document.querySelectorAll('.results-tabs .res-tab').forEach(t => t.classList.remove('active'));
+          document.querySelectorAll('.results-tabs .res-tab').forEach(t => {
+            t.classList.remove('active');
+            t.setAttribute('aria-selected', 'false');
+          });
           tab.classList.add('active');
+          tab.setAttribute('aria-selected', 'true');
           const view = tab.dataset.view;
           document.getElementById('viewGrid').style.display = view === 'grid' ? 'block' : 'none';
           document.getElementById('viewGraph').style.display = view === 'graph' ? 'block' : 'none';
@@ -1818,7 +1882,23 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
 
     // ==========================================
     // 后端 API 通信
+    // 健康轮询：后台标签页暂停（visibilitychange 暂停 interval 触发），
+    // 回前台立即补检一次，避免后台期间状态过期
     // ==========================================
+    let healthTimer = null;
+    let healthPollPaused = false;
+    function setHealthPollPaused(paused) {
+      healthPollPaused = paused;
+    }
+    function startHealthPolling() {
+      if (healthTimer) return;
+      healthTimer = setInterval(() => { if (!healthPollPaused) checkServerHealth(); }, 5000);
+      document.addEventListener('visibilitychange', () => {
+        setHealthPollPaused(document.hidden);
+        if (!document.hidden) checkServerHealth();
+      });
+    }
+
     async function checkServerHealth() {
       const connBadge = document.getElementById('connStatus');
       const connText = document.getElementById('connText');
@@ -1994,8 +2074,10 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
 
     // NDJSON 流式消费与增量渲染：meta 更新 Generation；row 批量缓冲入网格；
     // summary 终态收尾；结束后组装与 JSON 路径同形状的 currentResultData
-    // （导出 JSON / 图拓扑 / JSON 树视图共用，导出仍为全量行）
-    async function consumeNdjsonResult(response, query, startTime) {
+    // （导出 JSON / 图拓扑 / JSON 树视图共用，导出仍为全量行）。
+    // isLatest：查询序号守卫——被更新查询取代/中止的旧流，其迟到事件与
+    // 迟到的 rAF flush 一律丢弃，防止双流写同一网格
+    async function consumeNdjsonResult(response, query, startTime, isLatest = () => true) {
       const rows = [];
       const streamErrors = [];
       let generation = null;
@@ -2005,13 +2087,14 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       let flushScheduled = false;
 
       const updateRowCount = () => {
+        if (!isLatest()) return;
         document.getElementById('statusRowCount').textContent = `返回: ${rows.length} 行`;
         // 10000 行上限提示改为基于流式累计行数（语义不变）
         showRowLimitNotice(rows.length >= SERVER_MAX_QUERY_ROWS);
       };
       const flushBatch = () => {
         flushScheduled = false;
-        if (!batch.length) return;
+        if (!batch.length || !isLatest()) { batch = []; return; }
         grid.appendRows(batch);
         batch = [];
         updateRowCount();
@@ -2022,9 +2105,10 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         requestAnimationFrame(flushBatch);
       };
 
-      document.getElementById('statusAffected').textContent = '只读';
+      if (isLatest()) document.getElementById('statusAffected').textContent = '只读';
 
       await consumeNdjsonStream(response, (evt) => {
+        if (!isLatest()) return;
         if (!evt || typeof evt !== 'object' || !evt.type) return;
         switch (evt.type) {
           case 'meta':
@@ -2062,6 +2146,9 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
 
       // 流结束收尾：冲掉残余批次（此后 rAF 里的迟到 flush 对空批次是 no-op）
       flushBatch();
+
+      // 被更新查询取代/中止：不落地结果、不渲染视图、不写历史
+      if (!isLatest()) return;
 
       // 流完整性守卫：未收到 summary 行说明流被提前截断（网络中断/代理断连等），
       // 记入 streamErrors 并内联提示，避免静默按部分结果落地
@@ -2116,6 +2203,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
 
     let __activeQueryCount = 0; // 未决查询计数：selftest runner 据此设置「排空屏障」，
                                 // 防止 fire-and-forget 查询的迟到渲染/落地跨测试边界污染断言
+    let __queryAbort = null;    // 当前未决查询的 AbortController：新查询发出前中止旧流（含 NDJSON reader 取消）
+    let __querySeq = 0;         // 查询序号：只有最新一次查询允许落地渲染/恢复按钮（防中止查询的迟到渲染覆盖新结果）
 
     async function executeCurrentQuery() {
       const query = document.getElementById('tqlInput').value.trim();
@@ -2123,6 +2212,14 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
 
       const isMutation = document.getElementById('mutationCheck').checked;
       const isProfile = document.getElementById('profileCheck').checked;
+
+      // 连点/快捷键并发防护：按钮 disabled 只挡鼠标路径，Ctrl+Enter/片段/命令面板仍可并发。
+      // 中止前一次未决查询，防止双流写同一网格；旧查询的迟到事件按序号丢弃
+      if (__queryAbort) __queryAbort.abort();
+      const abort = new AbortController();
+      __queryAbort = abort;
+      const seq = ++__querySeq;
+      const isLatest = () => seq === __querySeq;
 
       const runBtn = document.getElementById('runQueryBtn');
       __activeQueryCount++;
@@ -2141,8 +2238,10 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         const response = await fetch(`${API_BASE}/v1/tql`, {
           method: 'POST',
           headers: requestHeaders,
-          body: JSON.stringify({ query, mutation: isMutation, profile: isProfile })
+          body: JSON.stringify({ query, mutation: isMutation, profile: isProfile }),
+          signal: abort.signal
         });
+        if (!isLatest()) return;
 
         const elapsed = (performance.now() - startTime).toFixed(1);
         document.getElementById('statusQueryTime').textContent = `耗时: ${elapsed} ms`;
@@ -2150,7 +2249,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         // 非 2xx：服务端错误（400/500）恒为 JSON 错误体，走既有渲染
         if (!response.ok) {
           const errorJson = await response.json().catch(() => ({ title: '未知错误', detail: response.statusText }));
-          renderError(errorJson);
+          if (isLatest()) renderError(errorJson);
           return;
         }
 
@@ -2160,17 +2259,22 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
 
         if (!isNdjson) {
           const data = await response.json();
-          applyJsonResult(data, isMutation, query);
+          if (isLatest()) applyJsonResult(data, isMutation, query);
           return;
         }
 
-        await consumeNdjsonResult(response, query, startTime);
+        await consumeNdjsonResult(response, query, startTime, isLatest);
       } catch (err) {
-        renderError({ title: '网络请求失败', detail: err.message });
+        // 被新查询主动中止：静默返回，不渲染错误（归新查询管），按钮由新查询的 finally 恢复
+        if (err && err.name === 'AbortError') return;
+        if (isLatest()) renderError({ title: '网络请求失败', detail: err.message });
       } finally {
         __activeQueryCount--;
-        runBtn.disabled = false;
-        runBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>运行 (Run)</span>`;
+        if (isLatest()) {
+          __queryAbort = null;
+          runBtn.disabled = false;
+          runBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>运行 (Run)</span>`;
+        }
       }
     }
 
@@ -2737,11 +2841,19 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       const head = document.getElementById('gridHead');
       const body = document.getElementById('gridBody');
       head.innerHTML = '<th>状态</th><th>受影响行数</th><th>生成节点 ID</th>';
-      body.innerHTML = `<tr>
-        <td style="color:var(--success); font-weight:600;">✓ 写入成功</td>
-        <td>${data.affected || 0}</td>
-        <td><code>${(data.createdIds || []).join(', ') || '无'}</code></td>
-      </tr>`;
+      // DOM textContent 构建：affected/createdIds 为服务端数据路径，禁止插值进 innerHTML
+      const tr = document.createElement('tr');
+      const tdState = document.createElement('td');
+      tdState.style.cssText = 'color:var(--success); font-weight:600;';
+      tdState.textContent = '✓ 写入成功';
+      const tdAffected = document.createElement('td');
+      tdAffected.textContent = String(data.affected || 0);
+      const tdIds = document.createElement('td');
+      const code = document.createElement('code');
+      code.textContent = (data.createdIds || []).join(', ') || '无';
+      tdIds.appendChild(code);
+      tr.append(tdState, tdAffected, tdIds);
+      body.replaceChildren(tr);
       renderJsonTree(document.getElementById('rawJsonOutput'), data);
       animateResultsIn();
     }
@@ -2753,10 +2865,22 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     function renderError(err) {
       teardownVirtualGrid();
       const body = document.getElementById('gridBody');
-      body.innerHTML = `<tr><td colspan="5" style="padding: 20px; background: var(--danger-bg); color: var(--danger);">
-        <strong>❌ ${err.title || '执行错误'}</strong><br>
-        <span style="font-size: 12px; margin-top: 4px; display:inline-block;">${err.detail || JSON.stringify(err)}</span>
-      </td></tr>`;
+      // DOM textContent 构建：err.title/detail 可能携带服务端回显的原始语句/上游错误文本，
+      // 禁止插值进 innerHTML（XSS 加固）
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 5;
+      td.style.cssText = 'padding: 20px; background: var(--danger-bg); color: var(--danger);';
+      const strong = document.createElement('strong');
+      strong.textContent = '❌ ' + (err.title || '执行错误');
+      const detail = document.createElement('span');
+      detail.style.cssText = 'font-size: 12px; margin-top: 4px; display:inline-block;';
+      detail.textContent = err.detail || JSON.stringify(err);
+      td.appendChild(strong);
+      td.appendChild(document.createElement('br'));
+      td.appendChild(detail);
+      tr.appendChild(td);
+      body.replaceChildren(tr);
       renderJsonTree(document.getElementById('rawJsonOutput'), err);
       animateResultsIn();
     }
@@ -3009,17 +3133,41 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         const sMax = Math.max(...scores);
         const sRange = sMax - sMin || 1;
         hits.forEach((hit, idx) => {
+          // DOM textContent 构建：hit.id / payload 为服务端数据路径，禁止插值进 innerHTML
+          // （payload 正文此前仅 title 属性转义，正文未转义，可注入 img onerror 等）
           const tr = document.createElement('tr');
+          const tdIdx = document.createElement('td');
+          tdIdx.style.color = 'var(--text-light)';
+          tdIdx.textContent = idx + 1;
+          const tdId = document.createElement('td');
+          tdId.style.fontFamily = 'var(--font-mono)';
+          tdId.textContent = String(hit.id ?? '');
           const payloadText = JSON.stringify(hit.payload ?? null);
           const payloadShort = payloadText.length > 200 ? payloadText.slice(0, 200) + '…' : payloadText;
           const scoreNum = Number(hit.score);
           // 单条命中或本批 score 全相同时满条，避免全部 0% 不可见
           const t = (hits.length === 1 || sMax === sMin) ? 1 : ((scoreNum || 0) - sMin) / sRange;
-          tr.innerHTML = `
-            <td style="color: var(--text-light);">${idx + 1}</td>
-            <td style="font-family: var(--font-mono);">${hit.id}</td>
-            <td><div class="score-cell"><span style="font-family: var(--font-mono);" title="${hit.score}">${scoreNum.toFixed(6)}</span><div class="score-bar" aria-hidden="true"><i style="width: ${(t * 100).toFixed(1)}%; background: ${heatColor(t)};"></i></div></div></td>
-            <td style="font-family: var(--font-mono); font-size: 11px;" title="${payloadText.replace(/"/g, '&quot;')}">${payloadShort}</td>`;
+          const tdScore = document.createElement('td');
+          const cell = document.createElement('div');
+          cell.className = 'score-cell';
+          const scoreSpan = document.createElement('span');
+          scoreSpan.style.fontFamily = 'var(--font-mono)';
+          scoreSpan.title = String(hit.score);
+          scoreSpan.textContent = scoreNum.toFixed(6);
+          const bar = document.createElement('div');
+          bar.className = 'score-bar';
+          bar.setAttribute('aria-hidden', 'true');
+          const fill = document.createElement('i');
+          fill.style.width = (t * 100).toFixed(1) + '%';
+          fill.style.background = heatColor(t);
+          bar.appendChild(fill);
+          cell.append(scoreSpan, bar);
+          tdScore.appendChild(cell);
+          const tdPayload = document.createElement('td');
+          tdPayload.style.cssText = 'font-family: var(--font-mono); font-size: 11px;';
+          tdPayload.title = payloadText;
+          tdPayload.textContent = payloadShort;
+          tr.append(tdIdx, tdId, tdScore, tdPayload);
           body.appendChild(tr);
         });
       }
@@ -3368,6 +3516,13 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       }
       window.addEventListener('resize', resize);
       setTimeout(resize, 100);
+      // 画布尺寸自适应：ResizeObserver 监听父容器实际布局变化（切换标签页/分栏拖动等
+      // window resize 覆盖不到的场景）。redrawGraph 内部 syncCanvasSize 只在尺寸变化时
+      // 重定位相机，不会重复归位；window resize 监听保留兜底
+      if (window.ResizeObserver) {
+        const ro = new ResizeObserver(() => redrawGraph());
+        ro.observe(canvas.parentElement);
+      }
 
       // 拖拽与缩放
       canvas.addEventListener('mousedown', (e) => {
@@ -3935,6 +4090,12 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         standaloneTransform.k *= e.deltaY < 0 ? 1.1 : 0.9;
         redrawGraph();
       });
+
+      // 独立探索画布同样接 ResizeObserver（父容器布局变化即时同步）
+      if (window.ResizeObserver) {
+        const saRo = new ResizeObserver(() => redrawGraph());
+        saRo.observe(saCanvas.parentElement);
+      }
     }
 
     // ==========================================
@@ -3980,53 +4141,83 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       container.appendChild(details);
     }
 
-    // Edges 平面：GET /v1/nodes/{id}，渲染 edgeVersions 的 target/label 列表
+    // Edges 平面：GET /v1/nodes/{id}，渲染 edgeVersions 的 target/label 列表。
+    // __drawerFetchSeq：抽屉节点请求序号守卫——快速连续点边跳转时，
+    // 乱序返回的旧响应不得覆盖当前节点内容
+    let __drawerFetchSeq = 0;
+
+    // 抽屉内联错误提示（textContent 渲染：err.title/detail 为服务端数据路径）
+    function setDrawerEdgeHint(message) {
+      const container = document.getElementById('drawerNodeEdges');
+      container.textContent = '';
+      const hint = document.createElement('div');
+      hint.className = 'inspector-hint';
+      hint.textContent = message;
+      container.appendChild(hint);
+    }
+
     async function loadNodeEdges(nodeId) {
+      const seq = ++__drawerFetchSeq;
       const container = document.getElementById('drawerNodeEdges');
       container.textContent = '加载中...';
       try {
         const res = await fetch(`${API_BASE}/v1/nodes/${nodeId}`);
+        if (seq !== __drawerFetchSeq) return;
         if (!res.ok) {
           const err = await res.json().catch(() => ({ title: '请求失败', detail: res.statusText }));
-          container.innerHTML = `<div class="inspector-hint">边信息加载失败: ${err.title || '未知错误'} — ${err.detail || ''}</div>`;
+          if (seq !== __drawerFetchSeq) return;
+          setDrawerEdgeHint(`边信息加载失败: ${err.title || '未知错误'} — ${err.detail || ''}`);
           return;
         }
         const data = await res.json();
+        if (seq !== __drawerFetchSeq) return;
         const edges = data.edgeVersions || [];
 
         if (!edges.length) {
           container.textContent = '无出边 (no outgoing edges)';
           return;
         }
-        container.innerHTML = '';
+        container.textContent = '';
         edges.forEach(edge => {
           const item = document.createElement('div');
           item.className = 'inspector-edge-item';
-          // target 可点击：跳转继续查看该节点
-          item.innerHTML = `
-            <span class="inspector-edge-label">${edge.label ?? '-'}</span>
-            <span>→</span>
-            <button class="inspector-edge-target" type="button" title="查看节点 #${edge.targetId} 的 360° 视图">#${edge.targetId}</button>`;
-          item.querySelector('.inspector-edge-target').addEventListener('click', () => jumpToNode(edge.targetId));
+          // target 可点击：跳转继续查看该节点（DOM textContent 构建，edge.label 为服务端数据）
+          const label = document.createElement('span');
+          label.className = 'inspector-edge-label';
+          label.textContent = edge.label ?? '-';
+          const arrow = document.createElement('span');
+          arrow.textContent = '→';
+          const target = document.createElement('button');
+          target.className = 'inspector-edge-target';
+          target.type = 'button';
+          target.title = `查看节点 #${edge.targetId} 的 360° 视图`;
+          target.textContent = `#${edge.targetId}`;
+          target.addEventListener('click', () => jumpToNode(edge.targetId));
+          item.append(label, arrow, target);
           container.appendChild(item);
         });
       } catch (err) {
-        container.innerHTML = `<div class="inspector-hint">网络请求失败: ${err.message}</div>`;
+        if (seq !== __drawerFetchSeq) return;
+        setDrawerEdgeHint(`网络请求失败: ${err.message}`);
       }
     }
 
-    // 从边列表跳转到目标节点：拉取完整节点数据后重新渲染抽屉
+    // 从边列表跳转到目标节点：拉取完整节点数据后重新渲染抽屉（同一序号守卫）
     async function jumpToNode(nodeId) {
+      const seq = ++__drawerFetchSeq;
       const container = document.getElementById('drawerNodeEdges');
       container.textContent = '加载中...';
       try {
         const res = await fetch(`${API_BASE}/v1/nodes/${nodeId}`);
+        if (seq !== __drawerFetchSeq) return;
         if (!res.ok) {
           const err = await res.json().catch(() => ({ title: '请求失败', detail: res.statusText }));
-          container.innerHTML = `<div class="inspector-hint">节点 #${nodeId} 加载失败: ${err.title || '未知错误'} — ${err.detail || ''}</div>`;
+          if (seq !== __drawerFetchSeq) return;
+          setDrawerEdgeHint(`节点 #${nodeId} 加载失败: ${err.title || '未知错误'} — ${err.detail || ''}`);
           return;
         }
         const data = await res.json();
+        if (seq !== __drawerFetchSeq) return;
         const node = data.node || {};
         openNodeDrawer({
           id: node.id ?? nodeId,
@@ -4035,7 +4226,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           vector: node.vector || []
         });
       } catch (err) {
-        container.innerHTML = `<div class="inspector-hint">网络请求失败: ${err.message}</div>`;
+        if (seq !== __drawerFetchSeq) return;
+        setDrawerEdgeHint(`网络请求失败: ${err.message}`);
       }
     }
 
@@ -4181,6 +4373,11 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       if (!area || !pre) return;
       // 尾部补换行：保证 pre 与 textarea 的滚动高度一致（textarea 末行下方有缓冲）
       pre.innerHTML = highlightTql(area.value) + '\n';
+      // 垂直滚动条宽度补偿：textarea 出现纵向滚动条时内容宽度收窄、换行点前移，
+      // 叠加层需同步加宽右内边距，否则超长单行查询下两侧 scrollWidth 不等
+      // （实测 5200 字符单行差 ~10px）。无滚动条时 sb=0，保持与原对齐行为一致
+      const sb = Math.max(area.offsetWidth - area.clientWidth, 0);
+      pre.style.paddingRight = (64 + sb) + 'px';
       pre.scrollTop = area.scrollTop;
       pre.scrollLeft = area.scrollLeft;
     }
@@ -4227,6 +4424,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           label: q,
           run: () => {
             setEditorValue(q);
+            applyInferredMutation(q);
             executeCurrentQuery();
           }
         });
@@ -4267,40 +4465,44 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       list.innerHTML = '';
       paletteState.filtered = [];
 
-      paletteState.items.forEach((item) => {
-        if (query) {
-          let hit = subsequenceMatch(query, item.label);
-          if (!hit) {
-            // 标签未命中时回退 keywords 命中（无 keywords 或 keywords 也未命中则排除）
-            if (!item.keywords || !subsequenceMatch(query, item.keywords)) return;
+      try {
+        paletteState.items.forEach((item) => {
+          if (query) {
+            let hit = subsequenceMatch(query, item.label);
+            if (!hit) {
+              // 标签未命中时回退 keywords 命中（无 keywords 或 keywords 也未命中则排除）
+              if (!item.keywords || !subsequenceMatch(query, item.keywords)) return;
+            }
+            paletteState.filtered.push({ item, hit });
+          } else {
+            paletteState.filtered.push({ item, hit: null });
           }
-          paletteState.filtered.push({ item, hit });
-        } else {
-          paletteState.filtered.push({ item, hit: null });
-        }
-      });
-
-      if (!paletteState.filtered.length) {
-        const empty = document.createElement('div');
-        empty.className = 'palette-empty';
-        empty.textContent = '无匹配命令';
-        list.appendChild(empty);
-      } else {
-        let lastGroup = null;
-        paletteState.filtered.forEach((entry, idx) => {
-          if (entry.item.group !== lastGroup) {
-            const g = document.createElement('div');
-            g.className = 'palette-group';
-            g.textContent = entry.item.group;
-            list.appendChild(g);
-            lastGroup = entry.item.group;
-          }
-          list.appendChild(buildPaletteItemEl(entry, idx));
         });
-      }
 
-      paletteState.active = paletteState.filtered.length ? 0 : -1;
-      applyActivePaletteItem();
+        if (!paletteState.filtered.length) {
+          const empty = document.createElement('div');
+          empty.className = 'palette-empty';
+          empty.textContent = '无匹配命令';
+          list.appendChild(empty);
+        } else {
+          let lastGroup = null;
+          paletteState.filtered.forEach((entry, idx) => {
+            if (entry.item.group !== lastGroup) {
+              const g = document.createElement('div');
+              g.className = 'palette-group';
+              g.textContent = entry.item.group;
+              list.appendChild(g);
+              lastGroup = entry.item.group;
+            }
+            list.appendChild(buildPaletteItemEl(entry, idx));
+          });
+        }
+      } finally {
+        // active 复位必须随渲染收尾完成：若构建中途抛错，filtered 可能部分填充而
+        // active 残留 -1/越界，出现「高亮正确但 Enter 无效」的失步（偶发竞态防御）
+        paletteState.active = paletteState.filtered.length ? 0 : -1;
+        applyActivePaletteItem();
+      }
     }
 
     function buildPaletteItemEl(entry, idx) {
@@ -4407,6 +4609,13 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         else if (e.key === 'ArrowUp') { e.preventDefault(); movePaletteActive(-1); }
         else if (e.key === 'Enter') {
           e.preventDefault();
+          // 兜底：active 与 DOM 高亮失步（active 丢失但列表仍有条目）时，
+          // 以 DOM aria-selected 项回同步，否则取第一条，保证 Enter 永远可执行
+          if (paletteState.active < 0 && paletteState.filtered.length) {
+            const activeEl = document.querySelector('#paletteList .palette-item.active');
+            const idx = activeEl ? Number(activeEl.dataset.index) : 0;
+            paletteState.active = (Number.isInteger(idx) && idx >= 0 && idx < paletteState.filtered.length) ? idx : 0;
+          }
           if (paletteState.active >= 0) executePaletteItem(paletteState.filtered[paletteState.active]);
         } else if (e.key === 'Tab') {
           e.preventDefault();
@@ -4435,7 +4644,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
 
     function exportJson() {
       if (!currentResultData) {
-        alert('当前没有可导出的结果');
+        showToast('当前没有可导出的结果');
         return;
       }
       const blob = new Blob([JSON.stringify(currentResultData, null, 2)], { type: 'application/json' });
@@ -4444,29 +4653,39 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       a.href = url;
       a.download = `triviumdb-export-${Date.now()}.json`;
       a.click();
+      // 释放 blob URL（延迟一拍：个别浏览器在 click 处理未完成时立即撤销会导致下载失败）
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
     }
 
     function saveHistory(q) {
       if (!queryHistory.includes(q)) {
         queryHistory.unshift(q);
         if (queryHistory.length > 30) queryHistory.pop();
-        localStorage.setItem('tdb_query_history', JSON.stringify(queryHistory));
+        safeStorageSet('tdb_query_history', JSON.stringify(queryHistory));
         renderHistory();
       }
     }
 
+    // 查询历史渲染：q 是用户原始输入（可含任意 HTML），必须 textContent 渲染（XSS 加固）；
+    // 动态创建的项单独补齐键盘可达属性
     function renderHistory() {
       const container = document.getElementById('historyList');
       if (!queryHistory.length) return;
-      container.innerHTML = '';
+      container.textContent = '';
       queryHistory.slice(0, 10).forEach(q => {
         const item = document.createElement('div');
         item.className = 'nav-item';
         item.style.fontSize = '11px';
         item.style.padding = '5px 14px';
-        item.innerHTML = `<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${q}</span>`;
+        item.tabIndex = 0;
+        item.setAttribute('role', 'button');
+        const span = document.createElement('span');
+        span.style.cssText = 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+        span.textContent = q;
+        item.appendChild(span);
         item.onclick = () => {
           setEditorValue(q);
+          applyInferredMutation(q);
           executeCurrentQuery();
         };
         container.appendChild(item);
@@ -4552,9 +4771,11 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           window.__ndjsonGate.released = true;
           if (!controllerRef) return;
           for (let i = head; i < lines.length; i++) {
-            controllerRef.enqueue(enc.encode(JSON.stringify(lines[i]) + '\n'));
+            // 流可能已被 AbortController 中止（fetch signal 取消会关闭底层流），
+            // enqueue/close 抛错需吞掉，保证 release 在中止场景下也可安全调用
+            try { controllerRef.enqueue(enc.encode(JSON.stringify(lines[i]) + '\n')); } catch (_) {}
           }
-          controllerRef.close();
+          try { controllerRef.close(); } catch (_) {}
         };
         return new Response(new ReadableStream({
           start(controller) {
@@ -5515,6 +5736,175 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         window.__selftestRegister('扩展点自证：动态注册的断言被执行', '命令面板（预留）', async () => {
           assert(document.title.indexOf('TriviumDB') !== -1, '动态断言应能访问页面环境');
         });
+      });
+
+      // ---------- 体验加固（ux-hardening）：错误路径 XSS / AbortController / mutation 自动推断 / 键盘可达 / favicon / aria-live / 轮询暂停 / RO 画布 ----------
+      addAssert('体验加固：renderError 标题/详情含 HTML 时以文本渲染', '体验加固', async () => {
+        renderError({ title: '<img src=x onerror="window.__errXss=true">', detail: '<script>window.__errXss2=true<\/script>' });
+        const body = document.getElementById('gridBody');
+        assert(!body.querySelector('img') && !body.querySelector('script'), '错误区不应注入 img/script 元素');
+        assert(body.textContent.indexOf('<img src=x') !== -1, '恶意标题应以文本呈现');
+        assert(window.__errXss === undefined && window.__errXss2 === undefined, 'onerror/脚本不应执行');
+        renderGrid(FIND_ROWS); // 还原
+      });
+
+      addAssert('体验加固：查询历史含 HTML 时以文本渲染（localStorage 数据路径）', '体验加固', async () => {
+        const saved = queryHistory;
+        queryHistory = ['<img src=x onerror="window.__histXss=true">'];
+        renderHistory();
+        const list = document.getElementById('historyList');
+        assert(!list.querySelector('img'), '历史列表不应注入 img 元素');
+        assert(list.textContent.indexOf('<img src=x') !== -1, '恶意查询应以文本呈现');
+        assert(window.__histXss === undefined, 'onerror 不应执行');
+        queryHistory = saved;
+        renderHistory();
+      });
+
+      addAssert('体验加固：向量检索 payload 含 HTML 时以文本渲染', '体验加固', async () => {
+        renderVectorResults({ hits: [{ id: '1', score: 0.9, payload: { x: '<img src=x onerror="window.__vecXss=true">' } }] }, 10);
+        const body = document.getElementById('vlResultBody');
+        assert(!body.querySelector('img'), '命中表格不应注入 img 元素');
+        assert(body.textContent.indexOf('<img src=x') !== -1, 'payload 应以文本呈现');
+        assert(window.__vecXss === undefined, 'onerror 不应执行');
+      });
+
+      addAssert('体验加固：mutation 自动推断 — CREATE 勾选 / MATCH 取消 / 手动覆盖保留', '体验加固', async () => {
+        applyInferredMutation('CREATE ({name: "X"})');
+        assert(document.getElementById('mutationCheck').checked === true, 'CREATE 应自动勾选写入模式');
+        applyInferredMutation('MATCH (a)-[]->(b) RETURN a, b');
+        assert(document.getElementById('mutationCheck').checked === false, 'MATCH 应自动取消写入模式');
+        assert(inferMutationFromQuery('  delete {id: 1}') === true, '大小写不敏感且 DELETE 应为 mutation');
+        assert(inferMutationFromQuery('LINK 1 -> 2') === true, 'LINK 应为 mutation');
+        assert(inferMutationFromQuery('EXPLAIN ANALYZE FIND {}') === false, 'EXPLAIN 应为只读');
+        // 手动覆盖：手动勾选后手动运行一次查询，勾选状态不被程序化路径篡改
+        document.getElementById('mutationCheck').checked = true;
+        setEditorValue('FIND {type: "person"} RETURN * LIMIT 25');
+        await executeCurrentQuery();
+        assert(document.getElementById('mutationCheck').checked === true, '手动运行不应覆盖用户手动勾选');
+        document.getElementById('mutationCheck').checked = false;
+        renderGrid(FIND_ROWS); // 还原
+      });
+
+      addAssert('体验加固：连发查询 AbortController — 旧流中止，仅最新查询落地', '体验加固', async () => {
+        setEditorValue('GATED_STREAM FIND {type: "person"} RETURN *');
+        const first = executeCurrentQuery();
+        await waitFor(() => document.getElementById('statusRowCount').textContent === '返回: 3 行', 3000, '首查询应先渲染 3 行');
+        setEditorValue('EMPTY_STREAM FIND {x} RETURN *');
+        const second = executeCurrentQuery(); // 中止第一个未决流
+        window.__ndjsonGate.release();        // 旧流残余事件不得污染新结果
+        await Promise.allSettled([first, second]);
+        await waitFor(() => document.getElementById('statusRowCount').textContent === '返回: 0 行', 3000, '新查询应完成落地');
+        assert((currentResultData.rows || []).length === 0, '落地结果应来自新查询（0 行）');
+        assert(document.getElementById('gridBody').textContent.indexOf('没有匹配的行') !== -1, '网格应显示新查询空态');
+        assert(document.getElementById('gridBody').textContent.indexOf('StreamG5') === -1, '被中止旧流的行不得写入网格（无双流写入）');
+        assert(document.getElementById('runQueryBtn').disabled === false, '运行按钮应恢复可用');
+        renderGrid(FIND_ROWS); // 还原
+      });
+
+      addAssert('体验加固：主标签键盘可达 — Enter/Space 激活且 aria-selected 同步', '体验加固', async () => {
+        const tab = document.querySelector('[data-tab="vectorLabPane"]');
+        assert(tab.getAttribute('role') === 'tab' && tab.tabIndex === 0, '标签应带 role=tab 且可聚焦');
+        tab.focus();
+        tab.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+        assert(document.getElementById('vectorLabPane').classList.contains('active'), 'Enter 应激活标签页');
+        assert(tab.getAttribute('aria-selected') === 'true', 'aria-selected 应同步为 true');
+        const tab2 = document.querySelector('[data-tab="queryPane"]');
+        tab2.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }));
+        assert(document.getElementById('queryPane').classList.contains('active'), 'Space 应激活标签页');
+        assert(tab.getAttribute('aria-selected') === 'false', '失活标签 aria-selected 应为 false');
+      });
+
+      addAssert('体验加固：favicon 内联 SVG data-URI 存在', '体验加固', async () => {
+        const icon = document.querySelector('link[rel="icon"]');
+        assert(icon, '应存在 link[rel=icon]');
+        assert((icon.getAttribute('href') || '').indexOf('data:image/svg+xml') === 0, 'favicon 应为内联 SVG data-URI');
+      });
+
+      addAssert('体验加固：状态栏 aria-live=polite 存在', '体验加固', async () => {
+        const left = document.querySelector('footer .status-left');
+        assert(left && left.getAttribute('aria-live') === 'polite', '状态栏应声明 aria-live=polite');
+      });
+
+      addAssert('体验加固：后台标签页健康轮询暂停/恢复开关', '体验加固', async () => {
+        assert(typeof setHealthPollPaused === 'function', '轮询暂停开关应存在');
+        assert(typeof healthPollPaused === 'boolean', '暂停状态应可读');
+        setHealthPollPaused(true);
+        assert(healthPollPaused === true, '应可置为暂停（后台标签页不轮询）');
+        setHealthPollPaused(false);
+        assert(healthPollPaused === false, '应可恢复轮询');
+      });
+
+      addAssert('体验加固：ResizeObserver 驱动画布跟随容器尺寸变化', '体验加固', async () => {
+        document.querySelector('[data-view="graph"]').click();
+        redrawGraph();
+        const canvas = document.getElementById('graphCanvas');
+        const parent = canvas.parentElement;
+        assert(canvas.width === parent.clientWidth && canvas.height === parent.clientHeight, '初始画布应与容器一致');
+        const prevStyle = parent.getAttribute('style');
+        parent.style.height = '420px';
+        await waitFor(() => canvas.height === 420, 3000, '容器变化后画布高度应经 ResizeObserver 同步');
+        parent.setAttribute('style', prevStyle);
+        await waitFor(() => canvas.height === parent.clientHeight, 3000, '还原后画布应回到容器尺寸');
+        document.querySelector('[data-view="grid"]').click();
+      });
+
+      addAssert('体验加固：localStorage 损坏/异常不崩 — loadQueryHistory 安全回退', '体验加固', async () => {
+        const prev = safeStorageGet('tdb_query_history');
+        localStorage.setItem('tdb_query_history', '{corrupt-json');
+        assert(loadQueryHistory().length === 0, '损坏 JSON 应回退空数组');
+        localStorage.setItem('tdb_query_history', '{"a":1}');
+        assert(loadQueryHistory().length === 0, '非数组 JSON 应回退空数组');
+        localStorage.setItem('tdb_query_history', '["ok", 3, null, "bad"]');
+        const hist = loadQueryHistory();
+        assert(hist.length === 2 && hist[0] === 'ok' && hist[1] === 'bad', '应过滤非字符串条目（保留 2 个字符串）');
+        if (prev === null) localStorage.removeItem('tdb_query_history');
+        else localStorage.setItem('tdb_query_history', prev);
+        renderHistory();
+      });
+
+      addAssert('体验加固：hidden 属性视觉生效 — 提示条计算样式 display:none（防类 display:flex 覆盖）', '体验加固', async () => {
+        renderGrid(FIND_ROWS); // 非万行：rowLimitNotice 处于 hidden
+        const notice = document.getElementById('rowLimitNotice');
+        assert(notice && notice.hidden, 'rowLimitNotice 应处于 hidden');
+        assert(getComputedStyle(notice).display === 'none', 'hidden 元素计算样式应为 display:none（类 display:flex 不得覆盖）');
+        const gsn = document.getElementById('graphScaleNotice');
+        assert(gsn.hidden && getComputedStyle(gsn).display === 'none', '图规模横幅未触发时应视觉隐藏（原 P1 误报根因）');
+        // 显示路径仍生效
+        showRowLimitNotice(true);
+        assert(getComputedStyle(notice).display === 'flex', '取消 hidden 后应恢复 flex 显示');
+        showRowLimitNotice(false);
+        assert(getComputedStyle(notice).display === 'none', '重新隐藏后应恢复 display:none');
+      });
+
+      addAssert('体验加固：命令面板无匹配→清空→Enter 兜底执行高亮项', '体验加固', async () => {
+        const overlay = document.getElementById('paletteOverlay');
+        overlay.classList.remove('open');
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));
+        const input = document.getElementById('paletteInput');
+        input.value = 'zzz不存在的命令zzz';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        assert(document.getElementById('paletteList').textContent.includes('无匹配命令'), '无匹配应显示空态');
+        input.value = '';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        const first = document.querySelector('#paletteList .palette-item.active');
+        assert(first, '清空后应有高亮项');
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+        assert(!overlay.classList.contains('open'), 'Enter 应执行高亮项并关闭面板');
+        await waitFor(() => currentResultData && currentResultData.rows && currentResultData.rows.length === 3,
+          3000, '第一条片段应经 Enter 兜底执行并落地');
+      });
+
+      addAssert('体验加固：超长单行查询（滚动条出现）高亮层 scroll 尺寸仍全等', '体验加固', async () => {
+        const area = document.getElementById('tqlInput');
+        const pre = document.getElementById('tqlHighlight');
+        area.value = 'MATCH (a)-[]->(b) RETURN a, b LIMIT 100 WHERE name == "' + 'x'.repeat(5200) + '"';
+        updateTqlHighlight();
+        assert(area.scrollHeight > area.clientHeight, '前置条件：长行应触发 textarea 纵向滚动条');
+        assert(pre.scrollWidth === area.scrollWidth,
+          '长行 scrollWidth 应全等（滚动条宽度补偿），实际 pre ' + pre.scrollWidth + ' vs area ' + area.scrollWidth);
+        assert(pre.scrollHeight === area.scrollHeight,
+          '长行 scrollHeight 应全等，实际 pre ' + pre.scrollHeight + ' vs area ' + area.scrollHeight);
+        setEditorValue('FIND {type: "person"} RETURN * LIMIT 25');
       });
 
       // ---------- 执行器（支持运行中动态追加的断言） ----------
