@@ -414,6 +414,9 @@ try {
   if (!aiState.bannerVisible) throw new Error('未配置时抽屉内应显示未配置横幅');
   if (!aiState.unconfigured) throw new Error('未配置态入口按钮应有弱化样式');
   log('  ✓ AI 助手入口常显：未配置点击直达设置，抽屉内含未配置横幅');
+  // 关闭 AI 抽屉本体：抽屉停靠右侧，若保持打开会拦截后续右下角按钮（星云模式等）的点击
+  await page.click('#closeAiDrawerBtn');
+  await page.waitForFunction(() => !document.getElementById('aiChatDrawer').classList.contains('open'), null, { timeout: 5000 });
 
   // 冒烟 5.6：探索器内 TQL 弹窗（PR-16）—— 示例填充 → 真实只读查询 → 结果并入图，
   // 全程停留在独立探索标签（探索流不断线）
@@ -444,6 +447,52 @@ try {
   if (!tqlMerge.paneActive) throw new Error('运行后应停留在独立探索标签');
   log(`  ✓ 探索器内 TQL 并入图 (${tqlMerge.status})，探索流未中断`);
   await page.click('#graphTqlCloseBtn');
+
+  // 冒烟 5.7：星云模式（PR-18）—— 真实 server 702 节点：单查询 MATCH 上限 10000 拉全图，
+  // Sigma 专属 + 物理必关 + 静态聚类布局；WebGL 库不可达时星云中止 + toast（与 WebGL 冒烟同双路径）
+  await page.evaluate(() => renderGraph([]));
+  page.on('dialog', (d) => { d.accept().catch(() => {}); });
+  // 清空前序步骤残留 toast：避免「任一 toast 存在」的等待条件被旧 toast 瞬间满足
+  await page.evaluate(() => { const s = document.getElementById('toastStack'); if (s) s.textContent = ''; });
+  await page.click('#nebulaModeBtn');
+  await page.waitForFunction(
+    () => (typeof nebulaActive !== 'undefined' && nebulaActive === true)
+      || Array.from(document.querySelectorAll('#toastStack .toast')).some(t => t.textContent.indexOf('星云') !== -1),
+    null, { timeout: 60000 }
+  );
+  const nebulaState = await page.evaluate(() => ({
+    active: typeof nebulaActive !== 'undefined' && nebulaActive === true,
+    nodes: graphNodes.length,
+    edges: graphEdges.length,
+    physicsRunning: simulationRunning,
+    layout: graphLayoutMode,
+    backend: graphBackend,
+    btnText: document.getElementById('nebulaModeBtn').textContent,
+    toast: Array.from(document.querySelectorAll('#toastStack .toast')).map(t => t.textContent).join('|'),
+  }));
+  if (nebulaState.active) {
+    if (nebulaState.nodes < 702) throw new Error('星云应合并全部 702 节点，实际 ' + nebulaState.nodes);
+    if (nebulaState.physicsRunning) throw new Error('星云应物理关闭');
+    if (nebulaState.layout !== 'cluster') throw new Error('星云应为静态聚类布局，实际 ' + nebulaState.layout);
+    if (nebulaState.backend !== 'sigma') throw new Error('星云应为 Sigma 后端');
+    log(`  ✓ 星云模式进入：${nebulaState.nodes} 节点 / ${nebulaState.edges} 边 / 物理关闭 / 静态聚类 (Sigma)`);
+    // 退出星云（confirm 对话框已自动接受）：清图回到当前查询结果
+    await page.click('#nebulaModeBtn');
+    await page.waitForFunction(() => nebulaActive === false, null, { timeout: 10000 });
+    const exited = await page.evaluate(() => ({
+      nodes: graphNodes.length,
+      layout: graphLayoutMode,
+      backend: graphBackend,
+    }));
+    if (exited.layout !== 'force') throw new Error('退出星云后应恢复力导向布局');
+    if (exited.nodes === 0) throw new Error('退出星云后应回到当前查询结果');
+    log(`  ✓ 星云模式退出：图已恢复为查询结果 (${exited.nodes} 节点，力导向)`);
+  } else {
+    if (!nebulaState.toast || nebulaState.toast.indexOf('星云') === -1) {
+      throw new Error('星云失败时应有中止 toast，实际: ' + nebulaState.toast);
+    }
+    log('  ✓ 星云模式因 WebGL 库不可达中止并 toast（按设计）');
+  }
 
   log(`5/6 打开 ${BASE}/ui?selftest=1 断言自检套件`);
   await page.goto(`${BASE}/ui?selftest=1`, { waitUntil: 'domcontentloaded', timeout: 20000 });

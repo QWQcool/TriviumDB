@@ -583,6 +583,61 @@
     .node-search-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
     .node-search-meta { margin-left: auto; color: var(--text-light); font-size: 11px; white-space: nowrap; }
     .node-search-empty { padding: 8px; color: var(--text-light); font-size: 12px; }
+    /* PR-18 命名空间树面板：与过滤器面板同款式，left 错开 260px 与其并存 */
+    .ns-panel {
+      position: absolute;
+      top: 10px;
+      left: 260px;
+      width: 240px;
+      max-height: calc(100% - 60px);
+      overflow-y: auto;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-md);
+      padding: 10px 12px;
+      z-index: 8;
+      font-size: 12px;
+    }
+    .ns-key-select {
+      width: 100%;
+      margin: 8px 0 6px;
+      padding: 4px 6px;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-sm);
+      background: var(--bg-surface);
+      color: var(--text-main);
+      font-size: 12px;
+    }
+    .ns-tree { font-size: 12px; }
+    .ns-tree details { margin: 2px 0; }
+    .ns-tree summary {
+      cursor: pointer;
+      padding: 3px 4px;
+      border-radius: var(--radius-sm);
+      color: var(--text-main);
+      user-select: none;
+    }
+    .ns-tree summary:hover { background: var(--bg-surface-secondary); }
+    .ns-tree .ns-branch { margin-left: 14px; border-left: 1px solid var(--border-color); padding-left: 6px; }
+    .ns-leaf {
+      display: block;
+      width: 100%;
+      text-align: left;
+      border: none;
+      background: none;
+      color: var(--text-light);
+      font-size: 11px;
+      padding: 3px 4px 3px 14px;
+      cursor: pointer;
+      border-radius: var(--radius-sm);
+      font-family: inherit;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .ns-leaf:hover { background: var(--bg-surface-secondary); color: var(--text-main); }
+    .ns-empty { padding: 8px 0; color: var(--text-light); font-size: 12px; }
     /* 图视图后端/着色切换按钮的激活态 */
     .graph-controls .btn.active {
       background: var(--primary);
@@ -1681,6 +1736,11 @@
                   <button class="btn active" id="colorModeTypeBtn" title="按节点类型着色">按类型</button>
                   <button class="btn" id="colorModeCommunityBtn" title="Louvain 社区检测着色（按需加载）">按社区</button>
                   <button class="btn" id="graphFilterBtn" title="按节点类型 / 边 label 过滤显示">过滤器</button>
+                  <!-- PR-18 布局四档：力导向为默认；其余三档为一次性确定性静态布局（物理关闭） -->
+                  <button class="btn active" id="layoutForceBtn" title="力导向布局（物理模拟实时收敛）">力导向</button>
+                  <button class="btn" id="layoutClusterBtn" title="聚类布局：Louvain 社区分簇摆位（离线回退按类型分组），静态确定性">聚类</button>
+                  <button class="btn" id="layoutVectorBtn" title="向量星图：PCA 二维投影（无向量/低维节点放外环），静态确定性">向量星图</button>
+                  <button class="btn" id="layoutRadialBtn" title="度数径向布局：按连接数分同心环，静态确定性">度数径向</button>
                 </div>
                 <!-- PR-17 画布浮动工具条：缩放 / 适合窗口 / 全屏（右上角垂直） -->
                 <div class="graph-float-toolbar" role="group" aria-label="画布视图工具条">
@@ -1765,6 +1825,21 @@
             <button class="btn active" id="colorModeTypeBtnStandalone" title="按节点类型着色">按类型</button>
             <button class="btn" id="colorModeCommunityBtnStandalone" title="Louvain 社区检测着色（按需加载）">按社区</button>
             <button class="btn" id="graphFilterBtnStandalone" title="按节点类型 / 边 label 过滤显示">过滤器</button>
+            <!-- PR-18 布局四档（独立探索视图，与全局布局模式同步） -->
+            <button class="btn active" id="layoutForceBtnStandalone" title="力导向布局（物理模拟实时收敛）">力导向</button>
+            <button class="btn" id="layoutClusterBtnStandalone" title="聚类布局：Louvain 社区分簇摆位（离线回退按类型分组），静态确定性">聚类</button>
+            <button class="btn" id="layoutVectorBtnStandalone" title="向量星图：PCA 二维投影（无向量/低维节点放外环），静态确定性">向量星图</button>
+            <button class="btn" id="layoutRadialBtnStandalone" title="度数径向布局：按连接数分同心环，静态确定性">度数径向</button>
+            <!-- PR-18 星云模式：显式 opt-in 的万级拓扑管线（Sigma 专属，物理关闭） -->
+            <button class="btn" id="nebulaModeBtn" title="星云模式：单查询拉取全库拓扑（MATCH 上限 10000 行），以 WebGL 星图呈现（Sigma 专属，物理关闭）">星云模式</button>
+            <!-- PR-18 命名空间树：按 payload 键分层导航 -->
+            <button class="btn" id="nsToggleBtn" title="命名空间树：按 payload 键分层浏览与聚焦">命名空间</button>
+          </div>
+          <!-- PR-18 命名空间浮动面板（与过滤器面板同款式，错开位置可并存） -->
+          <div class="ns-panel" id="nsPanel" hidden>
+            <div class="gf-head"><strong>命名空间</strong><button class="btn" id="nsCloseBtn" style="padding: 1px 8px;">收起</button></div>
+            <select class="ns-key-select" id="nsKeySelect" aria-label="命名空间键"></select>
+            <div class="ns-tree" id="nsTree"></div>
           </div>
           <!-- PR-17 画布浮动工具条（独立探索视图） -->
           <div class="graph-float-toolbar" role="group" aria-label="画布视图工具条">
@@ -4037,7 +4112,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
                 seenIds.add(id);
                 graphTotalNodeCount++;
               }
-              if (nodeMap.has(id) || graphNodes.length >= GRAPH_RENDER_MAX_NODES) {
+              // 星云模式（显式 opt-in）绕过 1500 渲染截断；默认护栏语义不变
+              if (nodeMap.has(id) || (graphNodes.length >= GRAPH_RENDER_MAX_NODES && !nebulaActive)) {
                 // 已渲染过、或达到渲染上限：只参与计数，不再创建；
                 // 连线推断也只对已渲染节点做，避免无效边堆积
                 if (nodeMap.has(id)) rowNodeIds.push(id);
@@ -4080,6 +4156,12 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     // ≤300 维持原力导向行为（用户手动冻结状态不受影响）
     function applyGraphPhysicsPolicy() {
       const btn = document.getElementById('togglePhysicsBtn');
+      // PR-18：非力导向档 = 一次性确定性静态布局，物理模拟不参与（星云等静态模式共用）
+      if (graphLayoutMode !== 'force') {
+        applyStaticGraphLayout();
+        updateGraphScaleNotice();
+        return;
+      }
       if (graphNodes.length > GRAPH_PHYSICS_MAX_NODES) {
         physicsLockedByScale = true;
         simulationRunning = false;
@@ -4105,6 +4187,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     function updateGraphScaleNotice() {
       const notice = document.getElementById('graphScaleNotice');
       if (!notice) return;
+      // 星云模式：护栏提示条让位（规模由星云 toast/按钮承载；退出后护栏语义恢复）
+      if (nebulaActive) { notice.hidden = true; return; }
       let msg = '';
       if (graphNodes.length >= GRAPH_RENDER_MAX_NODES && graphTotalNodeCount > graphNodes.length) {
         msg = `共 ${graphTotalNodeCount} 个节点，仅渲染前 ${GRAPH_RENDER_MAX_NODES}（已暂停力学模拟以保持流畅）`;
@@ -4284,6 +4368,193 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       };
     }
 
+    // ==========================================
+    // PR-18 布局四档 / 星云模式 / 命名空间树
+    // 非力导向档 = 一次性确定性静态布局（无随机、无 rAF），物理模拟关闭；
+    // 默认（力导向）路径与既有规模护栏语义完全不变，星云为显式 opt-in。
+    // ==========================================
+    const GOLDEN_ANGLE = 2.399963229728653;        // 黄金角（确定性螺旋，与 createGraphNode 一致）
+    const NEBULA_QUERY = 'MATCH (a)-[]->(b) RETURN a, b LIMIT 10000'; // 服务端 max_query_rows=10000 封顶
+    let graphLayoutMode = 'force';                 // 'force' | 'cluster' | 'vector' | 'radial'
+    let nebulaActive = false;                      // 星云模式开关（显式 opt-in，Sigma 专属）
+    let nebulaInFlight = false;                    // 星云管线进行中（防连点）
+
+    // 聚类布局：communities 优先（Louvain 结果 Map），null/缺省份回退 typeKey 分组。
+    // 簇心按簇规模黄金角螺旋摆位，簇内按度数降序小螺旋 → 完全确定性。
+    function computeClusterLayout(nodes, edges, communities) {
+      void edges; // 预留：后续可按边密度微调簇间距；当前签名保持与规格一致
+      const groups = new Map();
+      nodes.forEach(n => {
+        const key = (communities && communities.get(n.id)) || n.typeKey || '(unknown)';
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(n);
+      });
+      const ordered = Array.from(groups.values()).sort((a, b) => b.length - a.length);
+      const positions = new Map();
+      ordered.forEach((members, gi) => {
+        // 簇心螺旋：半径随簇序增长，保证簇间不重叠（大簇靠中心）
+        const r = gi === 0 ? 0 : 260 + gi * 130;
+        const cx = Math.cos(gi * GOLDEN_ANGLE) * r;
+        const cy = Math.sin(gi * GOLDEN_ANGLE) * r;
+        const sorted = members.slice().sort((a, b) => (b.degree || 0) - (a.degree || 0) || String(a.id).localeCompare(String(b.id)));
+        sorted.forEach((n, i) => {
+          const rr = i === 0 ? 0 : 22 + i * 8;
+          positions.set(n.id, { x: cx + Math.cos(i * GOLDEN_ANGLE) * rr, y: cy + Math.sin(i * GOLDEN_ANGLE) * rr });
+        });
+      });
+      return positions;
+    }
+
+    // PCA 二维投影：均值中心化 + 幂迭代求前两主成分（确定性初始化，无随机），
+    // 投影归一化到固定尺度；无向量/维度不足的节点进 outliers（调用方放外环）。
+    function pca2d(items) {
+      const positions = new Map();
+      const outliers = new Set();
+      const valid = items.filter(it => Array.isArray(it.vector) && it.vector.length >= 2);
+      items.forEach(it => { if (!valid.includes(it)) outliers.add(it.id); });
+      if (!valid.length) return { positions, outliers };
+      const dims = valid[0].vector.length;
+      // 严格同维过滤（不同维向量不可混合中心化）
+      const uniform = valid.filter(it => it.vector.length === dims);
+      valid.forEach(it => { if (it.vector.length !== dims) outliers.add(it.id); });
+      if (!uniform.length) return { positions, outliers };
+      const mean = new Array(dims).fill(0);
+      uniform.forEach(it => { for (let d = 0; d < dims; d++) mean[d] += it.vector[d]; });
+      for (let d = 0; d < dims; d++) mean[d] /= uniform.length;
+      const centered = uniform.map(it => {
+        const v = new Array(dims);
+        for (let d = 0; d < dims; d++) v[d] = it.vector[d] - mean[d];
+        return { id: it.id, vec: v };
+      });
+      const project = (vec, axis) => {
+        let s = 0;
+        for (let d = 0; d < dims; d++) s += vec[d] * axis[d];
+        return s;
+      };
+      const normalize = (a) => {
+        let s = 0;
+        for (let d = 0; d < dims; d++) s += a[d] * a[d];
+        const n = Math.sqrt(s) || 1;
+        for (let d = 0; d < dims; d++) a[d] /= n;
+        return a;
+      };
+      // 主成分 1：幂迭代（初始向量 1/√d，确定性）
+      let a1 = new Array(dims).fill(1 / Math.sqrt(dims));
+      for (let iter = 0; iter < 40; iter++) {
+        const next = new Array(dims).fill(0);
+        for (const it of centered) {
+          const p = project(it.vec, a1);
+          for (let d = 0; d < dims; d++) next[d] += it.vec[d] * p;
+        }
+        a1 = normalize(next);
+      }
+      // 主成分 2：与 a1 正交化约束下的幂迭代（初始 e0，确定性）
+      let a2 = new Array(dims).fill(0);
+      a2[0] = 1;
+      for (let iter = 0; iter < 40; iter++) {
+        const next = new Array(dims).fill(0);
+        for (const it of centered) {
+          const p = project(it.vec, a2);
+          for (let d = 0; d < dims; d++) next[d] += it.vec[d] * p;
+        }
+        const comp = project(next, a1);
+        for (let d = 0; d < dims; d++) next[d] -= comp * a1[d];
+        a2 = normalize(next);
+      }
+      // 归一化到固定尺度（最大投影半径 320）
+      let maxR = 0;
+      const raw = centered.map(it => {
+        const x = project(it.vec, a1);
+        const y = project(it.vec, a2);
+        maxR = Math.max(maxR, Math.hypot(x, y));
+        return { id: it.id, x, y };
+      });
+      const scale = maxR > 0 ? 320 / maxR : 1;
+      raw.forEach(p => positions.set(p.id, { x: p.x * scale, y: p.y * scale }));
+      return { positions, outliers };
+    }
+
+    // 度数径向布局：按度数分档（0 / 1 / 2-5 / 6+）同心环，环内黄金角均匀。返回带 ring 便于断言。
+    function computeRadialLayout(nodes) {
+      const ringOf = (degree) => (!degree || degree <= 0) ? 0 : (degree === 1 ? 1 : (degree <= 5 ? 2 : 3));
+      const ringRadius = [90, 200, 320, 440];
+      const counters = [0, 0, 0, 0];
+      const positions = new Map();
+      nodes.forEach(n => {
+        const ring = ringOf(n.degree || 0);
+        const idx = counters[ring]++;
+        const r = ring === 0 ? 0 : ringRadius[ring];
+        positions.set(n.id, {
+          x: Math.cos(idx * GOLDEN_ANGLE) * r,
+          y: Math.sin(idx * GOLDEN_ANGLE) * r,
+          ring
+        });
+      });
+      return positions;
+    }
+
+    // ---------- 命名空间树纯函数 ----------
+    // 分隔符自动探测：在候选分隔符中取总命中最多者（并列取靠前者），无命中返回 null（不切分）
+    function detectNamespaceSeparator(values) {
+      const candidates = ['/', '.', ':', ' > '];
+      let best = null;
+      let bestCount = 0;
+      candidates.forEach(sep => {
+        let count = 0;
+        values.forEach(v => { count += String(v).split(sep).length - 1; });
+        if (count > bestCount) { bestCount = count; best = sep; }
+      });
+      return best;
+    }
+
+    // 命名空间树：按 key 取 payload 值，自动探测分隔符切层级。
+    // 返回 {label, count, nodeIds, children}；空值/缺键节点归入根 nodeIds（调用方显示「未设置」组）。
+    function buildNamespaceTree(nodes, key) {
+      const root = { label: '(root)', count: 0, nodeIds: [], children: new Map() };
+      const values = [];
+      nodes.forEach(n => {
+        const v = n.payload ? n.payload[key] : undefined;
+        root.count++;
+        if (v === undefined || v === null || String(v) === '') {
+          root.nodeIds.push(n.id);
+          return;
+        }
+        const str = String(v);
+        values.push(str);
+      });
+      const sep = detectNamespaceSeparator(values);
+      nodes.forEach(n => {
+        const v = n.payload ? n.payload[key] : undefined;
+        if (v === undefined || v === null || String(v) === '') return;
+        const parts = sep ? String(v).split(sep).map(s => s.trim()).filter(Boolean) : [String(v)];
+        if (!parts.length) { root.nodeIds.push(n.id); return; }
+        let cur = root;
+        for (const p of parts) {
+          if (!cur.children.has(p)) cur.children.set(p, { label: p, count: 0, nodeIds: [], children: new Map() });
+          cur = cur.children.get(p);
+          cur.count++;
+        }
+        cur.nodeIds.push(n.id);
+      });
+      const toNode = (m) => ({
+        label: m.label,
+        count: m.count,
+        nodeIds: m.nodeIds,
+        children: Array.from(m.children.values()).map(toNode)
+          .sort((a, b) => b.count - a.count || (a.label < b.label ? -1 : a.label > b.label ? 1 : 0))
+      });
+      return toNode(root);
+    }
+
+    // payload 键候选：采样前 500 节点的 payload keys，偏好键优先，其余按字典序，上限 30
+    function namespaceKeyCandidates(nodes) {
+      const keys = new Set();
+      nodes.slice(0, 500).forEach(n => { Object.keys(n.payload || {}).forEach(k => keys.add(k)); });
+      const preferred = ['path', 'dir', 'ns', 'group', 'type'].filter(k => keys.has(k));
+      const rest = Array.from(keys).filter(k => !preferred.includes(k)).sort();
+      return preferred.concat(rest).slice(0, 30);
+    }
+
     function initCanvas(canvasId) {
       const canvas = document.getElementById(canvasId);
       if (!canvas) return;
@@ -4362,6 +4633,11 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         // 规模护栏禁用物理时（>300 节点），「恢复力学」不被允许，给出 toast 说明
         if (physicsLockedByScale) {
           showToast(`节点数超过 ${GRAPH_PHYSICS_MAX_NODES}，力学模拟已停用以保持流畅`);
+          return;
+        }
+        // PR-18：静态布局档物理不参与，防止「恢复力学」打破确定性布局
+        if (graphLayoutMode !== 'force') {
+          showToast('当前为静态布局模式（物理模拟未启用），切回「力导向」可恢复力学');
           return;
         }
         simulationRunning = !simulationRunning;
@@ -4607,6 +4883,299 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         });
         redrawGraph();
       });
+    }
+
+    // ==========================================
+    // PR-18 运行时：静态布局应用 / 布局四档切换 / 星云管线 / 命名空间面板
+    // ==========================================
+    // Louvain 社区分组（仅用于聚类布局分组，不改节点着色）；失败/离线返回 null 回退 typeKey
+    async function computeCommunityGroups() {
+      try {
+        const { louvain } = await loadCommunitiesLib();
+        const GraphCtor = (sigmaLibs && sigmaLibs.Graph) || (window.graphology && window.graphology.Graph);
+        if (!GraphCtor || !louvain) return null;
+        const g = new GraphCtor();
+        graphNodes.forEach(n => { try { g.addNode(n.id); } catch (_) { /* 重复 id */ } });
+        const ids = new Set(graphNodes.map(n => n.id));
+        const seen = new Set();
+        graphEdges.forEach(e => {
+          const key = [e.source, e.target].sort().join('|');
+          if (!ids.has(e.source) || !ids.has(e.target) || seen.has(key) || e.source === e.target) return;
+          seen.add(key);
+          try { g.addEdge(e.source, e.target); } catch (_) { /* 非法边 */ }
+        });
+        const result = louvain(g) || {};
+        return new Map(Object.entries(result));
+      } catch (_) {
+        return null;
+      }
+    }
+
+    // 一次性确定性静态布局：物理模拟关闭（无随机、无 rAF 循环），Sigma 需重建实例重算 mapFn
+    function applyStaticGraphLayout() {
+      simulationRunning = false;
+      if (simulationRafId !== null) { cancelAnimationFrame(simulationRafId); simulationRafId = null; }
+      const physicsBtn = document.getElementById('togglePhysicsBtn');
+      if (physicsBtn) physicsBtn.textContent = '恢复力学';
+      let positions = new Map();
+      if (graphLayoutMode === 'cluster') {
+        positions = computeClusterLayout(graphNodes, graphEdges, nodeCommunities.size ? nodeCommunities : null);
+      } else if (graphLayoutMode === 'vector') {
+        const res = pca2d(graphNodes.map(n => ({ id: n.id, vector: n.vector })));
+        positions = res.positions;
+        let i = 0;
+        res.outliers.forEach((id) => {
+          const ang = i * GOLDEN_ANGLE;
+          positions.set(id, { x: Math.cos(ang) * 460, y: Math.sin(ang) * 460 }); // 无向量节点外环
+          i++;
+        });
+      } else if (graphLayoutMode === 'radial') {
+        positions = computeRadialLayout(graphNodes);
+      }
+      positions.forEach((p, id) => {
+        const n = nodeMap.get(id);
+        if (n) { n.x = p.x; n.y = p.y; n.vx = 0; n.vy = 0; }
+      });
+      redrawGraph();
+      // 布局大改后 bbox 变化：重建 Sigma 实例让 mapFn 重算（规格要求）
+      if (graphBackend === 'sigma') rebuildSigmaInstances();
+    }
+
+    function syncLayoutButtons() {
+      [['layoutForceBtn', 'force'], ['layoutForceBtnStandalone', 'force'],
+       ['layoutClusterBtn', 'cluster'], ['layoutClusterBtnStandalone', 'cluster'],
+       ['layoutVectorBtn', 'vector'], ['layoutVectorBtnStandalone', 'vector'],
+       ['layoutRadialBtn', 'radial'], ['layoutRadialBtnStandalone', 'radial']]
+        .forEach(([id, mode]) => {
+          const btn = document.getElementById(id);
+          if (btn) btn.classList.toggle('active', graphLayoutMode === mode);
+        });
+    }
+
+    // 布局四档切换：非力导向档物理关闭；切回力导向恢复物理（规模锁定语义不破坏）
+    async function setGraphLayoutMode(mode) {
+      if (mode === graphLayoutMode) return;
+      graphLayoutMode = mode;
+      syncLayoutButtons();
+      if (mode === 'force') {
+        const physicsBtn = document.getElementById('togglePhysicsBtn');
+        if (!physicsLockedByScale) {
+          simulationRunning = true;
+          if (physicsBtn) physicsBtn.textContent = '冻结力学';
+        }
+        redrawGraph();
+        startSimulation(1);
+        return;
+      }
+      applyStaticGraphLayout();
+      // 聚类档优先 Louvain：离线/失败保持已应用的 typeKey 分组布局（确定性不受影响）
+      if (mode === 'cluster' && !nodeCommunities.size) {
+        const groups = await computeCommunityGroups();
+        if (groups && groups.size) {
+          nodeCommunities = groups;
+          applyStaticGraphLayout();
+        }
+      }
+    }
+
+    // 相机聚焦一组节点（命名空间分组聚焦 / 命中 bbox 适配）：Canvas 走 fit 变换，Sigma 走相机动画
+    function flyCameraToBBox(viewId, members) {
+      if (!members || !members.length) return;
+      if (graphBackend === 'sigma') {
+        const inst = sigmaInstances[viewId];
+        if (inst && !inst.sigma.killed) {
+          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          members.forEach(n => {
+            const p = inst.mapFn(n);
+            if (p.x < minX) minX = p.x;
+            if (p.x > maxX) maxX = p.x;
+            if (p.y < minY) minY = p.y;
+            if (p.y > maxY) maxY = p.y;
+          });
+          inst.sigma.getCamera().animate({
+            x: (minX + maxX) / 2,
+            y: (minY + maxY) / 2,
+            ratio: Math.max(Math.max(maxX - minX, maxY - minY, 0.05) * 1.35, 0.05)
+          }, { duration: 220 });
+          return;
+        }
+      }
+      const canvas = document.getElementById(viewId === 'query' ? 'graphCanvas' : 'standaloneGraphCanvas');
+      if (!canvas) return;
+      syncCanvasSize(canvas);
+      const fit = fitTransformToBBox(computeGraphBBox(members), canvas.width, canvas.height, 80);
+      const t = viewId === 'query' ? transform : standaloneTransform;
+      t.x = fit.x; t.y = fit.y; t.k = fit.k;
+      redrawGraph();
+    }
+
+    // ---------- 星云模式（显式 opt-in：Sigma 专属 + 物理必关 + 静态聚类布局） ----------
+    // 拉取方案实测结论：无过滤 FIND（`FIND {} RETURN *` / `FIND RETURN *`）均返回 400 不合法，
+    // 孤立节点无法经第二查询拉取 → 单查询 MATCH LIMIT 10000（服务端 max_query_rows=10000 封顶）
+    async function toggleNebulaMode() {
+      if (nebulaActive) {
+        if (!window.confirm('退出星云模式将清空当前图并回到查询结果，确定退出？')) return;
+        exitNebulaMode(false);
+        return;
+      }
+      if (nebulaInFlight) return;
+      // 星云强制 Sigma：Canvas 下先切后端（CDN 失败 setGraphBackend 内部 toast 并保持 Canvas）
+      if (graphBackend !== 'sigma') {
+        await setGraphBackend('sigma');
+        if (graphBackend !== 'sigma') {
+          showToast('星云模式需要 WebGL 渲染（Sigma 加载失败已回退 Canvas），已中止');
+          return;
+        }
+      }
+      nebulaInFlight = true;
+      const btn = document.getElementById('nebulaModeBtn');
+      btn.disabled = true;
+      btn.textContent = '星云加载中…';
+      try {
+        const res = await fetch(`${API_BASE}/v1/tql`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: NEBULA_QUERY, mutation: false })
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        const rows = data.rows || [];
+        if (!rows.length) throw new Error('查询未返回任何行');
+        nebulaActive = true;
+        btn.textContent = '退出星云';
+        btn.classList.add('active');
+        btn.title = '退出星云模式（确认后清空图并回到查询结果）';
+        graphLayoutMode = 'cluster';
+        syncLayoutButtons();
+        renderGraph(rows); // nebulaActive 下绕过 1500 截断；物理经静态布局分支强制关闭
+        showToast(`星云：${graphNodes.length} 节点 / ${graphEdges.length} 边（物理关闭）`);
+        // Louvain 簇分组异步升级（离线/失败静默保持 typeKey 分组，确定性布局不变）
+        computeCommunityGroups().then((groups) => {
+          if (nebulaActive && groups && groups.size) {
+            nodeCommunities = groups;
+            applyStaticGraphLayout();
+          }
+        }).catch(() => {});
+      } catch (err) {
+        nebulaActive = false;
+        btn.textContent = '星云模式';
+        btn.classList.remove('active');
+        showToast('星云模式启动失败: ' + err.message);
+      } finally {
+        nebulaInFlight = false;
+        btn.disabled = false;
+      }
+    }
+
+    // 退出星云：清图回到当前查询结果（护栏恢复）；auto=true 为切 Canvas 后端强制退出
+    function exitNebulaMode(auto) {
+      nebulaActive = false;
+      const btn = document.getElementById('nebulaModeBtn');
+      if (btn) {
+        btn.textContent = '星云模式';
+        btn.classList.remove('active');
+        btn.title = '星云模式：单查询拉取全库拓扑（MATCH 上限 10000 行），以 WebGL 星图呈现（Sigma 专属，物理关闭）';
+      }
+      if (graphLayoutMode !== 'force') {
+        graphLayoutMode = 'force';
+        syncLayoutButtons();
+      }
+      renderGraph((currentResultData && currentResultData.rows) || []);
+      showToast(auto
+        ? '星云节点规模较大，已自动退出星云模式（Canvas 后端不支持万级渲染）'
+        : '已退出星云模式，图已恢复为当前查询结果');
+    }
+
+    // ---------- 命名空间树面板（独立探索视图） ----------
+    function renderNamespaceTree() {
+      const select = document.getElementById('nsKeySelect');
+      const container = document.getElementById('nsTree');
+      if (!select || !container) return;
+      container.textContent = '';
+      const hint = (text) => {
+        const el = document.createElement('div');
+        el.className = 'ns-empty';
+        el.textContent = text;
+        container.appendChild(el);
+      };
+      if (!graphNodes.length) { hint('图中暂无节点'); return; }
+      const candidates = namespaceKeyCandidates(graphNodes);
+      if (!candidates.length) { hint('节点 payload 无可用键'); return; }
+      // 保持用户已选键（仍有效时），否则取首个候选
+      const key = candidates.includes(select.value) ? select.value : candidates[0];
+      if (select.options.length !== candidates.length
+        || Array.from(select.options).some((o, i) => o.value !== candidates[i])) {
+        select.textContent = '';
+        candidates.forEach(k => {
+          const opt = document.createElement('option');
+          opt.value = k;
+          opt.textContent = k;
+          select.appendChild(opt);
+        });
+      }
+      select.value = key;
+      const tree = buildNamespaceTree(graphNodes, key);
+
+      const appendLeaf = (parent, id) => {
+        const n = nodeMap.get(id);
+        if (!n) return;
+        const row = document.createElement('button');
+        row.type = 'button';
+        row.className = 'ns-leaf';
+        row.title = `定位节点 #${n.id}`;
+        row.textContent = `${n.label} (#${n.id})`;
+        row.addEventListener('click', () => flyToNode(n));
+        parent.appendChild(row);
+      };
+      const collectIds = (node, acc) => {
+        node.nodeIds.forEach(id => acc.push(id));
+        node.children.forEach(c => collectIds(c, acc));
+        return acc;
+      };
+      const focusGroup = (node) => {
+        const members = collectIds(node, []).map(id => nodeMap.get(id)).filter(Boolean);
+        flyCameraToBBox('standalone', members);
+      };
+
+      const buildDom = (node, parent, labelOverride) => {
+        if (node.children.length) {
+          const details = document.createElement('details');
+          const summary = document.createElement('summary');
+          summary.textContent = `${labelOverride || node.label} (${node.count})`;
+          summary.addEventListener('click', () => focusGroup(node));
+          details.appendChild(summary);
+          const branch = document.createElement('div');
+          branch.className = 'ns-branch';
+          details.appendChild(branch);
+          node.children.forEach(c => buildDom(c, branch));
+          node.nodeIds.forEach(id => appendLeaf(branch, id)); // 同值直挂节点
+          parent.appendChild(details);
+        } else if (node.nodeIds.length === 1) {
+          appendLeaf(parent, node.nodeIds[0]);
+        } else if (node.nodeIds.length > 1) {
+          // 多节点同值且无子层：分组头（聚焦）+ 逐节点叶子
+          const head = document.createElement('summary');
+          head.textContent = `${labelOverride || node.label} (${node.count})`;
+          head.addEventListener('click', () => focusGroup(node));
+          parent.appendChild(head);
+          node.nodeIds.forEach(id => appendLeaf(parent, id));
+        }
+      };
+
+      tree.children.forEach(c => buildDom(c, container));
+      if (tree.nodeIds.length) buildDom({ label: '(未设置)', count: tree.nodeIds.length, nodeIds: tree.nodeIds, children: [] }, container);
+    }
+
+    function setupNamespacePanel() {
+      const toggleBtn = document.getElementById('nsToggleBtn');
+      const panel = document.getElementById('nsPanel');
+      if (!toggleBtn || !panel) return;
+      toggleBtn.addEventListener('click', () => {
+        panel.hidden = !panel.hidden;
+        if (!panel.hidden) renderNamespaceTree();
+      });
+      document.getElementById('nsCloseBtn').addEventListener('click', () => { panel.hidden = true; });
+      document.getElementById('nsKeySelect').addEventListener('change', renderNamespaceTree);
     }
 
     function redrawGraph() {
@@ -4997,6 +5566,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           const el = document.getElementById(id);
           if (el) el.hidden = true;
         });
+        // PR-18：星云 Sigma 专属 —— 用户切回 Canvas 后端自动退出星云（防 Canvas 万级绘制）
+        if (nebulaActive) exitNebulaMode(true);
         redrawGraph();
       }
       syncBackendButtons();
@@ -5256,6 +5827,18 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         if (tql) document.getElementById('graphTqlInput').value = tql;
       });
       document.getElementById('graphTqlRunBtn').addEventListener('click', runGraphTqlQuery);
+
+      // PR-18：布局四档切换（两视图按钮同语义同状态）
+      [['layoutForceBtn', 'force'], ['layoutClusterBtn', 'cluster'],
+       ['layoutVectorBtn', 'vector'], ['layoutRadialBtn', 'radial'],
+       ['layoutForceBtnStandalone', 'force'], ['layoutClusterBtnStandalone', 'cluster'],
+       ['layoutVectorBtnStandalone', 'vector'], ['layoutRadialBtnStandalone', 'radial']]
+        .forEach(([id, mode]) => {
+          document.getElementById(id).addEventListener('click', () => { setGraphLayoutMode(mode); });
+        });
+      // PR-18：星云模式 / 命名空间面板
+      document.getElementById('nebulaModeBtn').addEventListener('click', toggleNebulaMode);
+      setupNamespacePanel();
     }
 
     // ==========================================
@@ -6560,7 +7143,14 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           if (q.indexOf('FORCE_ERROR') === 0) return jsonRes({ title: '流式兜底错误', detail: 'SELFTEST_FORCE_400' }, 400);
           // 行集合按查询语义选择（与 JSON mock 一致）
           let rows;
-          if (q.indexOf('MATCH') === 0) rows = MATCH_ROWS;
+          if (q.indexOf('LIMIT 10000') !== -1) {
+            // PR-18 星云 fixture：1200 节点闭环链（renderGraph 去重后 1200 节点 / 1200 边）
+            const nebulaPayload = (i) => ({ name: 'Nebula' + i, type: i % 3 === 0 ? 'paper' : 'person', path: 'ns' + (i % 7) + '/leaf' + i });
+            rows = Array.from({ length: 1200 }, (_, i) => ({
+              a: { type: 'node', id: 'nb' + i, payload: nebulaPayload(i), vector: [] },
+              b: { type: 'node', id: 'nb' + ((i + 1) % 1200), payload: nebulaPayload((i + 1) % 1200), vector: [] }
+            }));
+          } else if (q.indexOf('MATCH') === 0) rows = MATCH_ROWS;
           else if (q.indexOf('SEARCH') === 0) rows = [{ hit: NODE_ALICE, score: { type: 'float', value: 0.98 } }];
           else rows = FIND_ROWS;
           // 特殊流式 fixture（NDJSON 自检专用）
@@ -8116,6 +8706,150 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         badge.className = 'status-badge dead';
         assert(getComputedStyle(dot).animationName === 'none', 'dead 态不应脉冲');
         badge.className = prev;
+      });
+
+      // ---------- PR-18 布局四档 / 命名空间树 / 星云模式 ----------
+      addAssert('布局模式：三静态布局纯函数确定性 + 度数分环 + PCA 外环', '布局模式', async () => {
+        renderGraph(MATCH_ROWS);
+        // computeClusterLayout：Louvain 结果与 typeKey 回退均两次调用全等（确定性）
+        const comm = new Map([['1', 'c0'], ['2', 'c0'], ['3', 'c1']]);
+        const p1 = computeClusterLayout(graphNodes, graphEdges, comm);
+        const p2 = computeClusterLayout(graphNodes, graphEdges, comm);
+        assert(JSON.stringify(p1) === JSON.stringify(p2), '聚类布局两次调用应全等（确定性）');
+        assert(p1.size === 3, '聚类布局应覆盖全部节点');
+        const pn1 = computeClusterLayout(graphNodes, graphEdges, null);
+        const pn2 = computeClusterLayout(graphNodes, graphEdges, null);
+        assert(JSON.stringify(pn1) === JSON.stringify(pn2), 'typeKey 回退布局也应全等');
+        // pca2d：幂等确定性 + 低维/无向量外环 + 固定尺度
+        const items = [
+          { id: '1', vector: [0.1, 0.2, 0.3, 0.4] },
+          { id: '2', vector: [0.5, 0.4, 0.3, 0.2] },
+          { id: '3', vector: [0.9, 0.8, 0.7, 0.6] },
+          { id: '4', vector: [] },
+          { id: '5', vector: [0.5] }
+        ];
+        const r1 = pca2d(items);
+        const r2 = pca2d(items);
+        assert(JSON.stringify(r1) === JSON.stringify(r2), 'pca2d 两次调用应全等（幂等确定性）');
+        assert(r1.outliers.has('4') && r1.outliers.has('5'), '无向量/维度<2 应进 outliers');
+        assert(r1.positions.size === 3, '有效向量节点应全部有投影');
+        let maxAbs = 0;
+        r1.positions.forEach(p => { maxAbs = Math.max(maxAbs, Math.abs(p.x), Math.abs(p.y)); });
+        assert(maxAbs <= 320.0001, '投影应归一化到固定尺度 320，实际 ' + maxAbs);
+        const rEmpty = pca2d([]);
+        assert(rEmpty.positions.size === 0, '空输入不应崩');
+        // computeRadialLayout：度数分档 0/1/2-5/6+ 同心环
+        const rn = [{ id: 'a', degree: 0 }, { id: 'b', degree: 1 }, { id: 'c', degree: 3 }, { id: 'd', degree: 9 }];
+        const rad1 = computeRadialLayout(rn);
+        const rad2 = computeRadialLayout(rn);
+        assert(JSON.stringify(rad1) === JSON.stringify(rad2), '径向布局两次调用应全等');
+        assert(rad1.get('a').ring === 0 && rad1.get('b').ring === 1
+          && rad1.get('c').ring === 2 && rad1.get('d').ring === 3, '度数应分档入环');
+        assert(Math.abs(Math.hypot(rad1.get('b').x, rad1.get('b').y) - 200) < 1e-9, '环 1 半径应 200');
+      });
+
+      addAssert('布局模式：静态档物理关闭、重建图不重启、切回力导向恢复', '布局模式', async () => {
+        renderGraph(MATCH_ROWS);
+        await setGraphLayoutMode('radial');
+        assert(graphLayoutMode === 'radial', '布局模式应切换');
+        assert(simulationRunning === false && simulationRafId === null, '静态档应关闭物理（无 rAF 循环）');
+        assert(document.getElementById('togglePhysicsBtn').textContent === '恢复力学', '物理按钮应显示恢复态');
+        assert(graphNodes.every(n => isFinite(n.x) && isFinite(n.y)), '静态布局后坐标应有限');
+        // 静态档下图数据重建（merge/render）也不应启动物理
+        renderGraph(MATCH_ROWS);
+        assert(simulationRunning === false, '静态档下重建图仍不应启动物理');
+        // 切回力导向恢复物理（规模未锁定）
+        await setGraphLayoutMode('force');
+        assert(simulationRunning === true, '切回力导向应恢复物理');
+        assert(document.getElementById('togglePhysicsBtn').textContent === '冻结力学', '物理按钮应还原');
+        assert(document.getElementById('layoutForceBtn').classList.contains('active')
+          && document.getElementById('layoutRadialBtnStandalone').classList.contains('active') === false,
+          '两视图布局按钮应同步');
+      });
+
+      addAssert('命名空间树：分隔符探测/计数/嵌套/空值兜底 + 确定性', '命名空间树', async () => {
+        assert(detectNamespaceSeparator(['src/a.ts', 'src/b.ts']) === '/', '应探测到 /');
+        assert(detectNamespaceSeparator(['ns:a', 'ns:b']) === ':', '应探测到 :');
+        assert(detectNamespaceSeparator(['a > b', 'a > c']) === ' > ', '应探测到 " > "');
+        assert(detectNamespaceSeparator(['v1.2', 'v1.3']) === '.', '应探测到 .');
+        assert(detectNamespaceSeparator(['hello', 'world']) === null, '无分隔符应返回 null');
+        const mk = (id, path) => ({ id, payload: path === undefined ? {} : { path } });
+        const nodes = [mk('1', 'src/lib/a.ts'), mk('2', 'src/lib/b.ts'), mk('3', 'src/app.ts'), mk('4'), mk('5')];
+        const t1 = buildNamespaceTree(nodes, 'path');
+        const t2 = buildNamespaceTree(nodes, 'path');
+        assert(JSON.stringify(t1) === JSON.stringify(t2), '树构建应确定性（两次全等）');
+        assert(t1.count === 5, '根计数应 5，实际 ' + t1.count);
+        const src = t1.children.find(c => c.label === 'src');
+        assert(src && src.count === 3, 'src 组计数应 3');
+        const lib = src.children.find(c => c.label === 'lib');
+        assert(lib && lib.count === 2 && lib.children.length === 2, 'lib 组应计 2 并分出 a.ts/b.ts 子层');
+        const aTs = lib && lib.children.find(c => c.label === 'a.ts');
+        assert(aTs && aTs.nodeIds[0] === '1', 'a.ts 叶子应挂节点 1');
+        const app = src.children.find(c => c.label === 'app.ts');
+        assert(app && app.nodeIds[0] === '3', 'app.ts 应挂节点 3');
+        assert(t1.nodeIds.length === 2, '空 payload 应归入根（未设置组）');
+      });
+
+      addAssert('命名空间树：面板渲染、叶子点击飞行定位、分组聚焦', '命名空间树', async () => {
+        document.querySelector('[data-tab="graphExplorePane"]').click();
+        renderGraph([{ a: NODE_ALICE, b: NODE_BOB }]);
+        nodeMap.get('1').payload.path = 'src/lib/a.ts';
+        nodeMap.get('2').payload.path = 'src/app.ts';
+        const panel = document.getElementById('nsPanel');
+        document.getElementById('nsToggleBtn').click();
+        assert(!panel.hidden, '面板应展开');
+        const tree = document.getElementById('nsTree');
+        const leaves = tree.querySelectorAll('.ns-leaf');
+        assert(leaves.length >= 2, '叶子应渲染，实际 ' + leaves.length);
+        const select = document.getElementById('nsKeySelect');
+        assert(select.value === 'path', '键下拉应选中 path');
+        // 叶子点击 = 飞行定位 + 打开抽屉（先扰动相机避免重合假阴性）
+        standaloneTransform.x += 50;
+        const camBefore = { x: standaloneTransform.x, y: standaloneTransform.y };
+        leaves[0].click();
+        assert(document.getElementById('nodeDrawer').classList.contains('open'), '点击叶子应打开抽屉');
+        assert(standaloneTransform.x !== camBefore.x || standaloneTransform.y !== camBefore.y,
+          '点击叶子应飞行定位');
+        // 分组点击 = 相机聚焦组 bbox（不崩且相机变化）
+        document.getElementById('closeDrawerBtn').click();
+        const gBefore = { x: standaloneTransform.x, y: standaloneTransform.y };
+        tree.querySelector('summary').click();
+        assert(standaloneTransform.x !== gBefore.x || standaloneTransform.y !== gBefore.y,
+          '点击分组应聚焦组 bbox');
+        document.getElementById('nsCloseBtn').click();
+        assert(panel.hidden, '收起按钮应关闭面板');
+        document.querySelector('[data-tab="queryPane"]').click();
+      });
+
+      addAssert('星云模式：mock 大 MATCH 进 Sigma 静态聚类、护栏让位、切 Canvas 自动退出', '星云模式', async () => {
+        // 复用 WebGL 组的 fake 库（离线确定性）：loadScriptTag 已被回退测试还原，重新注入
+        window.graphology = { Graph: FakeGraph };
+        window.Sigma = FakeSigma;
+        loadScriptTag = () => Promise.resolve();
+        currentResultData = { rows: FIND_ROWS }; // 退出星云的恢复目标
+        renderGraph([]);
+        document.querySelector('[data-tab="graphExplorePane"]').click();
+        const btn = document.getElementById('nebulaModeBtn');
+        btn.click();
+        await waitFor(() => nebulaActive === true && graphNodes.length === 1200,
+          10000, '星云管线应合并 1200 节点');
+        assert(graphEdges.length === 1200, '闭环链应有 1200 边，实际 ' + graphEdges.length);
+        assert(graphBackend === 'sigma', '星云应强制 Sigma 后端');
+        assert(simulationRunning === false && simulationRafId === null, '星云应物理必关');
+        assert(graphLayoutMode === 'cluster', '星云应为静态聚类布局');
+        assert(document.getElementById('graphScaleNotice').hidden, '规模护栏提示条应让位');
+        assert(btn.textContent === '退出星云', '按钮应切换为退出星云');
+        // 用户切回 Canvas 后端 → 自动退出星云（防 Canvas 万级绘制）
+        document.getElementById('toggleWebGLBtn').click();
+        await waitFor(() => nebulaActive === false, 3000, '切 Canvas 应自动退出星云');
+        assert(graphNodes.length === 3, '退出后应回到查询结果（FIND_ROWS 3 节点），实际 ' + graphNodes.length);
+        assert(graphLayoutMode === 'force', '退出后应恢复力导向');
+        assert(btn.textContent === '星云模式', '按钮应还原');
+        // 清理 fake 库注入
+        loadScriptTag = origLoadScriptTag;
+        window.graphology = undefined;
+        window.Sigma = undefined;
+        document.querySelector('[data-tab="queryPane"]').click();
       });
 
       // ---------- 执行器（支持运行中动态追加的断言） ----------
