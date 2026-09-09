@@ -158,6 +158,13 @@
       border-radius: 50%;
       background: currentColor;
     }
+    /* PR-17 连接心跳：live 态呼吸脉冲（prefers-reduced-motion 全局已有 0.01ms 兜底）；
+       dead 态红色常亮不脉冲（无动画规则命中） */
+    @keyframes statusDotPulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+    .status-badge.live .status-dot { animation: statusDotPulse 2s ease-in-out infinite; }
     .header-actions {
       display: flex;
       align-items: center;
@@ -524,6 +531,58 @@
       flex-wrap: wrap;
       max-width: calc(100% - 32px);
     }
+    /* PR-17 画布浮动工具条：右上角垂直排列（避开左上过滤器/图例与底部 graph-controls） */
+    .graph-float-toolbar {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      z-index: 6;
+    }
+    .graph-float-toolbar .btn { justify-content: center; padding: 4px 8px; font-size: 12px; }
+    /* PR-17 全局节点搜索（图内）：顶栏输入 + 下拉结果 */
+    .node-search-wrap { position: relative; }
+    .node-search-input {
+      padding: 4px 10px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border-color);
+      background: var(--bg-surface);
+      color: var(--text-main);
+      font-size: 12px;
+      width: 190px;
+      font-family: inherit;
+    }
+    .node-search-input:focus { outline: none; border-color: var(--border-focus); }
+    .node-search-results {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      width: 300px;
+      max-height: 320px;
+      overflow-y: auto;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-md);
+      z-index: 60;
+      padding: 4px;
+    }
+    .node-search-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-size: 12px;
+      color: var(--text-main);
+    }
+    .node-search-item:hover, .node-search-item:focus { background: var(--bg-surface-secondary); outline: none; }
+    .node-search-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+    .node-search-meta { margin-left: auto; color: var(--text-light); font-size: 11px; white-space: nowrap; }
+    .node-search-empty { padding: 8px; color: var(--text-light); font-size: 12px; }
     /* 图视图后端/着色切换按钮的激活态 */
     .graph-controls .btn.active {
       background: var(--primary);
@@ -1417,6 +1476,13 @@
       <span class="badge">SERVER</span>
     </div>
 
+    <!-- PR-17 全局节点搜索（图内）：对当前图数据做 label/id/payload 子串匹配，点击结果飞行定位 -->
+    <div class="node-search-wrap">
+      <input class="node-search-input" id="nodeSearchInput" type="text" placeholder="搜索节点… (图内)"
+        autocomplete="off" spellcheck="false" aria-label="搜索图内节点" aria-controls="nodeSearchResults">
+      <div class="node-search-results" id="nodeSearchResults" role="listbox" aria-label="节点搜索结果" hidden></div>
+    </div>
+
     <div class="header-status">
       <span id="connStatus" class="status-badge">
         <span class="status-dot"></span>
@@ -1616,6 +1682,13 @@
                   <button class="btn" id="colorModeCommunityBtn" title="Louvain 社区检测着色（按需加载）">按社区</button>
                   <button class="btn" id="graphFilterBtn" title="按节点类型 / 边 label 过滤显示">过滤器</button>
                 </div>
+                <!-- PR-17 画布浮动工具条：缩放 / 适合窗口 / 全屏（右上角垂直） -->
+                <div class="graph-float-toolbar" role="group" aria-label="画布视图工具条">
+                  <button class="btn" id="gftZoomInBtn" title="放大">＋</button>
+                  <button class="btn" id="gftZoomOutBtn" title="缩小">－</button>
+                  <button class="btn" id="gftFitBtn" title="适合窗口（按可见节点包围盒适配）">适合窗口</button>
+                  <button class="btn" id="gftFullscreenBtn" title="画布全屏">全屏</button>
+                </div>
                 <!-- 过滤器面板（节点 payload.type 聚合 + 边 label） -->
                 <div class="graph-filter-panel" id="graphFilterPanel" hidden>
                   <div class="gf-head"><strong>过滤器</strong><button class="btn" id="gfResetBtn" style="padding: 1px 8px;">重置</button></div>
@@ -1681,7 +1754,7 @@
             <span style="color: var(--text-muted); font-size: 12px;">提示：可在画布上自由拖拽节点，滚轮缩放，单击节点查看属性</span>
           </div>
         </div>
-        <div style="flex: 1; position: relative; background: var(--bg-surface);">
+        <div style="flex: 1; position: relative; background: var(--bg-surface);" id="standaloneGraphShell">
           <canvas id="standaloneGraphCanvas" style="width: 100%; height: 100%; display: block;"></canvas>
           <!-- Sigma WebGL 渲染容器（独立画布的第二视图实例，共享同一图数据） -->
           <div class="graph-sigma-container" id="standaloneSigmaContainer" hidden></div>
@@ -1692,6 +1765,13 @@
             <button class="btn active" id="colorModeTypeBtnStandalone" title="按节点类型着色">按类型</button>
             <button class="btn" id="colorModeCommunityBtnStandalone" title="Louvain 社区检测着色（按需加载）">按社区</button>
             <button class="btn" id="graphFilterBtnStandalone" title="按节点类型 / 边 label 过滤显示">过滤器</button>
+          </div>
+          <!-- PR-17 画布浮动工具条（独立探索视图） -->
+          <div class="graph-float-toolbar" role="group" aria-label="画布视图工具条">
+            <button class="btn" id="gftZoomInBtnStandalone" title="放大">＋</button>
+            <button class="btn" id="gftZoomOutBtnStandalone" title="缩小">－</button>
+            <button class="btn" id="gftFitBtnStandalone" title="适合窗口（按可见节点包围盒适配）">适合窗口</button>
+            <button class="btn" id="gftFullscreenBtnStandalone" title="画布全屏">全屏</button>
           </div>
           <!-- 过滤器面板（独立探索视图） -->
           <div class="graph-filter-panel" id="graphFilterPanelStandalone" hidden>
@@ -2231,6 +2311,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       renderHistory();
       initCanvas('graphCanvas');
       setupGraphRenderers();
+      setupNodeSearch();          // PR-17：全局节点搜索
+      setupGraphFloatToolbars();  // PR-17：画布浮动工具条
       startHealthPolling();
       setupPalette();
       setupAiChat();
@@ -3864,6 +3946,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       });
       if (addedNodes > 0) {
         graphTotalNodeCount = Math.max(graphTotalNodeCount, graphNodes.length);
+        recomputeDegrees(); // PR-17：新节点入图后重算度数（Sigma size 同步依赖）
         applyGraphPhysicsPolicy();
         if (graphBackend === 'sigma') {
           if (graphColorMode === 'community') applyCommunityColors();
@@ -3925,6 +4008,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       });
       if (addedNodes > 0) {
         graphTotalNodeCount = Math.max(graphTotalNodeCount, graphNodes.length);
+        recomputeDegrees(); // PR-17：k-hop 扩展后重算度数
         applyGraphPhysicsPolicy();
         if (graphBackend === 'sigma') {
           if (graphColorMode === 'community') applyCommunityColors();
@@ -3981,6 +4065,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         }
       });
 
+      recomputeDegrees(); // PR-17：全量重建后重算度数（节点半径 / Sigma size 依赖）
       applyGraphPhysicsPolicy();
       // WebGL 后端下新数据到达：按当前着色模式重建 Sigma 实例
       if (graphBackend === 'sigma') {
@@ -4136,6 +4221,69 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       return colors[type] || '#0284c7';
     }
 
+    // ==========================================
+    // PR-17 观感与导航（纯函数区，selftest 可直接验证）：
+    //   a) graphEdgeAlpha —— 边透明度随节点密度自适应（星云质感）
+    //   b) recomputeDegrees + nodeRadius —— 度数-半径缩放，枢纽节点视觉锚点
+    //   c) computeGraphBBox + fitTransformToBBox —— 适合窗口的相机适配
+    // ==========================================
+    const NODE_SEARCH_MAX_RESULTS = 12; // 节点搜索下拉最多展示条数
+    const GRAPH_DEGREE_RADIUS_CAP = 20; // 度数计入半径的上限（超过后半径封顶 2 倍）
+
+    // 边透明度：节点越密边越淡；≤300 节点恒为 0.35，超密 clamp 到 0.05 下限
+    function graphEdgeAlpha(nodeCount) {
+      return Math.min(0.35, Math.max(0.05, 0.35 * 300 / Math.max(nodeCount, 300)));
+    }
+
+    // alpha(0~1) → 两位 hex（8 位色 #rrggbbaa 用；0.35 → '59' 与既有 #94a3b859 一致）
+    function alphaToHexByte(alpha) {
+      return Math.round(Math.min(1, Math.max(0, alpha)) * 255).toString(16).padStart(2, '0');
+    }
+
+    // 节点半径：基础 16，度数每 +1 半径 +6%，度数 20 封顶（2 倍）
+    function nodeRadius(node) {
+      return 16 * (1 + Math.min(node.degree || 0, GRAPH_DEGREE_RADIUS_CAP) * 0.06);
+    }
+
+    // 遍历边统计 source/target 出现次数写入 node.degree（图数据变化入口统一调用）
+    function recomputeDegrees() {
+      graphNodes.forEach(n => { n.degree = 0; });
+      graphEdges.forEach(e => {
+        const s = nodeMap.get(e.source);
+        const t = nodeMap.get(e.target);
+        if (s) s.degree++;
+        if (t) t.degree++;
+      });
+    }
+
+    // 节点包围盒；空图返回 null（调用方兜底，selftest 覆盖不崩）
+    function computeGraphBBox(nodes) {
+      if (!nodes || !nodes.length) return null;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      nodes.forEach(n => {
+        if (n.x < minX) minX = n.x;
+        if (n.x > maxX) maxX = n.x;
+        if (n.y < minY) minY = n.y;
+        if (n.y > maxY) maxY = n.y;
+      });
+      return { minX, minY, maxX, maxY };
+    }
+
+    // 包围盒 → 相机变换（中心对齐 + 按边距适配缩放；空 bbox 回落居中 k=1）
+    function fitTransformToBBox(bbox, canvasW, canvasH, padding) {
+      const pad = padding === undefined ? 80 : padding;
+      if (!bbox) return { x: canvasW / 2, y: canvasH / 2, k: 1 };
+      const w = Math.max(bbox.maxX - bbox.minX, 1);
+      const h = Math.max(bbox.maxY - bbox.minY, 1);
+      const k = Math.min(3, Math.max(0.05,
+        Math.min((canvasW - pad * 2) / w, (canvasH - pad * 2) / h)));
+      return {
+        x: canvasW / 2 - ((bbox.minX + bbox.maxX) / 2) * k,
+        y: canvasH / 2 - ((bbox.minY + bbox.maxY) / 2) * k,
+        k
+      };
+    }
+
     function initCanvas(canvasId) {
       const canvas = document.getElementById(canvasId);
       if (!canvas) return;
@@ -4164,8 +4312,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         const mx = (e.clientX - rect.left - transform.x) / transform.k;
         const my = (e.clientY - rect.top - transform.y) / transform.k;
 
-        // 碰撞测试
-        const clickedNode = graphNodes.find(n => Math.hypot(n.x - mx, n.y - my) < 20);
+        // 碰撞测试（PR-17：命中半径随节点度数半径缩放）
+        const clickedNode = graphNodes.find(n => Math.hypot(n.x - mx, n.y - my) < nodeRadius(n) + 4);
         if (clickedNode) {
           draggedNode = clickedNode;
           selectedNode = clickedNode;
@@ -4255,6 +4403,210 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       document.getElementById('graphFilterBtnStandalone').addEventListener('click', () => toggleGraphFilterPanel('graphFilterPanelStandalone'));
       document.getElementById('gfResetBtn').addEventListener('click', resetGraphFilters);
       document.getElementById('gfResetBtnStandalone').addEventListener('click', resetGraphFilters);
+    }
+
+    // ==========================================
+    // PR-17 全局节点搜索（图内）：debounce 120ms 子串匹配 + 下拉结果 + 点击飞行定位
+    // ==========================================
+    function nodeSearchMatch(query) {
+      const q = String(query || '').trim().toLowerCase();
+      if (!q) return [];
+      const hits = [];
+      for (const n of graphNodes) {
+        const payload = n.payload || {};
+        const hay = [n.label, n.id, payload.name, payload.title]
+          .map(v => String(v === undefined || v === null ? '' : v).toLowerCase());
+        if (hay.some(h => h.indexOf(q) !== -1)) {
+          hits.push(n);
+          if (hits.length >= NODE_SEARCH_MAX_RESULTS) break;
+        }
+      }
+      return hits;
+    }
+
+    function closeNodeSearch() {
+      const box = document.getElementById('nodeSearchResults');
+      if (box) box.hidden = true;
+    }
+
+    // 结果下拉（纯 DOM API / textContent，零 innerHTML 红线）
+    function renderNodeSearchResults(hits, query) {
+      const box = document.getElementById('nodeSearchResults');
+      if (!box) return;
+      box.textContent = '';
+      const empty = (text) => {
+        const el = document.createElement('div');
+        el.className = 'node-search-empty';
+        el.textContent = text;
+        box.appendChild(el);
+      };
+      if (!String(query || '').trim()) {
+        empty('输入关键字以搜索图内节点（label / id / payload）');
+      } else if (!hits.length) {
+        empty(`无匹配节点（图内共 ${graphNodes.length} 个节点）`);
+      } else {
+        hits.forEach(n => {
+          const item = document.createElement('div');
+          item.className = 'node-search-item';
+          item.setAttribute('role', 'option');
+          const dot = document.createElement('span');
+          dot.className = 'node-search-dot';
+          dot.style.background = getNodeColor(n.typeKey);
+          const label = document.createElement('span');
+          label.textContent = n.label;
+          const meta = document.createElement('span');
+          meta.className = 'node-search-meta';
+          meta.textContent = `#${n.id} · ${n.typeKey || ''}`;
+          item.append(dot, label, meta);
+          // mousedown 抢在输入框 blur 之前消费点击（click 会因下拉先收起而丢失）
+          item.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            closeNodeSearch();
+            flyToNode(n);
+          });
+          box.appendChild(item);
+        });
+      }
+      box.hidden = false;
+    }
+
+    function setupNodeSearch() {
+      const input = document.getElementById('nodeSearchInput');
+      if (!input) return;
+      let debounceId = null;
+      input.addEventListener('input', () => {
+        clearTimeout(debounceId);
+        debounceId = setTimeout(
+          () => renderNodeSearchResults(nodeSearchMatch(input.value), input.value), 120);
+      });
+      input.addEventListener('focus', () => {
+        renderNodeSearchResults(nodeSearchMatch(input.value), input.value);
+      });
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { closeNodeSearch(); input.blur(); }
+      });
+      // blur 延时关闭，给结果项 mousedown 留出消费窗口
+      input.addEventListener('blur', () => setTimeout(closeNodeSearch, 150));
+    }
+
+    // 相机飞行定位：Canvas 平移居中（同 focusCommunityView 模式），Sigma 走相机动画
+    function flyCameraToNode(viewId, node) {
+      const canvas = document.getElementById(viewId === 'query' ? 'graphCanvas' : 'standaloneGraphCanvas');
+      if (graphBackend === 'sigma') {
+        const inst = sigmaInstances[viewId];
+        if (inst && !inst.sigma.killed) {
+          const p = inst.mapFn(node);
+          inst.sigma.getCamera().animate({ x: p.x, y: p.y }, { duration: 250 });
+          return;
+        }
+      }
+      if (canvas) syncCanvasSize(canvas);
+      const t = viewId === 'query' ? transform : standaloneTransform;
+      t.x = canvas.width / 2 - node.x * t.k;
+      t.y = canvas.height / 2 - node.y * t.k;
+      redrawGraph();
+    }
+
+    // 飞行到节点：独立探索 tab 激活飞 standalone 相机；图视图可见飞查询相机；
+    // 两者都不可见时先切查询 tab + 图视图再飞。飞行后打开节点抽屉（与点击节点一致）
+    function flyToNode(node) {
+      if (!node) return;
+      if (document.getElementById('graphExplorePane').classList.contains('active')) {
+        flyCameraToNode('standalone', node);
+      } else {
+        if (document.getElementById('viewGraph').style.display !== 'block') {
+          document.querySelector('[data-tab="queryPane"]').click();
+          document.querySelector('[data-view="graph"]').click();
+        }
+        flyCameraToNode('query', node);
+      }
+      openNodeDrawer(node);
+    }
+
+    // ==========================================
+    // PR-17 画布浮动工具条：放大 / 缩小 / 适合窗口 / 全屏（两个图视图各一组）
+    // ==========================================
+    function graphFloatZoom(viewId, factor) {
+      if (graphBackend === 'sigma') {
+        const inst = sigmaInstances[viewId];
+        if (!inst || inst.sigma.killed) return;
+        const cam = inst.sigma.getCamera();
+        const s = cam.getState ? cam.getState() : cam;
+        cam.animate({ x: s.x, y: s.y, ratio: s.ratio / factor }, { duration: 150 });
+        return;
+      }
+      const t = viewId === 'query' ? transform : standaloneTransform;
+      t.k = Math.min(20, Math.max(0.05, t.k * factor));
+      redrawGraph();
+    }
+
+    function fitGraphView(viewId) {
+      const nodes = graphNodes.filter(isNodeVisible);
+      if (graphBackend === 'sigma') {
+        const inst = sigmaInstances[viewId];
+        if (inst && !inst.sigma.killed) {
+          const cam = inst.sigma.getCamera();
+          if (!nodes.length) {
+            cam.animate({ x: 0.5, y: 0.5, ratio: 1 }, { duration: 180 });
+            return;
+          }
+          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          nodes.forEach(n => {
+            const p = inst.mapFn(n);
+            if (p.x < minX) minX = p.x;
+            if (p.x > maxX) maxX = p.x;
+            if (p.y < minY) minY = p.y;
+            if (p.y > maxY) maxY = p.y;
+          });
+          cam.animate({
+            x: (minX + maxX) / 2,
+            y: (minY + maxY) / 2,
+            ratio: Math.max(Math.max(maxX - minX, maxY - minY, 0.05) * 1.35, 0.05)
+          }, { duration: 220 });
+          return;
+        }
+      }
+      const canvas = document.getElementById(viewId === 'query' ? 'graphCanvas' : 'standaloneGraphCanvas');
+      if (!canvas) return;
+      syncCanvasSize(canvas);
+      const fit = fitTransformToBBox(computeGraphBBox(nodes), canvas.width, canvas.height, 80);
+      const t = viewId === 'query' ? transform : standaloneTransform;
+      t.x = fit.x; t.y = fit.y; t.k = fit.k;
+      redrawGraph();
+    }
+
+    function toggleGraphFullscreen(containerId) {
+      const container = document.getElementById(containerId);
+      if (!container) return;
+      if (document.fullscreenElement) {
+        document.exitFullscreen();
+      } else if (container.requestFullscreen) {
+        container.requestFullscreen().catch(() => { /* 拒绝全屏（非用户手势等）静默 */ });
+      }
+    }
+
+    function setupGraphFloatToolbars() {
+      const bind = (id, fn) => {
+        const btn = document.getElementById(id);
+        if (btn) btn.addEventListener('click', fn);
+      };
+      bind('gftZoomInBtn', () => graphFloatZoom('query', 1.25));
+      bind('gftZoomOutBtn', () => graphFloatZoom('query', 0.8));
+      bind('gftFitBtn', () => fitGraphView('query'));
+      bind('gftFullscreenBtn', () => toggleGraphFullscreen('viewGraph'));
+      bind('gftZoomInBtnStandalone', () => graphFloatZoom('standalone', 1.25));
+      bind('gftZoomOutBtnStandalone', () => graphFloatZoom('standalone', 0.8));
+      bind('gftFitBtnStandalone', () => fitGraphView('standalone'));
+      bind('gftFullscreenBtnStandalone', () => toggleGraphFullscreen('standaloneGraphShell'));
+      // 全屏状态同步两视图按钮文案；尺寸变化后重绘兜底（ResizeObserver 为主路径）
+      document.addEventListener('fullscreenchange', () => {
+        const label = document.fullscreenElement ? '退出全屏' : '全屏';
+        ['gftFullscreenBtn', 'gftFullscreenBtnStandalone'].forEach(id => {
+          const btn = document.getElementById(id);
+          if (btn) btn.textContent = label;
+        });
+        redrawGraph();
+      });
     }
 
     function redrawGraph() {
@@ -4349,6 +4701,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       ctx.scale(t.k, t.k);
 
       const labelMode = graphLabelMode(graphNodes.length, t.k);
+      const edgeAlpha = graphEdgeAlpha(graphNodes.length); // PR-17：边透明度随密度自适应
 
       // 绘制连线（过滤器生效：隐藏类型/label 的元素整体跳过）
       graphEdges.forEach((edge, idx) => {
@@ -4365,12 +4718,12 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         ctx.beginPath();
         ctx.moveTo(s.x, s.y);
         ctx.quadraticCurveTo(cx, cy, t.x, t.y);
-        ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)'; // 低透明度：高密度下不糊成一片
+        ctx.strokeStyle = 'rgba(148, 163, 184, ' + edgeAlpha + ')'; // 低透明度：高密度下不糊成一片
         ctx.lineWidth = 1.2;
         ctx.stroke();
 
         if (edge.label) {
-          ctx.fillStyle = 'rgba(148, 163, 184, 0.85)';
+          ctx.fillStyle = 'rgba(148, 163, 184, ' + edgeAlpha + ')';
           ctx.font = '10px ' + CANVAS_FONT_FAMILY;
           ctx.fillText(edge.label, cx, cy - 3);
         }
@@ -4380,7 +4733,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       graphNodes.forEach(node => {
         if (!isNodeVisible(node)) return;
         ctx.beginPath();
-        ctx.arc(node.x, node.y, 16, 0, Math.PI * 2);
+        ctx.arc(node.x, node.y, nodeRadius(node), 0, Math.PI * 2);
         ctx.fillStyle = node.color;
         ctx.fill();
         ctx.strokeStyle = selectedNode === node ? '#ffffff' : 'rgba(148, 163, 184, 0.45)';
@@ -4523,14 +4876,20 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       graphNodes.forEach(n => {
         const p = mapFn(n);
         // 过滤器：hidden 属性由 Sigma 原生支持（WebGL 下护栏/过滤语义一致）
-        graph.addNode(n.id, { x: p.x, y: p.y, size: 7, label: n.label, color: n.color, hidden: !isNodeVisible(n) });
+        // PR-17：size 与 Canvas nodeRadius 同比例随度数缩放（7 × (1 + min(degree,20)*0.06)）
+        graph.addNode(n.id, {
+          x: p.x, y: p.y,
+          size: 7 * (1 + Math.min(n.degree || 0, GRAPH_DEGREE_RADIUS_CAP) * 0.06),
+          label: n.label, color: n.color, hidden: !isNodeVisible(n)
+        });
       });
+      // PR-17：边色随节点密度自适应（8 位 hex alpha），与 Canvas 后端公式一致
+      const sigmaEdgeColor = '#94a3b8' + alphaToHexByte(graphEdgeAlpha(graphNodes.length));
       graphEdges.forEach(e => {
         if (graph.hasNode(e.source) && graph.hasNode(e.target) && !graph.hasEdge(e.source, e.target)) {
-          // 边低透明度（#rrggbbaa 8 位 hex，alpha≈0.35）：与 Canvas 后端视觉一致
           graph.addEdge(e.source, e.target, {
             size: 1,
-            color: '#94a3b859',
+            color: sigmaEdgeColor,
             label: e.label || '',
             hidden: !isEdgeVisible(e)
           });
@@ -4538,7 +4897,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       });
       const sigma = new sigmaLibs.Sigma(graph, container, {
         allowInvalidContainer: true,
-        defaultEdgeColor: '#94a3b859',
+        defaultEdgeColor: sigmaEdgeColor,
         labelColor: { color: dark ? '#f1f5f9' : '#1e293b' },
         labelDensity: 1.2,
         minCameraRatio: 0.05,
@@ -4851,7 +5210,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         const rect = saCanvas.getBoundingClientRect();
         const mx = (e.clientX - rect.left - standaloneTransform.x) / standaloneTransform.k;
         const my = (e.clientY - rect.top - standaloneTransform.y) / standaloneTransform.k;
-        const hit = graphNodes.find(n => Math.hypot(n.x - mx, n.y - my) < 20);
+        const hit = graphNodes.find(n => Math.hypot(n.x - mx, n.y - my) < nodeRadius(n) + 4);
         if (hit) {
           openNodeDrawer(hit);
         } else {
@@ -7633,6 +7992,130 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         graphColorMode = prevMode;
         nodeCommunities = prevCommunities;
         updateGraphLegend();
+      });
+
+      // ---------- PR-17 观感与导航 ----------
+      addAssert('观感与导航：graphEdgeAlpha 密度自适应边界与单调性', '观感与导航', async () => {
+        assert(graphEdgeAlpha(100) === 0.35, '≤300 节点应恒为 0.35');
+        assert(graphEdgeAlpha(300) === 0.35, '300 节点应为 0.35');
+        assert(graphEdgeAlpha(3000) === 0.05, '超密图应 clamp 到 0.05 下限');
+        assert(graphEdgeAlpha(600) > graphEdgeAlpha(1200), '节点越多 alpha 应单调不增');
+        assert(alphaToHexByte(0.35) === '59', '0.35 → hex 59（与既有 #94a3b859 一致）');
+        assert(alphaToHexByte(0) === '00' && alphaToHexByte(1) === 'ff', 'alpha 越界值应夹取');
+      });
+
+      addAssert('观感与导航：度数统计与 nodeRadius 枢纽缩放', '观感与导航', async () => {
+        renderGraph(MATCH_ROWS);
+        assert(nodeMap.get('1').degree === 1, 'Alice 度数应为 1（一条边端点）');
+        assert(nodeMap.get('2').degree === 2, 'Bob 度数应为 2（两条边端点）');
+        assert(nodeRadius({ degree: 0 }) === 16, '0 度应为基础半径 16');
+        assert(nodeRadius({ degree: 5 }) > nodeRadius({ degree: 1 }), '度数越大半径应越大');
+        assert(nodeRadius({ degree: 99 }) === nodeRadius({ degree: 20 }), '度数 20 封顶（2 倍半径）');
+        renderGraph(FIND_ROWS);
+      });
+
+      addAssert('观感与导航：画布工具条 bbox/fit 纯函数与空图兜底', '观感与导航', async () => {
+        renderGraph(MATCH_ROWS);
+        const bbox = computeGraphBBox(graphNodes);
+        assert(bbox && isFinite(bbox.minX) && isFinite(bbox.maxY), '非空图应返回有限包围盒');
+        const fit = fitTransformToBBox(bbox, 800, 600, 80);
+        assert(fit.k > 0 && isFinite(fit.x) && isFinite(fit.y), 'fit 结果应为有限正值');
+        assert(computeGraphBBox([]) === null, '空图 bbox 应为 null（不崩）');
+        const fallback = fitTransformToBBox(computeGraphBBox([]), 800, 600);
+        assert(fallback.k === 1 && fallback.x === 400 && fallback.y === 300, '空 bbox 应回落居中 k=1');
+        ['gftZoomInBtn', 'gftZoomOutBtn', 'gftFitBtn', 'gftFullscreenBtn',
+         'gftZoomInBtnStandalone', 'gftZoomOutBtnStandalone', 'gftFitBtnStandalone', 'gftFullscreenBtnStandalone']
+          .forEach(id => assert(document.getElementById(id), `工具条按钮 ${id} 应存在`));
+      });
+
+      addAssert('观感与导航：Canvas 缩放按钮改变相机 k（放大×1.25/缩小还原）', '观感与导航', async () => {
+        document.querySelector('[data-tab="queryPane"]').click();
+        document.querySelector('[data-view="graph"]').click();
+        renderGraph(MATCH_ROWS);
+        const k0 = transform.k;
+        document.getElementById('gftZoomInBtn').click();
+        assert(Math.abs(transform.k - k0 * 1.25) < 1e-9, '放大应 ×1.25');
+        document.getElementById('gftZoomOutBtn').click();
+        assert(Math.abs(transform.k - k0) < 1e-9, '缩小应还原到原 k');
+      });
+
+      addAssert('观感与导航：节点搜索命中/空态/Esc 关闭', '观感与导航', async () => {
+        renderGraph([{ a: NODE_ALICE, b: NODE_BOB }]);
+        const input = document.getElementById('nodeSearchInput');
+        const box = document.getElementById('nodeSearchResults');
+        input.focus();
+        input.value = 'alice';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        await waitFor(() => !box.hidden && box.querySelectorAll('.node-search-item').length === 1,
+          2000, '应命中 Alice 一条');
+        assert(box.textContent.indexOf('#1') !== -1, '结果应展示 #id');
+        input.value = '绝对不存在的节点xyz';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        await waitFor(() => !box.hidden && box.textContent.indexOf('无匹配节点') !== -1,
+          2000, '无结果应显示空态文案');
+        input.value = '';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        await waitFor(() => !box.hidden && box.textContent.indexOf('输入关键字') !== -1,
+          2000, '空输入应显示空输入空态');
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        assert(box.hidden, 'Esc 应关闭下拉');
+        input.blur();
+      });
+
+      addAssert('观感与导航：飞行定位 — 图视图相机移动 + 抽屉打开', '观感与导航', async () => {
+        document.querySelector('[data-tab="queryPane"]').click();
+        document.querySelector('[data-view="graph"]').click();
+        renderGraph([{ a: NODE_ALICE, b: NODE_BOB }]);
+        const node = nodeMap.get('1');
+        const canvas = document.getElementById('graphCanvas');
+        // 先扰动相机：黄金角螺旋下 Alice 恒为 (30,0)，若相机恰已在其质心（前序社区聚焦
+        // 测试遗留），before 与 expect 会重合造成恒真假阴性
+        transform.x += 120;
+        transform.y += 60;
+        const before = { x: transform.x, y: transform.y };
+        flyToNode(node);
+        // 断言语义：节点应落在画布中心（相机 = 画布中心 - 节点坐标 × k）
+        const expectX = canvas.width / 2 - node.x * transform.k;
+        const expectY = canvas.height / 2 - node.y * transform.k;
+        assert(transform.x !== before.x || transform.y !== before.y,
+          `Canvas 相机应平移至节点中心 before=${before.x},${before.y} after=${transform.x},${transform.y} expect=${expectX},${expectY} canvas=${canvas.width}x${canvas.height} node=${node.x},${node.y} k=${transform.k}`);
+        assert(document.getElementById('nodeDrawer').classList.contains('open'), '飞行后应打开节点抽屉');
+        assert(currentDrawerNodeId === '1', '抽屉应指向目标节点');
+        document.getElementById('closeDrawerBtn').click();
+      });
+
+      addAssert('观感与导航：飞行定位 — 视图不可见时自动切查询 tab + 图视图', '观感与导航', async () => {
+        document.querySelector('[data-tab="queryPane"]').click();
+        document.querySelector('[data-view="grid"]').click();
+        assert(document.getElementById('viewGraph').style.display === 'none', '前置：图视图隐藏');
+        flyToNode(nodeMap.get('1'));
+        assert(document.getElementById('viewGraph').style.display === 'block', '应自动切到图视图');
+        assert(document.getElementById('nodeDrawer').classList.contains('open'), '飞行后抽屉应打开');
+        document.getElementById('closeDrawerBtn').click();
+        document.querySelector('[data-view="grid"]').click();
+      });
+
+      addAssert('观感与导航：飞行定位 — 独立探索激活时飞 standalone 相机', '观感与导航', async () => {
+        document.querySelector('[data-tab="graphExplorePane"]').click();
+        const before = { x: standaloneTransform.x, y: standaloneTransform.y };
+        flyToNode(nodeMap.get('1'));
+        assert(standaloneTransform.x !== before.x || standaloneTransform.y !== before.y,
+          'standalone 相机应平移至节点中心');
+        assert(document.getElementById('nodeDrawer').classList.contains('open'), '飞行后抽屉应打开');
+        document.getElementById('closeDrawerBtn').click();
+        document.querySelector('[data-tab="queryPane"]').click();
+        document.querySelector('[data-view="graph"]').click();
+      });
+
+      addAssert('观感与导航：连接心跳 — live 呼吸脉冲 / dead 不脉冲', '观感与导航', async () => {
+        const badge = document.getElementById('connStatus');
+        const dot = badge.querySelector('.status-dot');
+        const prev = badge.className;
+        badge.className = 'status-badge live';
+        assert(getComputedStyle(dot).animationName === 'statusDotPulse', 'live 态应有呼吸脉冲动画');
+        badge.className = 'status-badge dead';
+        assert(getComputedStyle(dot).animationName === 'none', 'dead 态不应脉冲');
+        badge.className = prev;
       });
 
       // ---------- 执行器（支持运行中动态追加的断言） ----------
