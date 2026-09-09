@@ -5,6 +5,14 @@ on:
     tags:
       - 'v*.*.*'
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: '要恢复发布的现有 beta/stable Tag'
+        required: true
+        type: string
+
+env:
+  RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
 
 permissions:
   contents: write
@@ -17,6 +25,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ env.RELEASE_TAG }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -24,19 +33,17 @@ jobs:
       - name: 校验版本与运行门禁
         shell: bash
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
-            if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$ ]]; then
-              echo "只允许 beta 或 stable Tag 进入 Server 发布"
-              exit 1
-            fi
-            git fetch origin master
-            if [[ "$VERSION" != *-beta.* ]] && ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/master"; then
-              echo "stable Tag 必须指向 master 历史中的提交"
-              exit 1
-            fi
-            test "$(cargo metadata --no-deps --format-version 1 | python -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "triviumdb-server"))')" = "$VERSION"
+          VERSION="${RELEASE_TAG#v}"
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$ ]]; then
+            echo "只允许 beta 或 stable Tag 进入 Server 发布"
+            exit 1
           fi
+          git fetch origin master
+          if [[ "$VERSION" != *-beta.* ]] && ! git merge-base --is-ancestor "$(git rev-parse HEAD)" "origin/master"; then
+            echo "stable Tag 必须指向 master 历史中的提交"
+            exit 1
+          fi
+          test "$(cargo metadata --no-deps --format-version 1 | python -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "triviumdb-server"))')" = "$VERSION"
           cargo fmt --all -- --check
           cargo test -p triviumdb-server -- --test-threads=1
           cargo clippy -p triviumdb-server --all-targets -- -D warnings
@@ -71,6 +78,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -81,7 +90,9 @@ jobs:
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         shell: bash
         run: |
-          sudo apt-get update
+          sudo apt-get update \
+            -o Dir::Etc::sourcelist="sources.list.d/ubuntu.sources" \
+            -o Dir::Etc::sourceparts="-"
           sudo apt-get install -y gcc-aarch64-linux-gnu
       - name: 构建 Server
         shell: bash
@@ -92,7 +103,7 @@ jobs:
         if: matrix.archive == 'tar.gz'
         shell: bash
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           NAME="triviumdb-server-v${VERSION}-${{ matrix.target }}"
           mkdir "$NAME"
           cp "target/${{ matrix.target }}/release/triviumdb-server" "$NAME/"
@@ -103,7 +114,7 @@ jobs:
         if: matrix.archive == 'zip'
         shell: pwsh
         run: |
-          $Version = "$env:GITHUB_REF_NAME" -replace '^v', ''
+          $Version = "$env:RELEASE_TAG" -replace '^v', ''
           $Name = "triviumdb-server-v$Version-${{ matrix.target }}"
           New-Item -ItemType Directory -Path $Name | Out-Null
           Copy-Item "target/${{ matrix.target }}/release/triviumdb-server.exe" "$Name/"
@@ -123,7 +134,7 @@ jobs:
 
   release:
     name: Publish Server Release Assets
-    if: github.ref_type == 'tag'
+    if: github.ref_type == 'tag' || inputs.release_tag != ''
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -135,8 +146,9 @@ jobs:
       - name: 发布 GitHub Release 附件
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
           generate_release_notes: true
-          prerelease: ${{ contains(github.ref_name, '-beta.') }}
+          prerelease: ${{ contains(env.RELEASE_TAG, '-beta.') }}
           files: |
             dist/*.tar.gz
             dist/*.tar.gz.sha256
