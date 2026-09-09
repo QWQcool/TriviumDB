@@ -400,15 +400,20 @@ try {
   await page.waitForFunction(() => graphBackend === 'canvas', null, { timeout: 5000 });
   log('  ✓ 图渲染后端切换往返正常');
 
-  // 冒烟 5.5：AI 助手（PR-15）—— 未配置 LLM 时整体隐藏（干净浏览器档案下无配置），
-  // 且命令面板保留设置入口（未配置状态的唯一配置通道）
+  // 冒烟 5.5：AI 助手（PR-15）—— 入口按钮常显（虚线未配置态），未配置点击
+  // 打开抽屉（含未配置横幅）并直达设置模态
+  await page.click('#aiChatToggleBtn');
+  await page.waitForSelector('#aiSettingsOverlay.open', { timeout: 5000 });
+  await page.click('#aiSettingsCloseBtn');
   const aiState = await page.evaluate(() => ({
-    toggleHidden: document.getElementById('aiChatToggleBtn').hidden,
     drawerOpen: document.getElementById('aiChatDrawer').classList.contains('open'),
+    bannerVisible: !document.getElementById('aiNotConfiguredBanner').hidden,
+    unconfigured: document.getElementById('aiChatToggleBtn').classList.contains('ai-toggle-unconfigured'),
   }));
-  if (!aiState.toggleHidden) throw new Error('未配置 LLM 时 AI 助手切换按钮应隐藏');
-  if (aiState.drawerOpen) throw new Error('未配置 LLM 时 AI 抽屉不应打开');
-  log('  ✓ AI 助手未配置时整体隐藏');
+  if (!aiState.drawerOpen) throw new Error('未配置点击入口应打开 AI 抽屉');
+  if (!aiState.bannerVisible) throw new Error('未配置时抽屉内应显示未配置横幅');
+  if (!aiState.unconfigured) throw new Error('未配置态入口按钮应有弱化样式');
+  log('  ✓ AI 助手入口常显：未配置点击直达设置，抽屉内含未配置横幅');
 
   log(`5/6 打开 ${BASE}/ui?selftest=1 断言自检套件`);
   await page.goto(`${BASE}/ui?selftest=1`, { waitUntil: 'domcontentloaded', timeout: 20000 });

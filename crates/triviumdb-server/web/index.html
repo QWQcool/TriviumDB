@@ -769,6 +769,8 @@
       justify-content: space-between;
     }
     .ai-drawer-header strong { font-size: 13px; }
+    /* 未配置态入口：虚线边框弱化显示，点击直达设置（可发现性 > 隐藏语义） */
+    .btn.ai-toggle-unconfigured { border-style: dashed; color: var(--text-muted); }
     .ai-messages {
       flex: 1;
       overflow-y: auto;
@@ -5142,13 +5144,18 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       updateAiVisibility();
     }
 
-    // 未配置 LLM 时整体隐藏：切换按钮隐藏；抽屉若开着则收起；
-    // 抽屉内"未配置"横幅仅在抽屉可见而配置缺失（运行中被清除）时出现
+    // 可见性策略（可发现性优先）：抽屉在未配置 LLM 时保持关闭（整体隐藏语义），
+    // 但 header 入口按钮**常显**——未配置态带未配置样式、点击直接打开设置模态，
+    // 避免唯一入口藏在命令面板里导致用户找不到配置位置（第一版 UX 缺陷）
     function updateAiVisibility() {
       const toggle = document.getElementById('aiChatToggleBtn');
       const drawer = document.getElementById('aiChatDrawer');
       const banner = document.getElementById('aiNotConfiguredBanner');
-      if (toggle) toggle.hidden = !aiConfig;
+      if (toggle) {
+        toggle.hidden = false;
+        toggle.classList.toggle('ai-toggle-unconfigured', !aiConfig);
+        toggle.title = aiConfig ? 'AI 助手 (TQL Copilot)' : '配置 AI 助手（选择提供商并填写 API Key）';
+      }
       if (banner) banner.hidden = !!aiConfig;
       if (!aiConfig) closeAiDrawer();
     }
@@ -5439,6 +5446,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
 
     function setupAiChat() {
       document.getElementById('aiChatToggleBtn').addEventListener('click', () => {
+        // 未配置：点击直达设置模态（入口可发现）；已配置：切换抽屉
+        if (!aiConfig) { openAiDrawer(); openAiSettings(); return; }
         if (isAiDrawerOpen()) closeAiDrawer(); else openAiDrawer();
       });
       document.getElementById('closeAiDrawerBtn').addEventListener('click', closeAiDrawer);
@@ -6813,12 +6822,23 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       });
 
       // ---------- AI 助手（PR-15） ----------
-      addAssert('AI 助手：未配置时整体隐藏 + 命令面板保留设置入口', 'AI 助手', async () => {
-        assert(document.getElementById('aiChatToggleBtn').hidden === true, '未配置时切换按钮应隐藏');
-        assert(!isAiDrawerOpen(), '未配置时抽屉应关闭');
-        // 未配置时的唯一配置通道是命令面板入口
-        const overlay = document.getElementById('paletteOverlay');
-        overlay.classList.remove('open');
+      addAssert('AI 助手：未配置时入口常显，点击开抽屉（横幅）+ 直达设置', 'AI 助手', async () => {
+        // 可发现性修复：入口按钮常显（虚线未配置态），点击打开抽屉（内含未配置
+        // 横幅与建议 chips）并直达设置模态；首屏（未交互）抽屉保持关闭
+        const btn = document.getElementById('aiChatToggleBtn');
+        assert(btn.hidden === false, '入口按钮应常显（不得藏在命令面板里）');
+        assert(btn.classList.contains('ai-toggle-unconfigured'), '未配置态应有弱化样式标记');
+        assert(!isAiDrawerOpen(), '首屏未交互时抽屉应关闭');
+        btn.click();
+        const overlay = document.getElementById('aiSettingsOverlay');
+        assert(overlay.classList.contains('open'), '未配置态点击入口应直达设置模态');
+        assert(isAiDrawerOpen(), '抽屉应随入口打开');
+        assert(!document.getElementById('aiNotConfiguredBanner').hidden, '未配置横幅应在抽屉内可见');
+        document.getElementById('aiSettingsCloseBtn').click();
+        assert(!overlay.classList.contains('open'), '设置模态应可关闭');
+        // 命令面板入口仍然保留
+        const palette = document.getElementById('paletteOverlay');
+        palette.classList.remove('open');
         document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));
         const input = document.getElementById('paletteInput');
         input.value = 'AI 设置';
@@ -6848,7 +6868,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         assert(aiConfig && aiConfig.baseUrl === 'https://mock-llm.test/v1', 'aiConfig 应生效');
         assert(sessionStorage.getItem('tdb_ai_cfg') !== null, '默认应写入 sessionStorage（关标签即清）');
         assert(localStorage.getItem('tdb_ai_cfg_persist') === null, '未勾选持久化时不得写 localStorage');
-        assert(document.getElementById('aiChatToggleBtn').hidden === false, '配置后切换按钮应显示');
+        assert(!document.getElementById('aiChatToggleBtn').classList.contains('ai-toggle-unconfigured'),
+          '配置后入口应脱离未配置弱化态（点击切换抽屉）');
         const cards = document.querySelectorAll('#aiProviderGrid .ai-provider-card').length;
         assert(cards >= 7, '应渲染 >=7 个提供商卡片，实际 ' + cards);
       });
@@ -6956,11 +6977,13 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         assert(document.getElementById('aiChatSendBtn').disabled === false, '发送按钮应恢复');
       });
 
-      addAssert('AI 助手：清除配置后恢复整体隐藏（存储清干净）', 'AI 助手', async () => {
+      addAssert('AI 助手：清除配置后回到未配置态（抽屉收起、入口回弱化态）', 'AI 助手', async () => {
         openAiSettings();
         document.getElementById('aiCfgClearBtn').click();
         assert(aiConfig === null, '配置应清空');
-        assert(document.getElementById('aiChatToggleBtn').hidden === true, '切换按钮应重新隐藏');
+        const btn = document.getElementById('aiChatToggleBtn');
+        assert(btn.hidden === false && btn.classList.contains('ai-toggle-unconfigured'),
+          '入口按钮应保持常显并回到未配置弱化态');
         assert(!isAiDrawerOpen(), '抽屉应收起');
         assert(sessionStorage.getItem('tdb_ai_cfg') === null, 'sessionStorage 配置应清除');
         assert(localStorage.getItem('tdb_ai_cfg_persist') === null, 'localStorage 持久配置应清除');
