@@ -410,6 +410,36 @@ try {
   if (aiState.drawerOpen) throw new Error('未配置 LLM 时 AI 抽屉不应打开');
   log('  ✓ AI 助手未配置时整体隐藏');
 
+  // 冒烟 5.6：探索器内 TQL 弹窗（PR-16）—— 示例填充 → 真实只读查询 → 结果并入图，
+  // 全程停留在独立探索标签（探索流不断线）
+  await page.click('[data-tab="graphExplorePane"]');
+  await page.waitForSelector('#graphExplorePane.active', { timeout: 5000 });
+  // 先清空图：前序规模冒烟已把 700 节点载入图，不清空则 merge 新增恒为 0 无法断言
+  await page.evaluate(() => renderGraph([]));
+  await page.click('#graphTqlBtn');
+  await page.waitForSelector('#graphTqlOverlay.open', { timeout: 5000 });
+  await page.evaluate(() => {
+    const ex = document.getElementById('graphTqlExample');
+    ex.value = 'ex-match';
+    ex.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  const tqlFilled = await page.evaluate(() => document.getElementById('graphTqlInput').value);
+  if (!tqlFilled.startsWith('MATCH')) throw new Error('示例应填充 TQL 编辑区');
+  await page.click('#graphTqlRunBtn');
+  await page.waitForFunction(
+    () => document.getElementById('graphTqlStatus').textContent.includes('新增'),
+    null, { timeout: 15000 }
+  );
+  const tqlMerge = await page.evaluate(() => ({
+    status: document.getElementById('graphTqlStatus').textContent,
+    nodes: graphNodes.length,
+    paneActive: document.getElementById('graphExplorePane').classList.contains('active'),
+  }));
+  if (tqlMerge.nodes === 0) throw new Error('TQL 结果应并入图: ' + tqlMerge.status);
+  if (!tqlMerge.paneActive) throw new Error('运行后应停留在独立探索标签');
+  log(`  ✓ 探索器内 TQL 并入图 (${tqlMerge.status})，探索流未中断`);
+  await page.click('#graphTqlCloseBtn');
+
   log(`5/6 打开 ${BASE}/ui?selftest=1 断言自检套件`);
   await page.goto(`${BASE}/ui?selftest=1`, { waitUntil: 'domcontentloaded', timeout: 20000 });
   await page.waitForFunction(() => window.__TRIVIUM_APP_READY === true, null, { timeout: 10000 });

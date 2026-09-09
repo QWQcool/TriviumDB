@@ -968,6 +968,97 @@
       margin-bottom: 12px;
     }
 
+    /* ==========================================
+       图探索器 v2（PR-16）：过滤器面板 / 探索器 TQL 弹窗 / 社区聚焦图例
+       ========================================== */
+    .graph-filter-panel {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      width: 240px;
+      max-height: calc(100% - 60px);
+      overflow-y: auto;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-md);
+      padding: 10px 12px;
+      z-index: 8;
+      font-size: 12px;
+    }
+    .gf-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .gf-head strong { font-size: 12.5px; }
+    .gf-summary { font-size: 10.5px; color: var(--text-light); margin-bottom: 6px; }
+    .gf-section-title {
+      font-size: 10.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-light);
+      margin: 8px 0 4px;
+    }
+    .gf-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 0;
+      cursor: pointer;
+      color: var(--text-main);
+    }
+    .gf-item input { accent-color: var(--primary); }
+    .gf-count {
+      margin-left: auto;
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      color: var(--text-light);
+    }
+    .gf-empty { color: var(--text-light); font-size: 11px; padding: 2px 0; }
+
+    /* 图例芯片可点击（社区树 ↔ 画布联动：点聚类聚焦） */
+    .legend-chip--clickable {
+      cursor: pointer;
+      font-family: inherit;
+      font-size: inherit;
+      border: 1px solid transparent;
+      background: var(--bg-surface-secondary);
+      border-radius: 9999px;
+    }
+    .legend-chip--clickable:hover { border-color: var(--primary); }
+    .legend-chip--clickable:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+
+    /* 探索器内 TQL 查询弹窗（复用模态遮罩观感） */
+    .graph-tql-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(10, 13, 17, 0.45);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      z-index: 120;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+    .graph-tql-overlay.open { display: flex; }
+    .graph-tql-modal {
+      width: 620px;
+      max-width: 92vw;
+      background: var(--bg-surface);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border-color);
+      box-shadow: var(--shadow-lg);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .graph-tql-modal .gt-body { padding: 14px 18px 18px; display: flex; flex-direction: column; gap: 10px; }
+    .graph-tql-modal textarea.vl-input { font-family: var(--font-mono); font-size: 12px; resize: vertical; }
+    .gt-footer { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+
     /* 轻提示 (Toast) */
     .toast-stack {
       position: fixed;
@@ -1521,8 +1612,18 @@
                   <button class="btn" id="toggleWebGLBtn" title="切换 WebGL/Canvas 渲染后端（加载失败自动回退 Canvas）">WebGL 渲染</button>
                   <button class="btn active" id="colorModeTypeBtn" title="按节点类型着色">按类型</button>
                   <button class="btn" id="colorModeCommunityBtn" title="Louvain 社区检测着色（按需加载）">按社区</button>
+                  <button class="btn" id="graphFilterBtn" title="按节点类型 / 边 label 过滤显示">过滤器</button>
                 </div>
-                <!-- 社区着色图例（按社区模式显示） -->
+                <!-- 过滤器面板（节点 payload.type 聚合 + 边 label） -->
+                <div class="graph-filter-panel" id="graphFilterPanel" hidden>
+                  <div class="gf-head"><strong>过滤器</strong><button class="btn" id="gfResetBtn" style="padding: 1px 8px;">重置</button></div>
+                  <div class="gf-summary" id="gfSummary"></div>
+                  <div class="gf-section-title">节点类型 (payload.type)</div>
+                  <div id="gfTypeList"></div>
+                  <div class="gf-section-title">边 label</div>
+                  <div id="gfLabelList"></div>
+                </div>
+                <!-- 社区着色图例（按社区模式显示；芯片可点击聚焦社区） -->
                 <div class="graph-legend" id="graphLegend" hidden></div>
               </div>
 
@@ -1549,7 +1650,16 @@
                 <section class="inspector-plane">
                   <div class="inspector-plane-title"><span class="inspector-dot" style="background: var(--tri-graph);"></span>Edges</div>
                   <div id="drawerNodeEdges" class="inspector-edges">-</div>
-                  <button class="btn" id="expandNeighborhoodBtn" type="button" title="以当前节点为种子拉取 1 跳邻域并入图探索">⤷ 扩展邻域入图 (+1 跳)</button>
+                  <div style="display: flex; align-items: center; gap: 6px; margin-top: 8px;">
+                    <select id="khopDepthSelect" class="vl-input" style="width: 90px; padding: 4px 6px;" title="邻域扩展跳数" aria-label="邻域扩展跳数">
+                      <option value="1" selected>1 跳</option>
+                      <option value="2">2 跳</option>
+                      <option value="3">3 跳</option>
+                      <option value="4">4 跳</option>
+                    </select>
+                    <button class="btn" id="expandNeighborhoodBtn" type="button" title="以当前节点为种子拉取邻域并入图探索">⤷ 扩展邻域入图</button>
+                  </div>
+                  <div class="ai-ctx-size" id="khopHint"></div>
                 </section>
               </div>
             </div>
@@ -1565,6 +1675,7 @@
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>
               加载全图拓扑 (Top 100 边)
             </button>
+            <button class="btn" id="graphTqlBtn" title="在探索器内运行只读 TQL，结果增量并入当前图（不离开探索流）">TQL 查询入图</button>
             <span style="color: var(--text-muted); font-size: 12px;">提示：可在画布上自由拖拽节点，滚轮缩放，单击节点查看属性</span>
           </div>
         </div>
@@ -1578,6 +1689,16 @@
             <button class="btn" id="toggleWebGLBtnStandalone" title="切换 WebGL/Canvas 渲染后端（加载失败自动回退 Canvas）">WebGL 渲染</button>
             <button class="btn active" id="colorModeTypeBtnStandalone" title="按节点类型着色">按类型</button>
             <button class="btn" id="colorModeCommunityBtnStandalone" title="Louvain 社区检测着色（按需加载）">按社区</button>
+            <button class="btn" id="graphFilterBtnStandalone" title="按节点类型 / 边 label 过滤显示">过滤器</button>
+          </div>
+          <!-- 过滤器面板（独立探索视图） -->
+          <div class="graph-filter-panel" id="graphFilterPanelStandalone" hidden>
+            <div class="gf-head"><strong>过滤器</strong><button class="btn" id="gfResetBtnStandalone" style="padding: 1px 8px;">重置</button></div>
+            <div class="gf-summary" id="gfSummaryStandalone"></div>
+            <div class="gf-section-title">节点类型 (payload.type)</div>
+            <div id="gfTypeListStandalone"></div>
+            <div class="gf-section-title">边 label</div>
+            <div id="gfLabelListStandalone"></div>
           </div>
           <div class="graph-legend" id="graphLegendStandalone" hidden></div>
         </div>
@@ -1772,6 +1893,35 @@
     </div>
   </div>
 
+  <!-- 探索器内 TQL 查询弹窗（PR-16）：只读查询结果经 mergeRowsIntoGraph 增量并入当前图 -->
+  <div class="graph-tql-overlay" id="graphTqlOverlay">
+    <div class="graph-tql-modal" role="dialog" aria-modal="true" aria-label="探索器内 TQL 查询">
+      <div class="ai-settings-header">
+        <strong style="font-size: 14px;">探索器内 TQL 查询（结果并入当前图）</strong>
+        <button class="btn" id="graphTqlCloseBtn" style="padding: 2px 8px;">✕</button>
+      </div>
+      <div class="gt-body">
+        <label class="ai-field" style="margin-bottom: 0;">
+          <span style="display:block; font-size:11.5px; color:var(--text-muted); margin-bottom:4px;">示例（选择即填充）</span>
+          <select id="graphTqlExample" class="vl-input">
+            <option value="">— 选择示例 —</option>
+            <option value="ex-match" data-tql="MATCH (a)-[]->(b) RETURN a, b LIMIT 100">一跳关系（匿名边模式）</option>
+            <option value="ex-find" data-tql='FIND {type: "person"} RETURN * LIMIT 50'>文档过滤</option>
+            <option value="ex-walk" data-tql="MATCH (a)-[:knows*1..3]->(b) RETURN a, b LIMIT 30">多跳可变长路径</option>
+          </select>
+        </label>
+        <textarea id="graphTqlInput" class="vl-input" rows="5" spellcheck="false"
+          placeholder="输入只读 TQL，例如: MATCH (a)-[]->(b) RETURN a, b LIMIT 100"></textarea>
+        <div class="inspector-hint" id="graphTqlError" hidden></div>
+        <div class="ai-ctx-size" id="graphTqlStatus" aria-live="polite"></div>
+        <div class="gt-footer">
+          <span class="ai-ctx-size" style="margin-right:auto;">仅支持只读查询；写入语句请到查询控制台（mutation 尤其）</span>
+          <button class="btn btn-primary" id="graphTqlRunBtn">运行并入图</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script>
     // ==========================================
     // 全局状态与配置
@@ -1839,6 +1989,148 @@
     let isDraggingCanvas = false;
     let dragStart = { x: 0, y: 0 };
     let draggedNode = null;
+
+    // ==========================================
+    // 图过滤器（PR-16）：节点按 payload.type 聚合统计排除 + 边按 label 排除。
+    // 两个图入口共享同一过滤状态；Canvas 后端直接跳过绘制，
+    // Sigma 后端通过 hidden 节点/边属性过滤（WebGL 下护栏语义不变）
+    // ==========================================
+    const graphFilters = { hiddenTypes: new Set(), hiddenLabels: new Set() };
+    const UNKNOWN_TYPE_LABEL = '(unknown)';
+    const INFERRED_EDGE_LABEL = '(推断)';
+
+    function graphTypeAggregation() {
+      const counts = new Map();
+      graphNodes.forEach(n => {
+        const t = n.typeKey || UNKNOWN_TYPE_LABEL;
+        counts.set(t, (counts.get(t) || 0) + 1);
+      });
+      return counts;
+    }
+    function graphLabelAggregation() {
+      const counts = new Map();
+      graphEdges.forEach(e => {
+        const l = e.label || INFERRED_EDGE_LABEL;
+        counts.set(l, (counts.get(l) || 0) + 1);
+      });
+      return counts;
+    }
+    function isNodeVisible(n) {
+      return !graphFilters.hiddenTypes.has(n.typeKey || UNKNOWN_TYPE_LABEL);
+    }
+    function isEdgeVisible(e) {
+      if (graphFilters.hiddenLabels.has(e.label || INFERRED_EDGE_LABEL)) return false;
+      const s = nodeMap.get(e.source);
+      const t = nodeMap.get(e.target);
+      return (!s || isNodeVisible(s)) && (!t || isNodeVisible(t));
+    }
+    function visibleNodeCount() {
+      return graphNodes.filter(isNodeVisible).length;
+    }
+    function visibleEdgeCount() {
+      return graphEdges.filter(isEdgeVisible).length;
+    }
+
+    // 过滤状态变化后统一入口：Canvas 重绘 / Sigma hidden 属性 + 刷新面板
+    function applyGraphFilters() {
+      if (graphBackend === 'sigma') {
+        for (const viewId of ['query', 'standalone']) {
+          const inst = sigmaInstances[viewId];
+          if (!inst || inst.sigma.killed) continue;
+          graphNodes.forEach(n => {
+            if (inst.graph.hasNode(n.id)) inst.graph.setNodeAttribute(n.id, 'hidden', !isNodeVisible(n));
+          });
+          inst.graph.forEachEdge((edge, attrs, source, target) => {
+            inst.graph.setEdgeAttribute(edge, 'hidden',
+              !isEdgeVisible({ source, target, label: attrs.label || '' }));
+          });
+          inst.sigma.refresh();
+        }
+      } else {
+        redrawGraph();
+      }
+      renderGraphFilterPanels();
+    }
+
+    // 过滤器面板渲染（两个视图同步；checkbox 勾选 = 排除该类型/label）
+    function renderGraphFilterPanels() {
+      const typeCounts = graphTypeAggregation();
+      const labelCounts = graphLabelAggregation();
+      [['', 'graphFilterPanel', 'gfTypeList', 'gfLabelList', 'gfSummary', 'gfResetBtn'],
+       ['Standalone', 'graphFilterPanelStandalone', 'gfTypeListStandalone', 'gfLabelListStandalone', 'gfSummaryStandalone', 'gfResetBtnStandalone']]
+        .forEach(([suffix, panelId, typeId, labelId, summaryId]) => {
+          const panel = document.getElementById(panelId);
+          if (!panel || panel.hidden) return;
+          const typeList = document.getElementById(typeId);
+          const labelList = document.getElementById(labelId);
+          const summary = document.getElementById(summaryId);
+          typeList.textContent = '';
+          labelList.textContent = '';
+          if (summary) {
+            summary.textContent = `显示 ${visibleNodeCount()}/${graphNodes.length} 节点 · ${visibleEdgeCount()}/${graphEdges.length} 边`;
+          }
+          if (!typeCounts.size) {
+            const empty = document.createElement('div');
+            empty.className = 'gf-empty';
+            empty.textContent = '图中暂无节点';
+            typeList.appendChild(empty);
+          }
+          Array.from(typeCounts.entries())
+            .sort((a, b) => b[1] - a[1])
+            .forEach(([type, count]) => {
+              typeList.appendChild(buildFilterCheckbox(type, count, graphFilters.hiddenTypes.has(type), (checked) => {
+                if (checked) graphFilters.hiddenTypes.add(type);
+                else graphFilters.hiddenTypes.delete(type);
+                applyGraphFilters();
+              }));
+            });
+          if (!labelCounts.size) {
+            const empty = document.createElement('div');
+            empty.className = 'gf-empty';
+            empty.textContent = '图中暂无边';
+            labelList.appendChild(empty);
+          }
+          Array.from(labelCounts.entries())
+            .sort((a, b) => b[1] - a[1])
+            .forEach(([label, count]) => {
+              labelList.appendChild(buildFilterCheckbox(label, count, graphFilters.hiddenLabels.has(label), (checked) => {
+                if (checked) graphFilters.hiddenLabels.add(label);
+                else graphFilters.hiddenLabels.delete(label);
+                applyGraphFilters();
+              }));
+            });
+        });
+    }
+
+    function buildFilterCheckbox(name, count, checked, onChange) {
+      const item = document.createElement('label');
+      item.className = 'gf-item';
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      // 语义：勾选 = 排除（隐藏）该类型/label；与「显示 X/Y」摘要联动
+      box.checked = checked;
+      box.addEventListener('change', () => onChange(box.checked));
+      const text = document.createElement('span');
+      text.textContent = name;
+      const badge = document.createElement('span');
+      badge.className = 'gf-count';
+      badge.textContent = String(count);
+      item.append(box, text, badge);
+      return item;
+    }
+
+    function toggleGraphFilterPanel(panelId) {
+      const panel = document.getElementById(panelId);
+      if (!panel) return;
+      panel.hidden = !panel.hidden;
+      if (!panel.hidden) renderGraphFilterPanels();
+    }
+
+    function resetGraphFilters() {
+      graphFilters.hiddenTypes.clear();
+      graphFilters.hiddenLabels.clear();
+      applyGraphFilters();
+    }
 
     // ==========================================
     // 教程系统数据 (6 步体系化实战)
@@ -3576,6 +3868,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           else rebuildSigmaInstances();
         }
       }
+      renderGraphFilterPanels();
       return addedNodes;
     }
 
@@ -3692,6 +3985,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         if (graphColorMode === 'community') applyCommunityColors();
         else rebuildSigmaInstances();
       }
+      // 全量重建后过滤面板统计已失效：面板打开时刷新计数（过滤器集合保持）
+      renderGraphFilterPanels();
     }
 
     // 规模护栏分流：>1500 只渲染（物理必关），300<n≤1500 关物理保静态布局，
@@ -3928,18 +4223,36 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         document.getElementById('nodeDrawer').classList.remove('open');
       });
 
-      // k-hop 邻域扩展：以抽屉当前节点为种子拉取 1 跳邻域并入图
+      // k-hop 邻域扩展：以抽屉当前节点为种子按选定跳数拉取邻域并入图。
+      // >1 跳提示请求放大：服务端无批量 k-hop 端点，逐点 N+1 请求
+      //（docs/webui-api-gaps.md Gap 1）
+      const khopSelect = document.getElementById('khopDepthSelect');
+      const khopHint = document.getElementById('khopHint');
+      const updateKhopHint = () => {
+        const depth = Number(khopSelect.value);
+        khopHint.textContent = depth > 1
+          ? `⚠ ${depth} 跳将逐点发起 N+1 轮请求（服务端无批量 k-hop 端点，见 docs/webui-api-gaps.md Gap 1），请求数随跳数与度数放大`
+          : '';
+      };
+      khopSelect.addEventListener('change', updateKhopHint);
       document.getElementById('expandNeighborhoodBtn').addEventListener('click', async (e) => {
         if (currentDrawerNodeId === null) return;
         const btn = e.currentTarget;
         btn.disabled = true;
         try {
-          const added = await expandNeighborhoodIntoGraph(currentDrawerNodeId, 1);
-          showToast(added > 0 ? `已扩展 ${added} 个邻域节点入图` : '邻域节点均已在图中');
+          const depth = Number(khopSelect.value) || 1;
+          const added = await expandNeighborhoodIntoGraph(currentDrawerNodeId, depth);
+          showToast(added > 0 ? `已扩展 ${added} 个 ${depth} 跳内邻域节点入图` : '邻域节点均已在图中');
         } finally {
           btn.disabled = false;
         }
       });
+
+      // 过滤器按钮（两个视图）与重置
+      document.getElementById('graphFilterBtn').addEventListener('click', () => toggleGraphFilterPanel('graphFilterPanel'));
+      document.getElementById('graphFilterBtnStandalone').addEventListener('click', () => toggleGraphFilterPanel('graphFilterPanelStandalone'));
+      document.getElementById('gfResetBtn').addEventListener('click', resetGraphFilters);
+      document.getElementById('gfResetBtnStandalone').addEventListener('click', resetGraphFilters);
     }
 
     function redrawGraph() {
@@ -3978,52 +4291,127 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       return false;
     }
 
+    // ==========================================
+    // 场景绘制（PR-16 视觉三件套）：
+    //   a) 深色"太空底"画布 —— 渐变底 + 确定性星点，独立于应用主题（浅色主题下同理）
+    //   b) 边低透明度 + 曲线 —— 密度即质感；曲率按边序号确定性变化并按距离缩放
+    //   c) 标签 LOD 药丸化 —— 节点数超阈值或缩放较小时，标签切换为深底药丸
+    //      （小图保持现状的纯文字标签）
+    // ==========================================
+    const GRAPH_PILL_NODE_THRESHOLD = 120;  // 节点数超过该值切换 pill 标签模式
+    const GRAPH_PILL_ZOOM_THRESHOLD = 0.55; // 相机缩放低于该倍率切换 pill 标签模式
+    const GRAPH_PILL_MAX_CHARS = 18;        // pill 模式标签截断长度
+
+    // 标签模式判定（纯函数，selftest 可直接验证）
+    function graphLabelMode(nodeCount, k) {
+      return (nodeCount > GRAPH_PILL_NODE_THRESHOLD || k < GRAPH_PILL_ZOOM_THRESHOLD) ? 'pill' : 'normal';
+    }
+
+    function drawSpaceBackground(ctx, canvas) {
+      const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      grad.addColorStop(0, '#0b1120');
+      grad.addColorStop(1, '#0d1526');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      // 星点：黄金比例 / polling 常数散布的确定性伪随机位置（每帧重绘结果一致）
+      ctx.fillStyle = 'rgba(226, 232, 240, 0.26)';
+      for (let i = 0; i < 90; i++) {
+        const x = ((i * 0.61803398875) % 1) * canvas.width;
+        const y = ((i * 0.75487766624) % 1) * canvas.height;
+        const r = i % 6 === 0 ? 1.4 : 0.7;
+        ctx.fillRect(x, y, r, r);
+      }
+    }
+
+    // 圆角药丸（手动路径，兼容无 ctx.roundRect 的引擎）
+    function drawPillRect(ctx, x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.lineTo(x + w - r, y);
+      ctx.arcTo(x + w, y, x + w, y + r, r);
+      ctx.lineTo(x + w, y + h - r);
+      ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+      ctx.lineTo(x + r, y + h);
+      ctx.arcTo(x, y + h, x, y + h - r, r);
+      ctx.lineTo(x, y + r);
+      ctx.arcTo(x, y, x + r, y, r);
+      ctx.closePath();
+    }
+
     // 场景绘制：把当前图数据按相机变换画到一个 canvas 上
     function drawGraphScene(ctx, t, canvas) {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawSpaceBackground(ctx, canvas);
 
       ctx.save();
       ctx.translate(t.x, t.y);
       ctx.scale(t.k, t.k);
 
-      // 绘制连线
-      graphEdges.forEach(edge => {
-        const s = graphNodes.find(n => n.id === edge.source);
-        const t = graphNodes.find(n => n.id === edge.target);
-        if (s && t) {
-          ctx.beginPath();
-          ctx.moveTo(s.x, s.y);
-          ctx.lineTo(t.x, t.y);
-          ctx.strokeStyle = document.documentElement.getAttribute('data-theme') === 'dark' ? '#334155' : '#cbd5e1';
-          ctx.lineWidth = 1.5;
-          ctx.stroke();
+      const labelMode = graphLabelMode(graphNodes.length, t.k);
 
-          // 绘制标签
-          if (edge.label) {
-            const midX = (s.x + t.x) / 2;
-            const midY = (s.y + t.y) / 2;
-            ctx.fillStyle = '#64748b';
-            ctx.font = '10px ' + CANVAS_FONT_FAMILY;
-            ctx.fillText(edge.label, midX, midY - 3);
-          }
+      // 绘制连线（过滤器生效：隐藏类型/label 的元素整体跳过）
+      graphEdges.forEach((edge, idx) => {
+        const s = nodeMap.get(edge.source);
+        const t = nodeMap.get(edge.target);
+        if (!s || !t || !isNodeVisible(s) || !isNodeVisible(t) || !isEdgeVisible(edge)) return;
+        const dx = t.x - s.x;
+        const dy = t.y - s.y;
+        const dist = Math.hypot(dx, dy) || 1;
+        // 曲线：控制点沿法线偏移，方向与幅度按边序号确定性变化
+        const curve = (idx % 2 === 0 ? 1 : -1) * Math.min(dist * 0.12, 40) * (0.5 + (idx % 5) * 0.15);
+        const cx = (s.x + t.x) / 2 - (dy / dist) * curve;
+        const cy = (s.y + t.y) / 2 + (dx / dist) * curve;
+        ctx.beginPath();
+        ctx.moveTo(s.x, s.y);
+        ctx.quadraticCurveTo(cx, cy, t.x, t.y);
+        ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)'; // 低透明度：高密度下不糊成一片
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+
+        if (edge.label) {
+          ctx.fillStyle = 'rgba(148, 163, 184, 0.85)';
+          ctx.font = '10px ' + CANVAS_FONT_FAMILY;
+          ctx.fillText(edge.label, cx, cy - 3);
         }
       });
 
       // 绘制节点
       graphNodes.forEach(node => {
+        if (!isNodeVisible(node)) return;
         ctx.beginPath();
         ctx.arc(node.x, node.y, 16, 0, Math.PI * 2);
         ctx.fillStyle = node.color;
         ctx.fill();
-        ctx.strokeStyle = selectedNode === node ? '#ffffff' : 'rgba(0,0,0,0.15)';
+        ctx.strokeStyle = selectedNode === node ? '#ffffff' : 'rgba(148, 163, 184, 0.45)';
         ctx.lineWidth = selectedNode === node ? 3 : 1;
         ctx.stroke();
+      });
 
-        // 文字
-        ctx.fillStyle = document.documentElement.getAttribute('data-theme') === 'dark' ? '#f1f5f9' : '#1e293b';
-        ctx.font = '11px ' + CANVAS_FONT_FAMILY;
+      // 标签单独一层绘制（pill 模式带底色，避免压在节点圆上）
+      graphNodes.forEach(node => {
+        if (!isNodeVisible(node)) return;
         ctx.textAlign = 'center';
-        ctx.fillText(node.label, node.x, node.y + 28);
+        if (labelMode === 'normal') {
+          ctx.fillStyle = '#e2e8f0';
+          ctx.font = '11px ' + CANVAS_FONT_FAMILY;
+          ctx.fillText(node.label, node.x, node.y + 28);
+        } else {
+          let text = node.label;
+          if (text.length > GRAPH_PILL_MAX_CHARS) text = text.slice(0, GRAPH_PILL_MAX_CHARS) + '…';
+          ctx.font = '10px ' + CANVAS_FONT_FAMILY;
+          const tw = ctx.measureText(text).width;
+          const pw = tw + 12;
+          const ph = 16;
+          const px = node.x - pw / 2;
+          const py = node.y - 30;
+          drawPillRect(ctx, px, py, pw, ph, 8);
+          ctx.fillStyle = 'rgba(10, 15, 30, 0.82)';
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          ctx.fillStyle = '#dbe4f0';
+          ctx.fillText(text, node.x, py + 11.5);
+        }
       });
 
       ctx.restore();
@@ -4132,16 +4520,23 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       const dark = document.documentElement.getAttribute('data-theme') === 'dark';
       graphNodes.forEach(n => {
         const p = mapFn(n);
-        graph.addNode(n.id, { x: p.x, y: p.y, size: 7, label: n.label, color: n.color });
+        // 过滤器：hidden 属性由 Sigma 原生支持（WebGL 下护栏/过滤语义一致）
+        graph.addNode(n.id, { x: p.x, y: p.y, size: 7, label: n.label, color: n.color, hidden: !isNodeVisible(n) });
       });
       graphEdges.forEach(e => {
         if (graph.hasNode(e.source) && graph.hasNode(e.target) && !graph.hasEdge(e.source, e.target)) {
-          graph.addEdge(e.source, e.target, { size: 1, color: dark ? '#334155' : '#cbd5e1' });
+          // 边低透明度（#rrggbbaa 8 位 hex，alpha≈0.35）：与 Canvas 后端视觉一致
+          graph.addEdge(e.source, e.target, {
+            size: 1,
+            color: '#94a3b859',
+            label: e.label || '',
+            hidden: !isEdgeVisible(e)
+          });
         }
       });
       const sigma = new sigmaLibs.Sigma(graph, container, {
         allowInvalidContainer: true,
-        defaultEdgeColor: dark ? '#334155' : '#cbd5e1',
+        defaultEdgeColor: '#94a3b859',
         labelColor: { color: dark ? '#f1f5f9' : '#1e293b' },
         labelDensity: 1.2,
         minCameraRatio: 0.05,
@@ -4313,7 +4708,9 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       return true;
     }
 
-    // 图例：仅社区模式显示（社区 N + 节点数），两个视图同步
+    // 图例：仅社区模式显示（社区 N + 节点数），两个视图同步。
+    // 芯片可点击（PR-16 社区树↔画布联动）：点击聚焦该社区（Canvas 平移相机 /
+    // Sigma 相机动画至社区包围盒）
     function updateGraphLegend(communityKeys) {
       ['graphLegend', 'graphLegendStandalone'].forEach(legendId => {
         const legend = document.getElementById(legendId);
@@ -4327,8 +4724,10 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         communityKeys.forEach((key, i) => {
           let count = 0;
           nodeCommunities.forEach(k => { if (k === key) count++; });
-          const chip = document.createElement('span');
-          chip.className = 'legend-chip';
+          const chip = document.createElement('button');
+          chip.type = 'button';
+          chip.className = 'legend-chip legend-chip--clickable';
+          chip.title = `聚焦社区 ${i + 1}（${count} 节点）`;
           const swatch = document.createElement('i');
           swatch.className = 'legend-swatch';
           swatch.style.background = COMMUNITY_PALETTE[i % COMMUNITY_PALETTE.length];
@@ -4336,9 +4735,53 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           const text = document.createElement('span');
           text.textContent = `社区 ${i + 1} (${count})`;
           chip.appendChild(text);
+          chip.addEventListener('click', () => focusCommunityView(legendId, key));
           legend.appendChild(chip);
         });
       });
+    }
+
+    // 社区聚焦：把视图相机对准该社区的包围盒/质心（社区树 ↔ 画布联动）
+    function focusCommunityView(legendId, communityKey) {
+      const viewId = legendId === 'graphLegend' ? 'query' : 'standalone';
+      const members = [];
+      nodeCommunities.forEach((k, id) => {
+        if (k !== communityKey) return;
+        const node = nodeMap.get(id);
+        if (node && isNodeVisible(node)) members.push(node);
+      });
+      if (!members.length) return;
+      if (graphBackend === 'sigma') {
+        const inst = sigmaInstances[viewId];
+        if (!inst || inst.sigma.killed) return;
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        members.forEach(n => {
+          const p = inst.mapFn(n);
+          if (p.x < minX) minX = p.x;
+          if (p.x > maxX) maxX = p.x;
+          if (p.y < minY) minY = p.y;
+          if (p.y > maxY) maxY = p.y;
+        });
+        const ratio = Math.max(maxX - minX, maxY - minY, 0.05) * 1.6;
+        inst.sigma.getCamera().animate(
+          { x: (minX + maxX) / 2, y: (minY + maxY) / 2, ratio: Math.max(ratio, 0.05) },
+          { duration: 220 }
+        );
+        return;
+      }
+      // Canvas 后端：按成员质心平移对应视图相机
+      const cx = members.reduce((sum, n) => sum + n.x, 0) / members.length;
+      const cy = members.reduce((sum, n) => sum + n.y, 0) / members.length;
+      if (viewId === 'query') {
+        const canvas = document.getElementById('graphCanvas');
+        transform.x = canvas.width / 2 - cx * transform.k;
+        transform.y = canvas.height / 2 - cy * transform.k;
+      } else {
+        const canvas = document.getElementById('standaloneGraphCanvas');
+        standaloneTransform.x = canvas.width / 2 - cx * standaloneTransform.k;
+        standaloneTransform.y = canvas.height / 2 - cy * standaloneTransform.k;
+      }
+      redrawGraph();
     }
 
     function refreshGraphColors() {
@@ -4432,6 +4875,83 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       if (window.ResizeObserver) {
         const saRo = new ResizeObserver(() => redrawGraph());
         saRo.observe(saCanvas.parentElement);
+      }
+
+      // 探索器内 TQL 查询弹窗（PR-16）：示例下拉 + 运行并入图，探索流不断线
+      const tqlOverlay = document.getElementById('graphTqlOverlay');
+      document.getElementById('graphTqlBtn').addEventListener('click', () => {
+        tqlOverlay.classList.add('open');
+        setGraphTqlError(null);
+      });
+      document.getElementById('graphTqlCloseBtn').addEventListener('click', () => {
+        tqlOverlay.classList.remove('open');
+      });
+      tqlOverlay.addEventListener('click', (e) => {
+        if (e.target === tqlOverlay) tqlOverlay.classList.remove('open');
+      });
+      document.getElementById('graphTqlExample').addEventListener('change', (e) => {
+        const opt = e.target.selectedOptions[0];
+        const tql = opt && opt.dataset.tql;
+        if (tql) document.getElementById('graphTqlInput').value = tql;
+      });
+      document.getElementById('graphTqlRunBtn').addEventListener('click', runGraphTqlQuery);
+    }
+
+    // ==========================================
+    // 探索器内 TQL 查询（PR-16）：只读 TQL → mergeRowsIntoGraph 增量并入当前图。
+    // 请求序号守卫防连点双流；mutation 语句直接拒绝（写入须到查询控制台人工确认）
+    // ==========================================
+    let __graphTqlSeq = 0;
+
+    function setGraphTqlError(message) {
+      const el = document.getElementById('graphTqlError');
+      if (!message) { el.hidden = true; el.textContent = ''; return; }
+      el.hidden = false;
+      el.textContent = message;
+    }
+
+    async function runGraphTqlQuery() {
+      const query = document.getElementById('graphTqlInput').value.trim();
+      if (!query) { setGraphTqlError('请输入 TQL 语句'); return; }
+      if (inferMutationFromQuery(query)) {
+        setGraphTqlError('探索器内仅支持只读查询：检测到 CREATE / LINK / DELETE 写入语句，请到查询控制台手动确认执行');
+        return;
+      }
+      const seq = ++__graphTqlSeq;
+      const runBtn = document.getElementById('graphTqlRunBtn');
+      const status = document.getElementById('graphTqlStatus');
+      runBtn.disabled = true;
+      runBtn.textContent = '运行中…';
+      setGraphTqlError(null);
+      try {
+        const res = await fetch(`${API_BASE}/v1/tql`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query, mutation: false })
+        });
+        if (seq !== __graphTqlSeq) return;
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ title: '请求失败', detail: res.statusText }));
+          if (seq !== __graphTqlSeq) return;
+          setGraphTqlError(`${err.title || '查询失败'} — ${err.detail || ''}`);
+          return;
+        }
+        const data = await res.json();
+        if (seq !== __graphTqlSeq) return;
+        const rows = data.rows || [];
+        const added = mergeRowsIntoGraph(rows);
+        status.textContent = `结果 ${rows.length} 行 · 新增 ${added} 节点 · 图内现共 ${graphNodes.length} 节点`;
+        showToast(added > 0
+          ? `已并入 ${added} 个新节点（图内现共 ${graphNodes.length} 个）`
+          : '结果节点均已在图中');
+      } catch (err) {
+        if (seq !== __graphTqlSeq) return;
+        setGraphTqlError('网络请求失败: ' + err.message);
+      } finally {
+        if (seq === __graphTqlSeq) {
+          runBtn.disabled = false;
+          runBtn.textContent = '运行并入图';
+        }
       }
     }
 
@@ -5745,6 +6265,10 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
             // 98 的出边指向图外节点 97（depth=1 不会拉取）——悬挂边回归 fixture
             return jsonRes({ node: { type: 'node', id: '98', payload: { name: 'KHop2', type: 'person' }, vector: [] }, edgeVersions: [{ targetId: '97', label: 'KNOWS', version: 1 }] });
           }
+          if (id === '97') {
+            // 2 跳节点（k-hop 深度选择器 fixture）：无出边
+            return jsonRes({ node: { type: 'node', id: '97', payload: { name: 'KHop3', type: 'person' }, vector: [] }, edgeVersions: [] });
+          }
           const node = id === '1' ? NODE_ALICE : (id === '2' ? NODE_BOB : NODE_PAPER);
           return jsonRes({ node, edgeVersions: id === '1' ? [{ targetId: '2', label: 'KNOWS', version: 1 }] : [] });
         }
@@ -6964,6 +7488,128 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         assert(!isAiDrawerOpen(), '抽屉应收起');
         assert(sessionStorage.getItem('tdb_ai_cfg') === null, 'sessionStorage 配置应清除');
         assert(localStorage.getItem('tdb_ai_cfg_persist') === null, 'localStorage 持久配置应清除');
+      });
+
+      // ---------- 图探索器 v2（PR-16） ----------
+      addAssert('图 v2：过滤器聚合统计与节点类型排除（Canvas）', '图探索器 v2', async () => {
+        renderGraph(FIND_ROWS);
+        assert(graphNodes.length === 3, '前置：3 节点入图');
+        toggleGraphFilterPanel('graphFilterPanel');
+        assert(!document.getElementById('graphFilterPanel').hidden, '面板应打开');
+        assert(document.getElementById('gfSummary').textContent.indexOf('3/3 节点') !== -1, '摘要应显示 3/3 节点');
+        const typeItems = Array.from(document.querySelectorAll('#gfTypeList .gf-item'));
+        const personItem = typeItems.find(el => el.textContent.indexOf('person') !== -1);
+        assert(personItem, '应聚合出 person 类型条目');
+        assert(personItem.querySelector('.gf-count').textContent === '2', 'person 计数应为 2（Alice+Bob）');
+        // 勾选 = 排除：隐藏 person 后仅剩 paper
+        const box = personItem.querySelector('input');
+        box.checked = true;
+        box.dispatchEvent(new Event('change'));
+        assert(visibleNodeCount() === 1, '排除 person 后可见 1 节点');
+        assert(document.getElementById('gfSummary').textContent.indexOf('1/3 节点') !== -1, '摘要应更新为 1/3');
+        document.getElementById('gfResetBtn').click();
+        assert(visibleNodeCount() === 3, '重置后应恢复 3 节点可见');
+        document.getElementById('graphFilterPanel').hidden = true;
+      });
+
+      addAssert('图 v2：边 label 过滤（含行内推断边计数）', '图探索器 v2', async () => {
+        renderGraph([{ a: NODE_ALICE, b: NODE_BOB }]);
+        mergeRowsIntoGraph([{ link: { source: '2', target: '3', label: 'KNOWS' } }]);
+        const agg = graphLabelAggregation();
+        assert((agg.get('KNOWS') || 0) === 1, 'KNOWS 应计数 1');
+        assert((agg.get(INFERRED_EDGE_LABEL) || 0) === 1, '行内推断边应计入 (推断)');
+        assert(visibleEdgeCount() === 2, '前置：2 边可见');
+        graphFilters.hiddenLabels.add('KNOWS');
+        assert(visibleEdgeCount() === 1, '隐藏 KNOWS 后应剩 1 边（推断边）');
+        graphFilters.hiddenLabels.clear();
+        assert(visibleEdgeCount() === 2, '清除后恢复 2 边');
+        renderGraph([]);
+      });
+
+      addAssert('图 v2：探索器内 TQL 运行并入图（不离开探索标签）', '图探索器 v2', async () => {
+        document.querySelector('[data-tab="graphExplorePane"]').click();
+        assert(document.getElementById('graphExplorePane').classList.contains('active'), '前置：探索标签激活');
+        renderGraph([]);
+        document.getElementById('graphTqlBtn').click();
+        const overlay = document.getElementById('graphTqlOverlay');
+        assert(overlay.classList.contains('open'), '弹窗应打开');
+        const ex = document.getElementById('graphTqlExample');
+        ex.value = 'ex-match';
+        ex.dispatchEvent(new Event('change', { bubbles: true }));
+        assert(document.getElementById('graphTqlInput').value.indexOf('MATCH') === 0, '示例应填充编辑区');
+        // 写入语句拒绝（mutation 必须到查询控制台）
+        document.getElementById('graphTqlInput').value = 'CREATE ({name: "x"})';
+        document.getElementById('graphTqlRunBtn').click();
+        assert(!document.getElementById('graphTqlError').hidden, '写入语句应被拒绝并提示');
+        // 只读运行：结果并入图
+        document.getElementById('graphTqlInput').value = 'MATCH (a)-[]->(b) RETURN a, b LIMIT 10';
+        document.getElementById('graphTqlRunBtn').click();
+        await waitFor(() => graphNodes.length >= 2
+          && document.getElementById('graphTqlStatus').textContent.indexOf('新增') !== -1,
+          3000, '结果应增量并入图');
+        assert(document.getElementById('graphExplorePane').classList.contains('active'), '运行后仍在探索标签（探索流不断线）');
+        document.getElementById('graphTqlCloseBtn').click();
+        document.querySelector('[data-tab="queryPane"]').click();
+      });
+
+      addAssert('图 v2：k-hop 深度选择器（默认 1 跳、请求放大提示、深层拉取）', '图探索器 v2', async () => {
+        const sel = document.getElementById('khopDepthSelect');
+        assert(sel.value === '1', '默认应为 1 跳');
+        assert(document.getElementById('khopHint').textContent === '', '1 跳不应显示放大提示');
+        renderGraph([]);
+        mergeRowsIntoGraph([{ node: { type: 'node', id: '99', payload: { name: 'KSeed', type: 'person' }, vector: [] } }]);
+        openNodeDrawer({ id: '99', label: 'KSeed', payload: { name: 'KSeed' }, vector: [] });
+        // 深度 1：2 跳节点 97 不得入库
+        document.getElementById('expandNeighborhoodBtn').click();
+        await waitFor(() => nodeMap.has('98'), 3000, '1 跳邻居应入图');
+        assert(!nodeMap.has('97'), '深度 1 不得拉取 2 跳外节点');
+        // 深度 3：提示出现 + 97 经 98 拉取入库
+        sel.value = '3';
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+        assert(document.getElementById('khopHint').textContent.indexOf('Gap 1') !== -1,
+          '>1 跳应显示 N+1 请求放大提示（docs/webui-api-gaps.md Gap 1）');
+        document.getElementById('expandNeighborhoodBtn').click();
+        await waitFor(() => nodeMap.has('97'), 3000, '深度 3 应拉取到 2 跳节点 97');
+        sel.value = '1';
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+        assert(document.getElementById('khopHint').textContent === '', '回到 1 跳提示应清空');
+      });
+
+      addAssert('图 v2：标签 LOD 模式判定纯函数 + pill 路径重绘不崩', '图探索器 v2', async () => {
+        assert(graphLabelMode(100, 1) === 'normal', '小图正常缩放应保持纯文字标签');
+        assert(graphLabelMode(121, 1) === 'pill', '节点超阈值应切换 pill 模式');
+        assert(graphLabelMode(10, 0.3) === 'pill', '缩放低于阈值应切换 pill 模式');
+        assert(typeof drawSpaceBackground === 'function', '太空底绘制入口应存在');
+        // 130 节点触发 pill 模式走一遍真实绘制路径
+        const rows = Array.from({ length: 130 }, (_, i) => (
+          { node: { type: 'node', id: String(5000 + i), payload: { name: 'P' + i, type: 'person' }, vector: [] } }
+        ));
+        renderGraph(rows);
+        document.querySelector('[data-view="graph"]').click();
+        redrawGraph();
+        assert(graphLabelMode(graphNodes.length, transform.k) === 'pill', '130 节点应处于 pill 模式');
+        document.querySelector('[data-view="grid"]').click();
+        renderGraph(FIND_ROWS); // 还原标准 fixture
+      });
+
+      addAssert('图 v2：社区图例芯片可点击聚焦（Canvas 相机联动）', '图探索器 v2', async () => {
+        renderGraph([{ a: NODE_ALICE, b: NODE_BOB }]);
+        const prevMode = graphColorMode;
+        const prevCommunities = nodeCommunities;
+        graphColorMode = 'community';
+        nodeCommunities = new Map([['1', 'c1'], ['2', 'c2']]);
+        updateGraphLegend(['c1', 'c2']);
+        const legend = document.getElementById('graphLegend');
+        assert(!legend.hidden, '社区图例应显示');
+        const chip = legend.querySelector('.legend-chip--clickable');
+        assert(chip && chip.tagName === 'BUTTON', '图例芯片应为可点击 button');
+        const before = { x: transform.x, y: transform.y };
+        chip.click();
+        assert(transform.x !== before.x || transform.y !== before.y, '点击芯片应平移相机聚焦该社区质心');
+        // 还原现场
+        graphColorMode = prevMode;
+        nodeCommunities = prevCommunities;
+        updateGraphLegend();
       });
 
       // ---------- 执行器（支持运行中动态追加的断言） ----------
