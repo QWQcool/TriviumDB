@@ -4373,11 +4373,12 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       if (!area || !pre) return;
       // 尾部补换行：保证 pre 与 textarea 的滚动高度一致（textarea 末行下方有缓冲）
       pre.innerHTML = highlightTql(area.value) + '\n';
-      // 垂直滚动条宽度补偿：textarea 出现纵向滚动条时内容宽度收窄、换行点前移，
-      // 叠加层需同步加宽右内边距，否则超长单行查询下两侧 scrollWidth 不等
-      // （实测 5200 字符单行差 ~10px）。无滚动条时 sb=0，保持与原对齐行为一致
+      // 垂直滚动条宽度补偿：textarea 出现纵向滚动条时 clientWidth 收窄 10px，
+      // 而叠加层（overflow:hidden 无滚动条）保持全宽 —— 两侧 scrollWidth 永远差一个
+      // 滚动条宽。通过收窄叠加层盒宽（right = 滚动条宽）使两侧 clientWidth/scrollWidth
+      // 严格相等（内边距补偿无效：padding 不改变 clientWidth，scrollWidth 以其兜底）
       const sb = Math.max(area.offsetWidth - area.clientWidth, 0);
-      pre.style.paddingRight = (64 + sb) + 'px';
+      pre.style.right = sb + 'px';
       pre.scrollTop = area.scrollTop;
       pre.scrollLeft = area.scrollLeft;
     }
