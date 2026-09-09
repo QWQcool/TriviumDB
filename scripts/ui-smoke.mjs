@@ -400,6 +400,16 @@ try {
   await page.waitForFunction(() => graphBackend === 'canvas', null, { timeout: 5000 });
   log('  ✓ 图渲染后端切换往返正常');
 
+  // 冒烟 5.5：AI 助手（PR-15）—— 未配置 LLM 时整体隐藏（干净浏览器档案下无配置），
+  // 且命令面板保留设置入口（未配置状态的唯一配置通道）
+  const aiState = await page.evaluate(() => ({
+    toggleHidden: document.getElementById('aiChatToggleBtn').hidden,
+    drawerOpen: document.getElementById('aiChatDrawer').classList.contains('open'),
+  }));
+  if (!aiState.toggleHidden) throw new Error('未配置 LLM 时 AI 助手切换按钮应隐藏');
+  if (aiState.drawerOpen) throw new Error('未配置 LLM 时 AI 抽屉不应打开');
+  log('  ✓ AI 助手未配置时整体隐藏');
+
   log(`5/6 打开 ${BASE}/ui?selftest=1 断言自检套件`);
   await page.goto(`${BASE}/ui?selftest=1`, { waitUntil: 'domcontentloaded', timeout: 20000 });
   await page.waitForFunction(() => window.__TRIVIUM_APP_READY === true, null, { timeout: 10000 });
