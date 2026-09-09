@@ -5,6 +5,15 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: '要恢复发布的现有 beta/stable Tag'
+        required: true
+        type: string
+
+env:
+  RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
 
 jobs:
   # ═══════════════════════════════════════════════════════════
@@ -22,12 +31,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: 提取并校验版本号
         id: extract
         shell: bash
         run: |
-          TAG="$GITHUB_REF_NAME"
+          TAG="$RELEASE_TAG"
           if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$ ]]; then
             echo "只允许 beta（vX.Y.Z-beta.N）或 stable（vX.Y.Z）Tag 进入三端发布"
             exit 1
@@ -46,7 +56,7 @@ jobs:
         run: |
           if [[ "${{ steps.extract.outputs.channel }}" == "stable" ]]; then
             git fetch origin master
-            if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/master"; then
+            if ! git merge-base --is-ancestor "$(git rev-parse HEAD)" "origin/master"; then
               echo "stable Tag 必须指向 master 历史中的提交"
               exit 1
             fi
@@ -87,6 +97,8 @@ jobs:
     if: needs.version-gate.outputs.pypi_should_publish == 'true' || needs.version-gate.outputs.npm_should_publish == 'true'
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -153,6 +165,8 @@ jobs:
             sdist: false
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Setup Python 3.10
         uses: actions/setup-python@v5
@@ -228,6 +242,8 @@ jobs:
             target: aarch64-apple-darwin
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -242,7 +258,9 @@ jobs:
       - name: Install cross-compiler (Linux ARM64)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
-          sudo apt-get update
+          sudo apt-get update \
+            -o Dir::Etc::sourcelist="sources.list.d/ubuntu.sources" \
+            -o Dir::Etc::sourceparts="-"
           sudo apt-get install -y gcc-aarch64-linux-gnu
 
       - name: Install dependencies
@@ -270,6 +288,8 @@ jobs:
     if: needs.version-gate.outputs.npm_should_publish == 'true'
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
