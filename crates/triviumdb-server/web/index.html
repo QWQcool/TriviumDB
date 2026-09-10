@@ -2497,7 +2497,7 @@
     }
 
     // ==========================================
-    // 教程系统数据 (6 步体系化实战)
+    // 教程系统数据 (8 步体系化实战)
     // ==========================================
     const TUTORIAL_STEPS = [
       {
@@ -2577,6 +2577,27 @@ RETURN doc, t
 CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         </div>
         <button class="btn btn-success" onclick="runTutorialCode('CREATE ({name: &quot;Bob&quot;, type: &quot;person&quot;, citations: 120, department: &quot;AI Lab&quot;})', true)">⚡ 体验一次安全的原子写入</button>`
+      },
+      {
+        id: "step7",
+        title: "7. AI 助手与统一面板",
+        badge: "AI 协作",
+        desc: `<h3>🤖 AI 助手与右侧统一面板</h3>
+        <p style="margin: 8px 0;">点击<strong>右上角 AI 助手入口</strong>即可唤出 AI 对话：未配置 LLM 时入口呈虚线态，点击直达设置页填入 OpenAI 兼容端点；配置后 AI 会结合你的库结构与当前选中节点给出 TQL 建议。</p>
+        <p style="margin: 8px 0;">AI 的<strong>建议卡片</strong>只把查询<strong>填入编辑器、不会自动执行</strong>——先审阅再运行；写入类语句务必勾选「变异」并确认。</p>
+        <p style="margin: 8px 0;">图视图右侧是<strong>统一面板</strong>，三个 tab 分别为：<strong>AI 对话</strong>、<strong>节点详情</strong>（Trinity 三平面 Payload / Vector / Edges，底部有关联节点的<strong>迷你图</strong>，点迷你图节点即可跳转）与<strong>过滤器</strong>（按类型 / 标签收敛画布节点）。</p>
+        <button class="btn btn-primary" onclick="runTutorialCode('MATCH (a)-[]-&gt;(b) RETURN a, b LIMIT 10', false, 'graph')">▶ 运行查询并打开图拓扑</button>
+        <p style="margin: 6px 0 0; color: var(--text-light); font-size: 12px;">图渲染后点击任意节点打开详情抽屉，试试关联迷你图。</p>`
+      },
+      {
+        id: "step8",
+        title: "8. 图探索器 v2 与星云模式",
+        badge: "图探索 v2",
+        desc: `<h3>🌌 图探索器 v2 与万级星云</h3>
+        <p style="margin: 8px 0;">独立图探索器提供<strong>布局四档</strong>：力导向 / 聚类（Louvain 社区）/ 向量星图（PCA 或检索聚焦）/ 度数径向；配合<strong>浮动工具条</strong>（缩放、适合窗口、全屏）与全局节点搜索快速定位，切换布局后相机会自动适配视野。</p>
+        <p style="margin: 8px 0;"><strong>过滤器面板</strong>按类型与标签收敛画布；<strong>命名空间树</strong>自动探测 payload 键的分隔符（/ . : 等），把节点组织成可点击跳转的层级树。</p>
+        <p style="margin: 8px 0;"><strong>星云模式</strong>：单条 MATCH 拉取最多 10000 节点，以 Sigma WebGL 静态星图渲染（物理关闭、确定性布局）；退出时自动恢复进入前的图状态快照。向量星图在有向量数据时以最近查询向量为焦点呈现相似度分层（越相似越靠内），无向量数据时退化为 PCA 投影 / 外环散布。</p>
+        <button class="btn btn-primary" onclick="document.querySelector('[data-tab=&quot;graphExplorePane&quot;]').click()">▶ 切换到独立图探索器</button>`
       }
     ];
 
@@ -4091,6 +4112,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           renderVectorSearchError(err);
           return;
         }
+        // 检索聚焦布局枢轴（优先级①）：记录本次成功检索使用的查询向量（slice 断开候选节点向量引用）
+        lastQueryVector = vector.slice();
         renderVectorResults(await res.json(), topK);
       } catch (err) {
         renderVectorSearchError({ title: '网络请求失败', detail: err.message });
@@ -4712,6 +4735,61 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       return positions;
     }
 
+    // ==========================================
+    // PR-20 检索聚焦布局（向量星图增强，纯客户端）：
+    // 枢轴优先级 ① 最近一次向量检索的查询向量 ② 当前抽屉节点向量（维度≥2） ③ null = 纯 PCA（现状）
+    // ==========================================
+    let lastQueryVector = null; // 最近一次向量检索成功使用的查询向量（runVectorSearch 成功路径写入）
+
+    // 解析枢轴来源（vectorLayoutPivot 的带来源版本，供 toast 提示焦点出处）
+    function vectorPivotInfo() {
+      if (Array.isArray(lastQueryVector) && lastQueryVector.length >= 2) {
+        return { vector: lastQueryVector, source: 'query' };
+      }
+      const node = currentDrawerNodeId != null ? nodeMap.get(currentDrawerNodeId) : null;
+      if (node && Array.isArray(node.vector) && node.vector.length >= 2) {
+        return { vector: node.vector, source: 'node', nodeId: node.id };
+      }
+      return null;
+    }
+
+    // 返回枢轴向量（无枢轴返回 null，调用方回落 pca2d）
+    function vectorLayoutPivot() {
+      const info = vectorPivotInfo();
+      return info ? info.vector : null;
+    }
+
+    // 检索聚焦布局：每节点与 pivot 求余弦相似度 s，
+    // r = 120 + (1 - (s+1)/2) * 340（相似度越高越靠内），角度 = 索引 × 黄金角 → 完全确定性。
+    // 维度不齐 / 零向量节点进 outliers（同 pca2d 惯例）；pivot 为零向量时余弦除零防护返回 0；
+    // pivot 向量本身不作为节点参与布局外推。
+    function computeVectorFocusLayout(nodes, pivot) {
+      const positions = new Map();
+      const outliers = new Set();
+      if (!Array.isArray(pivot) || pivot.length < 2) return { positions, outliers };
+      let pNorm2 = 0;
+      for (let d = 0; d < pivot.length; d++) pNorm2 += pivot[d] * pivot[d];
+      const pNorm = Math.sqrt(pNorm2);
+      nodes.forEach((node, i) => {
+        const vec = node.vector;
+        if (!Array.isArray(vec) || vec.length !== pivot.length) { outliers.add(node.id); return; }
+        let dot = 0;
+        let n2 = 0;
+        let isZero = true;
+        for (let d = 0; d < vec.length; d++) {
+          dot += vec[d] * pivot[d];
+          n2 += vec[d] * vec[d];
+          if (vec[d] !== 0) isZero = false;
+        }
+        if (isZero) { outliers.add(node.id); return; } // 零向量节点同 pca2d 惯例进 outliers
+        const s = (n2 === 0 || pNorm === 0) ? 0 : dot / (Math.sqrt(n2) * pNorm);
+        const r = 120 + (1 - (s + 1) / 2) * 340;
+        const ang = i * GOLDEN_ANGLE;
+        positions.set(node.id, { x: Math.cos(ang) * r, y: Math.sin(ang) * r, sim: s });
+      });
+      return { positions, outliers };
+    }
+
     // ---------- 命名空间树纯函数 ----------
     // 分隔符自动探测：在候选分隔符中取总命中最多者（并列取靠前者），无命中返回 null（不切分）
     function detectNamespaceSeparator(values) {
@@ -5035,39 +5113,58 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       redrawGraph();
     }
 
-    function fitGraphView(viewId) {
+    // 单视图 fit（PR-20 增强）：animate=false 或 prefers-reduced-motion 时 Sigma 直接 setState
+    // 跳过动画；隐藏视图（clientWidth=0）不做伪 fit，避免污染 transform
+    function fitGraphView(viewId, animate = true) {
       const nodes = graphNodes.filter(isNodeVisible);
       if (graphBackend === 'sigma') {
         const inst = sigmaInstances[viewId];
-        if (inst && !inst.sigma.killed) {
+        // getCamera 存在性守卫：selftest 的 FakeSigma 无相机，静默走 Canvas 兜底路径
+        if (inst && !inst.sigma.killed && typeof inst.sigma.getCamera === 'function') {
           const cam = inst.sigma.getCamera();
+          const duration = animate && !prefersReducedMotion() ? 220 : 0;
+          let target;
           if (!nodes.length) {
-            cam.animate({ x: 0.5, y: 0.5, ratio: 1 }, { duration: 180 });
-            return;
+            target = { x: 0.5, y: 0.5, ratio: 1 };
+          } else {
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            nodes.forEach(n => {
+              const p = inst.mapFn(n);
+              if (p.x < minX) minX = p.x;
+              if (p.x > maxX) maxX = p.x;
+              if (p.y < minY) minY = p.y;
+              if (p.y > maxY) maxY = p.y;
+            });
+            target = {
+              x: (minX + maxX) / 2,
+              y: (minY + maxY) / 2,
+              ratio: Math.max(Math.max(maxX - minX, maxY - minY, 0.05) * 1.35, 0.05)
+            };
           }
-          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-          nodes.forEach(n => {
-            const p = inst.mapFn(n);
-            if (p.x < minX) minX = p.x;
-            if (p.x > maxX) maxX = p.x;
-            if (p.y < minY) minY = p.y;
-            if (p.y > maxY) maxY = p.y;
-          });
-          cam.animate({
-            x: (minX + maxX) / 2,
-            y: (minY + maxY) / 2,
-            ratio: Math.max(Math.max(maxX - minX, maxY - minY, 0.05) * 1.35, 0.05)
-          }, { duration: 220 });
+          if (duration > 0) cam.animate(target, { duration });
+          else {
+            const prev = cam.getState ? cam.getState() : { x: 0.5, y: 0.5, angle: 0, ratio: 1 };
+            cam.setState({ x: target.x, y: target.y, angle: prev.angle, ratio: target.ratio });
+          }
           return;
         }
       }
       const canvas = document.getElementById(viewId === 'query' ? 'graphCanvas' : 'standaloneGraphCanvas');
-      if (!canvas) return;
+      if (!canvas || canvas.clientWidth === 0) return; // 隐藏视图不做伪 fit
       syncCanvasSize(canvas);
       const fit = fitTransformToBBox(computeGraphBBox(nodes), canvas.width, canvas.height, 80);
       const t = viewId === 'query' ? transform : standaloneTransform;
       t.x = fit.x; t.y = fit.y; t.k = fit.k;
       redrawGraph();
+    }
+
+    // 相机自动适配（PR-20）：两个图视图分别 fit 当前可见节点包围盒，修复「切布局后节点出视口」。
+    // 调用点：applyStaticGraphLayout 末尾（覆盖布局四档切换、星云进入与 Louvain 升级）、
+    // exitNebulaMode 快照恢复后；force 档由物理自组织，不自动 fit。
+    function fitAllGraphViews(animate) {
+      if (!graphNodes.some(isNodeVisible)) return; // 空图守卫：无可见节点直接返回
+      fitGraphView('query', animate);
+      fitGraphView('standalone', animate);
     }
 
     function toggleGraphFullscreen(containerId) {
@@ -5140,12 +5237,15 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       if (graphLayoutMode === 'cluster') {
         positions = computeClusterLayout(graphNodes, graphEdges, nodeCommunities.size ? nodeCommunities : null);
       } else if (graphLayoutMode === 'vector') {
-        const res = pca2d(graphNodes.map(n => ({ id: n.id, vector: n.vector })));
+        // PR-20：有枢轴（最近检索向量 / 抽屉节点向量）→ 检索聚焦布局；无枢轴 → 纯 pca2d（现状）
+        const pivot = vectorLayoutPivot();
+        const res = pivot ? computeVectorFocusLayout(graphNodes, pivot)
+          : pca2d(graphNodes.map(n => ({ id: n.id, vector: n.vector })));
         positions = res.positions;
         let i = 0;
         res.outliers.forEach((id) => {
           const ang = i * GOLDEN_ANGLE;
-          positions.set(id, { x: Math.cos(ang) * 460, y: Math.sin(ang) * 460 }); // 无向量节点外环
+          positions.set(id, { x: Math.cos(ang) * 460, y: Math.sin(ang) * 460 }); // 无向量/零向量节点外环
           i++;
         });
       } else if (graphLayoutMode === 'radial') {
@@ -5159,6 +5259,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       // 布局大改后 bbox 变化：重建 Sigma 实例让 mapFn 重算（规格要求）
       if (graphBackend === 'sigma') rebuildSigmaInstances();
       startAmbientMotion();
+      fitAllGraphViews(true); // PR-20 相机自动适配：静态布局确定 bbox 后立即拉回视口
     }
 
     // ==========================================
@@ -5221,6 +5322,15 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         return;
       }
       applyStaticGraphLayout();
+      // PR-20：切换到向量星图时提示一次焦点来源（有枢轴才提示）
+      if (mode === 'vector') {
+        const info = vectorPivotInfo();
+        if (info) {
+          showToast(info.source === 'query'
+            ? '向量星图：以最近检索向量为焦点'
+            : `向量星图：以节点 #${info.nodeId} 为焦点`);
+        }
+      }
       // 聚类档优先 Louvain：离线/失败保持已应用的 typeKey 分组布局（确定性不受影响）
       if (mode === 'cluster' && !nodeCommunities.size) {
         const groups = await computeCommunityGroups();
@@ -5310,7 +5420,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         btn.title = '退出星云模式（恢复进入前的图状态）';
         graphLayoutMode = 'cluster';
         syncLayoutButtons();
-        renderGraph(rows); // nebulaActive 下绕过 1500 截断；物理经静态布局分支强制关闭
+        renderGraph(rows); // nebulaActive 下绕过 1500 截断；物理经静态布局分支强制关闭（内含 fitAllGraphViews 相机适配）
         showToast(`星云：${graphNodes.length} 节点 / ${graphEdges.length} 边（物理关闭）`);
         // Louvain 簇分组异步升级（离线/失败静默保持 typeKey 分组，确定性布局不变）
         computeCommunityGroups().then((groups) => {
@@ -5358,6 +5468,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         if (graphBackend === 'sigma') rebuildSigmaInstances();
         updateGraphLegend();
         renderGraphFilterPanels();
+        // PR-20 相机自动适配：快照恢复后相机回位（force 档由物理自组织，不自动 fit）
+        if (graphLayoutMode !== 'force') fitAllGraphViews(true);
       } else {
         if (graphLayoutMode !== 'force') {
           graphLayoutMode = 'force';
@@ -9203,6 +9315,143 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         assert(document.getElementById('layoutForceBtn').classList.contains('active')
           && document.getElementById('layoutRadialBtnStandalone').classList.contains('active') === false,
           '两视图布局按钮应同步');
+      });
+
+      // ---------- PR-20 检索聚焦布局 / 相机自动适配 / 教程第 7-8 步 ----------
+      addAssert('向量星图：聚焦布局纯函数确定性/相似度单调/零向量防护/枢轴优先级', '向量星图', async () => {
+        const pivot = [1, 0, 0, 1];
+        const nodes = [
+          { id: 'near', vector: [2, 0, 0, 2] },   // 与 pivot 同向 → s=1 → r=120
+          { id: 'far', vector: [-1, 0, 0, -1] },  // 反向 → s=-1 → r=460
+          { id: 'mid', vector: [1, 0, 0, 0] },    // s≈0.5
+          { id: 'zero', vector: [0, 0, 0, 0] },   // 零向量 → outliers
+          { id: 'dim', vector: [1, 2] }           // 维度不齐 → outliers
+        ];
+        const r1 = computeVectorFocusLayout(nodes, pivot);
+        const r2 = computeVectorFocusLayout(nodes, pivot);
+        assert(JSON.stringify(r1) === JSON.stringify(r2), '聚焦布局两次调用应全等（确定性）');
+        assert(r1.positions.size === 3, '有效节点应全部有坐标');
+        assert(r1.outliers.has('zero') && r1.outliers.has('dim'), '零向量/维度不齐节点应进 outliers');
+        const rNear = Math.hypot(r1.positions.get('near').x, r1.positions.get('near').y);
+        const rFar = Math.hypot(r1.positions.get('far').x, r1.positions.get('far').y);
+        const rMid = Math.hypot(r1.positions.get('mid').x, r1.positions.get('mid').y);
+        assert(Math.abs(rNear - 120) < 1e-9, '相似度 1 应落内环 120，实际 ' + rNear);
+        assert(Math.abs(rFar - 460) < 1e-9, '相似度 -1 应落外环 460，实际 ' + rFar);
+        assert(rNear < rMid && rMid < rFar, '相似度越高半径应越小（单调）');
+        // 零 pivot：余弦除零防护返回 0，不产生 NaN
+        const rz = computeVectorFocusLayout(nodes, [0, 0, 0, 0]);
+        let nanFree = true;
+        rz.positions.forEach(p => { if (!isFinite(p.x) || !isFinite(p.y)) nanFree = false; });
+        assert(nanFree && rz.positions.get('near').sim === 0, '零 pivot 应返回余弦 0 且无 NaN 坐标');
+        // 枢轴优先级：lastQueryVector > 抽屉节点向量(维度≥2) > null
+        const savedVec = lastQueryVector;
+        const savedDrawer = currentDrawerNodeId;
+        const savedMap = nodeMap;
+        try {
+          nodeMap = new Map([
+            ['7', { id: '7', vector: [0.1, 0.2, 0.3, 0.4] }],
+            ['8', { id: '8', vector: [0.5] }]
+          ]);
+          currentDrawerNodeId = null;
+          lastQueryVector = [9, 9, 9, 9];
+          assert(vectorLayoutPivot() === lastQueryVector, '有检索向量时应优先返回检索向量');
+          lastQueryVector = null;
+          currentDrawerNodeId = '7';
+          const pv = vectorLayoutPivot();
+          assert(pv && pv[0] === 0.1 && pv.length === 4, '无检索向量时应回落抽屉节点向量');
+          currentDrawerNodeId = '8';
+          assert(vectorLayoutPivot() === null, '抽屉节点向量维度不足应返回 null（纯 PCA）');
+        } finally {
+          lastQueryVector = savedVec;
+          currentDrawerNodeId = savedDrawer;
+          nodeMap = savedMap;
+        }
+      });
+
+      addAssert('向量星图：vector 档枢轴接线 + 焦点 toast + 无 pivot 回落 pca2d', '向量星图', async () => {
+        const savedVec = lastQueryVector;
+        const savedDrawer = currentDrawerNodeId;
+        try {
+          lastQueryVector = [1, 0, 0, 1];
+          currentDrawerNodeId = null;
+          renderGraph([{ a: NODE_ALICE, b: NODE_BOB }]);
+          nodeMap.get('1').vector = [1, 0, 0, 1];
+          nodeMap.get('2').vector = [-1, 0, 0, -1];
+          await setGraphLayoutMode('vector');
+          assert(graphLayoutMode === 'vector', '应切到 vector 档');
+          assert(Math.abs(Math.hypot(nodeMap.get('1').x, nodeMap.get('1').y) - 120) < 12,
+            '相似节点应落内环 ~120，实际 ' + Math.hypot(nodeMap.get('1').x, nodeMap.get('1').y));
+          assert(Math.abs(Math.hypot(nodeMap.get('2').x, nodeMap.get('2').y) - 460) < 12,
+            '相反节点应落外环 ~460，实际 ' + Math.hypot(nodeMap.get('2').x, nodeMap.get('2').y));
+          const toasts = Array.from(document.querySelectorAll('#toastStack .toast')).map(t => t.textContent);
+          assert(toasts.some(t => t.indexOf('以最近检索向量为焦点') !== -1), '切换 vector 档应提示检索向量焦点');
+          // 无枢轴 → 回落 pca2d（投影归一化尺度 ≤320，与聚焦外环 460 可区分）
+          lastQueryVector = null;
+          await setGraphLayoutMode('radial'); // 离开 vector 档（避免走 cluster 触发 CDN 社区检测）
+          await setGraphLayoutMode('vector');
+          assert(graphNodes.every(n => isFinite(n.x) && isFinite(n.y)), '无 pivot 应回落 pca2d 且坐标有限');
+          graphNodes.forEach(n => {
+            assert(Math.hypot(n.x, n.y) <= 322, 'pca2d 投影尺度应 ≤320（非聚焦外环），实际 ' + Math.hypot(n.x, n.y));
+          });
+        } finally {
+          lastQueryVector = savedVec;
+          currentDrawerNodeId = savedDrawer;
+          await setGraphLayoutMode('force');
+        }
+      });
+
+      addAssert('相机自动适配：radial 档切布局后全节点入视口 + 空图守卫', '相机适配', async () => {
+        document.querySelector('[data-tab="graphExplorePane"]').click();
+        renderGraph([{ a: NODE_ALICE, b: NODE_BOB }]);
+        await setGraphLayoutMode('radial');
+        // 扰动相机模拟「切布局后节点出视口」，fitAllGraphViews 应把 bbox 拉回视口
+        standaloneTransform.x += 5000;
+        standaloneTransform.k = 3;
+        fitAllGraphViews(true);
+        const canvas = document.getElementById('standaloneGraphCanvas');
+        assert(canvas.clientWidth > 0, '独立探索画布应可见');
+        assert(syncCanvasSize(canvas) === false, 'fit 后画布尺寸应已同步');
+        assert(standaloneTransform.k > 0 && standaloneTransform.k <= 3, 'fit 后缩放应处于合法区间');
+        const pad = 40; // ambient 漂移 ±2.5px + 容差
+        graphNodes.filter(isNodeVisible).forEach(n => {
+          const sx = n.x * standaloneTransform.k + standaloneTransform.x;
+          const sy = n.y * standaloneTransform.k + standaloneTransform.y;
+          assert(sx >= -pad && sx <= canvas.width + pad && sy >= -pad && sy <= canvas.height + pad,
+            '节点 ' + n.id + ' 屏幕坐标 (' + sx.toFixed(0) + ',' + sy.toFixed(0) + ') 应落在画布内');
+        });
+        // 空图守卫：不崩、不改相机
+        renderGraph([]);
+        fitAllGraphViews(true);
+        assert(graphNodes.length === 0, '空图准备就绪');
+        // 重建 2 节点图再次 radial fit（幂等可重复调用）
+        renderGraph([{ a: NODE_ALICE, b: NODE_BOB }]);
+        await setGraphLayoutMode('radial');
+        const sx = nodeMap.get('1').x * standaloneTransform.k + standaloneTransform.x;
+        const sy = nodeMap.get('1').y * standaloneTransform.k + standaloneTransform.y;
+        assert(sy >= -pad && sy <= canvas.height + pad && sx >= -pad && sx <= canvas.width + pad,
+          '重复 fit 后节点仍应在视口内');
+        await setGraphLayoutMode('force'); // 还原布局档：后续星云测试快照依赖进入前为 force
+        document.querySelector('[data-tab="queryPane"]').click();
+      });
+
+      addAssert('教程系统：8 步导航渲染 + 新步骤标题/正文 + 硬编码正文无脚本注入', '教程系统', async () => {
+        assert(TUTORIAL_STEPS.length === 8, '教程应为 8 步，实际 ' + TUTORIAL_STEPS.length);
+        assert(TUTORIAL_STEPS[6].title.indexOf('AI 助手') !== -1
+          && TUTORIAL_STEPS[7].title.indexOf('星云') !== -1, '新增第 7/8 步标题应就位');
+        const nav = document.getElementById('tutorialStepsNav');
+        assert(nav.children.length === 8, '教程导航应渲染 8 项，实际 ' + nav.children.length);
+        nav.children[7].click();
+        assert(nav.children[7].classList.contains('active'), '点击第 8 步应激活导航项');
+        const pane = document.getElementById('tutorialContentPane');
+        assert(pane.textContent.indexOf('星云') !== -1 && pane.querySelectorAll('button').length >= 1,
+          '第 8 步正文应渲染且包含引导按钮');
+        nav.children[6].click();
+        assert(pane.textContent.indexOf('统一面板') !== -1, '第 7 步正文应渲染');
+        // 正文为硬编码字符串：无 <script 注入面（数据路径零 innerHTML 约束的教程侧对位）
+        TUTORIAL_STEPS.forEach((s, i) => {
+          assert(typeof s.desc === 'string' && s.desc.indexOf('<script') === -1,
+            '步骤 ' + (i + 1) + ' 正文应为硬编码字符串且无 script 标签');
+        });
       });
 
       addAssert('命名空间树：分隔符探测/计数/嵌套/空值兜底 + 确定性', '命名空间树', async () => {
