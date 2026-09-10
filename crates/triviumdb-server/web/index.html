@@ -756,13 +756,13 @@
       color: #ffffff;
     }
     /* Sigma WebGL 渲染容器：覆盖在 canvas 之上（canvas 后端时 hidden）。
-       背景恒为深色太空底（与 Canvas 后端 drawSpaceBackground 一致，独立于应用主题）：
-       曾跟随 var(--bg-surface)，浅色主题下白底 + 浅灰边线（#94a3b8~59）几乎不可见 */
+       背景跟随应用主题（PR-20 评审定版：浅色主题浅底 + 深色边线，
+       深色主题太空底），与 Canvas 后端 drawSpaceBackground 保持一致 */
     .graph-sigma-container {
       position: absolute;
       inset: 0;
       z-index: 2;
-      background: linear-gradient(180deg, #0b1120, #0d1526);
+      background: var(--bg-surface);
     }
     /* 社区着色图例（按社区模式显示） */
     .graph-legend {
@@ -5514,13 +5514,22 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       return (nodeCount > GRAPH_PILL_NODE_THRESHOLD || k < GRAPH_PILL_ZOOM_THRESHOLD) ? 'pill' : 'normal';
     }
 
+    // 画布背景板：跟随应用主题（PR-20 评审定版）——深色主题太空底渐变 + 确定性星点，
+    // 浅色主题浅灰渐变（无星点），与 Sigma 容器 var(--bg-surface) 观感一致
     function drawSpaceBackground(ctx, canvas) {
+      const dark = document.documentElement.getAttribute('data-theme') === 'dark';
       const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
-      grad.addColorStop(0, '#0b1120');
-      grad.addColorStop(1, '#0d1526');
+      if (dark) {
+        grad.addColorStop(0, '#0b1120');
+        grad.addColorStop(1, '#0d1526');
+      } else {
+        grad.addColorStop(0, '#f8fafc');
+        grad.addColorStop(1, '#eef2f7');
+      }
       ctx.fillStyle = grad;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-      // 星点：黄金比例 / polling 常数散布的确定性伪随机位置（每帧重绘结果一致）
+      if (!dark) return;
+      // 星点（仅深色主题）：黄金比例常数散布的确定性伪随机位置（每帧重绘结果一致）
       ctx.fillStyle = 'rgba(226, 232, 240, 0.26)';
       for (let i = 0; i < 90; i++) {
         const x = ((i * 0.61803398875) % 1) * canvas.width;
@@ -5555,6 +5564,12 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
 
       const labelMode = graphLabelMode(graphNodes.length, t.k);
       const edgeAlpha = graphEdgeAlpha(graphNodes.length); // PR-17：边透明度随密度自适应
+      // 配色跟随主题（PR-20 评审定版）：浅色主题浅底深线，深色主题暗底浅线
+      const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+      const edgeBase = dark ? '148, 163, 184' : '71, 85, 105';      // 边线：暗底浅灰 / 浅底深灰
+      const nodeStroke = dark ? 'rgba(148, 163, 184, 0.45)' : 'rgba(15, 23, 42, 0.3)';
+      const nodeLabel = dark ? '#e2e8f0' : '#1e293b';
+      const selectedStroke = dark ? '#ffffff' : '#0f172a';
 
       // 绘制连线（过滤器生效：隐藏类型/label 的元素整体跳过）
       graphEdges.forEach((edge, idx) => {
@@ -5571,12 +5586,12 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         ctx.beginPath();
         ctx.moveTo(s.x, s.y);
         ctx.quadraticCurveTo(cx, cy, t.x, t.y);
-        ctx.strokeStyle = 'rgba(148, 163, 184, ' + edgeAlpha + ')'; // 低透明度：高密度下不糊成一片
+        ctx.strokeStyle = 'rgba(' + edgeBase + ', ' + edgeAlpha + ')'; // 低透明度：高密度下不糊成一片
         ctx.lineWidth = 1.2;
         ctx.stroke();
 
         if (edge.label) {
-          ctx.fillStyle = 'rgba(148, 163, 184, ' + edgeAlpha + ')';
+          ctx.fillStyle = 'rgba(' + edgeBase + ', ' + Math.min(edgeAlpha + 0.25, 0.9) + ')';
           ctx.font = '10px ' + CANVAS_FONT_FAMILY;
           ctx.fillText(edge.label, cx, cy - 3);
         }
@@ -5589,7 +5604,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         ctx.arc(node.x, node.y, nodeRadius(node), 0, Math.PI * 2);
         ctx.fillStyle = node.color;
         ctx.fill();
-        ctx.strokeStyle = selectedNode === node ? '#ffffff' : 'rgba(148, 163, 184, 0.45)';
+        ctx.strokeStyle = selectedNode === node ? selectedStroke : nodeStroke;
         ctx.lineWidth = selectedNode === node ? 3 : 1;
         ctx.stroke();
       });
@@ -5599,7 +5614,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         if (!isNodeVisible(node)) return;
         ctx.textAlign = 'center';
         if (labelMode === 'normal') {
-          ctx.fillStyle = '#e2e8f0';
+          ctx.fillStyle = nodeLabel;
           ctx.font = '11px ' + CANVAS_FONT_FAMILY;
           ctx.fillText(node.label, node.x, node.y + 28);
         } else {
@@ -5612,12 +5627,13 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           const px = node.x - pw / 2;
           const py = node.y - 30;
           drawPillRect(ctx, px, py, pw, ph, 8);
-          ctx.fillStyle = 'rgba(10, 15, 30, 0.82)';
+          // pill 底色随主题：暗底深药丸 / 浅底白药丸（文字对比度各自成立）
+          ctx.fillStyle = dark ? 'rgba(10, 15, 30, 0.82)' : 'rgba(255, 255, 255, 0.9)';
           ctx.fill();
-          ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
+          ctx.strokeStyle = dark ? 'rgba(148, 163, 184, 0.35)' : 'rgba(15, 23, 42, 0.28)';
           ctx.lineWidth = 1;
           ctx.stroke();
-          ctx.fillStyle = '#dbe4f0';
+          ctx.fillStyle = nodeLabel;
           ctx.fillText(text, node.x, py + 11.5);
         }
       });
@@ -5736,8 +5752,10 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           label: n.label, color: n.color, hidden: !isNodeVisible(n)
         });
       });
-      // PR-17：边色随节点密度自适应（8 位 hex alpha），与 Canvas 后端公式一致
-      const sigmaEdgeColor = '#94a3b8' + alphaToHexByte(graphEdgeAlpha(graphNodes.length));
+      // PR-17：边色随节点密度自适应（8 位 hex alpha），与 Canvas 后端公式一致；
+      // PR-20 评审定版：边色基底跟随主题（暗底浅灰 / 浅底深灰）
+      const sigmaEdgeBase = dark ? '#94a3b8' : '#475569';
+      const sigmaEdgeColor = sigmaEdgeBase + alphaToHexByte(graphEdgeAlpha(graphNodes.length));
       graphEdges.forEach(e => {
         if (graph.hasNode(e.source) && graph.hasNode(e.target) && !graph.hasEdge(e.source, e.target)) {
           graph.addEdge(e.source, e.target, {
@@ -5751,8 +5769,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       const sigma = new sigmaLibs.Sigma(graph, container, {
         allowInvalidContainer: true,
         defaultEdgeColor: sigmaEdgeColor,
-        // 画布恒为深色太空底：标签恒浅色（不再随应用主题切换，浅色主题下白底黑标签已不存在）
-        labelColor: { color: '#e2e8f0' },
+        // 标签色跟随主题（画布底已跟随主题，见 .graph-sigma-container）
+        labelColor: { color: dark ? '#e2e8f0' : '#1e293b' },
         labelDensity: 1.2,
         minCameraRatio: 0.05,
         maxCameraRatio: 20
