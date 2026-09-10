@@ -310,7 +310,7 @@ try {
   await page.waitForSelector('#nodeDrawer.open', { timeout: 5000 });
   const drawerPayload = await page.textContent('#drawerNodePayload');
   if (!drawerPayload.includes('Smoke Alice')) throw new Error('抽屉 Payload 应包含 Smoke Alice');
-  await page.click('#closeDrawerBtn');
+  await page.click('#uspCollapseBtn');
   // 关闭后 .open class 被移除（元素仍在 DOM），用 hidden 状态等待而非 detached
   await page.waitForSelector('#nodeDrawer.open', { state: 'hidden', timeout: 5000 });
   log('  ✓ 节点 360° 抽屉打开/关闭');
@@ -415,7 +415,7 @@ try {
   if (!aiState.unconfigured) throw new Error('未配置态入口按钮应有弱化样式');
   log('  ✓ AI 助手入口常显：未配置点击直达设置，抽屉内含未配置横幅');
   // 关闭 AI 抽屉本体：抽屉停靠右侧，若保持打开会拦截后续右下角按钮（星云模式等）的点击
-  await page.click('#closeAiDrawerBtn');
+  await page.click('#uspCollapseBtn');
   await page.waitForFunction(() => !document.getElementById('aiChatDrawer').classList.contains('open'), null, { timeout: 5000 });
 
   // 冒烟 5.6：探索器内 TQL 弹窗（PR-16）—— 示例填充 → 真实只读查询 → 结果并入图，
@@ -449,9 +449,12 @@ try {
   await page.click('#graphTqlCloseBtn');
 
   // 冒烟 5.7：星云模式（PR-18）—— 真实 server 702 节点：单查询 MATCH 上限 10000 拉全图，
-  // Sigma 专属 + 物理必关 + 静态聚类布局；WebGL 库不可达时星云中止 + toast（与 WebGL 冒烟同双路径）
-  await page.evaluate(() => renderGraph([]));
-  page.on('dialog', (d) => { d.accept().catch(() => {}); });
+  // Sigma 专属 + 物理必关 + 静态聚类布局；WebGL 库不可达时星云中止 + toast（与 WebGL 冒烟同双路径）。
+  // PR-20：退出改为恢复进入前快照——先摆 2 个种子节点作为快照源
+  await page.evaluate(() => renderGraph([
+    { a: { type: 'node', id: 's1', payload: { name: 'PreNebula A', type: 'person' }, vector: [] },
+      b: { type: 'node', id: 's2', payload: { name: 'PreNebula B', type: 'person' }, vector: [] } }
+  ]));
   // 清空前序步骤残留 toast：避免「任一 toast 存在」的等待条件被旧 toast 瞬间满足
   await page.evaluate(() => { const s = document.getElementById('toastStack'); if (s) s.textContent = ''; });
   await page.click('#nebulaModeBtn');
@@ -476,17 +479,20 @@ try {
     if (nebulaState.layout !== 'cluster') throw new Error('星云应为静态聚类布局，实际 ' + nebulaState.layout);
     if (nebulaState.backend !== 'sigma') throw new Error('星云应为 Sigma 后端');
     log(`  ✓ 星云模式进入：${nebulaState.nodes} 节点 / ${nebulaState.edges} 边 / 物理关闭 / 静态聚类 (Sigma)`);
-    // 退出星云（confirm 对话框已自动接受）：清图回到当前查询结果
+    // 退出星云（PR-20：无 confirm，直接退出并恢复进入前快照）
     await page.click('#nebulaModeBtn');
     await page.waitForFunction(() => nebulaActive === false, null, { timeout: 10000 });
     const exited = await page.evaluate(() => ({
       nodes: graphNodes.length,
       layout: graphLayoutMode,
       backend: graphBackend,
+      names: graphNodes.map(n => n.label).join(','),
     }));
-    if (exited.layout !== 'force') throw new Error('退出星云后应恢复力导向布局');
-    if (exited.nodes === 0) throw new Error('退出星云后应回到当前查询结果');
-    log(`  ✓ 星云模式退出：图已恢复为查询结果 (${exited.nodes} 节点，力导向)`);
+    if (exited.layout !== 'force') throw new Error('退出星云后应恢复进入前布局（force）');
+    if (exited.nodes !== 2 || exited.names.indexOf('PreNebula A') === -1) {
+      throw new Error('退出星云后应恢复进入前快照（2 个 PreNebula 种子节点），实际 ' + exited.nodes + ' [' + exited.names + ']');
+    }
+    log(`  ✓ 星云模式退出：恢复进入前快照 (${exited.nodes} 节点，力导向)`);
   } else {
     if (!nebulaState.toast || nebulaState.toast.indexOf('星云') === -1) {
       throw new Error('星云失败时应有中止 toast，实际: ' + nebulaState.toast);

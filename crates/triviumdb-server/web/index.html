@@ -755,12 +755,14 @@
       border-color: var(--primary);
       color: #ffffff;
     }
-    /* Sigma WebGL 渲染容器：覆盖在 canvas 之上（canvas 后端时 hidden） */
+    /* Sigma WebGL 渲染容器：覆盖在 canvas 之上（canvas 后端时 hidden）。
+       背景恒为深色太空底（与 Canvas 后端 drawSpaceBackground 一致，独立于应用主题）：
+       曾跟随 var(--bg-surface)，浅色主题下白底 + 浅灰边线（#94a3b8~59）几乎不可见 */
     .graph-sigma-container {
       position: absolute;
       inset: 0;
       z-index: 2;
-      background: var(--bg-surface);
+      background: linear-gradient(180deg, #0b1120, #0d1526);
     }
     /* 社区着色图例（按社区模式显示） */
     .graph-legend {
@@ -2028,7 +2030,7 @@
           </div>
           <div style="display: flex; gap: 6px;">
             <button class="btn" id="aiSettingsBtn" title="配置 LLM 提供商 / API Key">设置</button>
-            <button class="btn" id="closeAiDrawerBtn" style="padding: 2px 8px;" aria-label="关闭 AI 助手">✕</button>
+            <!-- 内层关闭按钮已移除：与面板 uspCollapseBtn 功能重合（双 X 问题），收起语义统一到面板 -->
           </div>
         </div>
         <!-- 未配置提示条（清除配置后立即可见） -->
@@ -2057,7 +2059,7 @@
       <div class="node-detail-drawer" id="nodeDrawer">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
           <h4 id="drawerNodeTitle">节点详情</h4>
-          <button class="btn" id="closeDrawerBtn" style="padding: 2px 6px;">✕</button>
+          <!-- 内层关闭按钮已移除：与面板 uspCollapseBtn 功能重合（双 X 问题），收起语义统一到面板 -->
         </div>
         <!-- Trinity 三平面：Payload / Vector / Edges -->
         <section class="inspector-plane">
@@ -2456,6 +2458,12 @@
         const b = document.getElementById(id);
         if (b) b.setAttribute('aria-selected', 'false');
       });
+      // 收起同时复位壳 open 语义（原壳内关闭按钮的职责已并入面板收起，
+      // 12 处 selftest/smoke 以 collapse 代替原 closeDrawerBtn/closeAiDrawerBtn 点击）
+      const nd = document.getElementById('nodeDrawer');
+      if (nd) nd.classList.remove('open');
+      const ad = document.getElementById('aiChatDrawer');
+      if (ad) ad.classList.remove('open');
     }
 
     function setupUnifiedPanel() {
@@ -4576,6 +4584,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     const NEBULA_QUERY = 'MATCH (a)-[]->(b) RETURN a, b LIMIT 10000'; // 服务端 max_query_rows=10000 封顶
     let graphLayoutMode = 'force';                 // 'force' | 'cluster' | 'vector' | 'radial'
     let nebulaActive = false;                      // 星云模式开关（显式 opt-in，Sigma 专属）
+    let nebulaSnapshot = null;                     // 进入星云前的图快照（退出恢复用）
     let nebulaInFlight = false;                    // 星云管线进行中（防连点）
 
     // 聚类布局：communities 优先（Louvain 结果 Map），null/缺省份回退 typeKey 分组。
@@ -4660,7 +4669,10 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         for (let d = 0; d < dims; d++) next[d] -= comp * a1[d];
         a2 = normalize(next);
       }
-      // 归一化到固定尺度（最大投影半径 320）
+      // 归一化到固定尺度（最大投影半径 320）。
+      // 退化防护：向量全同/全零时中心化后全零 → 主成分无方差 → 投影全部重合于一点
+      // （用户报告「向量星图节点聚成一团」的偶现根因）。散布近似为零时回退
+      // 黄金角圆盘散布（确定性，保证可辨识）
       let maxR = 0;
       const raw = centered.map(it => {
         const x = project(it.vec, a1);
@@ -4668,24 +4680,32 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         maxR = Math.max(maxR, Math.hypot(x, y));
         return { id: it.id, x, y };
       });
-      const scale = maxR > 0 ? 320 / maxR : 1;
+      if (maxR < 1e-6) {
+        raw.forEach((p, i) => {
+          const r = 80 + (i % 8) * 34;
+          const ang = i * GOLDEN_ANGLE;
+          positions.set(p.id, { x: Math.cos(ang) * r, y: Math.sin(ang) * r });
+        });
+        return { positions, outliers };
+      }
+      const scale = 320 / maxR;
       raw.forEach(p => positions.set(p.id, { x: p.x * scale, y: p.y * scale }));
       return { positions, outliers };
     }
 
     // 度数径向布局：按度数分档（0 / 1 / 2-5 / 6+）同心环，环内黄金角均匀。返回带 ring 便于断言。
+    // ring0（孤立节点）半径非 0：全零度数图（全部节点 ring0）曾退化聚在圆心 (0,0)
     function computeRadialLayout(nodes) {
       const ringOf = (degree) => (!degree || degree <= 0) ? 0 : (degree === 1 ? 1 : (degree <= 5 ? 2 : 3));
-      const ringRadius = [90, 200, 320, 440];
+      const ringRadius = [140, 240, 340, 440];
       const counters = [0, 0, 0, 0];
       const positions = new Map();
       nodes.forEach(n => {
         const ring = ringOf(n.degree || 0);
         const idx = counters[ring]++;
-        const r = ring === 0 ? 0 : ringRadius[ring];
         positions.set(n.id, {
-          x: Math.cos(idx * GOLDEN_ANGLE) * r,
-          y: Math.sin(idx * GOLDEN_ANGLE) * r,
+          x: Math.cos(idx * GOLDEN_ANGLE) * ringRadius[ring],
+          y: Math.sin(idx * GOLDEN_ANGLE) * ringRadius[ring],
           ring
         });
       });
@@ -4810,6 +4830,11 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       });
 
       window.addEventListener('mouseup', () => {
+        if (draggedNode) {
+          // 静态档 ambient 微动效以 baseX/baseY 为锚点：拖拽落点写回锚点，防被拉回旧位
+          draggedNode.baseX = draggedNode.x;
+          draggedNode.baseY = draggedNode.y;
+        }
         draggedNode = null;
         isDraggingCanvas = false;
       });
@@ -4842,11 +4867,6 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         simulationRunning = !simulationRunning;
         document.getElementById('togglePhysicsBtn').textContent = simulationRunning ? '冻结力学' : '恢复力学';
         if (simulationRunning) startSimulation(0.5);
-      });
-
-      document.getElementById('closeDrawerBtn').addEventListener('click', () => {
-        document.getElementById('nodeDrawer').classList.remove('open');
-        if (uspActiveTab === 'detail') collapseUnifiedPanel(); // PR-19：详情关闭即收起面板
       });
 
       // k-hop 邻域扩展：以抽屉当前节点为种子按选定跳数拉取邻域并入图。
@@ -5133,11 +5153,44 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       }
       positions.forEach((p, id) => {
         const n = nodeMap.get(id);
-        if (n) { n.x = p.x; n.y = p.y; n.vx = 0; n.vy = 0; }
+        if (n) { n.x = p.x; n.y = p.y; n.baseX = p.x; n.baseY = p.y; n.vx = 0; n.vy = 0; }
       });
       redrawGraph();
       // 布局大改后 bbox 变化：重建 Sigma 实例让 mapFn 重算（规格要求）
       if (graphBackend === 'sigma') rebuildSigmaInstances();
+      startAmbientMotion();
+    }
+
+    // ==========================================
+    // 静态档环境微动效（GitNexus 式「活感」）：
+    // 确定性静态布局 + 每节点固定相位/周期的微小正弦漂移（±2.5px）——
+    // 纯 O(n) 坐标偏移（baseX/baseY 目标位不动），Canvas/Sigma 经 syncSigmaPositions
+    // 同步受益；物理运行中 / prefers-reduced-motion / 超渲染上限自动停用；
+    // 拖拽中的节点跳过写回（mouseup 时把落点写回 baseX/baseY）
+    // ==========================================
+    let ambientRafId = null;
+    let ambientT = 0;
+    function stopAmbientMotion() {
+      if (ambientRafId !== null) { cancelAnimationFrame(ambientRafId); ambientRafId = null; }
+    }
+    function ambientStep() {
+      ambientRafId = null;
+      if (graphLayoutMode === 'force' || simulationRunning || prefersReducedMotion()
+        || graphNodes.length > GRAPH_RENDER_MAX_NODES) return;
+      ambientT += 1;
+      const t = ambientT / 60; // 秒（按 60fps 粗略计时，动效不依赖精确时钟）
+      graphNodes.forEach((n, i) => {
+        if (n === draggedNode) return;
+        const phase = i * GOLDEN_ANGLE;
+        n.x = (n.baseX !== undefined ? n.baseX : n.x) + Math.sin(t * 0.9 + phase) * 2.5;
+        n.y = (n.baseY !== undefined ? n.baseY : n.y) + Math.cos(t * 0.7 + phase) * 2.5;
+      });
+      redrawGraph();
+      ambientRafId = requestAnimationFrame(ambientStep);
+    }
+    function startAmbientMotion() {
+      if (graphLayoutMode === 'force') return;
+      if (ambientRafId === null) ambientRafId = requestAnimationFrame(ambientStep);
     }
 
     function syncLayoutButtons() {
@@ -5157,6 +5210,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       graphLayoutMode = mode;
       syncLayoutButtons();
       if (mode === 'force') {
+        stopAmbientMotion();
         const physicsBtn = document.getElementById('togglePhysicsBtn');
         if (!physicsLockedByScale) {
           simulationRunning = true;
@@ -5213,7 +5267,9 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     // 孤立节点无法经第二查询拉取 → 单查询 MATCH LIMIT 10000（服务端 max_query_rows=10000 封顶）
     async function toggleNebulaMode() {
       if (nebulaActive) {
-        if (!window.confirm('退出星云模式将清空当前图并回到查询结果，确定退出？')) return;
+        // 不用 window.confirm：内嵌 webview / 部分浏览器会静默拒绝原生对话框
+        // （恒返回 false → 「退出星云」点击永远无效）。退出可逆（按钮再点即重进），
+        // 直接退出 + toast 说明即可
         exitNebulaMode(false);
         return;
       }
@@ -5240,10 +5296,18 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         const data = await res.json();
         const rows = data.rows || [];
         if (!rows.length) throw new Error('查询未返回任何行');
+        // 进入前快照：退出时精确恢复进入前的图状态（节点坐标/边/布局档），
+        // 而非 currentResultData——进入星云前若未跑查询或查询结果与图不一致，
+        // 旧行为会「退出后空图/看起来没效果」
+        nebulaSnapshot = {
+          nodes: graphNodes.map(n => Object.assign({}, n)),
+          edges: graphEdges.map(e => Object.assign({}, e)),
+          layout: graphLayoutMode
+        };
         nebulaActive = true;
         btn.textContent = '退出星云';
         btn.classList.add('active');
-        btn.title = '退出星云模式（确认后清空图并回到查询结果）';
+        btn.title = '退出星云模式（恢复进入前的图状态）';
         graphLayoutMode = 'cluster';
         syncLayoutButtons();
         renderGraph(rows); // nebulaActive 下绕过 1500 截断；物理经静态布局分支强制关闭
@@ -5266,7 +5330,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       }
     }
 
-    // 退出星云：清图回到当前查询结果（护栏恢复）；auto=true 为切 Canvas 后端强制退出
+    // 退出星云：恢复进入前的图快照（无快照时回退当前查询结果）；auto=true 为切 Canvas 后端强制退出
     function exitNebulaMode(auto) {
       nebulaActive = false;
       const btn = document.getElementById('nebulaModeBtn');
@@ -5275,14 +5339,35 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         btn.classList.remove('active');
         btn.title = '星云模式：单查询拉取全库拓扑（MATCH 上限 10000 行），以 WebGL 星图呈现（Sigma 专属，物理关闭）';
       }
-      if (graphLayoutMode !== 'force') {
-        graphLayoutMode = 'force';
-        syncLayoutButtons();
+      const snap = nebulaSnapshot;
+      nebulaSnapshot = null;
+      if (snap && snap.nodes.length) {
+        // 精确恢复进入前状态（含坐标，力导向档由物理接管继续演化）
+        graphNodes = snap.nodes;
+        graphEdges = snap.edges;
+        nodeMap = new Map(graphNodes.map(n => [n.id, n]));
+        graphTotalNodeCount = graphNodes.length;
+        nodeCommunities = new Map();
+        graphColorMode = 'type';
+        graphNodes.forEach(n => { n.color = getNodeColor(n.typeKey); });
+        if (graphLayoutMode !== snap.layout) {
+          graphLayoutMode = snap.layout;
+          syncLayoutButtons();
+        }
+        applyGraphPhysicsPolicy();
+        if (graphBackend === 'sigma') rebuildSigmaInstances();
+        updateGraphLegend();
+        renderGraphFilterPanels();
+      } else {
+        if (graphLayoutMode !== 'force') {
+          graphLayoutMode = 'force';
+          syncLayoutButtons();
+        }
+        renderGraph((currentResultData && currentResultData.rows) || []);
       }
-      renderGraph((currentResultData && currentResultData.rows) || []);
       showToast(auto
         ? '星云节点规模较大，已自动退出星云模式（Canvas 后端不支持万级渲染）'
-        : '已退出星云模式，图已恢复为当前查询结果');
+        : snap && snap.nodes.length ? '已退出星云模式，恢复进入前的图状态' : '已退出星云模式');
     }
 
     // ---------- 命名空间树面板（独立探索视图） ----------
@@ -5666,7 +5751,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       const sigma = new sigmaLibs.Sigma(graph, container, {
         allowInvalidContainer: true,
         defaultEdgeColor: sigmaEdgeColor,
-        labelColor: { color: dark ? '#f1f5f9' : '#1e293b' },
+        // 画布恒为深色太空底：标签恒浅色（不再随应用主题切换，浅色主题下白底黑标签已不存在）
+        labelColor: { color: '#e2e8f0' },
         labelDensity: 1.2,
         minCameraRatio: 0.05,
         maxCameraRatio: 20
@@ -7223,7 +7309,6 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         if (!aiConfig) { openAiDrawer(); openAiSettings(); return; }
         if (isAiDrawerOpen()) closeAiDrawer(); else openAiDrawer();
       });
-      document.getElementById('closeAiDrawerBtn').addEventListener('click', closeAiDrawer);
       document.getElementById('aiSettingsBtn').addEventListener('click', openAiSettings);
       document.getElementById('aiBannerConfigBtn').addEventListener('click', openAiSettings);
       document.getElementById('aiSettingsCloseBtn').addEventListener('click', closeAiSettings);
@@ -7759,7 +7844,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         document.querySelector('#drawerNodeEdges .inspector-edge-target').click();
         await waitFor(() => document.getElementById('drawerNodeTitle').textContent.indexOf('#2') !== -1, 3000, '标题应跳到 #2');
         assert(document.getElementById('drawerNodePayload').textContent.includes('Bob'), '跳转后 Payload 应为 Bob');
-        document.getElementById('closeDrawerBtn').click();
+        collapseUnifiedPanel(); // 原壳内 ✕ 已并入面板收起（双 X 去重）
         assert(!document.getElementById('nodeDrawer').classList.contains('open'), '关闭按钮应收起抽屉');
       });
 
@@ -7935,7 +8020,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         tr.click();
         assert(document.getElementById('nodeDrawer').classList.contains('open'), '点击虚拟行应经委托打开抽屉');
         assert(document.getElementById('drawerNodePayload').textContent.includes('N4'), '抽屉应显示第 4 行节点的 Payload');
-        document.getElementById('closeDrawerBtn').click();
+        collapseUnifiedPanel(); // 原壳内 ✕ 已并入面板收起（双 X 去重）
         assert(!document.getElementById('nodeDrawer').classList.contains('open'), '抽屉应关闭');
       });
 
@@ -7967,7 +8052,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         assert(document.querySelector('#gridBody tr[data-row-index="149"]').textContent.includes('S150'), '末行内容正确');
         document.querySelector('#gridBody tr[data-row-index="0"]').click();
         assert(document.getElementById('nodeDrawer').classList.contains('open'), '委托点击应打开抽屉');
-        document.getElementById('closeDrawerBtn').click();
+        collapseUnifiedPanel(); // 原壳内 ✕ 已并入面板收起（双 X 去重）
       });
 
       addAssert('虚拟滑窗：流式迁移 — 大流式结果切虚拟窗口且视口位置保持', '虚拟滑窗', async () => {
@@ -8137,7 +8222,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         sigmaInstances.query.sigma.emit('clickNode', { node: '1' });
         assert(document.getElementById('nodeDrawer').classList.contains('open'), '点击 Sigma 节点应打开抽屉');
         assert(document.getElementById('drawerNodeTitle').textContent.includes('Alice'), '抽屉应显示 Alice');
-        document.getElementById('closeDrawerBtn').click();
+        collapseUnifiedPanel(); // 原壳内 ✕ 已并入面板收起（双 X 去重）
         assert(!document.getElementById('nodeDrawer').classList.contains('open'), '抽屉应可关闭');
       });
 
@@ -8231,7 +8316,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         assert(!nodeMap.has('97'), '图外节点 97 不应被创建');
         assert(!graphEdges.some(e => e.source === '98' && e.target === '97'), '不得产生端点缺失的悬挂边');
         await waitFor(() => document.querySelector('#toastStack .toast'), 2000, '应有扩展结果 toast');
-        document.getElementById('closeDrawerBtn').click();
+        collapseUnifiedPanel(); // 原壳内 ✕ 已并入面板收起（双 X 去重）
       });
 
       addAssert('混合搜索种子：无查询结果时并入按钮给出提示', '搜索驱动探索', async () => {
@@ -8982,7 +9067,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           `Canvas 相机应平移至节点中心 before=${before.x},${before.y} after=${transform.x},${transform.y} expect=${expectX},${expectY} canvas=${canvas.width}x${canvas.height} node=${node.x},${node.y} k=${transform.k}`);
         assert(document.getElementById('nodeDrawer').classList.contains('open'), '飞行后应打开节点抽屉');
         assert(currentDrawerNodeId === '1', '抽屉应指向目标节点');
-        document.getElementById('closeDrawerBtn').click();
+        collapseUnifiedPanel(); // 原壳内 ✕ 已并入面板收起（双 X 去重）
       });
 
       addAssert('观感与导航：飞行定位 — 视图不可见时自动切查询 tab + 图视图', '观感与导航', async () => {
@@ -8992,7 +9077,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         flyToNode(nodeMap.get('1'));
         assert(document.getElementById('viewGraph').style.display === 'block', '应自动切到图视图');
         assert(document.getElementById('nodeDrawer').classList.contains('open'), '飞行后抽屉应打开');
-        document.getElementById('closeDrawerBtn').click();
+        collapseUnifiedPanel(); // 原壳内 ✕ 已并入面板收起（双 X 去重）
         document.querySelector('[data-view="grid"]').click();
       });
 
@@ -9003,7 +9088,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         assert(standaloneTransform.x !== before.x || standaloneTransform.y !== before.y,
           'standalone 相机应平移至节点中心');
         assert(document.getElementById('nodeDrawer').classList.contains('open'), '飞行后抽屉应打开');
-        document.getElementById('closeDrawerBtn').click();
+        collapseUnifiedPanel(); // 原壳内 ✕ 已并入面板收起（双 X 去重）
         document.querySelector('[data-tab="queryPane"]').click();
         document.querySelector('[data-view="graph"]').click();
       });
@@ -9049,14 +9134,31 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         assert(maxAbs <= 320.0001, '投影应归一化到固定尺度 320，实际 ' + maxAbs);
         const rEmpty = pca2d([]);
         assert(rEmpty.positions.size === 0, '空输入不应崩');
-        // computeRadialLayout：度数分档 0/1/2-5/6+ 同心环
+        // pca2d 退化回退（PR-20 修复回归钉）：全同向量 → 中心化后零方差 → 曾全部投影到
+        // 同一点（用户报告「向量星图聚成一团」）。现应回退黄金角圆盘散布
+        const same = pca2d([
+          { id: 's1', vector: [0.1, 0.2, 0.3, 0.4] },
+          { id: 's2', vector: [0.1, 0.2, 0.3, 0.4] },
+          { id: 's3', vector: [0.1, 0.2, 0.3, 0.4] },
+          { id: 's4', vector: [0.1, 0.2, 0.3, 0.4] }
+        ]);
+        assert(same.positions.size === 4, '退化输入应全员有坐标');
+        const uniqPts = new Set(Array.from(same.positions.values()).map(p => p.x.toFixed(3) + ',' + p.y.toFixed(3)));
+        assert(uniqPts.size === 4, '退化输入应圆盘散布不得重合，实际唯一坐标 ' + uniqPts.size);
+        // computeRadialLayout：度数分档 0/1/2-5/6+ 同心环（PR-20：ring0 半径非 0，
+        // 全零度数图曾全部聚在 (0,0)）
         const rn = [{ id: 'a', degree: 0 }, { id: 'b', degree: 1 }, { id: 'c', degree: 3 }, { id: 'd', degree: 9 }];
         const rad1 = computeRadialLayout(rn);
         const rad2 = computeRadialLayout(rn);
         assert(JSON.stringify(rad1) === JSON.stringify(rad2), '径向布局两次调用应全等');
         assert(rad1.get('a').ring === 0 && rad1.get('b').ring === 1
           && rad1.get('c').ring === 2 && rad1.get('d').ring === 3, '度数应分档入环');
-        assert(Math.abs(Math.hypot(rad1.get('b').x, rad1.get('b').y) - 200) < 1e-9, '环 1 半径应 200');
+        assert(Math.abs(Math.hypot(rad1.get('b').x, rad1.get('b').y) - 240) < 1e-9, '环 1 半径应 240');
+        assert(Math.abs(Math.hypot(rad1.get('a').x, rad1.get('a').y) - 140) < 1e-9, '环 0（孤立节点）半径应 140 不得为 0');
+        // 全零度数图：全部节点 ring0 也不得聚在一点
+        const zeroDeg = computeRadialLayout(Array.from({ length: 30 }, (_, i) => ({ id: 'z' + i, degree: 0 })));
+        const zeroUniq = new Set(Array.from(zeroDeg.values()).map(p => p.x.toFixed(2) + ',' + p.y.toFixed(2)));
+        assert(zeroUniq.size === 30, '全零度数图 30 节点坐标应全部可辨识，实际唯一 ' + zeroUniq.size);
       });
 
       addAssert('布局模式：静态档物理关闭、重建图不重启、切回力导向恢复', '布局模式', async () => {
@@ -9066,12 +9168,16 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         assert(simulationRunning === false && simulationRafId === null, '静态档应关闭物理（无 rAF 循环）');
         assert(document.getElementById('togglePhysicsBtn').textContent === '恢复力学', '物理按钮应显示恢复态');
         assert(graphNodes.every(n => isFinite(n.x) && isFinite(n.y)), '静态布局后坐标应有限');
+        // PR-20 ambient 微动效：静态档记录锚点并启动漂移循环（reduced-motion 自动豁免）
+        assert(graphNodes.every(n => n.baseX !== undefined && n.baseY !== undefined), '静态档应记录 ambient 锚点 baseX/baseY');
+        assert(ambientRafId !== null, '静态档应启动环境微动效 rAF');
         // 静态档下图数据重建（merge/render）也不应启动物理
         renderGraph(MATCH_ROWS);
         assert(simulationRunning === false, '静态档下重建图仍不应启动物理');
         // 切回力导向恢复物理（规模未锁定）
         await setGraphLayoutMode('force');
         assert(simulationRunning === true, '切回力导向应恢复物理');
+        assert(ambientRafId === null, '切回力导向应停止 ambient 微动效（交由物理驱动）');
         assert(document.getElementById('togglePhysicsBtn').textContent === '冻结力学', '物理按钮应还原');
         assert(document.getElementById('layoutForceBtn').classList.contains('active')
           && document.getElementById('layoutRadialBtnStandalone').classList.contains('active') === false,
@@ -9122,7 +9228,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         assert(standaloneTransform.x !== camBefore.x || standaloneTransform.y !== camBefore.y,
           '点击叶子应飞行定位');
         // 分组点击 = 相机聚焦组 bbox（不崩且相机变化）
-        document.getElementById('closeDrawerBtn').click();
+        collapseUnifiedPanel(); // 原壳内 ✕ 已并入面板收起（双 X 去重）
         const gBefore = { x: standaloneTransform.x, y: standaloneTransform.y };
         tree.querySelector('summary').click();
         assert(standaloneTransform.x !== gBefore.x || standaloneTransform.y !== gBefore.y,
@@ -9132,13 +9238,14 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         document.querySelector('[data-tab="queryPane"]').click();
       });
 
-      addAssert('星云模式：mock 大 MATCH 进 Sigma 静态聚类、护栏让位、切 Canvas 自动退出', '星云模式', async () => {
+      addAssert('星云模式：mock 大 MATCH 进 Sigma 静态聚类、护栏让位、切 Canvas 自动退出、退出恢复进入前快照', '星云模式', async () => {
         // 复用 WebGL 组的 fake 库（离线确定性）：loadScriptTag 已被回退测试还原，重新注入
         window.graphology = { Graph: FakeGraph };
         window.Sigma = FakeSigma;
         loadScriptTag = () => Promise.resolve();
-        currentResultData = { rows: FIND_ROWS }; // 退出星云的恢复目标
-        renderGraph([]);
+        currentResultData = { rows: FIND_ROWS };
+        // 进入前先摆一个 2 节点图（快照恢复目标；PR-20 起退出=恢复进入前状态而非查询结果）
+        renderGraph([{ a: NODE_ALICE, b: NODE_BOB }]);
         document.querySelector('[data-tab="graphExplorePane"]').click();
         const btn = document.getElementById('nebulaModeBtn');
         btn.click();
@@ -9153,8 +9260,9 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         // 用户切回 Canvas 后端 → 自动退出星云（防 Canvas 万级绘制）
         document.getElementById('toggleWebGLBtn').click();
         await waitFor(() => nebulaActive === false, 3000, '切 Canvas 应自动退出星云');
-        assert(graphNodes.length === 3, '退出后应回到查询结果（FIND_ROWS 3 节点），实际 ' + graphNodes.length);
-        assert(graphLayoutMode === 'force', '退出后应恢复力导向');
+        assert(graphNodes.length === 2, '退出应恢复进入前快照（2 节点），实际 ' + graphNodes.length);
+        assert(nodeMap.get('1') && nodeMap.get('2'), '快照应含 Alice/Bob');
+        assert(graphLayoutMode === 'force', '退出后应恢复进入前布局（force）');
         assert(btn.textContent === '星云模式', '按钮应还原');
         // 清理 fake 库注入
         loadScriptTag = origLoadScriptTag;
@@ -9225,7 +9333,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           bubbles: true
         }));
         await waitFor(() => currentDrawerNodeId === '2', 3000, '点击邻居应跳转到节点 2');
-        document.getElementById('closeDrawerBtn').click();
+        collapseUnifiedPanel(); // 原壳内 ✕ 已并入面板收起（双 X 去重）
       });
 
       addAssert('AI 上下文：选中节点 payload 附加且包裹 untrusted_data', '统一面板', async () => {
@@ -9241,7 +9349,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         assert(start !== -1 && end !== -1 && end > start, '节点 payload 应被 untrusted_data 包裹');
         assert(ctx.text.slice(start, end).indexOf('Alice') !== -1, 'payload 内容应落在数据区内');
         assert(ctx.bytes > 0, '上下文字节数应可测量');
-        document.getElementById('closeDrawerBtn').click();
+        collapseUnifiedPanel(); // 原壳内 ✕ 已并入面板收起（双 X 去重）
         renderGraph([]);
       });
 
