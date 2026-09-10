@@ -1860,6 +1860,7 @@
                   <button class="btn" id="gftZoomInBtn" title="放大">＋</button>
                   <button class="btn" id="gftZoomOutBtn" title="缩小">－</button>
                   <button class="btn" id="gftFitBtn" title="适合窗口（按可见节点包围盒适配）">适合窗口</button>
+                  <button class="btn" id="gftExportPngBtn" title="导出 PNG（Canvas 路径）">导出 PNG</button>
                   <button class="btn" id="gftFullscreenBtn" title="画布全屏">全屏</button>
                 </div>
                 <!-- 过滤器面板已并入右侧统一面板（PR-19），浮动入口按钮改为打开过滤器 tab -->
@@ -1922,6 +1923,7 @@
             <button class="btn" id="gftZoomInBtnStandalone" title="放大">＋</button>
             <button class="btn" id="gftZoomOutBtnStandalone" title="缩小">－</button>
             <button class="btn" id="gftFitBtnStandalone" title="适合窗口（按可见节点包围盒适配）">适合窗口</button>
+            <button class="btn" id="gftExportPngBtnStandalone" title="导出 PNG（Sigma 走 toPNG，不可用时合成 layer 画布）">导出 PNG</button>
             <button class="btn" id="gftFullscreenBtnStandalone" title="画布全屏">全屏</button>
           </div>
           <!-- 过滤器面板已并入右侧统一面板（PR-19） -->
@@ -2351,6 +2353,7 @@
         redrawGraph();
       }
       renderGraphFilterPanels();
+      scheduleGraphHashWrite(); // PR-21 深链：过滤器排除集入 hash（selftest 页内部禁用）
     }
 
     // 过滤器面板渲染（PR-19 起合并为统一面板内一份；checkbox 勾选 = 排除该类型/label）
@@ -2620,6 +2623,12 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       setupPalette();
       setupAiChat();
       updateTqlHighlight();
+      // PR-21 视图深链 + 偏好记忆：仅正常页应用（selftest 页跳过，避免污染页内自检状态）。
+      // 偏好先恢复（布局/着色变量，由后续 renderGraph 落地），深链随后覆盖更具体的视图状态
+      if (!window.__TRIVIUM_SELFTEST__) {
+        applyGraphPrefs(loadGraphPrefs());
+        applyGraphHash(window.location.hash);
+      }
       // 应用初始化完成信号：供 scripts/ui-smoke.mjs 等自动化脚本等待，
       // 避免在 DOMContentLoaded 监听器挂载前点击按钮导致竞态
       window.__TRIVIUM_APP_READY = true;
@@ -2631,6 +2640,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       redrawGraph();
       // Sigma 实例的主题相关配色（节点边/画布底色）随主题重建
       if (graphBackend === 'sigma') rebuildSigmaInstances();
+      scheduleGraphHashWrite(); // PR-21 深链：主题变更入 hash（selftest 页内部禁用）
     }
     function setupTheme() {
       const saved = localStorage.getItem('tdb_theme');
@@ -2875,6 +2885,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           if (targetId === 'graphExplorePane') {
             initStandaloneGraph();
           }
+          scheduleGraphHashWrite(); // PR-21 深链：活动标签页入 hash（selftest 页内部禁用）
         });
       });
 
@@ -5190,6 +5201,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       bind('gftZoomOutBtnStandalone', () => graphFloatZoom('standalone', 0.8));
       bind('gftFitBtnStandalone', () => fitGraphView('standalone'));
       bind('gftFullscreenBtnStandalone', () => toggleGraphFullscreen('standaloneGraphShell'));
+      bind('gftExportPngBtn', () => exportGraphPng('query'));            // PR-21 图导出 PNG
+      bind('gftExportPngBtnStandalone', () => exportGraphPng('standalone'));
       // 全屏状态同步两视图按钮文案；尺寸变化后重绘兜底（ResizeObserver 为主路径）
       document.addEventListener('fullscreenchange', () => {
         const label = document.fullscreenElement ? '退出全屏' : '全屏';
@@ -5310,6 +5323,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       if (mode === graphLayoutMode) return;
       graphLayoutMode = mode;
       syncLayoutButtons();
+      if (!window.__TRIVIUM_SELFTEST__) saveGraphPrefs(); // PR-21 偏好记忆
+      scheduleGraphHashWrite(); // PR-21 深链
       if (mode === 'force') {
         stopAmbientMotion();
         const physicsBtn = document.getElementById('togglePhysicsBtn');
@@ -5804,11 +5819,28 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           if (!window.graphology) await loadScriptTag(SIGMA_CDN.graphology);
           if (!window.Sigma) await loadScriptTag(SIGMA_CDN.sigma);
           if (!window.graphology || !window.Sigma) throw new Error('CDN 库加载不完整');
+          patchSigmaPreserveDrawingBuffer(window.Sigma);
           sigmaLibs = { Sigma: window.Sigma, Graph: window.graphology.Graph };
           return sigmaLibs;
         })().catch((err) => { sigmaLoadPromise = null; throw err; });
       }
       return sigmaLoadPromise;
+    }
+
+    // PR-21 返修：sigma@2.4.0 硬编码只给 edges 层 preserveDrawingBuffer:true
+    //（命中检测 readPixels 用），nodes/hoverNodes 层为 false——帧外读取（导出
+    // 合成的 drawImage/toDataURL）会得到空缓冲，节点层导出即丢失。
+    // 该版本无对应设置项，故对库原型做一次性补丁：所有 WebGL 层强制保留绘图
+    // 缓冲，使导出合成可安全逐层读取。代价：WebGL 帧合成后不清空（多一次拷贝），
+    // 万级星云实测无可感知差异；selftest 的 FakeSigma 无此方法，typeof 守卫跳过。
+    function patchSigmaPreserveDrawingBuffer(Sigma) {
+      if (!Sigma || Sigma.__pdbPatched) return;
+      const orig = Sigma.prototype && Sigma.prototype.createWebGLContext;
+      if (typeof orig !== 'function') return;
+      Sigma.prototype.createWebGLContext = function (layer, options) {
+        return orig.call(this, layer, Object.assign({ preserveDrawingBuffer: true }, options || {}));
+      };
+      Sigma.__pdbPatched = true;
     }
 
     // Louvain 社区检测模块加载器（可注入点：selftest 替换为 fake，离线可测）。
@@ -5883,6 +5915,9 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       });
       const sigma = new sigmaLibs.Sigma(graph, container, {
         allowInvalidContainer: true,
+        // 注：sigma@2.4.0 无 preserveDrawingBuffer 设置项（硬编码只给 edges 层开，
+        // 见 loadSigmaLibs 的原型补丁），此处保留为前瞻设置，未来版本若支持即生效
+        preserveDrawingBuffer: true,
         defaultEdgeColor: sigmaEdgeColor,
         // 标签色跟随主题（画布底已跟随主题，见 .graph-sigma-container）
         labelColor: { color: dark ? '#e2e8f0' : '#1e293b' },
@@ -6008,6 +6043,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         updateGraphLegend();
         refreshGraphColors();
         syncColorModeButtons();
+        if (!window.__TRIVIUM_SELFTEST__) saveGraphPrefs(); // PR-21 偏好记忆
+        scheduleGraphHashWrite();
         return;
       }
       graphColorMode = 'community';
@@ -6017,6 +6054,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         graphColorMode = 'type';
         syncColorModeButtons();
       }
+      if (!window.__TRIVIUM_SELFTEST__) saveGraphPrefs(); // PR-21 偏好记忆（失败回退 type 后落盘的也是真实态）
+      scheduleGraphHashWrite();
     }
 
     // 对当前图跑 Louvain 社区检测并按社区重新着色 + 更新图例；失败返回 false
@@ -6327,6 +6366,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
 
     function openNodeDrawer(node) {
       currentDrawerNodeId = node.id !== undefined ? String(node.id) : null;
+      scheduleGraphHashWrite(); // PR-21 深链：选中节点入 hash（selftest 页内部禁用）
       document.getElementById('drawerNodeTitle').textContent = `节点: #${node.id} (${node.label})`;
 
       // 平面 1: Payload（可折叠 JSON 树）
@@ -6974,6 +7014,184 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       a.click();
       // 释放 blob URL（延迟一拍：个别浏览器在 click 处理未完成时立即撤销会导致下载失败）
       setTimeout(() => URL.revokeObjectURL(url), 2000);
+    }
+
+    // blob 下载公共路径（PR-21）：revoke 时序与 exportJson 一致
+    function downloadGraphBlob(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    }
+
+    // 图导出 PNG（PR-21）：Canvas 后端 canvas.toBlob；
+    // Sigma 后端优先 sigma.toPNG({download:true})（库自带），不可用时把容器内
+    // layer canvas 按序合成到一张带主题底色的画布再下载。隐藏视图（clientWidth=0）
+    // 导出必为空图，直接忽略。
+    function exportGraphPng(viewId) {
+      const fname = `triviumdb-graph-${Date.now()}.png`;
+      if (graphBackend === 'sigma') {
+        const inst = sigmaInstances[viewId];
+        if (inst && !inst.sigma.killed && typeof inst.sigma.toPNG === 'function') {
+          inst.sigma.toPNG({ download: true, name: fname });
+          return;
+        }
+        const container = document.getElementById(viewId === 'query' ? 'graphSigmaContainer' : 'standaloneSigmaContainer');
+        if (!container) return;
+        const layers = Array.from(container.querySelectorAll('canvas')).filter(c => c.width > 0 && c.height > 0);
+        if (!layers.length) return;
+        const comp = document.createElement('canvas');
+        comp.width = layers[0].width;
+        comp.height = layers[0].height;
+        const ctx = comp.getContext('2d');
+        ctx.fillStyle = document.documentElement.getAttribute('data-theme') === 'light' ? '#f1f5f9' : '#0b1220';
+        ctx.fillRect(0, 0, comp.width, comp.height);
+        // 逐层合成；单层读取异常（tainted/上下文丢失等）跳过该层而非中断导出
+        layers.forEach(c => {
+          try { ctx.drawImage(c, 0, 0, comp.width, comp.height); } catch (_) { /* 跳过坏层 */ }
+        });
+        comp.toBlob((blob) => { if (blob) downloadGraphBlob(blob, fname); }, 'image/png');
+        return;
+      }
+      const canvas = document.getElementById(viewId === 'query' ? 'graphCanvas' : 'standaloneGraphCanvas');
+      if (!canvas || canvas.clientWidth === 0) return; // 隐藏视图不做空导出
+      canvas.toBlob((blob) => { if (blob) downloadGraphBlob(blob, fname); }, 'image/png');
+    }
+
+    // ==========================================
+    // PR-21 视图深链（URL hash）+ 偏好记忆
+    //   深链：#g=<URLSearchParams>，编码 theme / layout / tab / node（选中节点 id）/
+    //         extypes+exlabels（过滤器排除集，逗号序列）。
+    //         写入 = 状态变更后 debounce 300ms history.replaceState（不打历史记录）；
+    //         读取 = DOMContentLoaded 末尾应用一次。
+    //   隔离：selftest 页（window.__TRIVIUM_SELFTEST__，在页内自检 IIFE 顶部置位、
+    //         先于 DOMContentLoaded 触发）整体禁用 hash 写入与启动应用，避免污染
+    //         页内自检状态与用户浏览器地址栏；applyGraphHash 本身保持纯净供 selftest 直测。
+    //   偏好：localStorage tdb_graph_prefs = {layout, colorMode}（白名单校验，
+    //         损坏 JSON / 非法值静默回退默认）；启动恢复仅设置状态变量——
+    //         布局由 renderGraph 的静态布局分支落地，community 着色由 renderGraph
+    //         的 applyCommunityColors 路径触发（CDN 失败静默回退 type，既有语义）。
+    // ==========================================
+    const GRAPH_PREFS_KEY = 'tdb_graph_prefs';
+    const GRAPH_HASH_DEBOUNCE_MS = 300;
+    const GRAPH_LAYOUT_MODES = ['force', 'cluster', 'vector', 'radial'];
+    const GRAPH_TAB_IDS = ['queryPane', 'graphExplorePane', 'vectorLabPane'];
+    let graphHashTimer = null;
+
+    // 序列化当前视图状态为 hash（无副作用，build→apply 可往返）
+    function buildGraphHash() {
+      const p = new URLSearchParams();
+      p.set('theme', document.documentElement.getAttribute('data-theme') || 'dark');
+      p.set('layout', graphLayoutMode);
+      const activeTab = document.querySelector('.tabs-bar .tab.active');
+      if (activeTab && activeTab.dataset.tab) p.set('tab', activeTab.dataset.tab);
+      if (currentDrawerNodeId != null && nodeMap.has(currentDrawerNodeId)) p.set('node', currentDrawerNodeId);
+      if (graphFilters.hiddenTypes.size) p.set('extypes', Array.from(graphFilters.hiddenTypes).join(','));
+      if (graphFilters.hiddenLabels.size) p.set('exlabels', Array.from(graphFilters.hiddenLabels).join(','));
+      return '#g=' + p.toString();
+    }
+
+    // 应用 hash 到视图状态；合法前缀返回 true，非法/无前缀返回 false（静默忽略）
+    function applyGraphHash(hash) {
+      if (typeof hash !== 'string' || hash.indexOf('#g=') !== 0) return false;
+      let p;
+      try {
+        p = new URLSearchParams(hash.slice(3));
+      } catch (_) { return false; }
+      const theme = p.get('theme');
+      if (theme === 'dark' || theme === 'light') applyThemeAttributes(theme);
+      const layout = p.get('layout');
+      if (layout && GRAPH_LAYOUT_MODES.includes(layout) && layout !== graphLayoutMode) {
+        graphLayoutMode = layout;
+        syncLayoutButtons();
+        if (graphNodes.length) {
+          if (layout === 'force') {
+            // 与 setGraphLayoutMode force 分支同语义：恢复物理（规模锁定语义不破坏）
+            stopAmbientMotion();
+            const physicsBtn = document.getElementById('togglePhysicsBtn');
+            if (!physicsLockedByScale) {
+              simulationRunning = true;
+              if (physicsBtn) physicsBtn.textContent = '冻结力学';
+            }
+            redrawGraph();
+            startSimulation(1);
+          } else {
+            applyStaticGraphLayout();
+          }
+        }
+      }
+      const tab = p.get('tab');
+      if (tab && GRAPH_TAB_IDS.includes(tab)) {
+        const el = document.querySelector(`[data-tab="${tab}"]`); // tab 已过白名单，无注入面
+        if (el) el.click();
+      }
+      const nodeId = p.get('node');
+      if (nodeId != null) {
+        const node = nodeMap.get(nodeId);
+        if (node) openNodeDrawer(node);
+      }
+      const exTypes = p.get('extypes');
+      const exLabels = p.get('exlabels');
+      if (exTypes) exTypes.split(',').filter(Boolean).forEach(t => graphFilters.hiddenTypes.add(t));
+      if (exLabels) exLabels.split(',').filter(Boolean).forEach(l => graphFilters.hiddenLabels.add(l));
+      if (exTypes || exLabels) applyGraphFilters();
+      return true;
+    }
+
+    // 状态变更 → debounce 300ms replaceState（selftest 页整体禁用）
+    function scheduleGraphHashWrite() {
+      if (window.__TRIVIUM_SELFTEST__) return;
+      if (graphHashTimer !== null) clearTimeout(graphHashTimer);
+      graphHashTimer = setTimeout(() => {
+        graphHashTimer = null;
+        try { history.replaceState(null, '', buildGraphHash()); } catch (_) { /* 隐私模式等 */ }
+      }, GRAPH_HASH_DEBOUNCE_MS);
+    }
+
+    // 读偏好：白名单校验，损坏 JSON / 非法值回退 null/剔除（返回可安全消费的对象或 null）
+    function loadGraphPrefs() {
+      let raw;
+      try {
+        raw = localStorage.getItem(GRAPH_PREFS_KEY);
+      } catch (_) { return null; }
+      if (!raw) return null;
+      let obj;
+      try {
+        obj = JSON.parse(raw);
+      } catch (_) { return null; } // 损坏 JSON 回退默认
+      if (!obj || typeof obj !== 'object') return null;
+      const prefs = {};
+      if (GRAPH_LAYOUT_MODES.includes(obj.layout)) prefs.layout = obj.layout;
+      if (obj.colorMode === 'type' || obj.colorMode === 'community') prefs.colorMode = obj.colorMode;
+      return prefs;
+    }
+
+    // 写偏好（调用点已按 __TRIVIUM_SELFTEST__ 门控，selftest 页不落盘）
+    function saveGraphPrefs() {
+      try {
+        localStorage.setItem(GRAPH_PREFS_KEY, JSON.stringify({ layout: graphLayoutMode, colorMode: graphColorMode }));
+      } catch (_) { /* 隐私模式等静默 */ }
+    }
+
+    // 应用偏好：仅恢复状态变量 + 同步按钮（布局/社区着色由 renderGraph 落地，见区块头注释）
+    function applyGraphPrefs(prefs) {
+      if (!prefs) return false;
+      let applied = false;
+      if (prefs.layout && prefs.layout !== graphLayoutMode) {
+        graphLayoutMode = prefs.layout;
+        syncLayoutButtons();
+        applied = true;
+      }
+      if (prefs.colorMode && prefs.colorMode !== graphColorMode) {
+        graphColorMode = prefs.colorMode;
+        syncColorModeButtons();
+        applied = true;
+      }
+      return applied;
     }
 
     function saveHistory(q) {
@@ -9452,6 +9670,188 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           assert(typeof s.desc === 'string' && s.desc.indexOf('<script') === -1,
             '步骤 ' + (i + 1) + ' 正文应为硬编码字符串且无 script 标签');
         });
+      });
+
+      // ---------- PR-21 图导出 PNG / 视图深链 / 偏好记忆 ----------
+      addAssert('图导出 PNG：Canvas toBlob 路径捕获调用与文件名', '图导出', async () => {
+        document.querySelector('[data-tab="graphExplorePane"]').click();
+        renderGraph([{ a: NODE_ALICE, b: NODE_BOB }]);
+        const canvas = document.getElementById('standaloneGraphCanvas');
+        assert(canvas.clientWidth > 0, '独立画布应可见');
+        const savedDownload = downloadGraphBlob;
+        const captured = [];
+        let toBlobCalled = false;
+        try {
+          downloadGraphBlob = (blob, name) => captured.push({ size: blob && blob.size, name });
+          canvas.toBlob = (cb, type) => { toBlobCalled = true; cb(new Blob(['png-bytes'], { type: type || 'image/png' })); };
+          exportGraphPng('standalone');
+          assert(toBlobCalled, 'Canvas 后端应走 canvas.toBlob');
+          assert(captured.length === 1, 'toBlob stub 同步回调应触发一次下载，实际 ' + captured.length);
+          assert(/^triviumdb-graph-\d+\.png$/.test(captured[0].name),
+            '文件名应为 triviumdb-graph-<ts>.png，实际 ' + captured[0].name);
+          assert(captured[0].size > 0, '导出 blob 应非空');
+          // 隐藏视图守卫：切回 queryPane 后独立画布隐藏 → 静默不导出
+          document.querySelector('[data-tab="queryPane"]').click();
+          const before = captured.length;
+          exportGraphPng('standalone');
+          assert(captured.length === before, '隐藏视图应跳过导出（不做空导出）');
+        } finally {
+          downloadGraphBlob = savedDownload;
+        }
+      });
+
+      addAssert('图导出 PNG：Sigma toPNG 优先路径记录调用 + 无 toPNG 回退不崩', '图导出', async () => {
+        const savedBackend = graphBackend;
+        const savedInst = sigmaInstances.standalone;
+        try {
+          graphBackend = 'sigma';
+          const calls = [];
+          // graph no-op stub：ambient rAF 的 syncSigmaPositions 会遍历 inst.graph，null 会产生未捕获异常
+          const fakeGraph = { forEachNode() {}, forEachEdge() {}, hasNode() { return false; }, setNodeAttribute() {}, setEdgeAttribute() {} };
+          sigmaInstances.standalone = {
+            sigma: { killed: false, refresh() {}, toPNG: (opts) => { calls.push(opts); } },
+            graph: fakeGraph, mapFn: (n) => ({ x: 0.5, y: 0.5 })
+          };
+          exportGraphPng('standalone');
+          assert(calls.length === 1 && calls[0].download === true, 'Sigma 后端应优先调用 sigma.toPNG({download:true})');
+          // 回退：实例无 toPNG 且容器无 layer canvas（未启用 Sigma）→ 静默返回不崩
+          sigmaInstances.standalone = { sigma: { killed: false, refresh() {} }, graph: fakeGraph, mapFn: (n) => ({ x: 0.5, y: 0.5 }) };
+          exportGraphPng('standalone');
+          assert(calls.length === 1, '回退路径不应再触发 toPNG');
+          // 合成保真回归钉（PR-21 返修）：fake 双层（底色层 + 节点层画红色圆）走合成路径，
+          // 解码产物采样圆心像素必须保留节点填充色。真机根因是无 preserveDrawingBuffer
+          // 的 WebGL 层帧外读取纯黑（合成后节点只剩白点）——WebGL 帧读取由实例化
+          // options 修复 + 真机导出读图验证；本断言锁定合成管道的像素保真不回归
+          const container = document.getElementById('standaloneSigmaContainer');
+          const savedChildren = Array.from(container.childNodes);
+          const savedDl = downloadGraphBlob;
+          const blobs = [];
+          try {
+            downloadGraphBlob = (b) => blobs.push(b);
+            container.textContent = ''; // 隔离：仅本断言注入的两层参与合成
+            const bgLayer = document.createElement('canvas');
+            bgLayer.width = 64; bgLayer.height = 64;
+            const bgCtx = bgLayer.getContext('2d');
+            bgCtx.fillStyle = '#f1f5f9';
+            bgCtx.fillRect(0, 0, 64, 64);
+            const nodeLayer = document.createElement('canvas');
+            nodeLayer.width = 64; nodeLayer.height = 64;
+            const ndCtx = nodeLayer.getContext('2d');
+            ndCtx.fillStyle = '#ff3b30';
+            ndCtx.beginPath();
+            ndCtx.arc(32, 32, 10, 0, Math.PI * 2);
+            ndCtx.fill();
+            container.appendChild(bgLayer);
+            container.appendChild(nodeLayer);
+            exportGraphPng('standalone'); // 走合成回退（inst 无 toPNG）
+            await waitFor(() => blobs.length === 1, 3000, '合成回退应产出下载 blob'); // comp.toBlob 异步回调
+            const bmp = await createImageBitmap(blobs[0]);
+            const probe = document.createElement('canvas');
+            probe.width = 64; probe.height = 64;
+            probe.getContext('2d').drawImage(bmp, 0, 0);
+            const px = Array.from(probe.getContext('2d').getImageData(32, 32, 1, 1).data);
+            if (bmp.close) bmp.close();
+            assert(px[0] > 200 && px[1] < 120,
+              '合成产物圆心应保留节点填充色（≠背景），实际 rgb(' + px.join(',') + ')');
+          } finally {
+            downloadGraphBlob = savedDl;
+            container.textContent = '';
+            savedChildren.forEach(n => container.appendChild(n));
+          }
+        } finally {
+          graphBackend = savedBackend;
+          sigmaInstances.standalone = savedInst;
+        }
+      });
+
+      addAssert('视图深链：build→apply 往返全等 + 非法 hash 静默忽略', '视图深链', async () => {
+        // 非法输入静默忽略
+        assert(applyGraphHash('') === false, '空 hash 应返回 false');
+        assert(applyGraphHash('#other=1') === false, '无 #g= 前缀应返回 false');
+        assert(applyGraphHash('#g=layout=burst') === true, '合法前缀返回 true（白名单外值被忽略）');
+        assert(graphLayoutMode !== 'burst', '白名单外 layout 不得被应用');
+        // 状态 A：radial + 选中节点 1 + 排除类型 person
+        renderGraph([{ a: NODE_ALICE, b: NODE_BOB }]);
+        document.querySelector('[data-tab="graphExplorePane"]').click();
+        const savedTypes = new Set(graphFilters.hiddenTypes);
+        const savedLabels = new Set(graphFilters.hiddenLabels);
+        const savedDrawer = currentDrawerNodeId;
+        const savedHash = location.hash;
+        try {
+          graphFilters.hiddenTypes.add('person');
+          await setGraphLayoutMode('radial'); // 状态 A 的布局档（selftest 页不写偏好/深链）
+          openNodeDrawer({ id: '1', label: 'Alice', payload: NODE_ALICE.payload, vector: NODE_ALICE.vector });
+          const h1 = buildGraphHash();
+          assert(h1.indexOf('layout=radial') !== -1 && h1.indexOf('node=1') !== -1
+            && h1.indexOf('extypes=person') !== -1, 'hash 应编码 layout/node/extypes，实际 ' + h1);
+          // 状态 B：force + 清过滤器 + 清选中
+          graphFilters.hiddenTypes.clear();
+          currentDrawerNodeId = null;
+          applyGraphHash('#g=layout=force');
+          assert(graphLayoutMode === 'force', 'applyGraphHash 应切换布局到 force');
+          // 往返：应用 h1 后 build 应与 h1 全等
+          assert(applyGraphHash(h1) === true, '往返应用应成功');
+          await waitFor(() => currentDrawerNodeId === '1', 3000, 'hash node 应恢复选中节点');
+          assert(graphLayoutMode === 'radial', 'hash layout 应恢复 radial');
+          assert(graphFilters.hiddenTypes.has('person'), 'hash extypes 应恢复过滤器排除集');
+          assert(buildGraphHash() === h1, 'build→apply→build 应全等（往返），实际 ' + buildGraphHash() + ' vs ' + h1);
+        } finally {
+          graphFilters.hiddenTypes = savedTypes; // 恢复引用语义（graphFilters 为 const 对象）
+          void savedLabels;
+          currentDrawerNodeId = savedDrawer;
+          collapseUnifiedPanel();
+          history.replaceState(null, '', savedHash || location.pathname + location.search);
+          document.querySelector('[data-tab="queryPane"]').click();
+          await setGraphLayoutMode('force');
+        }
+      });
+
+      addAssert('视图深链：selftest 页整体禁用 hash 写入（replaceState 零调用）', '视图深链', async () => {
+        assert(window.__TRIVIUM_SELFTEST__ === true, '本页应为 selftest 模式');
+        const orig = history.replaceState.bind(history);
+        let calls = 0;
+        history.replaceState = (...a) => { calls++; return orig(...a); };
+        try {
+          scheduleGraphHashWrite(); // 自检页应直接 no-op
+          setGraphLayoutMode('radial'); // 真实状态变更入口也不得写 hash
+          await new Promise(r => setTimeout(r, 450)); // 越过 300ms debounce 窗口
+          assert(calls === 0, 'selftest 页 replaceState 应零调用，实际 ' + calls + ' 次');
+        } finally {
+          history.replaceState = orig;
+          await setGraphLayoutMode('force');
+        }
+      });
+
+      addAssert('偏好记忆：tdb_graph_prefs 写读往返 + 损坏 JSON/白名单外值回退 + 应用恢复', '偏好记忆', async () => {
+        const savedRaw = localStorage.getItem('tdb_graph_prefs');
+        const savedLayout = graphLayoutMode;
+        const savedColor = graphColorMode;
+        try {
+          localStorage.setItem('tdb_graph_prefs', JSON.stringify({ layout: 'radial', colorMode: 'community' }));
+          const p1 = loadGraphPrefs();
+          assert(p1 && p1.layout === 'radial' && p1.colorMode === 'community', '合法偏好应读回');
+          localStorage.setItem('tdb_graph_prefs', '{broken json');
+          assert(loadGraphPrefs() === null, '损坏 JSON 应回退 null（默认）');
+          localStorage.removeItem('tdb_graph_prefs');
+          assert(loadGraphPrefs() === null, '无偏好应返回 null');
+          localStorage.setItem('tdb_graph_prefs', JSON.stringify({ layout: 'hacker', colorMode: 'x', extra: 1 }));
+          const p2 = loadGraphPrefs();
+          assert(p2 && !p2.layout && !p2.colorMode, '白名单外值应被剔除，实际 ' + JSON.stringify(p2));
+          // 应用路径：恢复状态变量 + 按钮同步（社区着色由 renderGraph 落地，此处不触发 CDN）
+          assert(applyGraphPrefs({ layout: 'radial', colorMode: 'type' }) === true, '偏好应用应返回已应用');
+          assert(graphLayoutMode === 'radial', '布局偏好应恢复');
+          assert(document.getElementById('layoutRadialBtn').classList.contains('active')
+            && document.getElementById('layoutRadialBtnStandalone').classList.contains('active'),
+            '布局按钮应随偏好同步');
+          assert(applyGraphPrefs(null) === false, '空偏好应返回未应用');
+        } finally {
+          if (savedRaw === null) localStorage.removeItem('tdb_graph_prefs');
+          else localStorage.setItem('tdb_graph_prefs', savedRaw);
+          graphLayoutMode = savedLayout;
+          graphColorMode = savedColor;
+          syncLayoutButtons();
+          syncColorModeButtons();
+        }
       });
 
       addAssert('命名空间树：分隔符探测/计数/嵌套/空值兜底 + 确定性', '命名空间树', async () => {
