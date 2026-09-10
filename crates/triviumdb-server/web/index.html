@@ -2275,6 +2275,19 @@
       });
     }
 
+    // 侧栏「三模数据引擎」高亮同步：点击快速动作或切换主标签时把 active
+    // 移到对应项（HTML 里的 active 仅为静态初始态）
+    const TAB_SIDEBAR_MAP = {
+      queryPane: 'quick-find',
+      graphExplorePane: 'quick-match',
+      vectorLabPane: 'quick-search'
+    };
+    function syncSidebarHighlight(action) {
+      document.querySelectorAll('.sidebar .nav-item[data-action]').forEach(el => {
+        el.classList.toggle('active', el.dataset.action === action);
+      });
+    }
+
     // 力导向图模拟器状态
     // 规模护栏：力导向为 O(n²) tick 循环，节点规模超阈值时逐级降级防主线程冻结
     const GRAPH_PHYSICS_MAX_NODES = 300;   // 超过后自动关闭物理模拟（静态黄金角螺旋布局）
@@ -2842,7 +2855,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         });
       });
 
-      // 快速动作（同上：按填充的语句类型自动推断）
+      // 快速动作（同上：按填充的语句类型自动推断）；
+      // 高亮跟随点击（HTML 里的 active 是静态初始态，从不切换曾致高亮永久钉在「文档」）
       document.querySelectorAll('[data-action]').forEach(el => {
         el.addEventListener('click', () => {
           const action = el.dataset.action;
@@ -2854,6 +2868,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
             setEditorValue('SEARCH VECTOR [0.1, 0.2, 0.3, 0.4] TOP 5 RETURN *');
           }
           applyInferredMutation(document.getElementById('tqlInput').value);
+          syncSidebarHighlight(action);
           executeCurrentQuery();
         });
       });
@@ -2882,6 +2897,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           const targetId = tab.dataset.tab;
           document.getElementById(targetId).classList.add('active');
           animateTabIn(targetId);
+          // 侧栏「三模数据引擎」高亮随主标签联动
+          if (TAB_SIDEBAR_MAP[targetId]) syncSidebarHighlight(TAB_SIDEBAR_MAP[targetId]);
           if (targetId === 'graphExplorePane') {
             initStandaloneGraph();
           }
@@ -9026,6 +9043,30 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           'selftest 下 saveHistory 应为 no-op（用户历史不得被 mock 查询污染）');
         if (prev === null) localStorage.removeItem('tdb_query_history');
         else localStorage.setItem('tdb_query_history', prev);
+      });
+
+      addAssert('体验加固：侧栏快速动作高亮随点击与主标签联动', '体验加固', async () => {
+        // 回归钉：HTML 里的 active 曾是静态初始态，点击图拓扑/向量 QuIVer 后
+        // 高亮永久钉在「文档」（用户截图评审报告）
+        document.querySelector('.sidebar .nav-item[data-action="quick-match"]').click();
+        await waitFor(() => __activeQueryCount === 0, 5000, 'MATCH 查询落地');
+        assert(document.querySelector('.sidebar .nav-item[data-action="quick-match"]').classList.contains('active'),
+          '点击图拓扑后 quick-match 应高亮');
+        assert(!document.querySelector('.sidebar .nav-item[data-action="quick-find"]').classList.contains('active'),
+          'quick-find 应取消高亮');
+        // 主标签联动：切独立探索/向量/查询台分别映射图拓扑/向量 QuIVer/文档
+        document.querySelector('[data-tab="graphExplorePane"]').click();
+        assert(document.querySelector('.sidebar .nav-item[data-action="quick-match"]').classList.contains('active'),
+          '切独立探索标签应联动 quick-match');
+        document.querySelector('[data-tab="vectorLabPane"]').click();
+        assert(document.querySelector('.sidebar .nav-item[data-action="quick-search"]').classList.contains('active'),
+          '切向量标签应联动 quick-search');
+        document.querySelector('[data-tab="queryPane"]').click();
+        assert(document.querySelector('.sidebar .nav-item[data-action="quick-find"]').classList.contains('active'),
+          '切回查询台应联动 quick-find');
+        // 还原现场：点亮文档并落地一次 FIND（供后续断言环境稳定）
+        document.querySelector('.sidebar .nav-item[data-action="quick-find"]').click();
+        await waitFor(() => __activeQueryCount === 0, 5000, '还原 FIND 查询落地');
       });
 
       addAssert('体验加固：超长单行查询（滚动条出现）高亮层 scroll 尺寸仍全等', '体验加固', async () => {
