@@ -5563,14 +5563,12 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       ctx.scale(t.k, t.k);
 
       const labelMode = graphLabelMode(graphNodes.length, t.k);
-      // 配色跟随主题（PR-20 评审定版）：浅色主题浅底深线，深色主题暗底浅线。
-      // 浅色主题基色用 slate-700 且透明度下限 0.45（用户复评：0.35 的 slate-600
-      // 在白底上被冲成浅蓝灰仍看不清）
+      // 配色跟随主题（PR-20 评审定版）：深色主题暗底浅线；浅色主题用户定版
+      // 浅蓝色调（#6b8cae 钢青蓝）+ 固定 0.4 透明度（两轮复评收敛：slate-600×0.35
+      // 太浅、slate-700×0.45 过强）
       const dark = document.documentElement.getAttribute('data-theme') === 'dark';
-      const edgeBase = dark ? '148, 163, 184' : '51, 65, 85';       // 边线：暗底浅灰 / 浅底深灰(slate-700)
-      const edgeAlpha = dark
-        ? graphEdgeAlpha(graphNodes.length)
-        : Math.max(graphEdgeAlpha(graphNodes.length), 0.45);
+      const edgeBase = dark ? '148, 163, 184' : '107, 140, 174';    // 边线：暗底浅灰 / 浅底钢青蓝
+      const edgeAlpha = dark ? graphEdgeAlpha(graphNodes.length) : 0.4;
       const nodeStroke = dark ? 'rgba(148, 163, 184, 0.45)' : 'rgba(15, 23, 42, 0.3)';
       const nodeLabel = dark ? '#e2e8f0' : '#1e293b';
       const selectedStroke = dark ? '#ffffff' : '#0f172a';
@@ -5757,12 +5755,9 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         });
       });
       // PR-17：边色随节点密度自适应（8 位 hex alpha），与 Canvas 后端公式一致；
-      // PR-20 评审定版：边色基底跟随主题（暗底浅灰 / 浅底深灰 slate-700），
-      // 浅色主题透明度下限 0.45（与 Canvas 同步：0.35 在白底上被冲成浅蓝灰看不清）
-      const sigmaEdgeAlpha = dark
-        ? graphEdgeAlpha(graphNodes.length)
-        : Math.max(graphEdgeAlpha(graphNodes.length), 0.45);
-      const sigmaEdgeBase = dark ? '#94a3b8' : '#334155';
+      // PR-20 评审定版：浅色主题浅蓝 #6b8cae 固定 0.4 透明度（与 Canvas 同步）
+      const sigmaEdgeAlpha = dark ? graphEdgeAlpha(graphNodes.length) : 0.4;
+      const sigmaEdgeBase = dark ? '#94a3b8' : '#6b8cae';
       const sigmaEdgeColor = sigmaEdgeBase + alphaToHexByte(sigmaEdgeAlpha);
       graphEdges.forEach(e => {
         if (graph.hasNode(e.source) && graph.hasNode(e.target) && !graph.hasEdge(e.source, e.target)) {
