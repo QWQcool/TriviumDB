@@ -2088,6 +2088,20 @@
             <button class="btn" id="expandNeighborhoodBtn" type="button" title="以当前节点为种子拉取邻域并入图探索">⤷ 扩展邻域入图</button>
           </div>
           <div class="ai-ctx-size" id="khopHint"></div>
+          <!-- 路径追踪（0.8.8：GET /v1/nodes/{from}/paths/to/{to}） -->
+          <div style="display: flex; align-items: center; gap: 6px; margin-top: 8px;">
+            <input class="vl-input" id="pathTargetInput" type="text" inputmode="numeric"
+              placeholder="目标节点 id" aria-label="路径追踪目标节点 id"
+              style="width: 110px; padding: 4px 6px; font-family: var(--font-mono);">
+            <select id="pathHopsSelect" class="vl-input" style="width: 92px; padding: 4px 6px;" aria-label="最大跳数">
+              <option value="2">≤2 跳</option>
+              <option value="4" selected>≤4 跳</option>
+              <option value="8">≤8 跳</option>
+            </select>
+            <button class="btn" id="tracePathBtn" type="button" title="在服务端查找从当前节点到目标节点的有界路径，并把路径并入/高亮到图中">追踪路径</button>
+          </div>
+          <div class="ai-ctx-size" id="pathHint"></div>
+          <button class="btn" id="clearPathBtn" type="button" hidden style="margin-top: 6px;">清除路径高亮</button>
         </section>
       </div>
     </div>
@@ -4290,56 +4304,43 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       return addedNodes;
     }
 
-    // k-hop 邻域扩展：以指定节点为种子，用 GET /v1/nodes/{id} 的 edgeVersions 逐跳
-    // 拉取邻居并入图（现有 API 组合；服务端无批量 k-hop 端点，N+1 请求的代价见
-    // docs/webui-api-gaps.md）。单点请求失败不阻断整轮扩展。
+    // k-hop 邻域扩展（0.8.8 起）：单请求 GET /v1/nodes/{id}/neighbors
+    // 服务端返回有界子图（真实节点 + 真实边 + truncated 状态），
+    // 彻底移除旧版「逐跳逐节点 N+1 拉取 + 行内顺序推断边 + 悬挂边过滤」的 workaround
+    // （docs/webui-api-gaps.md Gap 1 / Gap 4 已由上游 0.8.8 修复）。
+    // direction=both：入边/出边都纳入（旧 API 只能看到出边）
+    const NEIGHBORS_LIMIT = 2000;
     async function expandNeighborhoodIntoGraph(nodeId, depth) {
-      // 轮次定义：第 0 轮拉种子详情，其后每轮拉上一轮发现的邻居（共 depth+1 轮），
-      // 即 depth=1 → 种子 + 全部 1 跳邻居的节点对象都入库
-      let frontier = [String(nodeId)];
-      const visited = new Set();
-      let addedNodes = 0;
-      const pendingEdges = [];
-      for (let d = 0; d <= depth; d++) {
-        const next = [];
-        for (const id of frontier) {
-          if (visited.has(id)) continue;
-          visited.add(id);
-          try {
-            const res = await fetch(`${API_BASE}/v1/nodes/${id}`);
-            if (!res.ok) continue;
-            const data = await res.json();
-            const node = data.node || {};
-            const sid = String(node.id ?? id);
-            if (!nodeMap.has(sid)) {
-              const gn = createGraphNode(sid, node, node.payload?.type);
-              nodeMap.set(sid, gn);
-              graphNodes.push(gn);
-              addedNodes++;
-            }
-            (data.edgeVersions || []).forEach(ev => {
-              const tid = String(ev.targetId);
-              pendingEdges.push({ source: sid, target: tid, label: ev.label || 'LINK' });
-              if (!visited.has(tid)) {
-                next.push(tid);
-              }
-            });
-          } catch (_) { /* 单点失败不阻断整轮扩展 */ }
-        }
-        frontier = next;
+      const url = `${API_BASE}/v1/nodes/${nodeId}/neighbors`
+        + `?depth=${encodeURIComponent(depth)}&limit=${NEIGHBORS_LIMIT}&direction=both`;
+      const res = await fetch(url);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ title: '请求失败', detail: res.statusText }));
+        throw new Error(`${err.title || '邻域查询失败'} — ${err.detail || ''}`);
       }
-      // 悬挂边防护：BFS 末轮节点的出边 target 不会再被拉取入库，直接并会产生
-      // 端点缺失的悬挂边（渲染层不可见、导出不一致）。统一在 BFS 结束后过滤，
-      // 只并入两端都在图内的边。
-      const seenEdges = new Set(graphEdges.map(e => e.source + '|' + e.target));
-      pendingEdges.forEach(e => {
-        const k = e.source + '|' + e.target;
-        if (nodeMap.has(e.source) && nodeMap.has(e.target) && !seenEdges.has(k)) {
-          seenEdges.add(k);
-          graphEdges.push(e);
-        }
+      const data = await res.json();
+      let addedNodes = 0;
+      (data.nodes || []).forEach(node => {
+        const sid = String(node.id);
+        if (nodeMap.has(sid)) return;
+        const gn = createGraphNode(sid, node, node.payload?.type);
+        nodeMap.set(sid, gn);
+        graphNodes.push(gn);
+        addedNodes++;
       });
-      if (addedNodes > 0) {
+      let addedEdges = 0;
+      const seenEdges = new Set(graphEdges.map(e => e.source + '|' + e.target));
+      (data.edges || []).forEach(e => {
+        const source = String(e.source);
+        const target = String(e.target);
+        const key = source + '|' + target;
+        // 服务端返回真实边：两端节点本次均已并入，直接落图（无需悬挂边过滤）
+        if (!nodeMap.has(source) || !nodeMap.has(target) || seenEdges.has(key)) return;
+        seenEdges.add(key);
+        graphEdges.push({ source, target, label: e.label || 'LINK', weight: e.weight });
+        addedEdges++;
+      });
+      if (addedNodes > 0 || addedEdges > 0) {
         graphTotalNodeCount = Math.max(graphTotalNodeCount, graphNodes.length);
         recomputeDegrees(); // PR-17：k-hop 扩展后重算度数
         applyGraphPhysicsPolicy();
@@ -4348,7 +4349,13 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           else rebuildSigmaInstances();
         }
       }
-      return addedNodes;
+      return {
+        addedNodes,
+        addedEdges,
+        truncated: !!data.truncated,
+        visitedNodes: data.visitedNodes || 0,
+        traversedEdges: data.traversedEdges || 0
+      };
     }
 
     function renderGraph(rows) {
@@ -4408,6 +4415,14 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       }
       // 全量重建后过滤面板统计已失效：面板打开时刷新计数（过滤器集合保持）
       renderGraphFilterPanels();
+      // 新查询重建图：旧的路径高亮键不再对应（清空避免幽灵高亮）
+      if (pathHighlightEdges.size) {
+        pathHighlightEdges = new Set();
+        const clearBtn = document.getElementById('clearPathBtn');
+        if (clearBtn) clearBtn.hidden = true;
+        const pathHint = document.getElementById('pathHint');
+        if (pathHint) pathHint.textContent = '';
+      }
     }
 
     // 规模护栏分流：>1500 只渲染（物理必关），300<n≤1500 关物理保静态布局，
@@ -4982,8 +4997,9 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       const khopHint = document.getElementById('khopHint');
       const updateKhopHint = () => {
         const depth = Number(khopSelect.value);
+        // 0.8.8：服务端单请求返回有界子图（limit 2000），不再是 N+1 请求风暴
         khopHint.textContent = depth > 1
-          ? `⚠ ${depth} 跳将逐点发起 N+1 轮请求（服务端无批量 k-hop 端点，见 docs/webui-api-gaps.md Gap 1），请求数随跳数与度数放大`
+          ? `${depth} 跳：单请求返回 ≤${NEIGHBORS_LIMIT} 节点的双向子图（超出由服务端截断并提示）`
           : '';
       };
       khopSelect.addEventListener('change', updateKhopHint);
@@ -4993,12 +5009,33 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         btn.disabled = true;
         try {
           const depth = Number(khopSelect.value) || 1;
-          const added = await expandNeighborhoodIntoGraph(currentDrawerNodeId, depth);
-          showToast(added > 0 ? `已扩展 ${added} 个 ${depth} 跳内邻域节点入图` : '邻域节点均已在图中');
+          const r = await expandNeighborhoodIntoGraph(currentDrawerNodeId, depth);
+          if (r.addedNodes === 0 && r.addedEdges === 0) {
+            showToast('邻域节点均已在图中');
+          } else {
+            showToast(`已扩展 ${depth} 跳邻域：新增 ${r.addedNodes} 节点 / ${r.addedEdges} 边`
+              + (r.truncated ? '（服务端已按 limit 截断，可减小跳数或收窄类型）' : ''));
+          }
+        } catch (err) {
+          showToast('邻域扩展失败: ' + err.message);
         } finally {
           btn.disabled = false;
         }
       });
+
+      // 路径追踪（0.8.8）：目标 id + 最大跳数 → 服务端有界路径搜索
+      document.getElementById('tracePathBtn').addEventListener('click', () => {
+        const target = document.getElementById('pathTargetInput').value.trim();
+        const hops = Number(document.getElementById('pathHopsSelect').value) || 4;
+        tracePathTo(target, hops);
+      });
+      document.getElementById('pathTargetInput').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          document.getElementById('tracePathBtn').click();
+        }
+      });
+      document.getElementById('clearPathBtn').addEventListener('click', clearPathHighlight);
 
       // 过滤器按钮（两个视图）与重置
       document.getElementById('graphFilterBtn').addEventListener('click', () => toggleGraphFilterPanel('graphFilterPanel'));
@@ -5732,8 +5769,11 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         ctx.beginPath();
         ctx.moveTo(s.x, s.y);
         ctx.quadraticCurveTo(cx, cy, t.x, t.y);
-        ctx.strokeStyle = 'rgba(' + edgeBase + ', ' + edgeAlpha + ')'; // 低透明度：高密度下不糊成一片
-        ctx.lineWidth = 1.2;
+        // 路径追踪高亮（0.8.8）：命中路径的边用琥珀色加粗（双主题下均可辨识）
+        const onPath = pathHighlightEdges.has(edge.source + '|' + edge.target)
+          || pathHighlightEdges.has(edge.target + '|' + edge.source);
+        ctx.strokeStyle = onPath ? 'rgba(245, 158, 11, 0.95)' : 'rgba(' + edgeBase + ', ' + edgeAlpha + ')';
+        ctx.lineWidth = onPath ? 3 : 1.2;
         ctx.stroke();
 
         if (edge.label) {
@@ -5915,11 +5955,9 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           label: n.label, color: n.color, hidden: !isNodeVisible(n)
         });
       });
-      // PR-17：边色随节点密度自适应（8 位 hex alpha），与 Canvas 后端公式一致；
-      // PR-20 评审定版：浅色主题浅蓝 #6b8cae 固定 0.4 透明度（与 Canvas 同步）
-      const sigmaEdgeAlpha = dark ? graphEdgeAlpha(graphNodes.length) : 0.4;
-      const sigmaEdgeBase = dark ? '#94a3b8' : '#6b8cae';
-      const sigmaEdgeColor = sigmaEdgeBase + alphaToHexByte(sigmaEdgeAlpha);
+      // 边色随节点密度自适应（8 位 hex alpha）；基色/透明度与 Canvas 后端一致，
+      // 统一走 sigmaEdgeBaseColor()（路径高亮还原时复用同一公式）
+      const sigmaEdgeColor = sigmaEdgeBaseColor();
       graphEdges.forEach(e => {
         if (graph.hasNode(e.source) && graph.hasNode(e.target) && !graph.hasEdge(e.source, e.target)) {
           graph.addEdge(e.source, e.target, {
@@ -6425,7 +6463,14 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     // __drawerFetchSeq：抽屉节点请求序号守卫——快速连续点边跳转时，
     // 乱序返回的旧响应不得覆盖当前节点内容
     let __drawerFetchSeq = 0;
-    let __drawerMiniEdges = []; // 迷你图当前已摆位的邻居（loadNodeEdges 已拉取的 edgeVersions，零新增请求）
+    let __drawerMiniEdges = []; // 迷你图当前已摆位的邻居（loadNodeEdges 已拉取的边，零新增请求）
+
+    // 抽屉边的「另一端」节点 id（0.8.8 起边为双向真实对象 {source,target}，
+    // 不再是仅含 targetId 的 edgeVersions）
+    function drawerEdgeOtherId(edge) {
+      const self = String(currentDrawerNodeId);
+      return String(edge.source) === self ? String(edge.target) : String(edge.source);
+    }
 
     // PR-19 迷你图纯函数：count 个邻居在单位圆环上确定性均匀摆位（首点正上方，顺时针）
     function miniRingPositions(count) {
@@ -6470,7 +6515,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         const nx = cx + o.x * radius;
         const ny = cy + o.y * radius;
         const edge = __drawerMiniEdges[i];
-        const nb = nodeMap.get(String(edge.targetId)) || {};
+        const nb = nodeMap.get(drawerEdgeOtherId(edge)) || {};
         ctx.beginPath();
         ctx.arc(nx, ny, 6, 0, Math.PI * 2);
         ctx.fillStyle = getNodeColor(nb.typeKey);
@@ -6513,7 +6558,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           const d = Math.hypot(cx + o.x * radius - mx, cy + o.y * radius - my);
           if (d < bestDist) { bestDist = d; best = i; }
         });
-        if (best >= 0) jumpToNode(__drawerMiniEdges[best].targetId);
+        if (best >= 0) jumpToNode(drawerEdgeOtherId(__drawerMiniEdges[best]));
       });
     }
 
@@ -6527,53 +6572,97 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       container.appendChild(hint);
     }
 
-    async function loadNodeEdges(nodeId) {
+    // 抽屉 Edges 平面（0.8.8 起）：GET /v1/nodes/{id}/edges?direction=both&offset&limit
+    // 相比旧版 /v1/nodes/{id} 的 edgeVersions（仅出边、无分页）：
+    //   * direction=both 让入边可见（← 方向箭头标注）
+    //   * 分页 + total/hasMore 支持 hub 节点「加载更多」
+    //   * 真实边对象（source/target/label/weight），不再依赖 targetId 单字段
+    const DRAWER_EDGES_PAGE = 50;
+    const __drawerEdgesState = { nodeId: null, offset: 0, total: 0, hasMore: false, items: [] };
+
+    function renderDrawerEdgeItems(nodeId, edges) {
+      const container = document.getElementById('drawerNodeEdges');
+      container.textContent = '';
+      const idStr = String(nodeId);
+      edges.forEach(edge => {
+        const isOut = edge.source === idStr;
+        const otherId = isOut ? edge.target : edge.source;
+        const item = document.createElement('div');
+        item.className = 'inspector-edge-item';
+        // label / otherId 均为服务端数据：DOM textContent 构建（XSS 安全）
+        const label = document.createElement('span');
+        label.className = 'inspector-edge-label';
+        label.textContent = edge.label ?? '-';
+        const arrow = document.createElement('span');
+        arrow.textContent = isOut ? '→' : '←';
+        arrow.title = isOut ? '出边' : '入边';
+        const target = document.createElement('button');
+        target.className = 'inspector-edge-target';
+        target.type = 'button';
+        target.title = `查看节点 #${otherId} 的 360° 视图`;
+        target.textContent = `#${otherId}`;
+        target.addEventListener('click', () => jumpToNode(otherId));
+        item.append(label, arrow, target);
+        container.appendChild(item);
+      });
+      // 分页：「加载更多」按钮（hasMore 时）
+      if (__drawerEdgesState.hasMore) {
+        const more = document.createElement('button');
+        more.className = 'btn';
+        more.type = 'button';
+        more.id = 'drawerEdgesMoreBtn';
+        more.style.marginTop = '6px';
+        more.textContent = `加载更多（${__drawerEdgesState.items.length}/${__drawerEdgesState.total}）`;
+        more.addEventListener('click', () => loadNodeEdges(nodeId, { append: true }));
+        container.appendChild(more);
+      }
+    }
+
+    async function loadNodeEdges(nodeId, opts) {
+      const append = !!(opts && opts.append);
       const seq = ++__drawerFetchSeq;
       const container = document.getElementById('drawerNodeEdges');
-      container.textContent = '加载中...';
+      if (!append) {
+        __drawerEdgesState.nodeId = String(nodeId);
+        __drawerEdgesState.offset = 0;
+        __drawerEdgesState.total = 0;
+        __drawerEdgesState.hasMore = false;
+        __drawerEdgesState.items = [];
+        container.textContent = '加载中...';
+      }
+      const offset = append ? __drawerEdgesState.offset : 0;
       try {
-        const res = await fetch(`${API_BASE}/v1/nodes/${nodeId}`);
+        const res = await fetch(`${API_BASE}/v1/nodes/${nodeId}/edges`
+          + `?direction=both&offset=${offset}&limit=${DRAWER_EDGES_PAGE}`);
         if (seq !== __drawerFetchSeq) return;
         if (!res.ok) {
           const err = await res.json().catch(() => ({ title: '请求失败', detail: res.statusText }));
           if (seq !== __drawerFetchSeq) return;
-          setDrawerEdgeHint(`边信息加载失败: ${err.title || '未知错误'} — ${err.detail || ''}`);
-          renderMiniGraph([]);
+          if (!append) { setDrawerEdgeHint(`边信息加载失败: ${err.title || '未知错误'} — ${err.detail || ''}`); renderMiniGraph([]); }
           return;
         }
         const data = await res.json();
         if (seq !== __drawerFetchSeq) return;
-        const edges = data.edgeVersions || [];
-
-        if (!edges.length) {
-          container.textContent = '无出边 (no outgoing edges)';
-          renderMiniGraph([]); // PR-19：无邻居时清空迷你图
+        const page = (data.edges || []).map(e => ({
+          source: String(e.source),
+          target: String(e.target),
+          label: e.label || 'LINK',
+          weight: e.weight
+        }));
+        __drawerEdgesState.items = append ? __drawerEdgesState.items.concat(page) : page;
+        __drawerEdgesState.offset = offset + page.length;
+        __drawerEdgesState.total = typeof data.total === 'number' ? data.total : __drawerEdgesState.items.length;
+        __drawerEdgesState.hasMore = !!data.hasMore;
+        if (!append && !__drawerEdgesState.items.length) {
+          container.textContent = '无关联边 (no edges in either direction)';
+          renderMiniGraph([]);
           return;
         }
-        container.textContent = '';
-        edges.forEach(edge => {
-          const item = document.createElement('div');
-          item.className = 'inspector-edge-item';
-          // target 可点击：跳转继续查看该节点（DOM textContent 构建，edge.label 为服务端数据）
-          const label = document.createElement('span');
-          label.className = 'inspector-edge-label';
-          label.textContent = edge.label ?? '-';
-          const arrow = document.createElement('span');
-          arrow.textContent = '→';
-          const target = document.createElement('button');
-          target.className = 'inspector-edge-target';
-          target.type = 'button';
-          target.title = `查看节点 #${edge.targetId} 的 360° 视图`;
-          target.textContent = `#${edge.targetId}`;
-          target.addEventListener('click', () => jumpToNode(edge.targetId));
-          item.append(label, arrow, target);
-          container.appendChild(item);
-        });
-        renderMiniGraph(edges); // PR-19：已拉取邻居上环摆位（零新增请求）
+        renderDrawerEdgeItems(nodeId, __drawerEdgesState.items);
+        renderMiniGraph(__drawerEdgesState.items); // PR-19：已加载邻居上环摆位（零额外请求）
       } catch (err) {
         if (seq !== __drawerFetchSeq) return;
-        setDrawerEdgeHint(`网络请求失败: ${err.message}`);
-        renderMiniGraph([]);
+        if (!append) { setDrawerEdgeHint(`网络请求失败: ${err.message}`); renderMiniGraph([]); }
       }
     }
 
@@ -6603,6 +6692,143 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       } catch (err) {
         if (seq !== __drawerFetchSeq) return;
         setDrawerEdgeHint(`网络请求失败: ${err.message}`);
+      }
+    }
+
+    // ==========================================
+    // 路径追踪（0.8.8）：GET /v1/nodes/{from}/paths/to/{to}?maxHops&label
+    // 旧版无路径端点（docs/webui-api-gaps.md Gap 2），功能无法实现；
+    // 现由服务端做有界搜索，返回节点序列 + 逐跳真实边，客户端
+    // 用 POST /v1/nodes/batch-get（Gap 5）补齐节点 payload 后并入图并高亮。
+    // ==========================================
+    let pathHighlightEdges = new Set(); // "source|target" 键集合
+    let __pathTraceSeq = 0;
+
+    // Sigma 边基色（与 buildSigmaForView 同公式；高亮还原时复用）
+    function sigmaEdgeBaseColor() {
+      const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+      const alpha = dark ? graphEdgeAlpha(graphNodes.length) : 0.4;
+      return (dark ? '#94a3b8' : '#6b8cae') + alphaToHexByte(alpha);
+    }
+
+    function clearPathHighlight() {
+      pathHighlightEdges = new Set();
+      const clearBtn = document.getElementById('clearPathBtn');
+      if (clearBtn) clearBtn.hidden = true;
+      const hint = document.getElementById('pathHint');
+      if (hint) hint.textContent = '';
+      if (graphBackend === 'sigma') {
+        const base = sigmaEdgeBaseColor();
+        for (const viewId of ['query', 'standalone']) {
+          const inst = sigmaInstances[viewId];
+          if (!inst || inst.sigma.killed) continue;
+          inst.graph.forEachEdge((edge) => {
+            inst.graph.setEdgeAttribute(edge, 'color', base);
+            inst.graph.setEdgeAttribute(edge, 'size', 1);
+          });
+          inst.sigma.refresh();
+        }
+      } else {
+        redrawGraph();
+      }
+    }
+
+    function applyPathHighlight(keys) {
+      pathHighlightEdges = new Set(keys);
+      const clearBtn = document.getElementById('clearPathBtn');
+      if (clearBtn) clearBtn.hidden = pathHighlightEdges.size === 0;
+      if (graphBackend === 'sigma') {
+        const base = sigmaEdgeBaseColor();
+        for (const viewId of ['query', 'standalone']) {
+          const inst = sigmaInstances[viewId];
+          if (!inst || inst.sigma.killed) continue;
+          inst.graph.forEachEdge((edge, attrs, source, target) => {
+            const on = pathHighlightEdges.has(source + '|' + target) || pathHighlightEdges.has(target + '|' + source);
+            inst.graph.setEdgeAttribute(edge, 'color', on ? '#f59e0b' : base);
+            inst.graph.setEdgeAttribute(edge, 'size', on ? 3 : 1);
+          });
+          inst.sigma.refresh();
+        }
+      } else {
+        redrawGraph();
+      }
+    }
+
+    async function tracePathTo(targetId, maxHops) {
+      const hint = document.getElementById('pathHint');
+      const from = currentDrawerNodeId;
+      if (from === null) { hint.textContent = '请先打开一个节点作为起点'; return; }
+      if (!targetId) { hint.textContent = '请输入目标节点 id'; return; }
+      const seq = ++__pathTraceSeq;
+      hint.textContent = '查询中…';
+      try {
+        const res = await fetch(`${API_BASE}/v1/nodes/${from}/paths/to/${targetId}?maxHops=${encodeURIComponent(maxHops)}`);
+        if (seq !== __pathTraceSeq) return;
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ title: '请求失败', detail: res.statusText }));
+          if (seq !== __pathTraceSeq) return;
+          hint.textContent = `${err.title || '路径查询失败'} — ${err.detail || ''}`;
+          return;
+        }
+        const data = await res.json();
+        if (seq !== __pathTraceSeq) return;
+        const paths = data.paths || [];
+        if (!paths.length) {
+          hint.textContent = `未找到 ≤${maxHops} 跳的路径（#${from} → #${targetId}）`;
+          return;
+        }
+        const p = paths[0];
+        const pathNodeIds = (p.nodes || []).map(s => String(s));
+        // 批量补齐路径节点 payload（0.8.8 batch-get；失败则仅并入边与高亮）
+        let addedNodes = 0;
+        try {
+          const ids = pathNodeIds.map(s => Number(s)).filter(n => Number.isFinite(n));
+          if (ids.length) {
+            const bres = await fetch(`${API_BASE}/v1/nodes/batch-get`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ids })
+            });
+            if (seq !== __pathTraceSeq) return;
+            if (bres.ok) {
+              const bdata = await bres.json();
+              (bdata.nodes || []).forEach(node => {
+                const sid = String(node.id);
+                if (nodeMap.has(sid)) return;
+                const gn = createGraphNode(sid, node, node.payload?.type);
+                nodeMap.set(sid, gn);
+                graphNodes.push(gn);
+                addedNodes++;
+              });
+            }
+          }
+        } catch (_) { /* 节点补齐失败不阻断路径并入 */ }
+        // 并入路径边（真实边对象，带 label）
+        const keys = [];
+        const seen = new Set(graphEdges.map(e => e.source + '|' + e.target));
+        (p.edges || []).forEach(e => {
+          const source = String(e.source);
+          const target = String(e.target);
+          const key = source + '|' + target;
+          keys.push(key);
+          if (nodeMap.has(source) && nodeMap.has(target) && !seen.has(key)) {
+            seen.add(key);
+            graphEdges.push({ source, target, label: e.label || 'LINK', weight: e.weight });
+          }
+        });
+        if (addedNodes > 0) {
+          graphTotalNodeCount = Math.max(graphTotalNodeCount, graphNodes.length);
+          recomputeDegrees();
+        }
+        applyGraphPhysicsPolicy();
+        if (graphBackend === 'sigma') rebuildSigmaInstances(); // 新节点/边入图需重建
+        applyPathHighlight(keys);
+        hint.textContent = `路径 ${Math.max(pathNodeIds.length - 1, 0)} 跳：${pathNodeIds.map(i => '#' + i).join(' → ')}`
+          + (data.truncated ? '（服务端结果已截断）' : '')
+          + (paths.length > 1 ? `（共 ${paths.length} 条，已高亮首条）` : '');
+        showToast(`路径追踪：已并入并高亮 ${keys.length} 跳路径`);
+      } catch (err) {
+        if (seq === __pathTraceSeq) hint.textContent = '网络请求失败: ' + err.message;
       }
     }
 
@@ -7976,6 +8202,86 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
             : '这是检索建议：\n```tql\n' + tql + '\n```\n点击卡片填入编辑器。';
           return gatedSseRes(fullText, 2, init && init.signal);
         }
+        // ---------- 0.8.8 图探索端点 mock（必须在 nodeMatch 之前：nodeMatch 的前缀
+        // 正则会把 /v1/nodes/99/neighbors 误判为节点详情） ----------
+        const neighborsMatch = path.match(/^\/v1\/nodes\/([^/?]+)\/neighbors/);
+        if (neighborsMatch) {
+          const nid = neighborsMatch[1];
+          const depth = Number((path.match(/[?&]depth=(\d+)/) || [])[1] || 1);
+          // 单请求观测点：断言 k-hop 已从 N+1 逐点拉取改为单请求
+          window.__neighborsCalls = (window.__neighborsCalls || 0) + 1;
+          window.__lastNeighborsQuery = path;
+          const nodes = [{ type: 'node', id: '99', payload: { name: 'KSeed', type: 'person' }, vector: [] }];
+          const edges = [];
+          if (nid === '99') {
+            nodes.push({ type: 'node', id: '98', payload: { name: 'KHop2', type: 'person' }, vector: [] });
+            edges.push({ type: 'edge', source: '99', target: '98', label: 'KNOWS', weight: 1 });
+            if (depth >= 2) {
+              nodes.push({ type: 'node', id: '97', payload: { name: 'KHop3', type: 'person' }, vector: [] });
+              edges.push({ type: 'edge', source: '98', target: '97', label: 'KNOWS', weight: 1 });
+            }
+          } else if (nid === '98') {
+            nodes.push({ type: 'node', id: '98', payload: { name: 'KHop2', type: 'person' }, vector: [] });
+          }
+          return jsonRes({
+            nodes, edges,
+            visitedNodes: nodes.length, traversedEdges: edges.length,
+            truncated: false, generation: GEN
+          });
+        }
+        const edgesListMatch = path.match(/^\/v1\/nodes\/([^/?]+)\/edges/);
+        if (edgesListMatch) {
+          const eid = edgesListMatch[1];
+          const offset = Number((path.match(/[?&]offset=(\d+)/) || [])[1] || 0);
+          const limit = Number((path.match(/[?&]limit=(\d+)/) || [])[1] || 50);
+          const all = eid === '1'
+            ? [{ type: 'edge', source: '1', target: '2', label: 'KNOWS', weight: 1 },
+               { type: 'edge', source: '3', target: '1', label: 'AUTHORED', weight: 1 }]
+            : eid === '99'
+              ? [{ type: 'edge', source: '99', target: '98', label: 'KNOWS', weight: 1 }]
+              : [];
+          const page = all.slice(offset, offset + limit);
+          return jsonRes({
+            edges: page, total: all.length, offset, limit,
+            hasMore: offset + page.length < all.length, generation: GEN
+          });
+        }
+        if (path.indexOf('/v1/nodes/batch-get') === 0) {
+          let req = {};
+          try { req = JSON.parse((init && init.body) || '{}'); } catch (_) {}
+          const known = {
+            '1': NODE_ALICE, '2': NODE_BOB, '3': NODE_PAPER,
+            '99': { type: 'node', id: '99', payload: { name: 'KSeed', type: 'person' }, vector: [] },
+            '98': { type: 'node', id: '98', payload: { name: 'KHop2', type: 'person' }, vector: [] },
+            '97': { type: 'node', id: '97', payload: { name: 'KHop3', type: 'person' }, vector: [] }
+          };
+          const ids = req.ids || [];
+          const nodes = ids.map(i => known[String(i)]).filter(Boolean);
+          const missingIds = ids.filter(i => !known[String(i)]).map(String);
+          return jsonRes({ nodes, missingIds, generation: GEN });
+        }
+        const pathsMatch = path.match(/^\/v1\/nodes\/([^/?]+)\/paths\/to\/([^/?]+)/);
+        if (pathsMatch) {
+          const from = pathsMatch[1];
+          const to = pathsMatch[2];
+          if (from === '99' && to === '97') {
+            return jsonRes({
+              paths: [{
+                nodes: ['99', '98', '97'],
+                edges: [{ type: 'edge', source: '99', target: '98', label: 'KNOWS', weight: 1 },
+                        { type: 'edge', source: '98', target: '97', label: 'KNOWS', weight: 1 }]
+              }],
+              truncated: false, generation: GEN
+            });
+          }
+          if (from === '1' && to === '2') {
+            return jsonRes({
+              paths: [{ nodes: ['1', '2'], edges: [{ type: 'edge', source: '1', target: '2', label: 'KNOWS', weight: 1 }] }],
+              truncated: false, generation: GEN
+            });
+          }
+          return jsonRes({ paths: [], truncated: false, generation: GEN });
+        }
         const nodeMatch = path.match(/^\/v1\/nodes\/([^/?]+)/);
         if (nodeMatch) {
           const id = nodeMatch[1];
@@ -9326,8 +9632,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         // 深度 3：提示出现 + 97 经 98 拉取入库
         sel.value = '3';
         sel.dispatchEvent(new Event('change', { bubbles: true }));
-        assert(document.getElementById('khopHint').textContent.indexOf('Gap 1') !== -1,
-          '>1 跳应显示 N+1 请求放大提示（docs/webui-api-gaps.md Gap 1）');
+        assert(document.getElementById('khopHint').textContent.indexOf('单请求') !== -1,
+          '>1 跳应说明服务端单请求有界子图语义（0.8.8 起不再是 N+1）');
         document.getElementById('expandNeighborhoodBtn').click();
         await waitFor(() => nodeMap.has('97'), 3000, '深度 3 应拉取到 2 跳节点 97');
         sel.value = '1';
@@ -10028,12 +10334,13 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           '镜像对 1↔4 应关于竖轴对称');
         assert(Math.abs(p5a[2].x + p5a[3].x) < 1e-9 && Math.abs(p5a[2].y - p5a[3].y) < 1e-9,
           '镜像对 2↔3 应关于竖轴对称');
-        // 渲染 + 点击跳转（mock：节点 1 有 KNOWS→2 出边）
+        // 渲染 + 点击跳转（mock：节点 1 双向两条边 —— 出边 KNOWS→2、入边 AUTHORED←3）
         renderGraph([{ a: NODE_ALICE, b: NODE_BOB }]);
         document.querySelector('[data-tab="queryPane"]').click();
         openNodeDrawer({ id: '1', label: 'Alice', payload: NODE_ALICE.payload, vector: NODE_ALICE.vector });
-        await waitFor(() => __drawerMiniEdges.length === 1, 3000, '已拉取邻居应上环');
-        assert(__drawerMiniEdges[0].targetId === '2', '邻居应为节点 2');
+        await waitFor(() => __drawerMiniEdges.length === 2, 3000, '已拉取邻居应上环（双向两条边）');
+        assert(drawerEdgeOtherId(__drawerMiniEdges[0]) === '2', '首条（出边）邻居应为节点 2');
+        assert(drawerEdgeOtherId(__drawerMiniEdges[1]) === '3', '第二条（入边）邻居应为节点 3');
         const canvas = document.getElementById('drawerMiniMap');
         const rect = canvas.getBoundingClientRect();
         assert(rect.width > 0 && rect.height > 0, '迷你图应可见（详情 tab 激活）');
@@ -10062,6 +10369,72 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         assert(ctx.bytes > 0, '上下文字节数应可测量');
         collapseUnifiedPanel(); // 原壳内 ✕ 已并入面板收起（双 X 去重）
         renderGraph([]);
+      });
+
+      // ---------- 0.8.8 API 适配（k-hop 单请求 / 边列举双向分页 / 路径追踪） ----------
+      addAssert('API 0.8.8：k-hop 邻域改为单请求 /neighbors（不再 N+1 逐点拉取）', 'API 适配', async () => {
+        renderGraph([]);
+        mergeRowsIntoGraph([{ node: { type: 'node', id: '99', payload: { name: 'KSeed', type: 'person' }, vector: [] } }]);
+        openNodeDrawer({ id: '99', label: 'KSeed', payload: { name: 'KSeed' }, vector: [] });
+        await waitFor(() => document.querySelector('#drawerNodeEdges .inspector-edge-item'), 3000, '边列表应加载');
+        window.__neighborsCalls = 0;
+        document.getElementById('khopDepthSelect').value = '2';
+        document.getElementById('khopDepthSelect').dispatchEvent(new Event('change', { bubbles: true }));
+        document.getElementById('expandNeighborhoodBtn').click();
+        await waitFor(() => nodeMap.has('97'), 3000, '2 跳应一次拉到 97');
+        assert(window.__neighborsCalls === 1,
+          'k-hop 应为单次 /neighbors 请求（旧实现为 N+1），实际 ' + window.__neighborsCalls + ' 次');
+        assert(window.__lastNeighborsQuery.indexOf('direction=both') !== -1,
+          '邻域查询应带 direction=both（旧 API 只能看到出边）');
+        assert(graphEdges.some(e => e.source === '99' && e.target === '98' && e.label === 'KNOWS'),
+          '真实边对象应带 label 落图');
+        assert(graphEdges.some(e => e.source === '98' && e.target === '97'), '2 跳边应落图');
+        document.getElementById('khopDepthSelect').value = '1';
+        document.getElementById('khopDepthSelect').dispatchEvent(new Event('change', { bubbles: true }));
+      });
+
+      addAssert('API 0.8.8：抽屉边列举双向（入边可见）+ 分页字段', 'API 适配', async () => {
+        renderGraph(FIND_ROWS);
+        openNodeDrawer({ id: '1', label: 'Alice', payload: { name: 'Alice' }, vector: [] });
+        await waitFor(() => document.querySelectorAll('#drawerNodeEdges .inspector-edge-item').length >= 2,
+          3000, '双向边应各渲染一条');
+        const container = document.getElementById('drawerNodeEdges');
+        assert(container.textContent.indexOf('KNOWS') !== -1, '出边 label 应显示');
+        assert(container.textContent.indexOf('AUTHORED') !== -1, '入边 label 应显示（direction=both）');
+        const arrows = Array.from(container.querySelectorAll('.inspector-edge-item'))
+          .map(el => el.querySelectorAll('span')[1].textContent);
+        assert(arrows.indexOf('→') !== -1 && arrows.indexOf('←') !== -1,
+          '应同时出现出边 → 与入边 ← 方向箭头，实际 ' + JSON.stringify(arrows));
+        assert(!document.getElementById('drawerEdgesMoreBtn'),
+          'mock 数据量小于分页上限时不应出现「加载更多」');
+      });
+
+      addAssert('API 0.8.8：路径追踪（/paths + batch-get 补齐 + 高亮 + 清除）', 'API 适配', async () => {
+        renderGraph([]);
+        mergeRowsIntoGraph([{ node: { type: 'node', id: '99', payload: { name: 'KSeed', type: 'person' }, vector: [] } }]);
+        openNodeDrawer({ id: '99', label: 'KSeed', payload: { name: 'KSeed' }, vector: [] });
+        await waitFor(() => document.getElementById('tracePathBtn'), 2000, '路径追踪入口应存在');
+        document.getElementById('pathTargetInput').value = '97';
+        document.getElementById('pathHopsSelect').value = '4';
+        document.getElementById('tracePathBtn').click();
+        await waitFor(() => document.getElementById('pathHint').textContent.indexOf('2 跳') !== -1,
+          3000, '路径提示应显示 2 跳');
+        assert(nodeMap.has('98') && nodeMap.has('97'), '路径节点应经 batch-get 并入图');
+        assert(pathHighlightEdges.has('99|98') && pathHighlightEdges.has('98|97'),
+          '路径边应进入高亮集合，实际 ' + JSON.stringify(Array.from(pathHighlightEdges)));
+        assert(!document.getElementById('clearPathBtn').hidden, '清除高亮按钮应显示');
+        assert(graphEdges.some(e => e.source === '98' && e.target === '97' && e.label === 'KNOWS'),
+          '路径边应带真实 label 落图');
+        // 未找到路径的分支
+        document.getElementById('pathTargetInput').value = '123456';
+        document.getElementById('tracePathBtn').click();
+        await waitFor(() => document.getElementById('pathHint').textContent.indexOf('未找到') !== -1,
+          3000, '无路径应给出明确提示');
+        // 清除高亮
+        document.getElementById('clearPathBtn').click();
+        assert(pathHighlightEdges.size === 0, '清除后高亮集合应为空');
+        assert(document.getElementById('clearPathBtn').hidden, '清除后按钮应隐藏');
+        assert(document.getElementById('pathHint').textContent === '', '清除后提示应清空');
       });
 
       // ---------- 执行器（支持运行中动态追加的断言） ----------

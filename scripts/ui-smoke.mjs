@@ -528,6 +528,66 @@ try {
   await page.waitForFunction(() => uspActiveTab === null, null, { timeout: 5000 });
   log('  ✓ 统一面板：收起回导航条');
 
+  // 冒烟 5.9：0.8.8 图探索 API —— k-hop 单请求 /neighbors + 边列举双向 + 路径追踪
+  // （种子数据：Smoke Alice -KNOWS-> Smoke Bob）
+  // 注意：前序星云步骤的图可能已被快照恢复替换（含非数字 id 的合成节点），
+  // 必须先跑一次真实查询把种子节点重新载入，才能命中 /v1/nodes/{id}/edges
+  await page.evaluate(() => {
+    document.querySelector('[data-tab="queryPane"]').click();
+    setEditorValue('FIND {type: "person"} RETURN * LIMIT 25');
+  });
+  await page.click('#runQueryBtn');
+  await page.waitForFunction(() => graphNodes.some(n => n.label === 'Smoke Alice'), null, { timeout: 15000 });
+  const aliceId = await page.evaluate(() => {
+    const n = graphNodes.find(x => x.label === 'Smoke Alice');
+    openNodeDrawer({ id: n.id, label: n.label, payload: n.payload, vector: n.vector || [] });
+    return String(n.id);
+  });
+  await page.waitForFunction(() => document.querySelectorAll('#drawerNodeEdges .inspector-edge-item').length >= 1,
+    null, { timeout: 8000 });
+  const edgeInfo = await page.evaluate(() => ({
+    text: document.getElementById('drawerNodeEdges').textContent,
+    count: document.querySelectorAll('#drawerNodeEdges .inspector-edge-item').length,
+  }));
+  if (edgeInfo.text.indexOf('KNOWS') === -1) throw new Error('抽屉边列表应含 KNOWS（/v1/nodes/{id}/edges）: ' + edgeInfo.text);
+  log(`  ✓ 边列举（0.8.8 /edges）：${edgeInfo.count} 条真实边，含 KNOWS`);
+
+  await page.evaluate(() => document.getElementById('expandNeighborhoodBtn').click());
+  await page.waitForFunction(() => Array.from(document.querySelectorAll('#toastStack .toast'))
+    .some(t => t.textContent.indexOf('邻域') !== -1 || t.textContent.indexOf('已在图中') !== -1), null, { timeout: 15000 });
+  log('  ✓ k-hop 邻域（0.8.8 /neighbors 单请求）执行成功');
+
+  const bobId = await page.evaluate(() => {
+    const n = graphNodes.find(x => x.label === 'Smoke Bob');
+    return n ? String(n.id) : null;
+  });
+  if (bobId) {
+    await page.evaluate((to) => {
+      document.getElementById('pathTargetInput').value = to;
+      document.getElementById('pathHopsSelect').value = '4';
+      document.getElementById('tracePathBtn').click();
+    }, bobId);
+    await page.waitForFunction(() => document.getElementById('pathHint').textContent.indexOf('路径') !== -1,
+      null, { timeout: 15000 });
+    const pathState = await page.evaluate(() => ({
+      hint: document.getElementById('pathHint').textContent,
+      highlighted: pathHighlightEdges.size,
+      clearVisible: !document.getElementById('clearPathBtn').hidden,
+    }));
+    if (pathState.highlighted < 1 || !pathState.clearVisible) {
+      throw new Error('路径追踪应高亮路径并显示清除按钮: ' + JSON.stringify(pathState));
+    }
+    log(`  ✓ 路径追踪（0.8.8 /paths + batch-get）：${pathState.hint}`);
+    await page.click('#clearPathBtn');
+    const cleared = await page.evaluate(() => pathHighlightEdges.size === 0
+      && document.getElementById('clearPathBtn').hidden);
+    if (!cleared) throw new Error('清除路径高亮应复位');
+    log('  ✓ 路径高亮清除复位');
+  } else {
+    log('  ⚠ 未找到 Smoke Bob 节点，跳过路径追踪冒烟');
+  }
+  await page.click('#uspCollapseBtn');
+
   log(`5/6 打开 ${BASE}/ui?selftest=1 断言自检套件`);
   await page.goto(`${BASE}/ui?selftest=1`, { waitUntil: 'domcontentloaded', timeout: 20000 });
   await page.waitForFunction(() => window.__TRIVIUM_APP_READY === true, null, { timeout: 10000 });

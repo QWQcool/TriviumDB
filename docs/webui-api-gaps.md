@@ -1,85 +1,42 @@
-# WebUI 图探索 API Gap 记录（PR-14）
+# WebUI 图探索 API Gap 记录与状态
 
-> 记录内置 Web Console（`crates/triviumdb-server/web/index.html`）在实现「搜索驱动图探索」
-> 过程中遇到的 HTTP API 能力缺口。每条 gap 包含：现状、对 WebUI 的实际影响、建议的端点草案。
-> 目的是为后续 server 迭代提供输入；在 gap 补齐之前，WebUI 用现有 API 的客户端组合 workaround。
+> 记录内置 Web Console（`crates/triviumdb-server/web/index.html`）在实现「搜索驱动图探索」过程中
+> 遇到的 HTTP API 能力缺口。**2026-09-11 更新：上游 0.8.8（PR #50 `feat/server-graph-exploration`）
+> 已补齐其中 4 项，WebUI 相应 workaround 已移除。**
 
-## 已有能力（本文引用）
+## 状态总览
 
-| 能力 | 端点 | 说明 |
-| --- | --- | --- |
-| TQL 查询 | `POST /v1/tql` | 支持 `Accept: application/x-ndjson` 流式（PR-11） |
-| 节点详情 | `GET /v1/nodes/{id}` | 返回 node + edgeVersions（targetId/label/version） |
-| 向量检索 | `POST /v1/search/vector` | Top-K 近邻 |
-| 健康探测 | `GET /health/ready`、`GET /health/details` | |
+| # | Gap | 状态 | 上游能力 / 现行实现 |
+| --- | --- | --- | --- |
+| 1 | k-hop 邻域批量查询 | ✅ **0.8.8 已修复** | `GET /v1/nodes/{id}/neighbors?depth&limit&labels&types&direction` → `{nodes, edges, visitedNodes, traversedEdges, truncated, generation}`；WebUI `expandNeighborhoodIntoGraph` 已改为单请求 |
+| 2 | 最短路径 / 路径追踪 | ✅ **0.8.8 已修复** | `GET /v1/nodes/{from}/paths/to/{to}?maxHops&label` → `{paths:[{nodes, edges}], truncated, generation}`；WebUI 新增「追踪路径」（并入 + 琥珀色高亮 + 清除） |
+| 3 | MATCH 投影无法返回边对象 | ⚠️ **仍开放** | TQL `RETURN r` 仍不支持边绑定；WebUI 保留行内顺序推断（`mergeRowsIntoGraph`）作为兜底。新的 `/neighbors`、`/edges`、`/paths` 端点已能提供真实边对象，图探索路径不再依赖推断 |
+| 4 | 按 label / 方向过滤的边列举 | ✅ **0.8.8 已修复** | `GET /v1/nodes/{id}/edges?direction=out|in|both&label&offset&limit` → `{edges, total, offset, limit, hasMore, generation}`；WebUI 抽屉 Edges 平面改为双向 + 分页「加载更多」 |
+| 5 | 批量节点读取 | ✅ **0.8.8 已修复** | `POST /v1/nodes/batch-get`（body `{ids:[...]}`）→ `{nodes, missingIds, generation}`；WebUI 路径追踪用它补齐路径节点 payload |
+| 6 | 结果 → 图的投影依赖约定形状 | ⚠️ **仍开放** | 查询响应 meta 仍无列类型描述；WebUI 保留 `findNodeInRow` / `mergeRowsIntoGraph` 启发式识别 |
 
-## Gap 1：无 k-hop / 多跳邻域批量查询端点
+## 历史背景（workaround 移除记录）
 
-- **现状**：拉取某节点的 1 跳邻域只能 `GET /v1/nodes/{id}` 拿 edgeVersions，再对每个
-  targetId 逐个 `GET /v1/nodes/{targetId}`，即 N+1 请求。2 跳扩展请求数按分支因子平方增长。
-- **影响**：WebUI「扩展邻域入图」功能（`expandNeighborhoodIntoGraph`）在稠密图上会产生
-  请求风暴；深度 >1 的探索在小带宽/远程场景不可用。
-- **建议草案**：
-  - `GET /v1/nodes/{id}/neighbors?depth=1..3&limit=N&types=paper,person`
-    → 返回 `{ nodes: [...], edges: [{ source, target, label }], truncated: bool }`，
-    一次性返回子图；`truncated` 配合 `limit` 做服务端护栏（与 max_query_rows 语义对齐）。
-- **当前 workaround**：客户端 BFS 逐跳逐节点拉取（depth 固定 1，由用户重复点击继续扩展）。
+- **Gap 1 旧 workaround**：`GET /v1/nodes/{id}` 取 `edgeVersions` → 逐 targetId 递归拉取（N+1，2 跳按分支因子平方增长），并在 BFS 结束后过滤悬挂边。0.8.8 后：单请求 + 服务端 `truncated` 护栏，悬挂边问题由服务端保证（返回边两端必在 `nodes` 中）。
+- **Gap 4 旧 workaround**：全量拉取出边后客户端过滤，且**入边完全不可见**。0.8.8 后：`direction=both` 让入边以 `←` 标注呈现，hub 节点分页加载。
+- **Gap 5 旧 workaround**：逐个 `GET /v1/nodes/{id}` 串行补齐。0.8.8 后：`batch-get` 单请求（上限 10000 ids）。
 
-## Gap 2：无最短路径 / 路径追踪查询
+## 仍开放的两项（对 WebUI 的影响与建议）
 
-- **现状**：TQL `MATCH` 只能匹配固定模式（定点跳数），无法表达「A 到 B 的最短路径 /
-  所有 ≤N 跳路径」这类变长路径查询；HTTP API 也没有 path 端点。
-- **影响**：WebUI「路径追踪」探索（选中两个节点高亮连通路径）无法实现，只能整图肉眼找。
-- **建议草案**：
-  - `GET /v1/nodes/{from}/paths/to/{to}?maxHops=4&limit=10`
-    → 返回 `{ paths: [[{ id, label }, { edgeLabel, id }...]] }`（节点序列 + 连接边标签）。
-  - 或 TQL 扩展：`MATCH SHORTEST (a)-[*1..4]->(b)`（需查询引擎支持变长路径与去环）。
-- **当前 workaround**：无（功能放弃，UI 未提供入口）。
+### Gap 3：TQL MATCH 投影无法返回边对象
 
-## Gap 3：MATCH 投影无法返回边对象
+- **影响**：TQL 查询结果入图（查询控制台「交互拓扑图」/「并入图探索」）仍靠行内节点顺序推断连线；两节点间多条边、环状路径等场景的连线语义不精确。
+- **现状缓解**：图探索路径（k-hop / 边列举 / 路径追踪）已全部走真实边端点；只有 TQL 结果投影仍是推断。
+- **建议**：`RETURN r` 支持 `{ type: 'edge', source, target, label, weight, metadata }`（与 `encode_graph_edge` 形状对齐，服务端已有该编码函数）。
 
-- **现状**：`MATCH (a)-[r]->(b) RETURN a, b, r` 中 `r` 无法作为边对象返回（服务端只支持
-  返回节点绑定）；WebUI 图视图的连线靠「同一行内节点出现顺序」推断。
-- **影响**：推断出的连线没有真实边语义（可能画出查询路径而非真实边），边 label 只能来自
-  显式 edge 对象行；两个节点被多条边连接时无法表达。
-- **建议草案**：`RETURN r` 支持 EdgeView：`{ source, target, label, payload?, version }`，
-  与 node 的 `{ type: 'node', ... }` 形状对齐（如 `{ type: 'edge', ... }`）。
-- **当前 workaround**：行内顺序推断 + 去重（`mergeRowsIntoGraph` / `renderGraph`）。
+### Gap 6：结果形状无列类型声明
 
-## Gap 4：无按 label / 方向过滤的边列举
+- **影响**：前端靠启发式识别节点/边/标量列；新增投影形状时需同步改前端。
+- **建议**：响应 meta 携带 `columns: [{name, kind: 'node'|'edge'|'scalar'}]`（NDJSON 的 meta 行或 JSON 顶层）。
 
-- **现状**：`GET /v1/nodes/{id}` 的 edgeVersions 返回全部出边（targetId/label/version），
-  不支持按 label 过滤、方向（入边/出边）、分页。
-- **影响**：hub 节点（大量出边）的邻域扩展无法选择性加载；入边完全不可见（需要反向查询）。
-- **建议草案**：`GET /v1/nodes/{id}/edges?direction=out|in|both&label=KNOWS&offset&limit`。
-- **当前 workaround**：全量拉取后客户端过滤（入边无解）。
+## 已满足、无需新端点（备忘）
 
-## Gap 5：无子图/批量节点批量获取端点
-
-- **现状**：按 id 列表获取节点只能逐个 `GET /v1/nodes/{id}`；NDJSON 批量端点只有导入
-  （`POST /v1/import/nodes`、`POST /v1/import/edges`），没有读取。
-- **影响**：与 Gap 1 叠加放大请求数；批量恢复/对比会话中的图快照效率低。
-- **建议草案**：`POST /v1/nodes/batch-get`（body: `{ ids: [...] }`，NDJSON 响应）。
-- **当前 workaround**：逐个请求 + 并发节制（串行）。
-
-## Gap 6：结果 → 图的投影依赖约定形状
-
-- **现状**：WebUI 从查询行中识别节点靠约定（对象含 `id` 且 `type === 'node'`；`hit`、
-  别名等形状靠逐值探测），边靠 `source/target` 字段或行内顺序推断。
-- **影响**：新增投影形状时前端需要跟着猜；无法显式声明「这列是节点/边」。
-- **建议草案**：查询响应 meta 中携带列类型描述（`columns: [{ name, kind: 'node'|'edge'|'scalar' }]`），
-  或统一 node/edge 包装形状（见 Gap 3）。
-- **当前 workaround**：`findNodeInRow` / `mergeRowsIntoGraph` 的启发式识别。
-
-## 已满足、无需新端点的需求（备忘）
-
-- **流式结果**：`Accept: application/x-ndjson` 已满足大结果渐进渲染（PR-11）。
-- **节点 360° 详情**：`GET /v1/nodes/{id}` 的 edgeVersions 满足抽屉 Edges 平面。
-- **向量 Top-K 种子**：`POST /v1/search/vector` 满足向量检索种子入图。
-
-## 优先级建议
-
-1. **Gap 1（k-hop 邻域批量）** —— 对图探索体验提升最大，直接消除 N+1。
-2. **Gap 3（MATCH 返回边对象）** —— 修正图连线语义，属于正确性问题。
-3. **Gap 2（路径查询）** —— 差异化能力，可结合 TQL 变长路径一并设计。
-4. Gap 4 / Gap 5 / Gap 6 —— 体验与健壮性改进，随相关功能一并考虑。
+- 流式结果：`Accept: application/x-ndjson`（PR-11）。
+- 节点 360° 详情：`GET /v1/nodes/{id}`（仍返回 `edgeVersions`，向后兼容）。
+- 向量 Top-K 种子：`POST /v1/search/vector`。
+- 星云模式全图拉取：`MATCH (a)-[]->(b) RETURN a, b LIMIT 10000`（受 `max_query_rows` 护栏；无过滤 FIND 仍不合法，见 Gap 6 相关讨论）。
