@@ -1,0 +1,111 @@
+# TriviumDB Web Console (WebUI) 端到端与视觉回归 CI
+#
+# 背景：WebUI 是 crates/triviumdb-server/web/index.html 单文件（include_str! 内嵌），
+# 页内自检（?selftest=1）与 ui-smoke 覆盖状态与逻辑，但覆盖不了"像素与观感"
+# ——历史上已三次出现"断言全绿、肉眼不对"（浅色主题边线不可见、退化布局聚成
+# 一点、侧栏高亮不切换）。本 workflow 把三层验证都放进 CI：
+#   1. 页内自检（selftest，chromium + webkit）
+#   2. ui-smoke 端到端（真实 server + 种子数据 + 独立临时库，双引擎）
+#   3. 视觉基线比对（scripts/visual-baseline.mjs，pixelmatch）
+#
+# 视觉基线的平台策略：基线按 platform 分目录存放（tests/visual/baseline/<platform>）。
+# 若当前平台无基线，脚本自动降级为"记录模式"（不判定失败）并把截图上传为产物；
+# 用 workflow_dispatch 的 update_baseline=true 可在 CI（linux）上生成基线产物，
+# 提交后该平台即开始强制比对。
+#
+# 本地复现：
+#   npm i --no-save playwright pixelmatch pngjs && npx playwright install chromium
+#   node scripts/ui-smoke.mjs            # SMOKE_BROWSER=webkit 跑第二引擎
+#   node scripts/visual-baseline.mjs     # --update 更新基线
+
+name: WebUI
+
+on:
+  push:
+    paths:
+      - 'crates/triviumdb-server/web/**'
+      - 'scripts/ui-smoke.mjs'
+      - 'scripts/visual-baseline.mjs'
+      - 'tests/visual/baseline/**'
+      - '.github/workflows/webui.yml'
+  pull_request:
+    paths:
+      - 'crates/triviumdb-server/web/**'
+      - 'scripts/ui-smoke.mjs'
+      - 'scripts/visual-baseline.mjs'
+      - 'tests/visual/baseline/**'
+      - '.github/workflows/webui.yml'
+  workflow_dispatch:
+    inputs:
+      update_baseline:
+        description: '生成当前 runner 平台的视觉基线并上传为产物（提交后启用该平台门禁）'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  webui:
+    name: WebUI E2E + Visual
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: webui
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 安装 WebUI 测试依赖（不写入 package.json）
+        run: |
+          npm i --no-save playwright pixelmatch pngjs
+          npx playwright install --with-deps chromium webkit
+
+      - name: 构建 server（HTML 经 include_str! 内嵌，必须先构建）
+        run: cargo build -p triviumdb-server
+
+      - name: 页内自检 + ui-smoke（chromium）
+        run: node scripts/ui-smoke.mjs
+
+      - name: 页内自检 + ui-smoke（webkit）
+        env:
+          SMOKE_BROWSER: webkit
+        run: node scripts/ui-smoke.mjs
+
+      - name: 视觉基线（生成模式，仅手动触发时）
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.update_baseline == 'true'
+        run: node scripts/visual-baseline.mjs --update
+
+      - name: 视觉基线比对
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.update_baseline == 'true') }}
+        run: node scripts/visual-baseline.mjs
+
+      - name: 上传视觉基线产物（手动生成模式）
+        if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.update_baseline == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-baseline-${{ runner.os }}
+          path: tests/visual/baseline/
+          if-no-files-found: warn
+
+      - name: 上传截图与差异图（失败时）
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: webui-visual-artifacts
+          path: |
+            .tmp/visual-shots/
+            .tmp/visual-diff/
+          if-no-files-found: ignore
