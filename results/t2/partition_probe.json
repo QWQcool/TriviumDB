@@ -1,0 +1,123 @@
+{
+  "n": 1000000,
+  "m0": 64,
+  "entry": 0,
+  "edges": 64000000,
+  "n_queries": 1000,
+  "top_k": 10,
+  "ks": [
+    16,
+    64,
+    256
+  ],
+  "j_list": [
+    1,
+    5,
+    10,
+    25
+  ],
+  "results": [
+    {
+      "name": "随机哈希 k=16",
+      "k": 16,
+      "cross_edge_pct": 93.750190625,
+      "own_partition_ceiling_pct": 6.69,
+      "ceilings_pct": {},
+      "balance": {
+        "min": 62500,
+        "median": 62500,
+        "max": 62500,
+        "ratio_max_min": 1.0,
+        "gini": 0.0
+      }
+    },
+    {
+      "name": "随机哈希 k=64",
+      "k": 64,
+      "cross_edge_pct": 98.4365359375,
+      "own_partition_ceiling_pct": 1.67,
+      "ceilings_pct": {},
+      "balance": {
+        "min": 15625,
+        "median": 15625,
+        "max": 15625,
+        "ratio_max_min": 1.0,
+        "gini": 0.0
+      }
+    },
+    {
+      "name": "随机哈希 k=256",
+      "k": 256,
+      "cross_edge_pct": 99.609909375,
+      "own_partition_ceiling_pct": 0.48,
+      "ceilings_pct": {},
+      "balance": {
+        "min": 3906,
+        "median": 3906,
+        "max": 3907,
+        "ratio_max_min": 1.0002560163850487,
+        "gini": 4.799999999982596e-05
+      }
+    },
+    {
+      "name": "k-means k=16",
+      "k": 16,
+      "cross_edge_pct": 32.435654687500005,
+      "own_partition_ceiling_pct": 70.00999999999999,
+      "ceilings_pct": {
+        "1": 70.00999999999999,
+        "5": 97.28999999999999,
+        "10": 99.72,
+        "25": 100.0
+      },
+      "balance": {
+        "min": 37923,
+        "median": 65722,
+        "max": 79951,
+        "ratio_max_min": 2.108245655670701,
+        "gini": 0.12996762500000003
+      },
+      "fit_seconds": 4.7785162925720215
+    },
+    {
+      "name": "k-means k=64",
+      "k": 64,
+      "cross_edge_pct": 43.047290625,
+      "own_partition_ceiling_pct": 59.34,
+      "ceilings_pct": {
+        "1": 59.34,
+        "5": 91.64,
+        "10": 97.16,
+        "25": 99.58
+      },
+      "balance": {
+        "min": 6676,
+        "median": 14775,
+        "max": 26654,
+        "ratio_max_min": 3.992510485320551,
+        "gini": 0.16538203124999995
+      },
+      "fit_seconds": 5.522236585617065
+    },
+    {
+      "name": "k-means k=256",
+      "k": 256,
+      "cross_edge_pct": 53.4340796875,
+      "own_partition_ceiling_pct": 50.18,
+      "ceilings_pct": {
+        "1": 50.18,
+        "5": 82.64,
+        "10": 90.66,
+        "25": 96.84
+      },
+      "balance": {
+        "min": 1,
+        "median": 4108,
+        "max": 8819,
+        "ratio_max_min": 8819.0,
+        "gini": 0.26068390624999993
+      },
+      "fit_seconds": 8.736212491989136
+    }
+  ]
+}

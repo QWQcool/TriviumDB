@@ -163,6 +163,11 @@ name = "bench_pruning_tradeoff"
 harness = false
 required-features = ["ablation"]
 
+[[bench]]
+name = "bench_t2_build_recon"
+harness = false
+required-features = ["ablation"]
+
 # ─────────────────────────────────────────────────────────────
 # E. 研究与硬件消融：不会进入默认日常 benchmark
 # ─────────────────────────────────────────────────────────────
