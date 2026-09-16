@@ -64,6 +64,8 @@ N_QUERIES = 1000
 TOP_K = 10
 KS = [16, 64, 256]
 J_LIST = [1, 5, 10, 25]
+# B1 可达率曲线用的 J（含 2/3，便于看低 J 处的斜率）
+J_LIST_B1 = [1, 2, 3, 5, 10, 25]
 SAMPLE_FIT = 50_000
 KM_ITERS = 25
 CSR_PATH = os.path.join(".tmp", "l0_csr.bin")
@@ -145,6 +147,59 @@ def gini(counts: np.ndarray) -> float:
     n = c.size
     cum = np.cumsum(c)
     return float((n + 1 - 2 * (cum / cum[-1]).sum()) / n)
+
+
+def edge_reachability(
+    assign: np.ndarray,
+    cent: np.ndarray,
+    x: np.ndarray,
+    offsets: np.ndarray,
+    adj: np.ndarray,
+    k: int,
+    j_list: list[int],
+) -> dict:
+    """B1 —— 分区受限候选池对**现有邻居**的可达率上界。
+
+    对边 u→v，「可达」当且仅当 `part[v]` 落在「按质心距离离 u 最近的 J 个分区」内。
+
+    这是**与选择算法无关的必要条件**：不在候选池里的邻居，任何基于该池的构造算法
+    （无论 `vamana_select` 还是别的）都**不可能**选出来。因此它给出 PiPNN 的
+    第一阶可行性信号，且能可靠止损：
+
+      - 可达率高 ⇒ 分区内候选足以覆盖全局束搜索选中的边 → 值得进入 B2 真构造
+      - 可达率低 ⇒ 候选池根本不含这些边 → 分区化必然丢质量，**立即止损**
+
+    此外它是 B1 而非 C3 的严格加强版：C3 只看「边是否跨分区」，本函数看
+    「**该边的目标分区是否在源节点的 J 近邻分区内**」——即真正决定候选可用性的量。
+    """
+    n = x.shape[0]
+    # 逐节点的分区距离序：part_rank[u, p] = 分区 p 在 u 的距离序中的名次
+    d = -2.0 * (x @ cent.T) + (cent * cent).sum(axis=1)[None, :]
+    order = np.argsort(d, axis=1, kind="stable")
+    del d
+    part_rank = np.empty((n, k), dtype=np.int16)
+    part_rank[np.arange(n, dtype=np.int64)[:, None], order] = np.arange(k, dtype=np.int16)
+    del order
+
+    deg = np.diff(offsets.astype(np.int64))
+    src = np.repeat(np.arange(n, dtype=np.int32), deg)
+    rank_of_edge = part_rank[src, assign[adj]]  # (E,) int16：每条边的目标分区名次
+    del part_rank
+
+    out: dict[int, dict] = {}
+    for j in j_list:
+        covered = (rank_of_edge < j).astype(np.float64)
+        hit = np.bincount(src, weights=covered, minlength=n)
+        node_rate = hit / np.maximum(deg, 1)
+        out[j] = {
+            "edge_coverage_pct": float(covered.mean()) * 100.0,
+            "node_mean_pct": float(node_rate.mean()) * 100.0,
+            "node_p10_pct": float(np.percentile(node_rate, 10)) * 100.0,
+            "node_p50_pct": float(np.percentile(node_rate, 50)) * 100.0,
+            "node_min_pct": float(node_rate.min()) * 100.0,
+            "nodes_below_50pct": int((node_rate < 0.5).sum()),
+        }
+    return out
 
 
 def eval_partition(
@@ -270,6 +325,10 @@ def main() -> int:
         q_assign = assign_to(qn, cent)  # ★ 查询**自身**的分区
         r = eval_partition(f"k-means k={k}", assign, cent, q_assign, offsets, adj, gt, qn, k)
         r["fit_seconds"] = time.time() - t
+        # ── B1：分区受限候选池的邻居可达率上界 ──
+        t_b1 = time.time()
+        r["reachability"] = edge_reachability(assign, cent, x, offsets, adj, k, J_LIST_B1)
+        r["b1_seconds"] = time.time() - t_b1
         results.append(r)
         ceil_str = "  ".join(f"J={j}:{r['ceilings_pct'][j]:5.1f}%" for j in J_LIST)
         log(
@@ -281,6 +340,12 @@ def main() -> int:
             f"    └ 分区均衡: min={r['balance']['min']} med={r['balance']['median']} "
             f"max={r['balance']['max']} max/min={r['balance']['ratio_max_min']:.1f} "
             f"gini={r['balance']['gini']:.3f}"
+        )
+        rc = r["reachability"]
+        log(
+            "    └ B1 邻居可达率上界(边覆盖率 / 节点均值 / 节点p10): "
+            + "  ".join(f"J={j}: {rc[j]['edge_coverage_pct']:.1f}%/{rc[j]['node_mean_pct']:.1f}%/{rc[j]['node_p10_pct']:.1f}%" for j in J_LIST_B1)
+            + f"  ({r['b1_seconds']:.1f}s)"
         )
 
     # 守卫：随机对照必须落在 100/k 附近
@@ -306,6 +371,24 @@ def main() -> int:
             f"| {r['name']} | {r['cross_edge_pct']:.1f}% | {own_str} | {cells} | "
             f"{r['balance']['ratio_max_min']:.1f} | {r['balance']['gini']:.3f} |"
         )
+
+    # ── B1 markdown ──
+    log("\n### T2 B1：分区受限候选池的邻居可达率上界（全量 64M 边，非采样）\n")
+    log("> 定义：边 `u→v` 可达 ⟺ `part[v]` 位于「离 `u` 最近的 J 个分区」内。")
+    log("> 这是**与选择算法无关的必要条件**——不在池里的邻居，任何构造算法都选不出来。\n")
+    log("| 分区 | J | 边覆盖率 | 节点均值 | 节点 p10 | 节点中位 | 可达率<50% 节点数 |")
+    log("|---|---|---|---|---|---|---|")
+    for r in results:
+        rc = r.get("reachability")
+        if not rc:
+            continue
+        for j in J_LIST_B1:
+            v = rc[j]
+            log(
+                f"| {r['name']} | {j} | {v['edge_coverage_pct']:.1f}% | "
+                f"{v['node_mean_pct']:.1f}% | {v['node_p10_pct']:.1f}% | "
+                f"{v['node_p50_pct']:.1f}% | {v['nodes_below_50pct']:,} |"
+            )
 
     os.makedirs(os.path.join("results", "t2"), exist_ok=True)
     out = os.path.join("results", "t2", "partition_probe.json")
