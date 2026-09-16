@@ -150,6 +150,19 @@ harness = false
 name = "bench_quiver_ablation"
 harness = false
 
+[[bench]]
+name = "bench_rbq2_equal_bits"
+harness = false
+
+[[bench]]
+name = "bench_rabitq_epsilon_scaling"
+harness = false
+
+[[bench]]
+name = "bench_pruning_tradeoff"
+harness = false
+required-features = ["ablation"]
+
 # ─────────────────────────────────────────────────────────────
 # E. 研究与硬件消融：不会进入默认日常 benchmark
 # ─────────────────────────────────────────────────────────────
@@ -165,6 +178,11 @@ required-features = ["ablation"]
 
 [[bench]]
 name = "bench_variance"
+harness = false
+required-features = ["ablation"]
+
+[[bench]]
+name = "bench_alpha_mechanism"
 harness = false
 required-features = ["ablation"]
 

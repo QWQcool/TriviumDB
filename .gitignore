@@ -52,4 +52,7 @@ desktop.ini
 diskann_data/
 
 # ══════ 研究目录（脚本、数据、论文，不纳入版本控制）══════
-research/
+# 锚定到仓库根：仅忽略顶层 research/（bench_logs 等运行产物）。
+# 未锚定的 `research/` 会同时吞掉 docs/research/ 与 scripts/research/，
+# 导致明确要求纳入版本控制的研究文档/复现脚本被静默忽略。
+/research/
