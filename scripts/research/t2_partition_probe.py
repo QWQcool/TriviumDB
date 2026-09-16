@@ -59,8 +59,19 @@ for _s in (sys.stdout, sys.stderr):
     except Exception:
         pass
 
-DIM = 768
-N_QUERIES = 1000
+# 数据集由环境变量选择（默认 cohere，与冻结基线一致）
+#   T2_PREFIX  cohere / sift128 / ...
+#   T2_DIM     向量维度
+#   T2_CSR     bench_t2_build_recon 导出的 L0 CSR 路径
+#   T2_QUERIES 查询数上限（默认取全部可用）
+PREFIX = os.environ.get("T2_PREFIX", "cohere")
+DIM = int(os.environ.get("T2_DIM", "768"))
+TRAIN_PATH = f"{PREFIX}_train.f32"
+TEST_PATH = f"{PREFIX}_test.f32"
+GT_PATH = f"{PREFIX}_groundtruth.i32"
+CSR_PATH = os.environ.get("T2_CSR", os.path.join(".tmp", "l0_csr.bin"))
+N_QUERIES = int(os.environ.get("T2_QUERIES", "0"))  # 0 = 全部
+
 TOP_K = 10
 KS = [16, 64, 256]
 J_LIST = [1, 5, 10, 25]
@@ -68,7 +79,6 @@ J_LIST = [1, 5, 10, 25]
 J_LIST_B1 = [1, 2, 3, 5, 10, 25]
 SAMPLE_FIT = 50_000
 KM_ITERS = 25
-CSR_PATH = os.path.join(".tmp", "l0_csr.bin")
 
 
 def log(msg: str) -> None:
@@ -268,23 +278,25 @@ def eval_partition(
 
 def main() -> int:
     t0 = time.time()
-    for p in ["cohere_train.f32", "cohere_test.f32", "cohere_groundtruth.i32", CSR_PATH]:
+    for p in [TRAIN_PATH, TEST_PATH, GT_PATH, CSR_PATH]:
         if not os.path.exists(p):
             log(f"缺少 {p}")
             return 1
 
     log("=" * 74)
-    log("  T2 预实验 — 分区质量探针（PiPNN 可行性上界）")
+    log(f"  T2 预实验 — 分区质量探针（PiPNN 可行性上界）  数据集={PREFIX} dim={DIM}")
     log("=" * 74)
 
     n, m0, entry, offsets, adj = load_csr(CSR_PATH)
     log(f"  载入图: n={n} m0={m0} entry={entry} 边={adj.size} 平均度={adj.size / n:.1f}")
 
-    x = np.fromfile("cohere_train.f32", dtype=np.float32).reshape(-1, DIM)
-    q = np.fromfile("cohere_test.f32", dtype=np.float32).reshape(-1, DIM)[:N_QUERIES]
-    gt_all = np.fromfile("cohere_groundtruth.i32", dtype=np.int32)
-    k_gt = gt_all.size // q.shape[0]
-    gt = gt_all.reshape(q.shape[0], k_gt)[:, :TOP_K].astype(np.int64)
+    x = np.fromfile(TRAIN_PATH, dtype=np.float32).reshape(-1, DIM)
+    q_all = np.fromfile(TEST_PATH, dtype=np.float32).reshape(-1, DIM)
+    nq_use = q_all.shape[0] if N_QUERIES <= 0 else min(N_QUERIES, q_all.shape[0])
+    q = q_all[:nq_use]
+    gt_all = np.fromfile(GT_PATH, dtype=np.int32)
+    k_gt = gt_all.size // q_all.shape[0]
+    gt = gt_all.reshape(q_all.shape[0], k_gt)[:nq_use, :TOP_K].astype(np.int64)
 
     x = l2_normalize(x)
     qn = l2_normalize(q)
@@ -359,7 +371,10 @@ def main() -> int:
     log("  守卫 指标管线（随机对照 ≈ 100/k%）PASS")
 
     # ── markdown ──
-    log("\n### T2 预实验：分区质量指标（1M × 768，官方 GT，1000 查询）\n")
+    log(
+        f"\n### T2 预实验：分区质量指标（{PREFIX} {n} × {DIM}，{gt.shape[0]} 查询，"
+        f"GT K={k_gt}）\n"
+    )
     log("| 分区方案 | 跨分区边率 | 本分区召回上界 | J=1 | J=5 | J=10 | J=25 | 分区 max/min | gini |")
     log("|---|---|---|---|---|---|---|---|---|")
     for r in results:
@@ -391,7 +406,10 @@ def main() -> int:
             )
 
     os.makedirs(os.path.join("results", "t2"), exist_ok=True)
-    out = os.path.join("results", "t2", "partition_probe.json")
+    # 默认按数据集分文件，避免不同数据集互相覆盖（曾因此把 cohere 结果覆盖成 sift）
+    out = os.environ.get(
+        "T2_OUT", os.path.join("results", "t2", f"partition_probe_{PREFIX}.json")
+    )
     with open(out, "w", encoding="utf-8") as f:
         json.dump(
             {

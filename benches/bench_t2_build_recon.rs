@@ -47,9 +47,11 @@ use std::io::Write;
 use std::time::Instant;
 use triviumdb::index::quiver::{QuIVer, QuIVerConfig};
 
-const DIM: usize = 768;
 /// `m = 32` → `m0 = 2m = 64`（`quiver.rs:1000`）。仅用于写入导出头。
 const M0: usize = 64;
+/// 数据集由 `T2_PREFIX` / `T2_DIM` 选择（默认 cohere / 768，与冻结基线一致）
+const DEFAULT_PREFIX: &str = "cohere";
+const DEFAULT_DIM: usize = 768;
 
 fn env_usize(key: &str, default: usize) -> usize {
     std::env::var(key)
@@ -67,13 +69,13 @@ fn read_f32_bin(path: &str) -> Vec<f32> {
         .collect()
 }
 
-fn l2_normalize(data: &mut [f32]) {
+fn l2_normalize(data: &mut [f32], dim: usize) {
     use rayon::prelude::*;
-    let n = data.len() / DIM;
+    let n = data.len() / dim;
     let norms: Vec<f32> = (0..n)
         .into_par_iter()
         .map(|i| {
-            data[i * DIM..(i + 1) * DIM]
+            data[i * dim..(i + 1) * dim]
                 .iter()
                 .map(|x| x * x)
                 .sum::<f32>()
@@ -84,7 +86,7 @@ fn l2_normalize(data: &mut [f32]) {
     (0..n).into_par_iter().for_each(|i| {
         // SAFETY: 各线程只写自己那一段，区间互不重叠
         let seg =
-            unsafe { std::slice::from_raw_parts_mut((data_ptr as *mut f32).add(i * DIM), DIM) };
+            unsafe { std::slice::from_raw_parts_mut((data_ptr as *mut f32).add(i * dim), dim) };
         let inv = 1.0 / norms[i].max(1e-12);
         for x in seg.iter_mut() {
             *x *= inv;
@@ -99,15 +101,23 @@ fn main() {
         .with_writer(std::io::stderr)
         .try_init();
 
-    let n_target = env_usize("T2_N", 1_000_000);
+    let prefix = std::env::var("T2_PREFIX").unwrap_or_else(|_| DEFAULT_PREFIX.into());
+    let dim = env_usize("T2_DIM", DEFAULT_DIM);
+    let n_target = env_usize("T2_N", 0); // 0 = 全部
     let n_ins = env_usize("T2_INS", 200);
-    let dump_path = std::env::var("T2_DUMP").unwrap_or_else(|_| ".tmp/l0_csr.bin".into());
+    let dump_path =
+        std::env::var("T2_DUMP").unwrap_or_else(|_| format!(".tmp/l0_csr_{prefix}.bin"));
     let eager = std::env::var("TRIVIUM_EAGER_PRUNE").as_deref() == Ok("1");
 
     eprintln!("═══════════════════════════════════════════════════════════════════");
-    eprintln!("  T2 摸底 — QuIVer 图构建成本基线");
+    eprintln!("  T2 摸底 — QuIVer 图构建成本基线   数据集={prefix} dim={dim}");
     eprintln!(
-        "  规模 N={n_target}  增量样本={n_ins}  反向剪枝模式={}",
+        "  规模 N={}  增量样本={n_ins}  反向剪枝模式={}",
+        if n_target == 0 {
+            "全部".to_string()
+        } else {
+            n_target.to_string()
+        },
         if eager {
             "eager 急式 (TRIVIUM_EAGER_PRUNE=1)"
         } else {
@@ -117,12 +127,13 @@ fn main() {
     eprintln!("═══════════════════════════════════════════════════════════════════");
 
     let t0 = Instant::now();
-    let mut train = read_f32_bin("cohere_train.f32");
-    let n_all = train.len() / DIM;
+    let mut train = read_f32_bin(&format!("{prefix}_train.f32"));
+    let n_all = train.len() / dim;
+    let n_target = if n_target == 0 { n_all } else { n_target };
     assert!(n_target <= n_all, "T2_N={n_target} 超出数据量 {n_all}");
-    l2_normalize(&mut train);
+    l2_normalize(&mut train, dim);
     eprintln!(
-        "  数据 {n_all} × {DIM}，归一化 + 加载 {:.2}s",
+        "  数据 {n_all} × {dim}，归一化 + 加载 {:.2}s",
         t0.elapsed().as_secs_f64()
     );
 
@@ -132,11 +143,11 @@ fn main() {
         ef_construction: 128,
         alpha: 1.2,
     };
-    let mut index = QuIVer::new(DIM, &config);
+    let mut index = QuIVer::new(dim, &config);
     let ids: Vec<u64> = (0..n_target as u64).collect();
     let slots: Vec<usize> = (0..n_target).collect();
 
-    let build_data = &train[..n_target * DIM];
+    let build_data = &train[..n_target * dim];
     let tb = Instant::now();
     index.batch_build_experimental_v2(build_data, &ids, &slots);
     let build_s = tb.elapsed().as_secs_f64();
@@ -148,9 +159,9 @@ fn main() {
         st.hot_bytes / 1024 / 1024
     );
 
-    // 守卫 1：可复现冻结基线（仅默认规模 + 惰性模式下检查）
+    // 守卫 1：可复现冻结基线（仅 cohere + 1M + 惰性模式下检查）
     const FROZEN_VPS: f64 = 29_043.0;
-    if n_target == 1_000_000 && !eager {
+    if prefix == "cohere" && n_target == 1_000_000 && !eager {
         let dev = (vps - FROZEN_VPS).abs() / FROZEN_VPS * 100.0;
         eprintln!(
             "  守卫1 可复现冻结基线: {vps:.0} vs {FROZEN_VPS:.0} vec/s（偏差 {dev:.1}%）{}",
@@ -171,7 +182,7 @@ fn main() {
         let mut lat_us: Vec<f64> = Vec::with_capacity(n_ins);
         for k in 0..n_ins {
             let gi = n_target + k;
-            let v = &train[gi * DIM..(gi + 1) * DIM];
+            let v = &train[gi * dim..(gi + 1) * dim];
             let t = Instant::now();
             index.insert(v, gi as u64, gi, &mut lcg);
             lat_us.push(t.elapsed().as_secs_f64() * 1e6);

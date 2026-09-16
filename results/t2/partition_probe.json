@@ -77,7 +77,7 @@
         "ratio_max_min": 2.108245655670701,
         "gini": 0.12996762500000003
       },
-      "fit_seconds": 4.713699579238892,
+      "fit_seconds": 4.752657890319824,
       "reachability": {
         "1": {
           "edge_coverage_pct": 67.5643453125,
@@ -128,7 +128,7 @@
           "nodes_below_50pct": 0
         }
       },
-      "b1_seconds": 5.239248514175415
+      "b1_seconds": 5.084820032119751
     },
     {
       "name": "k-means k=64",
@@ -148,7 +148,7 @@
         "ratio_max_min": 3.992510485320551,
         "gini": 0.16538203124999995
       },
-      "fit_seconds": 5.348468065261841,
+      "fit_seconds": 5.1057024002075195,
       "reachability": {
         "1": {
           "edge_coverage_pct": 56.952709375,
@@ -199,7 +199,7 @@
           "nodes_below_50pct": 14
         }
       },
-      "b1_seconds": 5.867438793182373
+      "b1_seconds": 5.948378801345825
     },
     {
       "name": "k-means k=256",
@@ -219,7 +219,7 @@
         "ratio_max_min": 8819.0,
         "gini": 0.26068390624999993
       },
-      "fit_seconds": 8.768412590026855,
+      "fit_seconds": 8.808862447738647,
       "reachability": {
         "1": {
           "edge_coverage_pct": 46.5659203125,
@@ -270,7 +270,7 @@
           "nodes_below_50pct": 573
         }
       },
-      "b1_seconds": 12.485528707504272
+      "b1_seconds": 12.492310523986816
     }
   ]
 }

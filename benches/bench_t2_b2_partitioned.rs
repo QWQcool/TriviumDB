@@ -40,20 +40,36 @@ use rayon::prelude::*;
 use std::time::Instant;
 use triviumdb::index::quiver::{QuIVer, QuIVerConfig, QuIVerSearchConfig};
 
-const DIM: usize = 768;
-const N: usize = 1_000_000;
 const TOP_K: usize = 10;
 /// 扫描臂（束搜索宽度）
 const EF_C_LIST: [usize; 4] = [128, 64, 32, 16];
 /// 搜索宽度扫描（与冻结基线一致）
 const EF_SEARCH_LIST: [usize; 5] = [64, 128, 256, 512, 1024];
-/// 冻结基线：1M × 768，m=32/ef_c=128/α=1.2，官方 GT
-const FROZEN_RECALL_EF128: f64 = 97.55;
+/// 数据集由 `T2_PREFIX` / `T2_DIM` 选择（默认 cohere / 768，与冻结基线一致）
+const DEFAULT_PREFIX: &str = "cohere";
+const DEFAULT_DIM: usize = 768;
+/// 冻结基线 R@10（仅 cohere 有值：1M × 768，m=32/ef_c=128/α=1.2，官方 GT）。
+/// 由 `T2_FROZEN_RECALL` 覆盖；新数据集未提供时**跳过守卫 G1**（尚无冻结值可比）。
+const DEFAULT_FROZEN_RECALL: f64 = 97.55;
 /// P1 容差
 const P1_TOLERANCE_PP: f64 = 1.0;
 /// 固定参数
 const M: usize = 32;
 const M0: usize = M * 2; // 64
+
+fn env_usize(key: &str, default: usize) -> usize {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
+}
+
+fn env_f32(key: &str, default: f32) -> f32 {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
+}
 
 fn read_f32_bin(path: &str) -> Vec<f32> {
     let b = std::fs::read(path).unwrap_or_else(|e| panic!("无法读取 {path}: {e}"));
@@ -73,11 +89,11 @@ fn read_i32_bin(path: &str) -> Vec<i32> {
         .collect()
 }
 
-fn l2_normalize(data: &mut [f32], n: usize) {
+fn l2_normalize(data: &mut [f32], n: usize, dim: usize) {
     let norms: Vec<f32> = (0..n)
         .into_par_iter()
         .map(|i| {
-            data[i * DIM..(i + 1) * DIM]
+            data[i * dim..(i + 1) * dim]
                 .iter()
                 .map(|x| x * x)
                 .sum::<f32>()
@@ -87,7 +103,7 @@ fn l2_normalize(data: &mut [f32], n: usize) {
     let p = data.as_mut_ptr() as usize;
     (0..n).into_par_iter().for_each(|i| {
         // SAFETY: 各线程只写自己那一段，区间互不重叠
-        let seg = unsafe { std::slice::from_raw_parts_mut((p as *mut f32).add(i * DIM), DIM) };
+        let seg = unsafe { std::slice::from_raw_parts_mut((p as *mut f32).add(i * dim), dim) };
         let inv = 1.0 / norms[i].max(1e-12);
         for x in seg.iter_mut() {
             *x *= inv;
@@ -116,8 +132,13 @@ fn edge_fingerprint(index: &QuIVer, n: usize) -> (u64, u64) {
 
 fn main() {
     eprintln!("═══════════════════════════════════════════════════════════════════");
+    let prefix = std::env::var("T2_PREFIX").unwrap_or_else(|_| DEFAULT_PREFIX.into());
+    let dim = env_usize("T2_DIM", DEFAULT_DIM);
+    let alpha = env_f32("T2_ALPHA", 1.2);
+    let n_cap = env_usize("T2_N", 0); // 0 = 全部
+
     eprintln!("  T2 B2-0 — ef_construction 扫描（平凡对照，零代码）");
-    eprintln!("  臂 = {EF_C_LIST:?}   m={M} m0={M0} alpha=1.2");
+    eprintln!("  数据集={prefix} dim={dim}  臂 = {EF_C_LIST:?}   m={M} m0={M0} alpha={alpha}");
     eprintln!("═══════════════════════════════════════════════════════════════════");
 
     // 守卫 G5：随机注入量必须与 ef 无关（公式断言，无需改 src）
@@ -130,18 +151,27 @@ fn main() {
     }
     eprintln!("  守卫G5 随机注入量恒为 128（对全部臂）PASS");
 
+    // 冻结基线：cohere 默认有值；其他数据集需显式 T2_FROZEN_RECALL，否则跳过守卫 G1
+    let frozen_recall: Option<f64> = std::env::var("T2_FROZEN_RECALL")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .or_else(|| (prefix == DEFAULT_PREFIX).then_some(DEFAULT_FROZEN_RECALL));
+
     let t0 = Instant::now();
-    let mut train = read_f32_bin("cohere_train.f32");
-    let mut test = read_f32_bin("cohere_test.f32");
-    let gt_raw = read_i32_bin("cohere_groundtruth.i32");
-    let n_train = train.len() / DIM;
-    let n_test = test.len() / DIM;
-    assert_eq!(n_train, N, "数据规模不符（期望 {N}）");
+    let mut train = read_f32_bin(&format!("{prefix}_train.f32"));
+    let mut test = read_f32_bin(&format!("{prefix}_test.f32"));
+    let gt_raw = read_i32_bin(&format!("{prefix}_groundtruth.i32"));
+    let n_all = train.len() / dim;
+    let n_train = if n_cap == 0 { n_all } else { n_cap.min(n_all) };
+    train.truncate(n_train * dim);
+    let n_test = test.len() / dim;
     let k_gt = gt_raw.len() / n_test;
-    l2_normalize(&mut train, n_train);
-    l2_normalize(&mut test, n_test);
+    assert!(k_gt >= TOP_K, "GT 的 K={k_gt} 小于 TOP_K={TOP_K}");
+    l2_normalize(&mut train, n_train, dim);
+    l2_normalize(&mut test, n_test, dim);
     eprintln!(
-        "  数据 {n_train} × {DIM}，查询 {n_test}，GT K={k_gt}；加载+归一化 {:.2}s",
+        "  数据集 {prefix}  数据 {n_train} × {dim}，查询 {n_test}，GT K={k_gt}；\
+         加载+归一化 {:.2}s",
         t0.elapsed().as_secs_f64()
     );
 
@@ -172,9 +202,9 @@ fn main() {
         let config = QuIVerConfig {
             m: M,
             ef_construction: ef_c,
-            alpha: 1.2,
+            alpha,
         };
-        let mut index = QuIVer::new(DIM, &config);
+        let mut index = QuIVer::new(dim, &config);
 
         let tb = Instant::now();
         index.batch_build_experimental_v2(&train, &ids, &slots);
@@ -198,7 +228,7 @@ fn main() {
             let hits: usize = (0..n_test)
                 .into_par_iter()
                 .map(|i| {
-                    let q = &test[i * DIM..(i + 1) * DIM];
+                    let q = &test[i * dim..(i + 1) * dim];
                     let res = index.search_flat(q, &train, &search_cfg);
                     res.iter()
                         .filter(|&&(id, _)| eval_gts[i].contains(&id))
@@ -230,21 +260,29 @@ fn main() {
         .find(|(e, _, _)| *e == 128)
         .map(|(_, r, _)| *r)
         .unwrap();
-    let dev = (base_r128 - FROZEN_RECALL_EF128).abs();
     eprintln!("\n  ── 守卫 ──");
-    eprintln!(
-        "  守卫G1 基线同进程复现: ef_c=128/ef_s=128 → {base_r128:.2}% vs 冻结 {FROZEN_RECALL_EF128:.2}% \
-         （偏差 {dev:.2}pp）{}",
-        if dev <= P1_TOLERANCE_PP {
-            "PASS"
-        } else {
-            "FAIL"
+    match frozen_recall {
+        Some(fr) => {
+            let dev = (base_r128 - fr).abs();
+            eprintln!(
+                "  守卫G1 基线同进程复现: ef_c=128/ef_s=128 → {base_r128:.2}% vs 冻结 {fr:.2}% \
+                 （偏差 {dev:.2}pp）{}",
+                if dev <= P1_TOLERANCE_PP {
+                    "PASS"
+                } else {
+                    "FAIL"
+                }
+            );
+            assert!(
+                dev <= P1_TOLERANCE_PP,
+                "守卫G1 失败: 基线未复现（偏差 {dev:.2}pp）"
+            );
         }
-    );
-    assert!(
-        dev <= P1_TOLERANCE_PP,
-        "守卫G1 失败: 基线未复现（偏差 {dev:.2}pp）"
-    );
+        None => eprintln!(
+            "  守卫G1 跳过: {prefix} 尚无冻结 R@10（可用 T2_FROZEN_RECALL 提供）；\
+             本臂自身即基线 {base_r128:.2}%"
+        ),
+    }
 
     // ── 守卫 G-det：并发建图确定性 + 非确定性对召回的影响 ──
     // 连做两次同配置建图（同条件、背靠背），隔离调度抖动；
@@ -253,11 +291,11 @@ fn main() {
     let mut det_reps: Vec<((u64, u64), f64)> = Vec::new();
     for rep in 0..2 {
         let mut ix = QuIVer::new(
-            DIM,
+            dim,
             &QuIVerConfig {
                 m: M,
                 ef_construction: 128,
-                alpha: 1.2,
+                alpha,
             },
         );
         ix.batch_build_experimental_v2(&train, &ids, &slots);
@@ -270,7 +308,7 @@ fn main() {
         let hits: usize = (0..n_test)
             .into_par_iter()
             .map(|i| {
-                let q = &test[i * DIM..(i + 1) * DIM];
+                let q = &test[i * dim..(i + 1) * dim];
                 let res = ix.search_flat(q, &train, &cfg);
                 res.iter()
                     .filter(|&&(id, _)| eval_gts[i].contains(&id))
@@ -405,7 +443,9 @@ fn main() {
     }
 
     // ── markdown ──
-    println!("\n### T2 B2-0：`ef_construction` 扫描（1M × 768，m=32，α=1.2，同一进程）\n");
+    println!(
+        "\n### T2 B2-0：`ef_construction` 扫描（{prefix} {n_train} × {dim}，m=32，α=1.2，同一进程）\n"
+    );
     print!("| ef_c | 建图(s) | 相对基线 |");
     for e in EF_SEARCH_LIST {
         print!(" R@10@ef_s={e} |");

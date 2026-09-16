@@ -1,0 +1,276 @@
+{
+  "n": 1000000,
+  "m0": 64,
+  "entry": 0,
+  "edges": 64000000,
+  "n_queries": 10000,
+  "top_k": 10,
+  "ks": [
+    16,
+    64,
+    256
+  ],
+  "j_list": [
+    1,
+    5,
+    10,
+    25
+  ],
+  "results": [
+    {
+      "name": "随机哈希 k=16",
+      "k": 16,
+      "cross_edge_pct": 93.7378296875,
+      "own_partition_ceiling_pct": 6.242,
+      "ceilings_pct": {},
+      "balance": {
+        "min": 62500,
+        "median": 62500,
+        "max": 62500,
+        "ratio_max_min": 1.0,
+        "gini": 0.0
+      }
+    },
+    {
+      "name": "随机哈希 k=64",
+      "k": 64,
+      "cross_edge_pct": 98.442403125,
+      "own_partition_ceiling_pct": 1.564,
+      "ceilings_pct": {},
+      "balance": {
+        "min": 15625,
+        "median": 15625,
+        "max": 15625,
+        "ratio_max_min": 1.0,
+        "gini": 0.0
+      }
+    },
+    {
+      "name": "随机哈希 k=256",
+      "k": 256,
+      "cross_edge_pct": 99.6122890625,
+      "own_partition_ceiling_pct": 0.385,
+      "ceilings_pct": {},
+      "balance": {
+        "min": 3906,
+        "median": 3906,
+        "max": 3907,
+        "ratio_max_min": 1.0002560163850487,
+        "gini": 4.799999999982596e-05
+      }
+    },
+    {
+      "name": "k-means k=16",
+      "k": 16,
+      "cross_edge_pct": 51.6060953125,
+      "own_partition_ceiling_pct": 77.807,
+      "ceilings_pct": {
+        "1": 77.807,
+        "5": 99.759,
+        "10": 100.0,
+        "25": 100.0
+      },
+      "balance": {
+        "min": 29567,
+        "median": 48868,
+        "max": 117882,
+        "ratio_max_min": 3.986944904792505,
+        "gini": 0.25775174999999995
+      },
+      "fit_seconds": 1.2829530239105225,
+      "reachability": {
+        "1": {
+          "edge_coverage_pct": 48.3939046875,
+          "node_mean_pct": 48.3939046875,
+          "node_p10_pct": 12.5,
+          "node_p50_pct": 45.3125,
+          "node_min_pct": 0.0,
+          "nodes_below_50pct": 540871
+        },
+        "2": {
+          "edge_coverage_pct": 69.7471109375,
+          "node_mean_pct": 69.7471109375,
+          "node_p10_pct": 32.8125,
+          "node_p50_pct": 75.0,
+          "node_min_pct": 0.0,
+          "nodes_below_50pct": 222545
+        },
+        "3": {
+          "edge_coverage_pct": 82.356046875,
+          "node_mean_pct": 82.356046875,
+          "node_p10_pct": 53.125,
+          "node_p50_pct": 89.0625,
+          "node_min_pct": 0.0,
+          "nodes_below_50pct": 82897
+        },
+        "5": {
+          "edge_coverage_pct": 94.0488203125,
+          "node_mean_pct": 94.0488203125,
+          "node_p10_pct": 79.6875,
+          "node_p50_pct": 100.0,
+          "node_min_pct": 0.0,
+          "nodes_below_50pct": 9065
+        },
+        "10": {
+          "edge_coverage_pct": 99.713128125,
+          "node_mean_pct": 99.713128125,
+          "node_p10_pct": 100.0,
+          "node_p50_pct": 100.0,
+          "node_min_pct": 0.0,
+          "nodes_below_50pct": 130
+        },
+        "25": {
+          "edge_coverage_pct": 100.0,
+          "node_mean_pct": 100.0,
+          "node_p10_pct": 100.0,
+          "node_p50_pct": 100.0,
+          "node_min_pct": 100.0,
+          "nodes_below_50pct": 0
+        }
+      },
+      "b1_seconds": 3.1124908924102783
+    },
+    {
+      "name": "k-means k=64",
+      "k": 64,
+      "cross_edge_pct": 74.6360265625,
+      "own_partition_ceiling_pct": 62.463,
+      "ceilings_pct": {
+        "1": 62.463,
+        "5": 96.206,
+        "10": 99.535,
+        "25": 99.99900000000001
+      },
+      "balance": {
+        "min": 4147,
+        "median": 15541,
+        "max": 24814,
+        "ratio_max_min": 5.983602604292259,
+        "gini": 0.15604168749999991
+      },
+      "fit_seconds": 1.9259634017944336,
+      "reachability": {
+        "1": {
+          "edge_coverage_pct": 25.363973437499997,
+          "node_mean_pct": 25.363973437499997,
+          "node_p10_pct": 3.125,
+          "node_p50_pct": 20.3125,
+          "node_min_pct": 0.0,
+          "nodes_below_50pct": 863805
+        },
+        "2": {
+          "edge_coverage_pct": 39.6323453125,
+          "node_mean_pct": 39.6323453125,
+          "node_p10_pct": 10.9375,
+          "node_p50_pct": 35.9375,
+          "node_min_pct": 0.0,
+          "nodes_below_50pct": 685809
+        },
+        "3": {
+          "edge_coverage_pct": 49.6326171875,
+          "node_mean_pct": 49.6326171875,
+          "node_p10_pct": 17.1875,
+          "node_p50_pct": 46.875,
+          "node_min_pct": 0.0,
+          "nodes_below_50pct": 523807
+        },
+        "5": {
+          "edge_coverage_pct": 63.3840875,
+          "node_mean_pct": 63.3840875,
+          "node_p10_pct": 31.25,
+          "node_p50_pct": 64.0625,
+          "node_min_pct": 0.0,
+          "nodes_below_50pct": 277634
+        },
+        "10": {
+          "edge_coverage_pct": 82.70040937499999,
+          "node_mean_pct": 82.70040937499999,
+          "node_p10_pct": 60.9375,
+          "node_p50_pct": 85.9375,
+          "node_min_pct": 0.0,
+          "nodes_below_50pct": 40291
+        },
+        "25": {
+          "edge_coverage_pct": 98.69862968749999,
+          "node_mean_pct": 98.69862968749999,
+          "node_p10_pct": 95.3125,
+          "node_p50_pct": 100.0,
+          "node_min_pct": 0.0,
+          "nodes_below_50pct": 263
+        }
+      },
+      "b1_seconds": 4.221704483032227
+    },
+    {
+      "name": "k-means k=256",
+      "k": 256,
+      "cross_edge_pct": 87.0438625,
+      "own_partition_ceiling_pct": 48.43,
+      "ceilings_pct": {
+        "1": 48.43,
+        "5": 87.087,
+        "10": 95.556,
+        "25": 99.56700000000001
+      },
+      "balance": {
+        "min": 1001,
+        "median": 3642,
+        "max": 10227,
+        "ratio_max_min": 10.216783216783217,
+        "gini": 0.18564782812500003
+      },
+      "fit_seconds": 4.119920969009399,
+      "reachability": {
+        "1": {
+          "edge_coverage_pct": 12.9561375,
+          "node_mean_pct": 12.9561375,
+          "node_p10_pct": 1.5625,
+          "node_p50_pct": 9.375,
+          "node_min_pct": 0.0,
+          "nodes_below_50pct": 968381
+        },
+        "2": {
+          "edge_coverage_pct": 20.939004687500002,
+          "node_mean_pct": 20.939004687500002,
+          "node_p10_pct": 3.125,
+          "node_p50_pct": 15.625,
+          "node_min_pct": 0.0,
+          "nodes_below_50pct": 918145
+        },
+        "3": {
+          "edge_coverage_pct": 27.0337171875,
+          "node_mean_pct": 27.0337171875,
+          "node_p10_pct": 6.25,
+          "node_p50_pct": 21.875,
+          "node_min_pct": 0.0,
+          "nodes_below_50pct": 863419
+        },
+        "5": {
+          "edge_coverage_pct": 36.2195296875,
+          "node_mean_pct": 36.2195296875,
+          "node_p10_pct": 10.9375,
+          "node_p50_pct": 31.25,
+          "node_min_pct": 0.0,
+          "nodes_below_50pct": 753743
+        },
+        "10": {
+          "edge_coverage_pct": 51.289300000000004,
+          "node_mean_pct": 51.289300000000004,
+          "node_p10_pct": 21.875,
+          "node_p50_pct": 48.4375,
+          "node_min_pct": 0.0,
+          "nodes_below_50pct": 501356
+        },
+        "25": {
+          "edge_coverage_pct": 74.54352656249999,
+          "node_mean_pct": 74.54352656249999,
+          "node_p10_pct": 50.0,
+          "node_p50_pct": 76.5625,
+          "node_min_pct": 0.0,
+          "nodes_below_50pct": 98248
+        }
+      },
+      "b1_seconds": 10.477231502532959
+    }
+  ]
+}
