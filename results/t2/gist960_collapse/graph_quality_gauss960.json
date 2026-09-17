@@ -1,0 +1,16 @@
+{
+  "prefix": "gauss960",
+  "dim": 960,
+  "n": 1000000,
+  "n_nodes": 256,
+  "top": 64,
+  "h_mean": 408.03790283203125,
+  "h_std": 9.118038177490234,
+  "mean_deg": 64.0,
+  "overlap_cos_pct": 4.58984375,
+  "h_bias_cos_sigma": 0.008266955731205122,
+  "overlap_w_pct": 7.562255859375,
+  "h_bias_w_sigma": 0.0959636253947827,
+  "overlap_c_pct": 0.0,
+  "h_bias_c_sigma": 0.28446360384882013
+}

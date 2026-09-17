@@ -1,0 +1,16 @@
+{
+  "prefix": "gist960c",
+  "dim": 960,
+  "n": 1000000,
+  "n_nodes": 256,
+  "top": 64,
+  "h_mean": 392.3638610839844,
+  "h_std": 21.21685218811035,
+  "mean_deg": 64.0,
+  "overlap_cos_pct": 25.86669921875,
+  "h_bias_cos_sigma": 0.48027439689579254,
+  "overlap_w_pct": 53.3447265625,
+  "h_bias_w_sigma": 1.3631831233754903,
+  "overlap_c_pct": 0.0,
+  "h_bias_c_sigma": 1.553283198521073
+}

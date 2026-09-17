@@ -1,0 +1,16 @@
+{
+  "prefix": "cohere",
+  "dim": 768,
+  "n": 1000000,
+  "n_nodes": 256,
+  "top": 64,
+  "h_mean": 299.4330139160156,
+  "h_std": 8.724432945251465,
+  "mean_deg": 64.0,
+  "overlap_cos_pct": 56.8359375,
+  "h_bias_cos_sigma": -0.3641114877838131,
+  "overlap_w_pct": 77.84423828125,
+  "h_bias_w_sigma": 0.06401587367000243,
+  "overlap_c_pct": 0.0,
+  "h_bias_c_sigma": 0.7929874092597793
+}

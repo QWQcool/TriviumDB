@@ -1,0 +1,245 @@
+{
+  "sift128": {
+    "prefix": "sift128",
+    "dim": 128,
+    "n": 1000000,
+    "nq_used": 1000,
+    "neg_frac": 0.0,
+    "zero_frac": 0.2299197109375,
+    "pos_dens": 0.7700802890625,
+    "pos_ham": 0.34103121525461416,
+    "strong_dens": 0.3130482890625,
+    "strong_dens_std": 0.040668170899152756,
+    "h_mean": 40.0701789855957,
+    "h_std": 5.205525875091553,
+    "eff_bits_per_dim": 2.0,
+    "ceiling_cheap": {
+      "128": 30.15,
+      "1024": 58.64
+    },
+    "ceiling_weighted": {
+      "128": 9.969999999999999,
+      "1024": 24.14
+    },
+    "code_only_cheap": 10.03,
+    "code_only_weighted": 3.11,
+    "bench_recall_ef128": 21.83,
+    "note": "euclidean→cosine(重算)"
+  },
+  "gist960c": {
+    "prefix": "gist960c",
+    "dim": 960,
+    "n": 1000000,
+    "nq_used": 1000,
+    "neg_frac": 0.579369128125,
+    "zero_frac": 6.458333333333333e-08,
+    "pos_dens": 0.4206308072916667,
+    "pos_ham": 0.48717440701208214,
+    "strong_dens": 0.40871237083333334,
+    "strong_dens_std": 0.022100888192653656,
+    "h_mean": 392.3638610839844,
+    "h_std": 21.21685218811035,
+    "eff_bits_per_dim": 2.0,
+    "ceiling_cheap": {
+      "128": 69.32000000000001,
+      "1024": 93.16
+    },
+    "ceiling_weighted": {
+      "128": 76.87,
+      "1024": 96.69
+    },
+    "code_only_cheap": 25.180000000000003,
+    "code_only_weighted": 30.15,
+    "bench_recall_ef128": 51.96,
+    "note": "T-center 去均值"
+  },
+  "sift128c": {
+    "prefix": "sift128c",
+    "dim": 128,
+    "n": 1000000,
+    "nq_used": 1000,
+    "neg_frac": 0.6604784453125,
+    "zero_frac": 0.0,
+    "pos_dens": 0.3395215546875,
+    "pos_ham": 0.4438589893262175,
+    "strong_dens": 0.3612315078125,
+    "strong_dens_std": 0.025121374055743217,
+    "h_mean": 46.237632751464844,
+    "h_std": 3.215535879135132,
+    "eff_bits_per_dim": 2.0,
+    "ceiling_cheap": {
+      "128": 62.91,
+      "1024": 90.35
+    },
+    "ceiling_weighted": {
+      "128": 65.61,
+      "1024": 93.62
+    },
+    "code_only_cheap": 23.66,
+    "code_only_weighted": 22.29,
+    "bench_recall_ef128": 44.16,
+    "note": "T-center SIFT"
+  },
+  "gist960k128": {
+    "prefix": "gist960k128",
+    "dim": 128,
+    "n": 1000000,
+    "nq_used": 1000,
+    "neg_frac": 0.0,
+    "zero_frac": 3.9703125e-05,
+    "pos_dens": 0.999960296875,
+    "pos_ham": 0.0,
+    "strong_dens": 0.4116605234375,
+    "strong_dens_std": 0.04520689323544502,
+    "h_mean": 52.69254684448242,
+    "h_std": 5.786482334136963,
+    "eff_bits_per_dim": 1.0,
+    "ceiling_cheap": {
+      "128": 16.650000000000002,
+      "1024": 41.339999999999996
+    },
+    "ceiling_weighted": {
+      "128": 1.18,
+      "1024": 5.76
+    },
+    "code_only_cheap": 4.41,
+    "code_only_weighted": 0.06,
+    "bench_recall_ef128": 1.61,
+    "note": "T-sweep 128"
+  },
+  "cohere": {
+    "prefix": "cohere",
+    "dim": 768,
+    "n": 1000000,
+    "nq_used": 1000,
+    "neg_frac": 0.4099422721354167,
+    "zero_frac": 3.776041666666667e-08,
+    "pos_dens": 0.5900576901041666,
+    "pos_ham": 0.3499504449725743,
+    "strong_dens": 0.38988677604166666,
+    "strong_dens_std": 0.01135993842035532,
+    "h_mean": 299.4330139160156,
+    "h_std": 8.724432945251465,
+    "eff_bits_per_dim": 2.0,
+    "ceiling_cheap": {
+      "128": 98.95,
+      "1024": 99.98
+    },
+    "ceiling_weighted": {
+      "128": 99.2,
+      "1024": 100.0
+    },
+    "code_only_cheap": 69.21000000000001,
+    "code_only_weighted": 68.81,
+    "bench_recall_ef128": 97.52,
+    "note": "官方 GT"
+  },
+  "cohere960pad": {
+    "prefix": "cohere960pad",
+    "dim": 960,
+    "n": 1000000,
+    "nq_used": 1000,
+    "neg_frac": 0.3279538177083333,
+    "zero_frac": 0.20000003020833335,
+    "pos_dens": 0.47204615208333334,
+    "pos_ham": 0.2793070046697798,
+    "strong_dens": 0.3936325708333333,
+    "strong_dens_std": 0.00984666682779789,
+    "h_mean": 377.8872985839844,
+    "h_std": 9.452799797058105,
+    "eff_bits_per_dim": 2.0,
+    "ceiling_cheap": {
+      "128": 98.34,
+      "1024": 99.89
+    },
+    "ceiling_weighted": {
+      "128": 99.29,
+      "1024": 99.99
+    },
+    "code_only_cheap": 67.16,
+    "code_only_weighted": 69.06,
+    "bench_recall_ef128": 97.11,
+    "note": "T-pad 零填充"
+  },
+  "gauss960": {
+    "prefix": "gauss960",
+    "dim": 960,
+    "n": 1000000,
+    "nq_used": 1000,
+    "neg_frac": 0.5000041739583333,
+    "zero_frac": 1.3333333333333334e-07,
+    "pos_dens": 0.49999569270833333,
+    "pos_ham": 0.4999861574382922,
+    "strong_dens": 0.4250394416666667,
+    "strong_dens_std": 0.009497955441474915,
+    "h_mean": 408.03790283203125,
+    "h_std": 9.118038177490234,
+    "eff_bits_per_dim": 2.0,
+    "ceiling_cheap": {
+      "128": 5.2299999999999995,
+      "1024": 15.920000000000002
+    },
+    "ceiling_weighted": {
+      "128": 54.449999999999996,
+      "1024": 86.59
+    },
+    "code_only_cheap": 0.91,
+    "code_only_weighted": 17.64,
+    "bench_recall_ef128": null,
+    "note": "T-ctrl 随机各向同性高斯"
+  },
+  "gauss960plant": {
+    "prefix": "gauss960plant",
+    "dim": 960,
+    "n": 1000000,
+    "nq_used": 1000,
+    "neg_frac": 0.5000047083333333,
+    "zero_frac": 1.3125e-07,
+    "pos_dens": 0.49999516041666664,
+    "pos_ham": 0.5000116503594989,
+    "strong_dens": 0.4250361260416667,
+    "strong_dens_std": 0.009497040882706642,
+    "h_mean": 408.0346984863281,
+    "h_std": 9.117158889770508,
+    "eff_bits_per_dim": 2.0,
+    "ceiling_cheap": {
+      "128": 100.0,
+      "1024": 100.0
+    },
+    "ceiling_weighted": {
+      "128": 100.0,
+      "1024": 100.0
+    },
+    "code_only_cheap": 100.0,
+    "code_only_weighted": 100.0,
+    "bench_recall_ef128": 100.0,
+    "note": "T-plant 植入真近邻"
+  },
+  "glove100": {
+    "prefix": "glove100",
+    "dim": 100,
+    "n": 1183514,
+    "nq_used": 1000,
+    "neg_frac": 0.4827683407209378,
+    "zero_frac": 0.0,
+    "pos_dens": 0.5172316592790622,
+    "pos_ham": 0.464088974872137,
+    "strong_dens": 0.4231881498655698,
+    "strong_dens_std": 0.02978825755417347,
+    "h_mean": 42.318817138671875,
+    "h_std": 2.9788260459899902,
+    "eff_bits_per_dim": 2.0,
+    "ceiling_cheap": {
+      "128": 45.15,
+      "1024": 67.78999999999999
+    },
+    "ceiling_weighted": {
+      "128": 73.13,
+      "1024": 93.08999999999999
+    },
+    "code_only_cheap": 19.31,
+    "code_only_weighted": 32.23,
+    "bench_recall_ef128": 45.6,
+    "note": "angular(原生 GT)"
+  }
+}
