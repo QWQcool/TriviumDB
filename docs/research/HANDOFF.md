@@ -172,6 +172,25 @@ QuIVer 天花板 **47.21%**（ef_s=1024, 18,247 QPS）vs **hnswlib ef=64 → 97.
 **路径决定**：① 不以"新标量预测器"为论文核心；② 改为"**评估 + 修好已发表的探针**"（指明度量 / 两度量取弱环 / 补图保真度轴）；
 ③ P2 仍做，但目的改为**在论文自己的 12 行上评估论文自己的探针**；④ 无结构档（Random-Sphere）**不并入同一预测器**（论文 Finding 4 已单独解释）。
 
+### P2（修订版）— 复现论文的 *Practical Compatibility Test*（本会话，`p2-revised-result.md`）
+
+| 预注册判据 | 结果 |
+|---|---|
+| **P2-1** `cheap`、`S=10K` 探针与召回的 ρ ≥ 0.9 | ✅ **+0.9500**（n=9）；`S=100K` +0.9833；`S=1M` +0.9500。**对照：`weighted` 只有 +0.8167/+0.85/+0.85（不成立）** |
+| **P2-2** `S=10K` 用 50% 阈值分开"崩塌档 / 竞争档" | ✅ 可分（w: 29.90 < 50 < 57.75；c: 19.65 < 50 < 54.95） |
+| **P2-3** 两度量是否给出**相反 verdict** | ★ **确认**：`random`(Synthetic-LR, 召回 43.60%) **w 66.95% vs c 45.25%** |
+| **P2-4** 探针随 `S` 的依赖幅度 | ★ 最大 **6.8×**（gauss960 cheap 4.40→0.65），方向是**样本越小越乐观** |
+| 与论文对拍 | 论文 Table 10（Cohere-100K 2-bit SM = **64.7%**）vs 我们 `S=100K` **63.20/61.55%** ⇒ **可复现到 3pp** |
+
+**跨口径校准累计 6/12 行**：cohere Δ−0.50 / glove100 +0.74 / sift128 +0.92 / gist960 +0.09 /
+**Synthetic-LR +1.84** / **Random-Sphere +0.08**（后两个数据集是**仓库自带生成器，零下载**：
+`bench_random1m`（k=64 低秩+Zipf 簇）与 `bench_random_sphere`（纯高斯球面））。
+
+**⇒ 三条可写进论文的批评**：① 判据**未指定 BQ 度量**（两度量在 Synthetic-LR 上结论相反）⇒
+修正为 **`min` 两度量**（ρ=+0.95，且在"建图度量才是瓶颈"的行上更保守）；
+② **强依赖样本量**（6.8×，且 S 越小越乐观 ⇒ 50% 阈值在小样本下更难报警）；
+③ 论文四档是**事后标签**，可替换为 P1+P2 给出的**先算后测**组合（`min` 双度量探针 + 图保真度 + `GT10−GT11`）。
+
 ---
 
 ## 3. 文件索引
@@ -193,6 +212,7 @@ QuIVer 天花板 **47.21%**（ef_s=1024, 18,247 QPS）vs **hnswlib ef=64 → 97.
 | `t2-gist960-collapse.md` | **★★ 实验 A：gist960 崩塌根因（H1/H2/H3 + 两个度量不一致 + 图质量实测）** |
 | `paper-readiness.md` | **★★ 论文就绪度：对标已发表 QuIVer(PVLDB 2027) Table 11 的贡献定位、缺口 G1–G12、A/B/C 分层 DoD、P0–P7 执行顺序** |
 | `p1-snr-predictor-result.md` | **★★ P1 闸门实验：SNR 预测器主判据不成立 + 失败诊断 + 路径决定（D1–D4）** |
+| `p2-revised-result.md` | **★★ P2 修订版：复现论文的 compatibility test（P2-1~P2-4）+ 度量歧义 + 样本量依赖 + 三条可写批评** |
 
 ### Bench（`benches/`，均 `required-features = ["ablation"]`）
 `bench_alpha_mechanism` / `bench_rbq2_equal_bits` / `bench_rabitq_epsilon_scaling` /
@@ -220,7 +240,13 @@ QuIVer 天花板 **47.21%**（ef_s=1024, 18,247 QPS）vs **hnswlib ef=64 → 97.
 `bq2_code_ceiling.py`（码的 oracle 分辨力，**自带"分析式 vs `bq.rs` 逐位"守卫**）、
 `graph_neighbor_quality.py`（L0 ∩ 真 top-64，图质量实测，需 `bench_t2_build_recon` 的 CSR 导出）、
 `code_snr_probe.py`（P1：`gap` / `σ_code` / `SNR` / 码 top-10 命中率；`--report` 可离线重算；
-**每数据集独立确定种子**）
+**每数据集独立确定种子**）、`compat_probe_scaling.py`（P2：论文 compatibility test 的**样本量×度量**扫描；`--report`）
+
+### 新增数据集（仓库自带生成器，**零下载**）
+```powershell
+cargo bench --features ablation --bench bench_random1m      # → random_{train,test}.f32 + GT（论文 Synthetic-LR 41.76%）
+cargo bench --features ablation --bench bench_random_sphere # → sphere_{train,test}.f32 + GT（论文 Random-Sphere 0.40%）
+```
 
 ### 结果（`results/`）
 `l1/cohere1m.json`、`t2/partition_probe.json`（cohere）、`t2/partition_probe_sift128.json`、
@@ -245,8 +271,9 @@ QuIVer 天花板 **47.21%**（ef_s=1024, 18,247 QPS）vs **hnswlib ef=64 → 97.
 | **U9** | **图质量指标的抖动与置信区间** | `L0 ∩ cos_top64` 目前是**单次导出 + 256 节点采样**；需多次建图求区间（与 U5 同源） |
 | **U10** | **去均值的部署语义** | `t2-gist960-collapse.md` §7.1 方案 A：门控指标（`pos` 面 Hamming 率 / `cos(x,μ)`）、`μ` 的库级持久化与增量一致性、是否改变产品语义 —— **需产品侧确认** |
 | **U11** | 论文的"两个准入量"判据只在本轮 4 个数据集上验证 | 需 384/1024/1536 维更多点补曲线（`minilm`/`bge_m3`/`dbpedia1536`） |
-| **U12** | **P1 的 SNR 预测器已被证伪**（`p1-snr-predictor-result.md`），替代量（cheap 码命中率 ρ=0.98）只在 **8 行**上成立 | 需 P2 补论文 12 行定论；并执行该文档 §4 的**预注册推论**（论文 Random-Sphere 一行用 weighted 度量做探针会误判为"兼容"） |
-| **U13** | 论文的 compatibility test **未指明用哪个 BQ 度量**（weighted/cheap 在 gauss960 上差 20×） | 需在 P2 上量化 12 行的两度量差，作为对已发表判据的具体批评点 |
+| **U12** | **P1 的 SNR 预测器已被证伪**（`p1-snr-predictor-result.md`）；P2 已给出可用替代（`min` 双度量探针 ρ=0.95，见 `p2-revised-result.md`），但只在 **9 行**上验证 | 需补齐论文剩余 6 行（`minilm-384` / `wolt-clip-512` / `redcaps-512` / `bge-m3-1024` / `dbpedia-1536` / `dbpedia-3072`；**`redcaps-1m` 在本仓 registry 里不存在，可复现性未知**） |
+| **U13** | ✅ **已量化**：论文判据**未指明度量**，且在 Synthetic-LR 上 w `66.95%` vs c `45.25%` 给出**相反 verdict**；另测出**样本量依赖 6.8×**（`p2-revised-result.md` §4） | 结论已定；剩下去 PDF 逐格复核论文原文的探针描述（是否指定度量 / 样本是"库"还是"库+查询"） |
+| **U14** | **`glove100` 的 GT 口径模糊**：其"样本内 f32 top-10"与"数据集自带 GT"只有 **84.85%** 一致（其余 6 个数据集 ≈100%） | 需确认 ann-benchmarks 原生 angular GT 是否基于归一化向量；影响则需在论文中标注 |
 
 ---
 
@@ -267,14 +294,23 @@ QuIVer 天花板 **47.21%**（ef_s=1024, 18,247 QPS）vs **hnswlib ef=64 → 97.
 **结论**：`SNR_eff` ρ=+0.30（含 Random-Sphere 臂）⇒ 不以"新预测器"为核心；
 改为"**评估 + 修好论文自己的探针**（指明度量 / 两度量取弱环 / 补图保真度）"。
 
-### P1-next（立即执行，2 天）—— **在论文自己的 12 行上评估论文自己的探针**
-1. 补数据集（本地只有 4/12）：`minilm-384` / `wolt-clip-512` / `redcaps-512` / `bge-m3-1024` /
-   `dbpedia-*` / `random-1m` / `sphere-1m` / `synthetic-lr`（后两个仓库自带 generator）；
-2. 每个数据集跑 `code_snr_probe.py`（**同时报 weighted 与 cheap 两个度量的码命中率**）
-   + `graph_neighbor_quality.py` + `baseline_competitors.py`；
-3. **预注册检验**（`p1-snr-predictor-result.md` §4）：论文 Table 11 的 **Random-Sphere 一行**
-   （0.40%）若用 **weighted** 度量做 compatibility test，会得到远高于 50% 的值 ⇒
-   **探针会说"兼容"而实测崩塌** —— 若不成立则撤回该推论。
+### ~~P1-next（在论文自己的 12 行上评估论文自己的探针）~~ ✅ **已完成 → 见 §2 的 P2（修订版）**
+产物：`scripts/research/compat_probe_scaling.py` + `results/.../compat_probe_scaling.json` +
+**`p2-revised-result.md`**（9 行 × 3 个样本量 × 2 个度量）。
+
+**诚实记账**：P1 文档里预注册的推论（"论文 Random-Sphere 一行若用 weighted 度量做探针会远高于 50%"）
+**❌ 被证伪**——实测 sphere 的 weighted 探针 `29.85%（10K）/ 18.20%（全量）`，**低于** 50%，
+即探针给出了**正确**的 "incompatible"。⇒ **该推论撤回**。
+但同一担忧（判据未指定度量）在 **`random`（Synthetic-LR）** 一行上以另一种方式成立：
+w `66.95%` vs c `45.25%` ⇒ **相反 verdict**（`p2-revised-result.md` §4.1）。
+
+### 下一步（优先级已重排）
+| # | 事项 | 说明 |
+|---|---|---|
+| **N1（最高）** | **补齐论文剩余 6 行**：`minilm-384` / `wolt-clip-512` / `redcaps-512` / `bge-m3-1024` / `dbpedia-1536` / `dbpedia-3072`（**`redcaps-1m` 本仓 registry 无，可复现性未知**） | 现在"竞争档"只有 1 行，P2-2 的判定样本极薄（U12） |
+| **N2** | **`glove100` 的 GT 口径**（U14）：原生 angular GT 与我们重算的 f32 top-10 只有 84.85% 一致 | 影响所有 glove100 数字的引用 |
+| **N3** | **去 PDF 逐格复核**论文原文的探针描述（是否指定度量 / "10K 样本"是"库"还是"库+查询"） | U13 的剩余部分 |
+| **N4** | 修复项端到端（F1 度量一致 / α=1.0，**需批准**）+ 竞品曲线 ≥6 数据集 | G5/G7 |
 
 ### ~~P1——补维度轴，把 2 个点变成曲线~~ ✅ **已完成（本会话）**
 `gist960` / `glove100` / `sift128` / `cohere` 四点已在上一轮跑完；本会话又补了
@@ -376,3 +412,5 @@ cargo bench --features ablation --bench bench_t2_b2_partitioned      # 建图 + 
 | **K17** | **"码排序质量"类指标必须用测试向量自己的签名**。P1 首版误用 `train[q]` 的行当查询码 ⇒ 码的 top-1 恒为候选自身 ⇒ 命中率恒 `0.00%`，σ/SNR 全部失真 | 任何这类指标都要与**已独立验证过的实现**对拍（`bq2_code_ceiling.py` 的 `code_only_*`：glove100 32.23/19.31、sift128 3.11/10.03），并写成**硬断言哨兵** |
 | **K18** | `np.random.default_rng` 状态随"跑了哪些数据集 / 什么顺序"漂移 ⇒ 同一数据集抽样不同 ⇒ 数值不可复现（实测 glove100 的 `gap` 两次运行差 35%） | 每个数据集用**独立确定种子**：`default_rng([SEED, dim, Σord(prefix)])` |
 | **K19** | `Remove-Item` 删 `results/` 下文件会触发审批（可能超时并打断整条命令链） | 需要"重跑"时**不要删**：结果 JSON 按前缀合并覆盖即可（`code_snr_probe.py` / `bq2_code_ceiling.py` 都支持） |
+| **K20** | **"先评估后落盘"会让一个聚合异常吃掉整批结果**：`compat_probe_scaling.py` 的 `evaluate()` 在"竞争档为空"时 `min([])` 抛 `ValueError` ⇒ 该批 JSON 根本没写；分批跑时前一批全丢，直到 `--report` 只显示 4 行才发现 | ① **先写盘再评估**；② 分批长跑**每批结束都用 `--report` 核对行数**；③ 所有"某类可能为空"的聚合都要有空值分支（打印 `（无）` 而非崩溃） |
+| **K21** | 仓库自带的两个"无结构/低秩"数据集生成器**不需要下载**，但会往**仓库根**写 ~3 GB：`bench_random1m` → `random_*`（Synthetic-LR）、`bench_random_sphere` → `sphere_*`（Random-Sphere）；`bench_sensitivity` 的 registry 名分别是 `random-1m` / `sphere-1m` | 想补论文 Table 11 的"无结构档"时**先跑这两个**（各 ~2 分钟），别去下载 |
