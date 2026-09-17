@@ -13,6 +13,13 @@
 但竞品基线**首次复现了仓库自己的核心宣称（高维上快 HNSW 4–5×）**，
 并暴露出一个精度-维数边界 —— 论文形状已从"融合三个技术"改为"BQ2 的适用边界"。
 
+> ⚠️ **（2026-09-17 修正）** 已发表版本是 **PVLDB Vol. 20, 2027**（arXiv `2605.02171`，作者 Wenxuan Xiao /
+> Zhiyou Wang / Chengcheng Li），其**自述的核心贡献就是这条边界**，且**明确说"维度不是分界线"**：
+> 分组是数据属性（**cosine-native ≥88% / CLIP 71–78% / Euclidean-native 或 structureless <15%**，
+> 12 个百万级数据集）。⇒ **"发现边界不是维度"不能当卖点**；我们的可发表贡献必须是
+> **更精确的机制 + 可预先计算的连续判据 + 可操作的修复**。
+> 完整的就绪度评估与缺口清单见 **`paper-readiness.md`**。
+
 **⚠️ 本会话（实验 A）修正了上面那条"边界"的归因**：gist960 的召回崩塌**不是维度问题**，
 而是**数据全非负 ⇒ BQ2 的 `pos` 符号面退化为常量 ⇒ 建图所用度量退化为"按候选 popcount 选邻居"**，
 叠加**建图与查询使用两个不一致的度量**。同时证伪了"上游 FHT 旋转 512 段"的怀疑
@@ -219,6 +226,15 @@ QuIVer 天花板 **47.21%**（ef_s=1024, 18,247 QPS）vs **hnswlib ef=64 → 97.
 ---
 
 ## 5. 下一步（按优先级）
+
+> **先读 `paper-readiness.md`**：它给出论文就绪度评估、缺口清单（G1–G11）、分层 DoD（Tier A/B/C）
+> 与审稿人预演。**其中 P0（跨口径校准）是最高优先且最便宜（1–2 h）**：
+> ```powershell
+> $env:TRIVIUM_ANN_NAME="cohere-1m"; $env:TRIVIUM_SENSITIVITY_MODE="params"
+> $env:TRIVIUM_SENSITIVITY_START="1d"; $env:TRIVIUM_SENSITIVITY_END="1d"
+> cargo bench --bench bench_sensitivity     # 论文自己的 harness，与 bench_t2_b2_partitioned 对拍
+> ```
+> 判据：每点偏差 ≤0.5pp ⇒ 口径打通；>1pp ⇒ 必须改用论文 harness 重跑全部实验。
 
 ### ~~P1——补维度轴，把 2 个点变成曲线~~ ✅ **已完成（本会话）**
 `gist960` / `glove100` / `sift128` / `cohere` 四点已在上一轮跑完；本会话又补了
