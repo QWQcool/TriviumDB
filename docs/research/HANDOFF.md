@@ -17,8 +17,14 @@
 > Zhiyou Wang / Chengcheng Li），其**自述的核心贡献就是这条边界**，且**明确说"维度不是分界线"**：
 > 分组是数据属性（**cosine-native ≥88% / CLIP 71–78% / Euclidean-native 或 structureless <15%**，
 > 12 个百万级数据集）。⇒ **"发现边界不是维度"不能当卖点**；我们的可发表贡献必须是
-> **更精确的机制 + 可预先计算的连续判据 + 可操作的修复**。
+> **更精确的机制 + 修好可预先计算的判据 + 可操作的修复**。
 > 完整的就绪度评估与缺口清单见 **`paper-readiness.md`**。
+>
+> **（2026-09-17 之二）P1 闸门实验已做，主判据不成立**：我们自己提出的"码估计信噪比"预测器
+> （`SNR_eff = min(SNR_w, SNR_c)`）与召回的秩相关只有 **ρ = +0.30**（含 Random-Sphere 对应臂时），
+> 失败原因已定位（残差型 `σ_code` 尺度自由 ⇒ 无结构档失效）；`gap` 单独（ρ=0.75–0.83）反而更好。
+> 事后实测最准的是 **cheap 度量自身的码 top-10 命中率（ρ=+0.9762）**。⇒ 论文核心改为
+> "**评估 + 修好论文自己的探针**（指明用哪个度量 / 两度量取弱环 / 补图保真度轴）"。详见 **`p1-snr-predictor-result.md`**。
 
 **⚠️ 本会话（实验 A）修正了上面那条"边界"的归因**：gist960 的召回崩塌**不是维度问题**，
 而是**数据全非负 ⇒ BQ2 的 `pos` 符号面退化为常量 ⇒ 建图所用度量退化为"按候选 popcount 选邻居"**，
@@ -153,6 +159,19 @@ QuIVer 天花板 **47.21%**（ef_s=1024, 18,247 QPS）vs **hnswlib ef=64 → 97.
 `0.1224 < 0.1291` 而召回翻倍；`gist960` 可分性高于 SIFT 而召回仅 1/8）。修正判据需要**两个独立量**：
 ① `pos` 面 Hamming 率（度量是否退化）；② `L0 ∩ cos_top64`（图是否真近邻图，需 CSR 导出实测）。
 
+### P1 — 码估计信噪比预测器（本会话，`p1-snr-predictor-result.md`）：**主判据不成立**
+
+**结论**（预注册，闸门实验）：
+| 项 | 结果 |
+|---|---|
+| 预注册判据 `SNR_eff` 与 R@10@ef=64 的 ρ ≥ 0.9 | ❌ **不成立**：含 Random-Sphere 对应臂（gauss960）时 **ρ = +0.30**（不含时 +0.80；4 点下多个量并列 1.0，**无分辨力**） |
+| 失败诊断 | 残差型 `σ_code` **尺度自由** ⇒ 无结构数据局部 cosine 展布极小 ⇒ σ 被低估（gauss960 `0.015` < gist960 `0.025`）⇒ SNR 虚高而实际召回最低（`0.41%`）；`gap 单独`（ρ=0.75–0.83）反而优于 `snr_eff` |
+| 事后最佳替代 | **cheap 度量自身的码 top-10 命中率**：ρ = **+0.9762**（8 行）/ +1.0000（论文 5 个对应行） |
+| ★ 附带发现 | 论文的 *Practical Compatibility Test* **未指明用哪个 BQ 度量**；gauss960 上 weighted `16.70%` vs cheap `0.85%`（**20×**），cohere 上几乎相同（1.01×） |
+
+**路径决定**：① 不以"新标量预测器"为论文核心；② 改为"**评估 + 修好已发表的探针**"（指明度量 / 两度量取弱环 / 补图保真度轴）；
+③ P2 仍做，但目的改为**在论文自己的 12 行上评估论文自己的探针**；④ 无结构档（Random-Sphere）**不并入同一预测器**（论文 Finding 4 已单独解释）。
+
 ---
 
 ## 3. 文件索引
@@ -172,6 +191,8 @@ QuIVer 天花板 **47.21%**（ef_s=1024, 18,247 QPS）vs **hnswlib ef=64 → 97.
 | `baseline-competitors.md` | **★ 竞品基线（正向结论 + 论文形状）** |
 | `alpha-default-reeval.md` | **α 默认值重评** |
 | `t2-gist960-collapse.md` | **★★ 实验 A：gist960 崩塌根因（H1/H2/H3 + 两个度量不一致 + 图质量实测）** |
+| `paper-readiness.md` | **★★ 论文就绪度：对标已发表 QuIVer(PVLDB 2027) Table 11 的贡献定位、缺口 G1–G12、A/B/C 分层 DoD、P0–P7 执行顺序** |
+| `p1-snr-predictor-result.md` | **★★ P1 闸门实验：SNR 预测器主判据不成立 + 失败诊断 + 路径决定（D1–D4）** |
 
 ### Bench（`benches/`，均 `required-features = ["ablation"]`）
 `bench_alpha_mechanism` / `bench_rbq2_equal_bits` / `bench_rabitq_epsilon_scaling` /
@@ -197,7 +218,9 @@ QuIVer 天花板 **47.21%**（ef_s=1024, 18,247 QPS）vs **hnswlib ef=64 → 97.
 `l1_*` / `t1_*`（历史验证脚本）、
 **本会话新增**：`gist960_collapse_prepare.py`（派生数据集 + GT 重算 + 守卫）、
 `bq2_code_ceiling.py`（码的 oracle 分辨力，**自带"分析式 vs `bq.rs` 逐位"守卫**）、
-`graph_neighbor_quality.py`（L0 ∩ 真 top-64，图质量实测，需 `bench_t2_build_recon` 的 CSR 导出）
+`graph_neighbor_quality.py`（L0 ∩ 真 top-64，图质量实测，需 `bench_t2_build_recon` 的 CSR 导出）、
+`code_snr_probe.py`（P1：`gap` / `σ_code` / `SNR` / 码 top-10 命中率；`--report` 可离线重算；
+**每数据集独立确定种子**）
 
 ### 结果（`results/`）
 `l1/cohere1m.json`、`t2/partition_probe.json`（cohere）、`t2/partition_probe_sift128.json`、
@@ -222,6 +245,8 @@ QuIVer 天花板 **47.21%**（ef_s=1024, 18,247 QPS）vs **hnswlib ef=64 → 97.
 | **U9** | **图质量指标的抖动与置信区间** | `L0 ∩ cos_top64` 目前是**单次导出 + 256 节点采样**；需多次建图求区间（与 U5 同源） |
 | **U10** | **去均值的部署语义** | `t2-gist960-collapse.md` §7.1 方案 A：门控指标（`pos` 面 Hamming 率 / `cos(x,μ)`）、`μ` 的库级持久化与增量一致性、是否改变产品语义 —— **需产品侧确认** |
 | **U11** | 论文的"两个准入量"判据只在本轮 4 个数据集上验证 | 需 384/1024/1536 维更多点补曲线（`minilm`/`bge_m3`/`dbpedia1536`） |
+| **U12** | **P1 的 SNR 预测器已被证伪**（`p1-snr-predictor-result.md`），替代量（cheap 码命中率 ρ=0.98）只在 **8 行**上成立 | 需 P2 补论文 12 行定论；并执行该文档 §4 的**预注册推论**（论文 Random-Sphere 一行用 weighted 度量做探针会误判为"兼容"） |
+| **U13** | 论文的 compatibility test **未指明用哪个 BQ 度量**（weighted/cheap 在 gauss960 上差 20×） | 需在 P2 上量化 12 行的两度量差，作为对已发表判据的具体批评点 |
 
 ---
 
@@ -235,6 +260,21 @@ QuIVer 天花板 **47.21%**（ef_s=1024, 18,247 QPS）vs **hnswlib ef=64 → 97.
 > cargo bench --bench bench_sensitivity     # 论文自己的 harness，与 bench_t2_b2_partitioned 对拍
 > ```
 > 判据：每点偏差 ≤0.5pp ⇒ 口径打通；>1pp ⇒ 必须改用论文 harness 重跑全部实验。
+
+### ~~P1（闸门）—— 码估计信噪比预测器~~ ✅ **已完成 → 主判据不成立**
+产物：`scripts/research/code_snr_probe.py` + `results/t2/gist960_collapse/snr_probe.json` +
+**`p1-snr-predictor-result.md`**（8 行结果、失败诊断、路径决定 D1–D4）。
+**结论**：`SNR_eff` ρ=+0.30（含 Random-Sphere 臂）⇒ 不以"新预测器"为核心；
+改为"**评估 + 修好论文自己的探针**（指明度量 / 两度量取弱环 / 补图保真度）"。
+
+### P1-next（立即执行，2 天）—— **在论文自己的 12 行上评估论文自己的探针**
+1. 补数据集（本地只有 4/12）：`minilm-384` / `wolt-clip-512` / `redcaps-512` / `bge-m3-1024` /
+   `dbpedia-*` / `random-1m` / `sphere-1m` / `synthetic-lr`（后两个仓库自带 generator）；
+2. 每个数据集跑 `code_snr_probe.py`（**同时报 weighted 与 cheap 两个度量的码命中率**）
+   + `graph_neighbor_quality.py` + `baseline_competitors.py`；
+3. **预注册检验**（`p1-snr-predictor-result.md` §4）：论文 Table 11 的 **Random-Sphere 一行**
+   （0.40%）若用 **weighted** 度量做 compatibility test，会得到远高于 50% 的值 ⇒
+   **探针会说"兼容"而实测崩塌** —— 若不成立则撤回该推论。
 
 ### ~~P1——补维度轴，把 2 个点变成曲线~~ ✅ **已完成（本会话）**
 `gist960` / `glove100` / `sift128` / `cohere` 四点已在上一轮跑完；本会话又补了
@@ -333,3 +373,6 @@ cargo bench --features ablation --bench bench_t2_b2_partitioned      # 建图 + 
 | **K14** | `np.abs(tr).sum(1) / np.linalg.norm(tr, axis=1)` 在全零行上产生 `nan` 并刷 warning（gist960 有 10 行全零） | 各向异性统计要加 `np.maximum(norm, 1e-12)` |
 | **K15** | `bench_t2_build_recon` 的**守卫1 只对 cohere+1M+惰性生效**（安全用于其它数据集）；但它的 `T2_N=0` 表示全部 ⇒ **增量插入样本为 0，阶段 C 自动跳过**（与 K5 同源） | 想测增量插入必须 `T2_N=数据量-N` |
 | **K16** | `bench_t2_b2_partitioned` 用 `T2_FROZEN_RECALL` 时是**硬断言**（偏差 >1pp ⇒ panic，位于 markdown 表打印之前 ⇒ 丢表） | 派生数据集要么不传该变量，要么确认真能复现；stderr 的逐臂行已足够留档 |
+| **K17** | **"码排序质量"类指标必须用测试向量自己的签名**。P1 首版误用 `train[q]` 的行当查询码 ⇒ 码的 top-1 恒为候选自身 ⇒ 命中率恒 `0.00%`，σ/SNR 全部失真 | 任何这类指标都要与**已独立验证过的实现**对拍（`bq2_code_ceiling.py` 的 `code_only_*`：glove100 32.23/19.31、sift128 3.11/10.03），并写成**硬断言哨兵** |
+| **K18** | `np.random.default_rng` 状态随"跑了哪些数据集 / 什么顺序"漂移 ⇒ 同一数据集抽样不同 ⇒ 数值不可复现（实测 glove100 的 `gap` 两次运行差 35%） | 每个数据集用**独立确定种子**：`default_rng([SEED, dim, Σord(prefix)])` |
+| **K19** | `Remove-Item` 删 `results/` 下文件会触发审批（可能超时并打断整条命令链） | 需要"重跑"时**不要删**：结果 JSON 按前缀合并覆盖即可（`code_snr_probe.py` / `bq2_code_ceiling.py` 都支持） |
