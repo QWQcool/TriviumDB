@@ -137,12 +137,26 @@ fn main() {
     let alpha = env_f32("T2_ALPHA", 1.2);
     let n_cap = env_usize("T2_N", 0); // 0 = 全部
 
+    // 可选开关：
+    //   T2_EFC=128        单一/多值覆盖束宽（用于 α 扫描等只需单一束宽的场景）
+    //   T2_SKIP_DET=1     跳过 G-det 的两次额外建图（该守卫已在 t2-b2-result.md 确立）
+    let efc_list: Vec<usize> = match std::env::var("T2_EFC") {
+        Ok(v) if !v.trim().is_empty() => {
+            v.split(',').filter_map(|s| s.trim().parse().ok()).collect()
+        }
+        _ => EF_C_LIST.to_vec(),
+    };
+    let skip_det = std::env::var("T2_SKIP_DET").as_deref() == Ok("1");
+
     eprintln!("  T2 B2-0 — ef_construction 扫描（平凡对照，零代码）");
-    eprintln!("  数据集={prefix} dim={dim}  臂 = {EF_C_LIST:?}   m={M} m0={M0} alpha={alpha}");
+    eprintln!(
+        "  数据集={prefix} dim={dim}  臂 = {efc_list:?}   m={M} m0={M0} alpha={alpha}{}",
+        if skip_det { "  [T2_SKIP_DET]" } else { "" }
+    );
     eprintln!("═══════════════════════════════════════════════════════════════════");
 
     // 守卫 G5：随机注入量必须与 ef 无关（公式断言，无需改 src）
-    for &ef in &EF_C_LIST {
+    for &ef in &efc_list {
         let samples = ef.min(128).max(M0 * 2);
         assert_eq!(
             samples, 128,
@@ -197,7 +211,7 @@ fn main() {
 
     let mut arms: Vec<Arm> = Vec::new();
 
-    for &ef_c in &EF_C_LIST {
+    for &ef_c in &efc_list {
         eprintln!("\n  ── 臂 ef_construction={ef_c} ──");
         let config = QuIVerConfig {
             m: M,
@@ -287,65 +301,74 @@ fn main() {
     // ── 守卫 G-det：并发建图确定性 + 非确定性对召回的影响 ──
     // 连做两次同配置建图（同条件、背靠背），隔离调度抖动；
     // 并各自测 R@10，以判定"边集不同"是否"质量等价"。
-    eprintln!("  守卫G-det 正在背靠背重复建图（ef_c=128）×2 并各自测召回 ...");
-    let mut det_reps: Vec<((u64, u64), f64)> = Vec::new();
-    for rep in 0..2 {
-        let mut ix = QuIVer::new(
-            dim,
-            &QuIVerConfig {
-                m: M,
-                ef_construction: 128,
-                alpha,
+    // 该守卫已在 t2-b2-result.md 的 3 次运行 × 2 次重复中确立，可用 T2_SKIP_DET=1 跳过。
+    let mut det_consecutive = true;
+    let mut det_vs_arm = true;
+    let mut recall_spread = 0.0f64;
+    if skip_det {
+        eprintln!("  守卫G-det 跳过（T2_SKIP_DET=1）");
+    } else {
+        eprintln!("  守卫G-det 正在背靠背重复建图（ef_c=128）×2 并各自测召回 ...");
+        let mut det_reps: Vec<((u64, u64), f64)> = Vec::new();
+        for rep in 0..2 {
+            let mut ix = QuIVer::new(
+                dim,
+                &QuIVerConfig {
+                    m: M,
+                    ef_construction: 128,
+                    alpha,
+                },
+            );
+            ix.batch_build_experimental_v2(&train, &ids, &slots);
+            let fp = edge_fingerprint(&ix, n_train);
+            let cfg = QuIVerSearchConfig {
+                top_k: TOP_K,
+                ef_search: 128,
+                rerank_limit: None,
+            };
+            let hits: usize = (0..n_test)
+                .into_par_iter()
+                .map(|i| {
+                    let q = &test[i * dim..(i + 1) * dim];
+                    let res = ix.search_flat(q, &train, &cfg);
+                    res.iter()
+                        .filter(|&&(id, _)| eval_gts[i].contains(&id))
+                        .count()
+                })
+                .sum();
+            let r = hits as f64 / (n_test * TOP_K) as f64 * 100.0;
+            det_reps.push((fp, r));
+            drop(ix); // 释放 ~1GB，避免影响下一次建图
+            eprintln!("    rep{rep}: 指纹 {:#018x}  R@10 {r:.2}%", fp.0);
+        }
+        det_consecutive = det_reps[0].0 == det_reps[1].0;
+        det_vs_arm = det_reps[0].0 == base.fp;
+        recall_spread = (det_reps[0].1 - det_reps[1].1).abs();
+        eprintln!(
+            "  守卫G-det 背靠背两次: 指纹{}（{}）",
+            if det_consecutive {
+                "相同 PASS"
+            } else {
+                "不同 ⚠️"
             },
+            if det_vs_arm {
+                "，且与臂1相同"
+            } else {
+                "，且与臂1不同"
+            }
         );
-        ix.batch_build_experimental_v2(&train, &ids, &slots);
-        let fp = edge_fingerprint(&ix, n_train);
-        let cfg = QuIVerSearchConfig {
-            top_k: TOP_K,
-            ef_search: 128,
-            rerank_limit: None,
-        };
-        let hits: usize = (0..n_test)
-            .into_par_iter()
-            .map(|i| {
-                let q = &test[i * dim..(i + 1) * dim];
-                let res = ix.search_flat(q, &train, &cfg);
-                res.iter()
-                    .filter(|&&(id, _)| eval_gts[i].contains(&id))
-                    .count()
-            })
-            .sum();
-        let r = hits as f64 / (n_test * TOP_K) as f64 * 100.0;
-        det_reps.push((fp, r));
-        drop(ix); // 释放 ~1GB，避免影响下一次建图
-        eprintln!("    rep{rep}: 指纹 {:#018x}  R@10 {r:.2}%", fp.0);
+        eprintln!(
+            "  守卫G-det 非确定性对召回的影响: {:.2}% vs {:.2}%（极差 {recall_spread:.2}pp）→ {}",
+            det_reps[0].1,
+            det_reps[1].1,
+            if recall_spread <= 0.20 {
+                "质量等价（边集不同但召回稳定）"
+            } else {
+                "⚠️ 召回不稳定，所有单次运行结论需附抖动范围"
+            }
+        );
     }
-    let det_consecutive = det_reps[0].0 == det_reps[1].0;
-    let det_vs_arm = det_reps[0].0 == base.fp;
-    let recall_spread = (det_reps[0].1 - det_reps[1].1).abs();
-    eprintln!(
-        "  守卫G-det 背靠背两次: 指纹{}（{}）",
-        if det_consecutive {
-            "相同 PASS"
-        } else {
-            "不同 ⚠️"
-        },
-        if det_vs_arm {
-            "，且与臂1相同"
-        } else {
-            "，且与臂1不同"
-        }
-    );
-    eprintln!(
-        "  守卫G-det 非确定性对召回的影响: {:.2}% vs {:.2}%（极差 {recall_spread:.2}pp）→ {}",
-        det_reps[0].1,
-        det_reps[1].1,
-        if recall_spread <= 0.20 {
-            "质量等价（边集不同但召回稳定）"
-        } else {
-            "⚠️ 召回不稳定，所有单次运行结论需附抖动范围"
-        }
-    );
+    let _ = det_vs_arm; // 仅在 G-det 未跳过时用于打印
     let det = det_consecutive;
 
     // ── 判定 ──
