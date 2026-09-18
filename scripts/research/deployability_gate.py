@@ -240,7 +240,18 @@ def main():
               f" 可分={r['separability']:+.3f} probe10={r['probe_top10_min']:5.1f}%"
               f" probe_ef={r['probe_topef_min']:5.1f}% 实测@128={m}  {r['verdict']}")
         OUT.parent.mkdir(parents=True, exist_ok=True)
-        OUT.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+        # ⚠️ 必须**增量合并**：否则带 argv 过滤的分批跑会把产物覆盖成只剩本次的臂
+        #（曾经踩过：4 臂过滤跑把 22 臂的 JSON 覆盖了）
+        merged = {}
+        if OUT.exists():
+            try:
+                merged = {x["prefix"]: x for x in json.loads(OUT.read_text(encoding="utf-8"))}
+            except (json.JSONDecodeError, KeyError, TypeError):
+                merged = {}
+        merged.update({x["prefix"]: x for x in rows})
+        order = [p for p, _ in ARMS if p in merged] + [p for p in merged if p not in [a for a, _ in ARMS]]
+        OUT.write_text(json.dumps([merged[p] for p in order], ensure_ascii=False, indent=2),
+                       encoding="utf-8")
 
     print(f"\n{'=' * 112}\n  markdown\n{'=' * 112}")
     print("| 臂 | dim | sign_info mean/min | ‖μ‖ | 可分性 | probe10 | probe_ef | 实测 R@10@128 | 判据 |")
