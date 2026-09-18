@@ -14,6 +14,17 @@ pub(crate) static FORCE_NO_384_KERNEL: std::sync::LazyLock<bool> = std::sync::La
     std::env::var("TRIVIUM_DISABLE_384_KERNEL").is_ok_and(|value| value == "1")
 });
 
+/// 环境变量 `TRIVIUM_NAV_WEIGHTED=1` 时，**L0 查询导航**改用 `distance_to_sig`（6 类加权），
+/// 与建图/剪枝/上层所用的度量一致 ⇒ 修复 **F1：建图与查询使用两个不同的度量**。
+///
+/// - 默认 **关闭** ⇒ 与历史行为逐位一致（冻结的召回值即回归守卫）。
+/// - 打开后每条候选的距离要多算一次 popcount 组合（`bq2_distance_raw` vs `_cheap`），
+///   QPS 代价须实测（见 `docs/research/f1-metric-consistency.md`）。
+/// - ⚠️ 打开后加权距离上界变成 `4·dim`，故 `TsngNavigationScorer` 的 `max_bq_distance`
+///   必须从 `2·dim` 改为 `4·dim`，否则所有距离会被截断到饱和（已按本开关取用）。
+pub(crate) static NAV_WEIGHTED: std::sync::LazyLock<bool> =
+    std::sync::LazyLock::new(|| std::env::var("TRIVIUM_NAV_WEIGHTED").is_ok_and(|v| v == "1"));
+
 /// BQ 签名最大 chunks 数量（每个 u64 chunk 覆盖 64 维）
 /// 48 chunks × 64 bits = 3072 维上限
 const MAX_BQ_CHUNKS: usize = 48;

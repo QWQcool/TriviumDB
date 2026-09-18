@@ -1269,15 +1269,25 @@ impl QuIVer {
             BinaryHeap::with_capacity(ef * 2);
         let mut results: BinaryHeap<(NonNanF32, u32)> = BinaryHeap::with_capacity(ef + 1);
 
+        // F1（`TRIVIUM_NAV_WEIGHTED=1`）：导航度量与建图/剪枝保持一致（6 类加权）。
+        // 默认关闭 ⇒ 历史行为逐位不变。384 维分支必须一起切，否则该维度下开关失效。
+        let nav_weighted = *crate::index::bq::NAV_WEIGHTED;
         let cheap_distance = |node: u32| -> u32 {
             #[cfg(target_arch = "x86_64")]
             if DIM_384 {
-                return self
-                    .bq_store
-                    .distance_to_sig_cheap_384(node as usize, q_sig);
+                return if nav_weighted {
+                    self.bq_store.distance_to_sig(node as usize, q_sig, 384)
+                } else {
+                    self.bq_store
+                        .distance_to_sig_cheap_384(node as usize, q_sig)
+                };
             }
-            self.bq_store
-                .distance_to_sig_cheap(node as usize, q_sig, self.dim)
+            if nav_weighted {
+                self.bq_store.distance_to_sig(node as usize, q_sig, self.dim)
+            } else {
+                self.bq_store
+                    .distance_to_sig_cheap(node as usize, q_sig, self.dim)
+            }
         };
         let d = NonNanF32(scorer.score(self.ids[entry as usize], cheap_distance(entry)) as f32);
         visited.set(entry as usize);
@@ -1340,9 +1350,15 @@ impl QuIVer {
         let mut signal_queue = BinaryHeap::with_capacity(ef.saturating_mul(2));
         let mut vector_results = BinaryHeap::with_capacity(ef.saturating_add(1));
         let mut signal_results = BinaryHeap::with_capacity(ef.saturating_add(1));
+        // F1：与 `beam_search_l0_impl` 同一开关（dual/信号路径也须一致）
+        let nav_weighted = *crate::index::bq::NAV_WEIGHTED;
         let distance = |node: u32| {
-            self.bq_store
-                .distance_to_sig_cheap(node as usize, q_sig, self.dim)
+            if nav_weighted {
+                self.bq_store.distance_to_sig(node as usize, q_sig, self.dim)
+            } else {
+                self.bq_store
+                    .distance_to_sig_cheap(node as usize, q_sig, self.dim)
+            }
         };
         let add = |node: u32,
                    discovered: &mut Bitset,
@@ -1510,10 +1526,15 @@ impl QuIVer {
         scratch.candidates.reserve(ef.saturating_mul(2));
         scratch.results.reserve(ef.saturating_add(1));
 
+        // F1：第三个导航点（384 维 scratch 路径）也须与上面两处一致
+        let nav_weighted = *crate::index::bq::NAV_WEIGHTED;
         let distance = |scorer: &mut S, node: u32| -> NonNanF32 {
-            let bq_distance = self
-                .bq_store
-                .distance_to_sig_cheap_384(node as usize, q_sig);
+            let bq_distance = if nav_weighted {
+                self.bq_store.distance_to_sig(node as usize, q_sig, 384)
+            } else {
+                self.bq_store
+                    .distance_to_sig_cheap_384(node as usize, q_sig)
+            };
             NonNanF32(scorer.score(self.ids[node as usize], bq_distance) as f32)
         };
         let initial_distance = distance(scorer, entry);

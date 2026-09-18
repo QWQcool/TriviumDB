@@ -2,7 +2,9 @@
 
 > **分支**：`research/quiver2-pipnn-rabitq-tsng`（基点 `upstream/dev @ 043c328`）
 > **提交**：`3637954` → `d66142f` → `b0b85a4` → `f132334` → `4c28ffe` → `d0e44e1` → **`33100ed`（实验 A，见 §2.6）**
-> **源码状态**：**`src/` 零改动**（全部工作 = 新 bench + Python 脚本 + 研究文档）
+> **源码状态**：**`src/` 已首次改动（仅 F1，默认关闭）**：`bq.rs`/`quiver.rs`/`tsng.rs` 新增
+> `TRIVIUM_NAV_WEIGHTED` 开关（L0 查询导航换 6 类加权度量），**默认路径逐位不变**，
+> 冻结值仍是回归守卫（`f1-metric-consistency.md`）。其余全部工作仍为零改动。
 > **日期**：2026-09-17
 
 ---
@@ -235,6 +237,7 @@ QuIVer 天花板 **47.21%**（ef_s=1024, 18,247 QPS）vs **hnswlib ef=64 → 97.
 | `audit-and-direction.md` | **★★★ N1–N4 结果 + 旧结论逐条审查 + 新方向（D1–D4）+ 论文可行性（含停止条件）**；§9 = D2 竞品曲线与 A9/A11 修正 |
 | `t2-deployability-gate.md` | **★★ D1 可部署性判据链**：`sign_info` 分诊 + 双度量最弱探针；含 Random-Sphere 上 **53.2% vs 0.91%** 的假阳性发现 |
 | `scripts/research/deployability_gate.py` | D1 脚本（22 臂，产物 `results/t2/deployability_gate.json`） |
+| `f1-metric-consistency.md` | **★★ F1 补丁（首个 `src/` 改动，默认关闭）+ 6 数据集 A/B：`sign_info` 完美预测 F1 的收益符号** |
 
 ### Bench（`benches/`，均 `required-features = ["ablation"]`）
 `bench_alpha_mechanism` / `bench_rbq2_equal_bits` / `bench_rabitq_epsilon_scaling` /
@@ -289,7 +292,8 @@ cargo bench --features ablation --bench bench_random_sphere # → sphere_{train,
 | U5 | B1 / 跨分区边率的**结构抖动未量化** | 可用多次建图重算得到置信区间 |
 | U6 | 竞品只扫了一个 M=32 | M=16/48 可能改变倍差（但 3 个实现一致 ⇒ 量级稳） |
 | U7 | `bench_t2_b2_partitioned` 的 **P1 判据在基线退化时失效**（SIFT 上所有臂都"达标"） | 判据需加绝对下限 |
-| **U8** | **度量不一致的修复（F1/F2/F3）** —— L0 查询导航用 cheap、建图用 weighted | **需批准**（见 `t2-gist960-collapse.md` §7.2）。F1=`quiver.rs:1272-1281` 换度量（收益上界：glove100 `45.60→≤73.13`、gauss960 `0.83→≤54.45`）；F2=按注释补一次 weighted 重排；F3=签名前去均值（**动磁盘契约**，建议独立提案）。**代价未测**（本机无 AVX-512） |
+| **U8** | ✅ **F1 已实现并实测（2026-09-18）**：`TRIVIUM_NAV_WEIGHTED=1`（默认关闭 ⇒ 冻结值不变）。**结论反转**：不是纯 bug，而是**数据依赖的 trade-off** —— `sign_info ≥ 0.75` 全受益（glove100 **+21.8pp**、gauss960 2.9×、wolt_clip +0.9、cohere +0.5），`sign_info = 0.000` 全受损（sift128 **−13.4pp**、gist960 −1.3）；QPS 代价 ≲9% ⇒ 见 `f1-metric-consistency.md`。**F2 未做；F3（签名前去均值）已由 bench 侧的去均值臂替代（动磁盘契约的建议仍待产品侧）** |
+| **U19** | **「去均值 + weighted 导航」组合臂未测**：`gist960c`/`sift128c` 的 `sign_info ≈ 0.92–0.98` ⇒ 按 D1→F1 的条件链应在去均值后打开加权导航 | 每个数据集 ~2 分钟（4 个臂） |
 | **U9** | **图质量指标的抖动与置信区间** | `L0 ∩ cos_top64` 目前是**单次导出 + 256 节点采样**；需多次建图求区间（与 U5 同源） |
 | **U10** | **去均值的部署语义** | `t2-gist960-collapse.md` §7.1 方案 A：门控指标（`pos` 面 Hamming 率 / `cos(x,μ)`）、`μ` 的库级持久化与增量一致性、是否改变产品语义 —— **需产品侧确认** |
 | **U11** | 论文的"两个准入量"判据只在本轮 4 个数据集上验证 | 需 384/1024/1536 维更多点补曲线（`minilm`/`bge_m3`/`dbpedia1536`） |
@@ -454,3 +458,4 @@ cargo bench --features ablation --bench bench_t2_b2_partitioned      # 建图 + 
 | **K25** | `scripts/prepare_all.py` 的 `binary_vector` 分支假设向量是 **JSON 字符串**，而 `wolt_clip` 当前 revision 直接给 `list` ⇒ `TypeError: the JSON object must be str, ... not list` | 已做最小容错（`isinstance` 判断）；记入上游缺陷清单（第 4 条） |
 | **K26** | **别把 MiB 当 MB**：`[math]::Round($_.Length/1MB,1)` 里的 `1MB` = 1,048,576 ⇒ `wolt_clip_train` 显示 "1953.1" 而实际是 **2,048,000,000 B = 1,000,000×512 行**。我据此误判"流式只取到 953,662 行"并写进限制 L3（已撤回） | 行数**一律**用 `Length / 4 / dim` 算；`.f32` 的字节数/4/dim 才是行数 |
 | **K27** | **维度专用内核容易写错度量**：我第一版 `deployability_gate.py` 把 `pos` 写成 `v >= 0`（正确是 `v > 0`）、并即兴推了一个加权 6 类公式 | **永远从 `bq2_code_ceiling.py` 里已过守卫的三式复制**（`pos = v > 0`、`w = (2p−1)(1+s)`、cheap = `(｜p｜+｜s｜) − 2(<p,p>+<s,s>)`） |
+| **K28** | **把"代码不一致"当 bug 之前先做 A/B**：F1（建图 weighted / 导航 cheap 的不一致）看着像疏漏，实测却是**数据依赖的 trade-off**——sift128 `−13.4pp` vs glove100 `+21.8pp`。上游把导航设成 cheap **是符号面退化数据上的保护** | 任何"两处用了不同度量/不同路径"的发现，先进 A/B；再问 D1 的 `sign_info` 属于哪一侧 |

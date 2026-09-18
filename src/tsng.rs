@@ -302,9 +302,14 @@ impl<'a> TsngNavigationScorer<'a> {
         let sum = weights.vector + weights.property + weights.graph;
         let fixed = |weight: f32| ((weight / sum) * NAVIGATION_SCALE as f32).round() as u32;
         Self {
-            max_bq_distance: u32::try_from(dim.saturating_mul(2))
-                .unwrap_or(u32::MAX)
-                .max(1),
+            // F1 开关（`TRIVIUM_NAV_WEIGHTED=1`）下导航距离是 6 类加权（上界 4·dim），
+            // 否则是纯 Hamming（上界 2·dim）。截断上界必须随之改变，否则全部饱和。
+            max_bq_distance: {
+                let per_dim = if *crate::index::bq::NAV_WEIGHTED { 4 } else { 2 };
+                u32::try_from(dim.saturating_mul(per_dim))
+                    .unwrap_or(u32::MAX)
+                    .max(1)
+            },
             property_weight: fixed(weights.property),
             graph_weight: fixed(weights.graph),
             metadata_bonus_cap_ppm,
