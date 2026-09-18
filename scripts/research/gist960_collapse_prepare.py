@@ -76,8 +76,12 @@ def n_rows(prefix, dim):
     return (ROOT / f"{prefix}_train.f32").stat().st_size // (4 * dim)
 
 
-def streaming_mean(prefix, dim, block=100_000):
-    """流式求列均值（避免为 float64 拷贝再分配一份 2× 内存）"""
+def streaming_mean(prefix, dim, block=100_000, normalize=False):
+    """流式求列均值（避免为 float64 拷贝再分配一份 2× 内存）
+
+    `normalize=True`：对每个 block 先 L2 归一化再累加 ⇒ 得到"归一化后数据的均值"。
+    必须与 `derive()` 的"先归一化再 transform"顺序一致（见 `center_generic` 的守卫）。
+    """
     n = n_rows(prefix, dim)
     acc = np.zeros(dim, dtype=np.float64)
     with open(ROOT / f"{prefix}_train.f32", "rb") as f:
@@ -85,6 +89,8 @@ def streaming_mean(prefix, dim, block=100_000):
         while left > 0:
             m = min(block, left)
             a = np.fromfile(f, dtype=np.float32, count=m * dim).reshape(m, dim)
+            if normalize:
+                a = a / np.maximum(np.linalg.norm(a, axis=1, keepdims=True), 1e-12)
             acc += a.sum(axis=0, dtype=np.float64)
             left -= m
     return (acc / n).astype(np.float32)
@@ -378,11 +384,49 @@ def cohere960pad(rng):
 
 # ══════════════════════════════════════════════════════════════════
 
+def center_generic(src_prefix, src_dim, dst_prefix):
+    """通用去均值臂：`x' = normalize(x − mean(train))`（论文未提出此预处理，见 N3）
+
+    用于把 T-center 从 gist960/SIFT 推广到**其余档位**（CLIP / 对比学习文本嵌入），
+    并回答"去均值对已经很好的数据是否有害"（推荐该修复前必须知道）。
+
+    ⚠️ **口径守卫（本会话新增）**：`derive()` 是"先归一化再 transform"，
+    所以 `mu` 必须是**归一化后** train 的均值。若磁盘文件未归一化（cohere 就是），
+    直接用原始均值会得到 `‖mu‖≫1`，减完之后所有向量方向几乎相同
+    （实测 `随机对 cos = 0.9973`）——这正是我第一版踩的坑。故：
+      ① `streaming_mean(..., normalize=True)`；
+      ② 断言 `‖mu‖ ≤ 1`（单位向量的均值范数不可能 > 1）；
+      ③ 打印磁盘原始行范数作为诊断。
+    """
+    raw_norm = streaming_mean(src_prefix, src_dim, normalize=False)
+    disk_row_norm = float(np.linalg.norm(raw_norm))
+    mu = streaming_mean(src_prefix, src_dim, normalize=True)
+    print(f"  ‖mean(磁盘原始)‖ = {disk_row_norm:.6f}   "
+          f"‖mean(归一化后)‖ = {np.linalg.norm(mu):.6f}")
+    assert np.linalg.norm(mu) <= 1.0 + 1e-3, (
+        f"‖mu‖={np.linalg.norm(mu):.4f} > 1 ⇒ 均值不是在归一化数据上算的（口径守卫失败）"
+    )
+    if disk_row_norm > 2.0:
+        print(f"  [注意] 磁盘文件未归一化（‖mean‖={disk_row_norm:.2f}）⇒ 已自动改用归一化后的均值")
+    tr, te, gt, dim = derive(
+        src_prefix, src_dim, dst_prefix,
+        lambda a, b: (a - mu, b - mu), src_dim,
+        doc="通用去均值（N1 推广）",
+    )
+    stats(dst_prefix, dim, tr, te, gt, np.random.default_rng(RNG_SEED))
+
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     if "--list" in sys.argv:
         for name in RECIPES:
             print(f"  {name}")
+        return
+    if "--center" in sys.argv:
+        # 用法: --center cohere:768 wolt_clip:512 ...
+        for spec in args:
+            src, dim = spec.split(":")
+            center_generic(src, int(dim), f"{src}c")
         return
     if "--stats" in sys.argv:
         # 只对已生成的派生集重跑统计（不重新生成/重算 GT）

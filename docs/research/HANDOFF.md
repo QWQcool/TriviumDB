@@ -191,6 +191,17 @@ QuIVer 天花板 **47.21%**（ef_s=1024, 18,247 QPS）vs **hnswlib ef=64 → 97.
 ② **强依赖样本量**（6.8×，且 S 越小越乐观 ⇒ 50% 阈值在小样本下更难报警）；
 ③ 论文四档是**事后标签**，可替换为 P1+P2 给出的**先算后测**组合（`min` 双度量探针 + 图保真度 + `GT10−GT11`）。
 
+### N1–N4（本会话，`audit-and-direction.md`）—— 三条重要更新
+
+1. **去均值修复推广到全部四档**（`wolt_clip` 71.48% vs 论文 70.68% ⇒ 校准 **7/12 行**）：
+   GIST `+37.6pp`、SIFT `+14.9`、**Wolt-CLIP `+5.3`**、GloVe `+3.3`、cohere `−1.2`（中性）、
+   **各向同性对照（`‖μ‖=0.001`）`+0.03pp`** ⇒ 流水线无伪影。
+   ⇒ **论文明确宣称 "zero preprocessing" 并只建议"改用 float32"**（N3 核对原文）⇒ **修复落在其空白处**。
+2. ❌ **U14 撤回**：`glove100` 的 GT **无问题**（100.00% 一致）；84.85% 是**我自己的子采样伪影**（K23）。
+3. ⚠️ **竞品地图推翻了"四档 = 竞争力"的读法**：有竞品数据的 **3/4 档被 HNSW 严格支配**
+   （wolt_clip：QuIVer 上限 86.81% < hnswlib ef=64 的 87.86%；glove100：71.69% < 82.05%；sift128：47.21% < 97.46%）
+   ⇒ **QuIVer 只在最高档（cohere-768）有优势**；且**去均值不改变这个判定**。
+
 ---
 
 ## 3. 文件索引
@@ -213,6 +224,7 @@ QuIVer 天花板 **47.21%**（ef_s=1024, 18,247 QPS）vs **hnswlib ef=64 → 97.
 | `paper-readiness.md` | **★★ 论文就绪度：对标已发表 QuIVer(PVLDB 2027) Table 11 的贡献定位、缺口 G1–G12、A/B/C 分层 DoD、P0–P7 执行顺序** |
 | `p1-snr-predictor-result.md` | **★★ P1 闸门实验：SNR 预测器主判据不成立 + 失败诊断 + 路径决定（D1–D4）** |
 | `p2-revised-result.md` | **★★ P2 修订版：复现论文的 compatibility test（P2-1~P2-4）+ 度量歧义 + 样本量依赖 + 三条可写批评** |
+| `audit-and-direction.md` | **★★★ N1–N4 结果 + 旧结论逐条审查 + 新方向（D1–D4）+ 论文可行性（含停止条件）** |
 
 ### Bench（`benches/`，均 `required-features = ["ablation"]`）
 `bench_alpha_mechanism` / `bench_rbq2_equal_bits` / `bench_rabitq_epsilon_scaling` /
@@ -273,7 +285,10 @@ cargo bench --features ablation --bench bench_random_sphere # → sphere_{train,
 | **U11** | 论文的"两个准入量"判据只在本轮 4 个数据集上验证 | 需 384/1024/1536 维更多点补曲线（`minilm`/`bge_m3`/`dbpedia1536`） |
 | **U12** | **P1 的 SNR 预测器已被证伪**（`p1-snr-predictor-result.md`）；P2 已给出可用替代（`min` 双度量探针 ρ=0.95，见 `p2-revised-result.md`），但只在 **9 行**上验证 | 需补齐论文剩余 6 行（`minilm-384` / `wolt-clip-512` / `redcaps-512` / `bge-m3-1024` / `dbpedia-1536` / `dbpedia-3072`；**`redcaps-1m` 在本仓 registry 里不存在，可复现性未知**） |
 | **U13** | ✅ **已量化**：论文判据**未指明度量**，且在 Synthetic-LR 上 w `66.95%` vs c `45.25%` 给出**相反 verdict**；另测出**样本量依赖 6.8×**（`p2-revised-result.md` §4） | 结论已定；剩下去 PDF 逐格复核论文原文的探针描述（是否指定度量 / 样本是"库"还是"库+查询"） |
-| **U14** | **`glove100` 的 GT 口径模糊**：其"样本内 f32 top-10"与"数据集自带 GT"只有 **84.85%** 一致（其余 6 个数据集 ≈100%） | 需确认 ann-benchmarks 原生 angular GT 是否基于归一化向量；影响则需在论文中标注 |
+| **U14** | ❌ **已撤回（2026-09-18 / N2）**：`glove100` 的 GT **没有问题**（原生 angular GT 与我们重算的 cosine top-10 **100.00%** 一致）。那个 84.85% 是 **`compat_probe_scaling.py` 的子采样伪影**（`S_LIST` 上限 1e6 < `n=1,183,514` ⇒ "S=全量"实为 84.49% 基底） | 已在脚本加"基底占比"列与警示；`p2-revised-result.md` §5-2 已更正 |
+| **U15** | **修复臂的竞品曲线**（`wolt_clipc` / `gist960c` / `glove100c`）—— 决定"去均值是否改变竞争判定"（`audit-and-direction.md` §6-D2 / A9·A11） | 0.5–1 天；**这是论文措辞的兜底，优先做** |
+| **U16** | 论文剩余 5 行数据集（`minilm-384` / `bge-m3-1024` / `dbpedia-1536/3072`；`redcaps-512` 不在 `prepare_all` 注册表内，可能不可得） | 1–2 天 |
+| **U17** | 图保真度 `L0∩cos_top64` 只有 4 个数据集 | 需补 ≥6（每个建图 + CSR 导出） |
 
 ---
 
@@ -307,10 +322,16 @@ w `66.95%` vs c `45.25%` ⇒ **相反 verdict**（`p2-revised-result.md` §4.1�
 ### 下一步（优先级已重排）
 | # | 事项 | 说明 |
 |---|---|---|
-| **N1（最高）** | **补齐论文剩余 6 行**：`minilm-384` / `wolt-clip-512` / `redcaps-512` / `bge-m3-1024` / `dbpedia-1536` / `dbpedia-3072`（**`redcaps-1m` 本仓 registry 无，可复现性未知**） | 现在"竞争档"只有 1 行，P2-2 的判定样本极薄（U12） |
-| **N2** | **`glove100` 的 GT 口径**（U14）：原生 angular GT 与我们重算的 f32 top-10 只有 84.85% 一致 | 影响所有 glove100 数字的引用 |
-| **N3** | **去 PDF 逐格复核**论文原文的探针描述（是否指定度量 / "10K 样本"是"库"还是"库+查询"） | U13 的剩余部分 |
-| **N4** | 修复项端到端（F1 度量一致 / α=1.0，**需批准**）+ 竞品曲线 ≥6 数据集 | G5/G7 |
+| **N1（最高）** | **补齐论文剩余 5 行**：`minilm-384` / `bge-m3-1024` / `dbpedia-1536/3072`（**`redcaps-1m` 不在 `prepare_all` 注册表内，可能不可得**） | 现在"竞争档"只有 1 行，P2-2 的判定样本仍薄（U12/U16） |
+| ~~N2~~ | ✅ **已完成并撤回**（`glove100` GT 无问题，是子采样伪影） | 见 `audit-and-direction.md` §2 |
+| ~~N3~~ | ✅ **已完成**：探针定义在 §6、**未指定度量**、**未说明样本来源**、**明确宣称 zero preprocessing**、失败建议只是"改用 float32" ⇒ 我们的修复落在其空白处 | 见 `audit-and-direction.md` §3 |
+| **N4** | **修复臂的竞品曲线**（U15，最高价值）+ F1 补丁端到端（**需批准**）+ α=1.0 A/B | `audit-and-direction.md` §7.2 |
+
+> ### ⚠️ 论文口径必须先修正（`audit-and-direction.md` §5 的两条）
+> **A9**：去均值**只提高召回，不改变竞争判定**（gist960c 上限 79.4% / glove100c 73.3%，仍低于 HNSW 的最低工作点）。
+> **A11**：论文的四档是**绝对召回梯度**，不是**竞争力**；有竞品数据的 **3/4 档被 HNSW 严格支配**（含"较高"CLIP 档）
+> ⇒ **QuIVer 只在最高档（cohere-768）有优势**。
+> **停止条件已写死**在 `audit-and-direction.md` §7.3（超过 2 周或 G-b 为负 ⇒ 只发 arXiv + 上游 PR）。
 
 ### ~~P1——补维度轴，把 2 个点变成曲线~~ ✅ **已完成（本会话）**
 `gist960` / `glove100` / `sift128` / `cohere` 四点已在上一轮跑完；本会话又补了
@@ -414,3 +435,7 @@ cargo bench --features ablation --bench bench_t2_b2_partitioned      # 建图 + 
 | **K19** | `Remove-Item` 删 `results/` 下文件会触发审批（可能超时并打断整条命令链） | 需要"重跑"时**不要删**：结果 JSON 按前缀合并覆盖即可（`code_snr_probe.py` / `bq2_code_ceiling.py` 都支持） |
 | **K20** | **"先评估后落盘"会让一个聚合异常吃掉整批结果**：`compat_probe_scaling.py` 的 `evaluate()` 在"竞争档为空"时 `min([])` 抛 `ValueError` ⇒ 该批 JSON 根本没写；分批跑时前一批全丢，直到 `--report` 只显示 4 行才发现 | ① **先写盘再评估**；② 分批长跑**每批结束都用 `--report` 核对行数**；③ 所有"某类可能为空"的聚合都要有空值分支（打印 `（无）` 而非崩溃） |
 | **K21** | 仓库自带的两个"无结构/低秩"数据集生成器**不需要下载**，但会往**仓库根**写 ~3 GB：`bench_random1m` → `random_*`（Synthetic-LR）、`bench_random_sphere` → `sphere_*`（Random-Sphere）；`bench_sensitivity` 的 registry 名分别是 `random-1m` / `sphere-1m` | 想补论文 Table 11 的"无结构档"时**先跑这两个**（各 ~2 分钟），别去下载 |
+| **K22** | **去均值的均值必须在"归一化后"的数据上算**：`derive()` 是"先归一化再 transform"，而 **cohere 的磁盘文件未归一化**（`hf_bin`/`hf` 源都可能如此）⇒ 直接减原始均值（`‖μ‖=11.5`）会得到 `随机对 cos = 0.9973` 的退化数据 | 守卫 **`‖μ‖ ≤ 1 + 1e-3`**（单位向量均值的范数不可能 >1）已写进 `center_generic`；`streaming_mean(..., normalize=True)` |
+| **K23** | **`S_LIST` 的上限可能小于 `n`**：`compat_probe_scaling.py` 的 `S=1e6` 对 `glove100`（`n=1,183,514`）只是 **84.49% 子采样** ⇒ 该行"样本内 f32 top-10 ∩ 数据集 GT"只有 84.85%，**看起来像 GT 有问题**（我一度据此写了 U14，已撤回） | 所有"子采样 vs 全量"的对比都要打印**基底占比**；诊断量异常时先怀疑自己的采样，再怀疑数据 |
+| **K24** | **竞品脚本里的 `faiss_exact` 是必要的"并列地板"检查**：`wolt_clip` 上它只有 **90.09%**（cohere/glove100 为 100.00%、sift128 99.94%）⇒ 该数据集的召回上限被并列锁死，**不可与其它集横比** | 报任何数据集的召回前，先看 `faiss_exact`；<99% 就要标注并列地板 |
+| **K25** | `scripts/prepare_all.py` 的 `binary_vector` 分支假设向量是 **JSON 字符串**，而 `wolt_clip` 当前 revision 直接给 `list` ⇒ `TypeError: the JSON object must be str, ... not list` | 已做最小容错（`isinstance` 判断）；记入上游缺陷清单（第 4 条） |

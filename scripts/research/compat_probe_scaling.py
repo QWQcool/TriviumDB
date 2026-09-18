@@ -148,12 +148,15 @@ def probe(prefix, dim, recall, group, note, rng):
             del TC, SW, SC
         den = len(qs) * TOP_K
         out["probe"][f"S={S_}"] = {k: hit[k] / den * 100 for k in ("w", "c")}
+        out.setdefault("base_frac", {})[f"S={S_}"] = S_ / n
         if S_ == 1_000_000 or S_ == n:
             out["global_full"] = {k: hit_global[k] / den * 100 for k in ("w", "c")}
             out["insample_vs_datasetGT_pct"] = inter_dataset / den * 100
-        print(f"  S={S_:>9,}  探针（样本内 top-10 重叠）: weighted {hit['w'] / den * 100:6.2f}%"
-              f" | cheap {hit['c'] / den * 100:6.2f}%   "
-              f"（全局口径 w {hit_global['w'] / den * 100:6.2f}% / c {hit_global['c'] / den * 100:6.2f}%）")
+        warn = (f"   ⚠️ 只占基底 {S_ / n * 100:.1f}% ⇒ 该行不是「全量」（见 K23）"
+                if S_ < n else "")
+        print(f"  S={S_:>9,}（基底 {S_ / n * 100:5.1f}%）  探针（样本内 top-10 重叠）: "
+              f"weighted {hit['w'] / den * 100:6.2f}% | cheap {hit['c'] / den * 100:6.2f}%"
+              f"（全局口径 w {hit_global['w'] / den * 100:6.2f}% / c {hit_global['c'] / den * 100:6.2f}%）{warn}")
         del trs, Ps, Ss, Ws, rss
     if out["global_full"]:
         print(f"  交叉检查：全量时'样本内 f32 top-10' ∩ '数据集 GT top-10' = "

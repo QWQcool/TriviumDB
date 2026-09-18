@@ -253,8 +253,12 @@ def process_huggingface(cfg):
         for row in tqdm(ds, total=n_total, desc="  提取向量"):
             emb = row[emb_col]
             if is_binary:
+                # 该数据集历史上把向量存成 JSON 字符串，当前 revision 直接给 list。
+                # 两种都容忍（否则 TypeError: the JSON object must be str, ... not list）。
                 import json
-                all_emb[count] = np.array(json.loads(emb), dtype=np.float32)
+                if isinstance(emb, (str, bytes, bytearray)):
+                    emb = json.loads(emb)
+                all_emb[count] = np.array(emb, dtype=np.float32)
             elif isinstance(emb, list):
                 all_emb[count] = np.array(emb, dtype=np.float32)
             else:
