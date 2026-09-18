@@ -198,9 +198,17 @@ QuIVer 天花板 **47.21%**（ef_s=1024, 18,247 QPS）vs **hnswlib ef=64 → 97.
    **各向同性对照（`‖μ‖=0.001`）`+0.03pp`** ⇒ 流水线无伪影。
    ⇒ **论文明确宣称 "zero preprocessing" 并只建议"改用 float32"**（N3 核对原文）⇒ **修复落在其空白处**。
 2. ❌ **U14 撤回**：`glove100` 的 GT **无问题**（100.00% 一致）；84.85% 是**我自己的子采样伪影**（K23）。
-3. ⚠️ **竞品地图推翻了"四档 = 竞争力"的读法**：有竞品数据的 **3/4 档被 HNSW 严格支配**
+3. ⚠️ **竞品地图推翻了"四档 = 竞争力"的读法**：**去均值前** 有竞品数据的 **3/4 档被 HNSW 严格支配**
    （wolt_clip：QuIVer 上限 86.81% < hnswlib ef=64 的 87.86%；glove100：71.69% < 82.05%；sift128：47.21% < 97.46%）
-   ⇒ **QuIVer 只在最高档（cohere-768）有优势**；且**去均值不改变这个判定**。
+   ⇒ 明确获胜的只有最高档（cohere-768，4.6–5.0×）。
+4. ✅ **D1/D2（后续本轮）**：
+   - **D1 判据链**：`sign_info`（逐坐标符号熵的**均值**）是"是否可被去均值修复"的分诊量
+     （0.000 = gist960 全系/sift128 ⇒ 可修；1.000 但 `probe_ef<50%` = sphere ⇒ 不可修）；22 臂 21 臂判定一致。
+     ★ **硬发现**：论文默认的**加权 6 类**度量在 Random-Sphere 上给 **53.2%（>50% ⇒ "兼容"）**，
+     而该集实测召回 **0.91%**；**取双度量最弱（`min`）恰给 4.7% 并修掉这个假阳性**。
+   - **D2 修正 A9/A11**：去均值把 **CLIP 档从"严格支配"推入"曲线相交"**
+     （≥89% 高召回区 QuIVer 9,356 QPS vs hnswlib 4,124–2,394 ⇒ 快 **2.3–3.9×**；低 ef 区 HNSW 快 1.1–1.3×）；
+     `glove100c` 仍严格支配（73.31%@11,021 vs 83.98%@33,617）。 ⇒ **"不改变判定"的说法过于绝对**。
 
 ---
 
@@ -224,7 +232,9 @@ QuIVer 天花板 **47.21%**（ef_s=1024, 18,247 QPS）vs **hnswlib ef=64 → 97.
 | `paper-readiness.md` | **★★ 论文就绪度：对标已发表 QuIVer(PVLDB 2027) Table 11 的贡献定位、缺口 G1–G12、A/B/C 分层 DoD、P0–P7 执行顺序** |
 | `p1-snr-predictor-result.md` | **★★ P1 闸门实验：SNR 预测器主判据不成立 + 失败诊断 + 路径决定（D1–D4）** |
 | `p2-revised-result.md` | **★★ P2 修订版：复现论文的 compatibility test（P2-1~P2-4）+ 度量歧义 + 样本量依赖 + 三条可写批评** |
-| `audit-and-direction.md` | **★★★ N1–N4 结果 + 旧结论逐条审查 + 新方向（D1–D4）+ 论文可行性（含停止条件）** |
+| `audit-and-direction.md` | **★★★ N1–N4 结果 + 旧结论逐条审查 + 新方向（D1–D4）+ 论文可行性（含停止条件）**；§9 = D2 竞品曲线与 A9/A11 修正 |
+| `t2-deployability-gate.md` | **★★ D1 可部署性判据链**：`sign_info` 分诊 + 双度量最弱探针；含 Random-Sphere 上 **53.2% vs 0.91%** 的假阳性发现 |
+| `scripts/research/deployability_gate.py` | D1 脚本（22 臂，产物 `results/t2/deployability_gate.json`） |
 
 ### Bench（`benches/`，均 `required-features = ["ablation"]`）
 `bench_alpha_mechanism` / `bench_rbq2_equal_bits` / `bench_rabitq_epsilon_scaling` /
@@ -286,7 +296,8 @@ cargo bench --features ablation --bench bench_random_sphere # → sphere_{train,
 | **U12** | **P1 的 SNR 预测器已被证伪**（`p1-snr-predictor-result.md`）；P2 已给出可用替代（`min` 双度量探针 ρ=0.95，见 `p2-revised-result.md`），但只在 **9 行**上验证 | 需补齐论文剩余 6 行（`minilm-384` / `wolt-clip-512` / `redcaps-512` / `bge-m3-1024` / `dbpedia-1536` / `dbpedia-3072`；**`redcaps-1m` 在本仓 registry 里不存在，可复现性未知**） |
 | **U13** | ✅ **已量化**：论文判据**未指明度量**，且在 Synthetic-LR 上 w `66.95%` vs c `45.25%` 给出**相反 verdict**；另测出**样本量依赖 6.8×**（`p2-revised-result.md` §4） | 结论已定；剩下去 PDF 逐格复核论文原文的探针描述（是否指定度量 / 样本是"库"还是"库+查询"） |
 | **U14** | ❌ **已撤回（2026-09-18 / N2）**：`glove100` 的 GT **没有问题**（原生 angular GT 与我们重算的 cosine top-10 **100.00%** 一致）。那个 84.85% 是 **`compat_probe_scaling.py` 的子采样伪影**（`S_LIST` 上限 1e6 < `n=1,183,514` ⇒ "S=全量"实为 84.49% 基底） | 已在脚本加"基底占比"列与警示；`p2-revised-result.md` §5-2 已更正 |
-| **U15** | **修复臂的竞品曲线**（`wolt_clipc` / `gist960c` / `glove100c`）—— 决定"去均值是否改变竞争判定"（`audit-and-direction.md` §6-D2 / A9·A11） | 0.5–1 天；**这是论文措辞的兜底，优先做** |
+| **U15** | ✅ **已完成（D2）**：`wolt_clipc` **从严格支配 → 曲线相交**（≥89% 区 QuIVer 快 2.3–3.9×）；`glove100c` 仍严格支配 ⇒ **A9/A11 已修正**（`audit-and-direction.md` §9.4） | 余下：**`gist960c` 的竞品曲线未测**（U18） |
+| **U18** | `gist960c` 的竞品曲线（预期仍被支配，但论文需要数字） | ~15 min（960 维建图慢） |
 | **U16** | 论文剩余 5 行数据集（`minilm-384` / `bge-m3-1024` / `dbpedia-1536/3072`；`redcaps-512` 不在 `prepare_all` 注册表内，可能不可得） | 1–2 天 |
 | **U17** | 图保真度 `L0∩cos_top64` 只有 4 个数据集 | 需补 ≥6（每个建图 + CSR 导出） |
 
@@ -325,7 +336,9 @@ w `66.95%` vs c `45.25%` ⇒ **相反 verdict**（`p2-revised-result.md` §4.1�
 | **N1（最高）** | **补齐论文剩余 5 行**：`minilm-384` / `bge-m3-1024` / `dbpedia-1536/3072`（**`redcaps-1m` 不在 `prepare_all` 注册表内，可能不可得**） | 现在"竞争档"只有 1 行，P2-2 的判定样本仍薄（U12/U16） |
 | ~~N2~~ | ✅ **已完成并撤回**（`glove100` GT 无问题，是子采样伪影） | 见 `audit-and-direction.md` §2 |
 | ~~N3~~ | ✅ **已完成**：探针定义在 §6、**未指定度量**、**未说明样本来源**、**明确宣称 zero preprocessing**、失败建议只是"改用 float32" ⇒ 我们的修复落在其空白处 | 见 `audit-and-direction.md` §3 |
-| **N4** | **修复臂的竞品曲线**（U15，最高价值）+ F1 补丁端到端（**需批准**）+ α=1.0 A/B | `audit-and-direction.md` §7.2 |
+| **N4** | 修复臂竞品曲线 ✅（U15，除 `gist960c`）+ **F1 补丁端到端（仍待批准）** + α=1.0 A/B | `audit-and-direction.md` §7.2 |
+| **D1** | ✅ 判据链建成 + 22 臂验证（`t2-deployability-gate.md`）；余：把它写成论文的"部署决策"一节 | — |
+| **D2** | ✅ 见 U15；余：`gist960c`（U18） | — |
 
 > ### ⚠️ 论文口径必须先修正（`audit-and-direction.md` §5 的两条）
 > **A9**：去均值**只提高召回，不改变竞争判定**（gist960c 上限 79.4% / glove100c 73.3%，仍低于 HNSW 的最低工作点）。
@@ -439,3 +452,5 @@ cargo bench --features ablation --bench bench_t2_b2_partitioned      # 建图 + 
 | **K23** | **`S_LIST` 的上限可能小于 `n`**：`compat_probe_scaling.py` 的 `S=1e6` 对 `glove100`（`n=1,183,514`）只是 **84.49% 子采样** ⇒ 该行"样本内 f32 top-10 ∩ 数据集 GT"只有 84.85%，**看起来像 GT 有问题**（我一度据此写了 U14，已撤回） | 所有"子采样 vs 全量"的对比都要打印**基底占比**；诊断量异常时先怀疑自己的采样，再怀疑数据 |
 | **K24** | **竞品脚本里的 `faiss_exact` 是必要的"并列地板"检查**：`wolt_clip` 上它只有 **90.09%**（cohere/glove100 为 100.00%、sift128 99.94%）⇒ 该数据集的召回上限被并列锁死，**不可与其它集横比** | 报任何数据集的召回前，先看 `faiss_exact`；<99% 就要标注并列地板 |
 | **K25** | `scripts/prepare_all.py` 的 `binary_vector` 分支假设向量是 **JSON 字符串**，而 `wolt_clip` 当前 revision 直接给 `list` ⇒ `TypeError: the JSON object must be str, ... not list` | 已做最小容错（`isinstance` 判断）；记入上游缺陷清单（第 4 条） |
+| **K26** | **别把 MiB 当 MB**：`[math]::Round($_.Length/1MB,1)` 里的 `1MB` = 1,048,576 ⇒ `wolt_clip_train` 显示 "1953.1" 而实际是 **2,048,000,000 B = 1,000,000×512 行**。我据此误判"流式只取到 953,662 行"并写进限制 L3（已撤回） | 行数**一律**用 `Length / 4 / dim` 算；`.f32` 的字节数/4/dim 才是行数 |
+| **K27** | **维度专用内核容易写错度量**：我第一版 `deployability_gate.py` 把 `pos` 写成 `v >= 0`（正确是 `v > 0`）、并即兴推了一个加权 6 类公式 | **永远从 `bq2_code_ceiling.py` 里已过守卫的三式复制**（`pos = v > 0`、`w = (2p−1)(1+s)`、cheap = `(｜p｜+｜s｜) − 2(<p,p>+<s,s>)`） |
