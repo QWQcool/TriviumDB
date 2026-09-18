@@ -52,6 +52,9 @@ ARMS = [
     ("random", 768), ("randomc", 768),
     ("sphere", 768), ("spherec", 768),
     ("gauss960", 960), ("gauss960plant", 960),
+    # ── N1 ③：论文 Table 11 剩余行（缺文件会自动跳过）──
+    ("minilm", 384), ("bge_m3", 1024),
+    ("dbpedia_openai", 1536), ("dbpedia_openai_3072", 3072),
 ]
 
 # `bench_t2_b2_partitioned` 实测 R@10（@ef_s=128 主列, @ef_s=1024 天花板；None=未测）
@@ -65,6 +68,9 @@ MEASURED = {
     "random": (59.08, 92.52), "randomc": (60.28, 94.69),
     "sphere": (0.91, 6.46), "spherec": (1.11, 6.58),
     "gauss960": (0.83, None), "gauss960plant": (100.00, None),
+    # N1 ③ 新增（@ef_s=128, @ef_s=1024）
+    "minilm": (94.28, 99.47), "bge_m3": (97.76, 99.97),
+    "dbpedia_openai": (98.29, 99.79), "dbpedia_openai_3072": (98.16, 99.80),
 }
 
 
@@ -106,36 +112,48 @@ def probe(tr, te, gt, qs):
     - `top10`  = 论文的**字面定义**（"BQ-ranked Top-10 vs float32 GT"）
     - `topef`  = "码 top-**ef** 候选 → f32 精排 → top-10"，即 P2 里与图召回可比的那个仪器
                  （P2 实测：glove100 `code_oracle@128`=67.79% ↔ bench 71.69%；ρ=+0.95）
-    公式与 `bq2_code_ceiling.py` 的已验证版本一致（`w = (2p−1)(1+s)`，weighted 越大越近）。
+
+    **公式逐字沿用 `bq2_code_ceiling.py` 的已验证版本**（该脚本断言过"分析式 vs 位运算最大差 = 0"）：
+        pos = v > 0.0;  strong = |v| > mean(|v|);  w = (2p−1)(1+s) ∈ {−2,−1,1,2}
+        cheap    : D = (|p_i|+|s_i|) − 2(<p_i,p_q> + <s_i,s_q>)        升序 = 近
+        weighted : S = <w_i, w_q>                                      降序 = 近
+    ⚠️ 我曾试图把 `<w_a,w_b>` 拆成 popcount 的组合来省内存，**代数推导错了**
+    （`(2p−1)(1+s)` 的两个因子无法那样拆），自检当场抓到（glove100 45.1→29.5）。
+    正确做法是**按行分块**物化 P/S/W：内存 O(blk×dim)，数学与已验证版本完全一致。
     """
-    pos, strong = bq2_planes(tr)
+    n, dim = tr.shape
     ppos, pstrong = bq2_planes(te)
-    Ptr = pos.astype(np.float32)
-    Str = strong.astype(np.float32)
-    Wtr = (2.0 * Ptr - 1.0) * (1.0 + Str)
-    bias = (Ptr.sum(1) + Str.sum(1))[:, None]
     Pq = ppos[qs].astype(np.float32)
     Sq = pstrong[qs].astype(np.float32)
     Wq = (2.0 * Pq - 1.0) * (1.0 + Sq)
-    del pos, strong, ppos, pstrong
-    gc.collect()
+    B = len(qs)
+    D = np.empty((n, B), dtype=np.float32)      # 990K×200×4 ≈ 0.8 GB
+    Sw = np.empty((n, B), dtype=np.float32)
+    blk = max(1, 1_500_000_000 // (dim * 4 * 3))   # 每块的 P/S/W 合计约 1.5 GB
+    for b0 in range(0, n, blk):
+        b1 = min(b0 + blk, n)
+        sub = tr[b0:b1]
+        alpha = np.abs(sub).mean(axis=1)
+        P = (sub > 0.0).astype(np.float32)
+        S = (np.abs(sub) > alpha[:, None]).astype(np.float32)
+        W = (2.0 * P - 1.0) * (1.0 + S)
+        bias = (P.sum(1) + S.sum(1))[:, None]
+        D[b0:b1] = bias - 2.0 * (P @ Pq.T + S @ Sq.T)
+        Sw[b0:b1] = W @ Wq.T
+        del sub, P, S, W, bias
+        gc.collect()
 
     hit = {k: 0 for k in ("top10_w", "top10_c", "topef_w", "topef_c")}
-    for b0 in range(0, len(qs), QPAD_BATCH):
-        b1 = min(b0 + QPAD_BATCH, len(qs))
-        D_cheap = bias - 2.0 * (Ptr @ Pq[b0:b1].T + Str @ Sq[b0:b1].T)   # 升序 = 近
-        S_w = Wtr @ Wq[b0:b1].T                                          # 降序 = 近
-        for qi in range(b1 - b0):
-            q = qs[b0 + qi]
-            g = gt[q]
-            for key, arr in (("w", -S_w[:, qi]), ("c", D_cheap[:, qi])):   # 统一升序 = 近
-                t10 = np.argpartition(arr, TOP_K)[:TOP_K]
-                hit[f"top10_{key}"] += len(set(t10.tolist()) & set(g.tolist()))
-                cand = np.argpartition(arr, EF_REFINE)[:EF_REFINE]
-                sims = tr[cand] @ te[q]
-                top = cand[np.argsort(-sims, kind="stable")[:TOP_K]]
-                hit[f"topef_{key}"] += len(set(top.tolist()) & set(g.tolist()))
-        del D_cheap, S_w
+    for i, q in enumerate(qs):
+        for key, arr in (("w", -Sw[:, i]), ("c", D[:, i])):   # 统一升序 = 近
+            t10 = np.argpartition(arr, TOP_K)[:TOP_K]
+            hit[f"top10_{key}"] += len(set(t10.tolist()) & set(gt[q].tolist()))
+            cand = np.argpartition(arr, EF_REFINE)[:EF_REFINE]
+            sims = tr[cand] @ te[q]
+            top = cand[np.argsort(-sims, kind="stable")[:TOP_K]]
+            hit[f"topef_{key}"] += len(set(top.tolist()) & set(gt[q].tolist()))
+    del D, Sw
+    gc.collect()
     den = len(qs) * TOP_K
     return {k: v / den * 100 for k, v in hit.items()}
 
@@ -206,7 +224,11 @@ def run(prefix, dim):
 
 def main():
     rows = []
+    # `python deployability_gate.py glove100 gist960` ⇒ 只跑指定臂（产物仍增量合并进 JSON）
+    want = [a for a in sys.argv[1:] if not a.startswith("-")]
     for prefix, dim in ARMS:
+        if want and prefix not in want:
+            continue
         if not (ROOT / f"{prefix}_train.f32").exists():
             print(f"  [跳过] {prefix} 缺文件")
             continue
