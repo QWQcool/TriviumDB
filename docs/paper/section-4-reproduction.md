@@ -35,9 +35,10 @@ Our numbers are therefore comparable to the paper's *pipeline* but not to the pu
 Euclidean leaderboard; we return to this in §10.
 
 **Reproducibility of a single arm.** Graph construction is concurrent, so the L0 edge set is not
-bit-reproducible between runs. Recall is stable (documented per-dataset spread ≤ 0.2 pp over repeated
-builds); we therefore treat recall-level conclusions as comparable and mark any graph-structure quantity as
-a single-sample estimate.
+bit-reproducible between runs. To bound what that costs, we re-built and re-measured the five tier
+representatives three times each: the spread of R@10 @ef = 64 is **≤ 0.27 pp**
+(Cohere 0.13, GloVe-100 0.27, SIFT-128 0.07, GIST-960 0.06, Wolt-CLIP 0.07). We therefore treat recall-level
+conclusions as comparable at that resolution, and mark any graph-structure quantity as a single-sample estimate.
 
 ## 4.3 Result: all twelve rows reproduce
 
@@ -103,9 +104,12 @@ On Cohere-1M (768-d), the paper's headline setting, we confirm the reported matc
 four independent CPU implementations: hnswlib, FAISS-HNSW, USearch and FAISS-IVF-Flat, plus an exact scan as
 a reference. QuIVer is **4.6–5.0× faster than hnswlib at matched recall** (99.78 % vs 99.84 % at the top of
 the curve, 4.2 k vs 0.74 k MT-QPS), and of the same order against the other three.
-Because QuIVer's hot path is built on VPOPCNTDQ and this machine has no AVX-512, this factor is a *lower*
-bound in the paper's favour on AVX-512 hardware; conversely it is not transferable to other platforms, and we
-never compare our absolute QPS against the paper's (§10).
+**Platform caveat, in both directions.** This factor is measured on a machine without AVX-512, while the paper's
+main configuration is a Zen 4 CPU with VPOPCNTDQ. QuIVer's hot path is built around that instruction, but our
+baselines' distance kernels are SIMD-accelerated as well, so whether this factor *grows* or *shrinks* on AVX-512
+hardware is **not something we can predict from this experiment** — we therefore make no claim about its
+direction, and we never compare our absolute QPS against the paper's (§10). The recall-side statements we build
+on in §5–§8 are unaffected by this caveat, because they contain no hardware-dependent quantity.
 
 ## 4.6 What §4 establishes
 
