@@ -11,6 +11,6 @@
   "h_bias_cos_sigma": -0.3641114877838131,
   "overlap_w_pct": 77.84423828125,
   "h_bias_w_sigma": 0.06401587367000243,
-  "overlap_c_pct": 0.0,
-  "h_bias_c_sigma": 0.7929874092597793
+  "overlap_c_pct": 62.823486328125,
+  "h_bias_c_sigma": -0.27952420528078054
 }

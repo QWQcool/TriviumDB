@@ -1,0 +1,16 @@
+{
+  "prefix": "gauss960plant",
+  "dim": 960,
+  "n": 1000000,
+  "n_nodes": 256,
+  "top": 64,
+  "h_mean": 408.0346984863281,
+  "h_std": 9.117158889770508,
+  "mean_deg": 64.0,
+  "overlap_cos_pct": 4.4677734375,
+  "h_bias_cos_sigma": 0.010507075602450787,
+  "overlap_w_pct": 7.244873046875,
+  "h_bias_w_sigma": 0.10826070283850454,
+  "overlap_c_pct": 1.837158203125,
+  "h_bias_c_sigma": -0.2172745410738079
+}

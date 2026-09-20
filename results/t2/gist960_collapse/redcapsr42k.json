@@ -1,0 +1,15 @@
+{
+  "prefix": "redcapsr42k",
+  "dim": 512,
+  "n_train": 1000000,
+  "n_test": 10000,
+  "base_rule": "random 1000000 rows of 11588824 (seed=42) + 不排除自匹配",
+  "queries": "random_test (10000)",
+  "self_match_excluded": true,
+  "n_self_excluded": 0,
+  "gt_scope": "exact cosine top-10 within the 1M base",
+  "gt1": 0.8926274074554443,
+  "gt10": 0.8494604587554931,
+  "hdf5_md5": "a6221cc0a4103af7e0f06f87bd989a0a",
+  "zenodo": "10.5281/zenodo.13137120"
+}

@@ -44,13 +44,19 @@ N_NODES = 256
 RNG_SEED = 20260917
 
 DATASETS = {
-    "cohere": 768,
-    "sift128": 128,
-    "glove100": 100,
-    "gist960": 960,
-    "gist960c": 960,
-    "gauss960": 960,
-    "gauss960plant": 960,
+    # 四个档位的代表 + 崩塌修复臂 + 合成对照（2026-09-20 扩充，覆盖 ≥6 数据集）
+    "cohere": 768,          # competitive（QuIVer 唯一胜场）
+    "coherec": 768,         # 去均值臂（中性）
+    "wolt_clip": 512,       # moderate（被支配）
+    "wolt_clipc": 512,      # 去均值臂（+5.3pp）
+    "glove100": 100,        # usable（被支配）
+    "sift128": 128,         # collapse（可修复）
+    "gist960": 960,         # collapse（可修复）
+    "gist960c": 960,        # 去均值臂（+49pp）
+    "gauss960": 960,        # 任务不可分辨（不可修复）
+    "gauss960plant": 960,   # 植入真近邻的正对照
+    "minilm": 384,          # competitive（新补）
+    "redcapsr42k": 512,     # moderate（新补，RedCaps 复现口径）
 }
 
 
@@ -109,7 +115,9 @@ def analyse(prefix, dim, rng):
         nbrs = adj[offsets[u]:offsets[u + 1]].astype(np.int64)
         s_cos = tr @ q_cos[i]
         s_w = W @ q_w[i]                          # 加权口径：越大越近
-        s_c = -(bias_i - 2.0 * (P @ Pq[i] + S @ Sq[i]))   # cheap：越小越近
+        # ⚠️ 曾经写成 `s_c = -(距离)` 却仍用 `argpartition(s_c, TOP)` 升序取 ⇒ 取到的是**最远**的
+        # 64 个邻居 ⇒ `L0∩cheap_top64` 恒为 0.00%（2026-09-20 修）。统一为"越小越近"。
+        s_c = bias_i - 2.0 * (P @ Pq[i] + S @ Sq[i])      # cheap Hamming 距离（越小越近）
         s_cos[u] = -9e9
         s_w[u] = -9e9
         s_c[u] = 9e9

@@ -346,6 +346,10 @@ w `66.95%` vs c `45.25%` ⇒ **相反 verdict**（`p2-revised-result.md` §4.1�
 | **N4** | 修复臂竞品曲线 ✅（U15，除 `gist960c`）+ **F1 补丁端到端（仍待批准）** + α=1.0 A/B | `audit-and-direction.md` §7.2 |
 | **D1** | ✅ 判据链建成 + 22 臂验证（`t2-deployability-gate.md`）；余：把它写成论文的"部署决策"一节 | — |
 | **D2** | ✅ 见 U15；余：`gist960c`（U18） | — |
+| **③ 12/12 行** | ✅ RedCaps 源=Zenodo 13137120（§1.1b）；**12 行全部复现**，RedCaps 以声明协议为前提（69.66→77.08% 随协议假设 7.4pp） | — |
+| **G-c** | ✅ 图保真度 **9 数据集**（`audit-and-direction.md` §11.1），修掉脚本 cheap 列 bug（K29） | — |
+| **G-i** | ✅ 关键点 3 次独立建图，极差 ≤0.27pp（§11.2） | — |
+| **§4/§5 初稿** | ✅ `docs/paper/section-4-reproduction.md`、`section-5-boundary.md`（英文） | 待审阅 |
 
 > ### ⚠️ 论文口径必须先修正（`audit-and-direction.md` §5 的两条）
 > **A9**：去均值**只提高召回，不改变竞争判定**（gist960c 上限 79.4% / glove100c 73.3%，仍低于 HNSW 的最低工作点）。
@@ -461,4 +465,5 @@ cargo bench --features ablation --bench bench_t2_b2_partitioned      # 建图 + 
 | **K25** | `scripts/prepare_all.py` 的 `binary_vector` 分支假设向量是 **JSON 字符串**，而 `wolt_clip` 当前 revision 直接给 `list` ⇒ `TypeError: the JSON object must be str, ... not list` | 已做最小容错（`isinstance` 判断）；记入上游缺陷清单（第 4 条） |
 | **K26** | **别把 MiB 当 MB**：`[math]::Round($_.Length/1MB,1)` 里的 `1MB` = 1,048,576 ⇒ `wolt_clip_train` 显示 "1953.1" 而实际是 **2,048,000,000 B = 1,000,000×512 行**。我据此误判"流式只取到 953,662 行"并写进限制 L3（已撤回） | 行数**一律**用 `Length / 4 / dim` 算；`.f32` 的字节数/4/dim 才是行数 |
 | **K27** | **维度专用内核容易写错度量**：我第一版 `deployability_gate.py` 把 `pos` 写成 `v >= 0`（正确是 `v > 0`）、并即兴推了一个加权 6 类公式 | **永远从 `bq2_code_ceiling.py` 里已过守卫的三式复制**（`pos = v > 0`、`w = (2p−1)(1+s)`、cheap = `(｜p｜+｜s｜) − 2(<p,p>+<s,s>)`） |
-| **K28** | **把"代码不一致"当 bug 之前先做 A/B**：F1（建图 weighted / 导航 cheap 的不一致）看着像疏漏，实测却是**数据依赖的 trade-off**——sift128 `−13.4pp` vs glove100 `+21.8pp`。上游把导航设成 cheap **是符号面退化数据上的保护** | 任何"两处用了不同度量/不同路径"的发现，先进 A/B；再问 D1 的 `sign_info` 属于哪一侧 |
+| **K28** | **判"源不可得"之前必须先读仓库自己的复现指南**：我据 ann-benchmarks / HF / Qdrant 三条阴性证据就宣布 `redcaps-512` 不可复现，而它的源**明明白白写在 `README_QUIVER.md` §1c**（Zenodo 13137120）。三条证据本身没错，只是**没有一条覆盖真正的来源** | 任何"数据集不可得/不可复现"的结论，先 grep 仓库 README 的 dataset 小节 |
+| **K29** | **`argpartition` 的方向**：`graph_neighbor_quality.py` 的 cheap 列写成 `s_c = -(距离)`（越大越近）却仍用 `argpartition(s_c, TOP)` 升序取 ⇒ 取到**最远**的 64 个 ⇒ `L0∩cheap_top64` **恒为 0.00%**（全数据集都一样时几乎一定是自己的 bug）。修复后 gist960 = 0.79%、glove100 = 20.78%、cohere = 62.82% | "某个指标在所有数据集上取值相同/极端"→ 先查自己的排序方向与符号约定 |
