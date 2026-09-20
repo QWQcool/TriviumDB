@@ -30,6 +30,7 @@
 """
 import gc
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -192,6 +193,18 @@ def run(prefix, dim):
 
     pr = probe(tr, te, gt, qs)
     r128, r1024 = MEASURED.get(prefix, (None, None))
+    # ── U20：探针协议 = **K 个查询子集取均值**（单次 200 查询的极差 4–7pp，且见重尾）──
+    kk = int(os.environ.get("GATE_K", "3"))
+    prs = [pr]
+    for _ in range(max(0, kk - 1)):
+        qs_k = RNG.choice(te.shape[0], min(NQ, te.shape[0]), replace=False)
+        prs.append(probe(tr, te, gt, qs_k))
+    pr_mean = {k: float(np.mean([p[k] for p in prs])) for k in pr}
+    pr_rng = {k: float(np.ptp([p[k] for p in prs])) for k in pr}
+    print(f"    [U20] K={len(prs)} 个子集的 probe_ef 范围 = "
+          f"{min(p['topef_w'] for p in prs):.1f}..{max(p['topef_w'] for p in prs):.1f}%"
+          f"（加权）/ {min(p['topef_c'] for p in prs):.1f}..{max(p['topef_c'] for p in prs):.1f}%"
+          f"（Hamming）")
     rec = {
         "prefix": prefix, "dim": dim, "n": int(tr.shape[0]), "nq": int(te.shape[0]),
         "raw_mu_norm": raw_mu, "mu_norm": mu_norm, "disk_normalized": raw_mu < 2.0,
@@ -200,10 +213,13 @@ def run(prefix, dim):
         "gt1": gt1, "gt10": gt10, "gap_10_11": gap, "cos_std": cos_std,
         "separability": (gt1 - gt10) / cos_std if cos_std else float("nan"),
         "crowd_med": float(np.median(crowd)), "crowd_mean": float(np.mean(crowd)),
-        "probe_top10_w": pr["top10_w"], "probe_top10_c": pr["top10_c"],
-        "probe_topef_w": pr["topef_w"], "probe_topef_c": pr["topef_c"],
-        "probe_top10_min": min(pr["top10_w"], pr["top10_c"]),
-        "probe_topef_min": min(pr["topef_w"], pr["topef_c"]),
+        "probe_k": len(prs),
+        "probe_top10_w": pr_mean["top10_w"], "probe_top10_c": pr_mean["top10_c"],
+        "probe_topef_w": pr_mean["topef_w"], "probe_topef_c": pr_mean["topef_c"],
+        "probe_top10_min": min(pr_mean["top10_w"], pr_mean["top10_c"]),
+        "probe_topef_min": min(pr_mean["topef_w"], pr_mean["topef_c"]),
+        "probe_topef_min_range": float(np.ptp([min(p["topef_w"], p["topef_c"]) for p in prs])),
+        "probe_raw": prs,
         "measured_r128": r128, "measured_r1024": r1024,
     }
     headroom = 100.0 - r128 if r128 is not None else None
