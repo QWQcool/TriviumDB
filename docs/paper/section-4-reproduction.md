@@ -104,14 +104,42 @@ On Cohere-1M (768-d), the paper's headline setting, we confirm the reported matc
 four independent CPU implementations: hnswlib, FAISS-HNSW, USearch and FAISS-IVF-Flat, plus an exact scan as
 a reference. QuIVer is **4.6–5.0× faster than hnswlib at matched recall** (99.78 % vs 99.84 % at the top of
 the curve, 4.2 k vs 0.74 k MT-QPS), and of the same order against the other three.
-**Platform caveat, in both directions.** This factor is measured on a machine without AVX-512, while the paper's
-main configuration is a Zen 4 CPU with VPOPCNTDQ. QuIVer's hot path is built around that instruction, but our
-baselines' distance kernels are SIMD-accelerated as well, so whether this factor *grows* or *shrinks* on AVX-512
-hardware is **not something we can predict from this experiment** — we therefore make no claim about its
-direction, and we never compare our absolute QPS against the paper's (§10). The recall-side statements we build
-on in §5–§8 are unaffected by this caveat, because they contain no hardware-dependent quantity.
+**Platform caveat, in both directions.** The paper's Table 11 reports MT-QPS alongside recall, which lets us
+locate our platform rather than merely flag it as different: our absolute MT-QPS is **1.1–2.4× higher** than the
+paper's on every dataset we can match (Cohere 55.8k vs 36.7k, GIST 182.3k vs 103.8k, SIFT 194.1k vs 87.2k,
+GloVe 143.2k vs 59.4k, Wolt-CLIP 96.6k vs 62.4k, MiniLM 74.1k vs 41.1k, BGE-M3 58.3k vs 41.2k,
+DBpedia-1536 25.7k vs 22.0k, DBpedia-3072 14.0k vs 12.9k at ef = 64). We run 32 threads against the paper's 16,
+on a desktop CPU without AVX-512; the net effect is that our absolute numbers are **not conservative**. The
+speedup *ratios* land in the range the paper itself reports for the same baselines (their Table 6, at ≈95 %
+recall: hnswlib 4.3×, FAISS-HNSW 4.8×, USearch 5.5×; ours: 4.6–5.0× vs hnswlib), but we make no claim about
+how the ratio would move on AVX-512 hardware, since our baselines' distance kernels are SIMD-accelerated as
+well. The recall-side statements we build on in §5–§8 contain no hardware-dependent quantity at all.
 
-## 4.6 What §4 establishes
+## 4.6 Four cross-checks beyond Table 11
+
+Table 11 is not the only table we can check against. We extracted all 14 tables verbatim from the arXiv HTML
+(the tables carry machine-readable ids, e.g. `S5.T11`), which removes any transcription risk from our side:
+
+| check | paper (verbatim) | ours | agreement |
+|---|---|---|---|
+| **Table 4** dataset shapes: base sizes and query counts | GloVe 1,183,514; DBpedia 990,000; RedCaps 1,000,000 base + 10,000 queries; MiniLM/Wolt-CLIP/Cohere/BGE-M3 1,000 queries; SIFT 10,000; GIST 1,000 | identical for all twelve | **exact** |
+| **Table 9** α sweep, Cohere-1M (m=32, ef_c=128) | α=1.0 → **98.7 %**, α=1.2 → 97.7 % at ef = 128 | 98.58 % / 97.56 % | **≤ 0.15 pp** |
+| **Table 10** top-10 overlap, 2-bit sign-magnitude (Cohere-100K) | **64.7 %** (1-bit sign: 55.0 %) | 68.6 % (weighted) / 70.0 % (Hamming), 1 M base | ≈ 4 pp |
+| **Table 11** R@10 at ef = 64 | twelve rows | Table 1 | ≤ 1.84 pp |
+
+The Table 10 gap is not attributable: the paper measures on a Cohere-100K base with an unspecified query
+sampling protocol, we measure on 1 M. It does establish the order of magnitude.
+
+Two things follow that matter later. (i) Our α sweep is a **reproduction of the paper's own Table 9**, not a
+new finding — and that table shows α = 1.0 at or above α = 1.2 at *every* ef on Cohere, while the default and
+all main experiments use 1.2; we return to this internal inconsistency in §7. (ii) **Table 4 labels SIFT-128 and
+GIST-960 as Euclidean**, but the repository's own `prepare_all.py` L2-normalizes Euclidean sources and
+recomputes cosine ground truth; our twelve rows agree with Table 11 under that (cosine) pipeline, which suggests
+Table 11 was produced by the repository's pipeline and "Euclidean" describes the source dataset rather than the
+evaluated metric. We state this explicitly because it makes our SIFT/GIST rows **not** comparable to the public
+ann-benchmarks Euclidean leaderboard (§10).
+
+## 4.7 What §4 establishes
 
 1. The released implementation behaves as the paper claims, to within ±1.84 pp on all twelve published rows.
 2. The four-tier structure is real and reproducible in rank order and in magnitude.
