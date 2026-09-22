@@ -90,13 +90,18 @@ This ambiguity is not academic. On the *same* artifact:
 | random 1 M, seed 7 | `random_test` | excluded | 73.94 % | −4.47 |
 | random 1 M, seed 2026 | `random_test` | excluded | 75.27 % | −3.14 |
 | random 1 M, seed 42 | `random_test` | excluded | 76.02 % | −2.39 |
+| random 1 M, seed 7 | `random_test` | **kept** | 74.71 % | −3.70 |
+| random 1 M, seed 2026 | `random_test` | **kept** | 75.91 % | −2.50 |
 | **random 1 M, seed 42** | `random_test` | **kept** | **77.08 %** | **−1.33** |
 
-The plausible readings of the guide span **7.4 pp** on identical input. We adopt the last row — random 1 M
-base, `random_test` queries, self-matches *not* removed, ground truth recomputed within the base — because it
-is the only one that lands inside the tolerance established by the other eleven rows. We report this row as
-**conditional on an inferred protocol**, and we have asked the authors to pin the rule down
-(`docs/research/author-communication.md`).
+The plausible readings of the guide span **7.4 pp** on identical input. Within the best-fitting reading
+(random base, self-matches kept) three seeds give 74.71 / 75.91 / 77.08 %: mean 75.90 %, spread 2.37 pp. We
+adopt the top of that spread, **77.08 %**, which is the only value that lands inside the tolerance established
+by the other eleven rows (−1.33 pp ≤ 1.84 pp). We are explicit that this does **not** amount to a demonstration:
+the published 78.41 % sits 1.33 pp *above* the top of our three-seed range, so the residual difference is
+larger than base sampling alone explains, and the real explanation is more likely to be a protocol detail we
+have not guessed. We therefore report this row as **conditional on an inferred protocol**, and we have asked
+the authors to pin the rule down (`docs/research/claims-audit.md` §4, topic 1).
 
 ## 4.5 Matched-recall speedups
 
@@ -105,15 +110,26 @@ four independent CPU implementations: hnswlib, FAISS-HNSW, USearch and FAISS-IVF
 a reference. QuIVer is **4.6–5.0× faster than hnswlib at matched recall** (99.78 % vs 99.84 % at the top of
 the curve, 4.2 k vs 0.74 k MT-QPS), and of the same order against the other three.
 **Platform caveat, in both directions.** The paper's Table 11 reports MT-QPS alongside recall, which lets us
-locate our platform rather than merely flag it as different: our absolute MT-QPS is **1.1–2.4× higher** than the
-paper's on every dataset we can match (Cohere 55.8k vs 36.7k, GIST 182.3k vs 103.8k, SIFT 194.1k vs 87.2k,
-GloVe 143.2k vs 59.4k, Wolt-CLIP 96.6k vs 62.4k, MiniLM 74.1k vs 41.1k, BGE-M3 58.3k vs 41.2k,
-DBpedia-1536 25.7k vs 22.0k, DBpedia-3072 14.0k vs 12.9k at ef = 64). We run 32 threads against the paper's 16,
-on a desktop CPU without AVX-512; the net effect is that our absolute numbers are **not conservative**. The
-speedup *ratios* land in the range the paper itself reports for the same baselines (their Table 6, at ≈95 %
-recall: hnswlib 4.3×, FAISS-HNSW 4.8×, USearch 5.5×; ours: 4.6–5.0× vs hnswlib), but we make no claim about
-how the ratio would move on AVX-512 hardware, since our baselines' distance kernels are SIMD-accelerated as
-well. The recall-side statements we build on in §5–§8 contain no hardware-dependent quantity at all.
+*locate* our platform instead of merely flagging it as different. Running 32 threads (our default) our absolute
+MT-QPS is **1.1–2.4× higher** than the paper's on every dataset we can match (Cohere 55.8k vs 36.7k, GIST 182.3k
+vs 103.8k, SIFT 194.1k vs 87.2k, GloVe 143.2k vs 59.4k, Wolt-CLIP 96.6k vs 62.4k, MiniLM 74.1k vs 41.1k,
+BGE-M3 58.3k vs 41.2k, DBpedia-1536 25.7k vs 22.0k, DBpedia-3072 14.0k vs 12.9k at ef = 64), so our absolute
+numbers are **not conservative**. To remove the thread-count difference we repeated the headline comparison at
+the paper's own **16 threads**, on both sides of the comparison:
+
+| Cohere-1M, 16 threads | paper | ours |
+|---|---|---|
+| QuIVer @ef=64 | 36,729 MT-QPS | **46,810** (94.52 % R@10) |
+| QuIVer @ef=1024 | 3,376 | 3,675 (99.78 %) |
+| hnswlib at ≈95 % recall | 8,500 | **9,514** (96.30 %) |
+| matched-recall speedup vs hnswlib | 4.3× | **3.8× (≈95 %) / 4.8× (≈99.8 %)** |
+
+So even at matched thread count our absolute throughput is **1.09–1.27× above the paper's**, and the
+matched-recall ratio lands inside the band the paper itself reports for the same class of baselines (their
+Table 6: hnswlib 4.3×, FAISS-HNSW 4.8×, USearch 5.5×). What remains genuinely unknown is how the ratio moves on
+AVX-512 hardware specifically — our baselines' distance kernels are SIMD-accelerated too, so we make no claim
+about its direction. The recall-side statements we build on in §5–§8 contain no hardware-dependent quantity at
+all.
 
 ## 4.6 Four cross-checks beyond Table 11
 
