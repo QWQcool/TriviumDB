@@ -67,19 +67,23 @@ plane and navigates better; when it is dead, the weighted metric's `|h|` bias is
 Same task on both sides (the centred task's own GT; competitor curves rebuilt on the centred data), so the
 verdict is machine-independent. "Pipeline upper" = centring + weighted navigation.
 
-| Tier | Arm | Before: QuIVer upper / HNSW `ef=64` | After: pipeline upper (@QPS) | After: HNSW (best point) | Verdict |
+| Tier | Arm | Before: QuIVer upper / HNSW `ef=64` | After: pipeline upper (@QPS) | After: competitor (best point) | Verdict |
 |---|---|---|---|---|---|
 | collapse | GIST-960 | 4.38 % / 84.11 % @5,417 | **82.77 %** @4,717 | 84.85 % @6,734 | dominated → **dominated** (gap 79.7 → **2.1 pp**) |
 | collapse | SIFT-128 | 47.21 % / 97.46 % @45,118 | **92.47 %** @15,629 | 97.06 % @50,547 (centred curve) | dominated → **dominated** (49.9 → **4.6 pp**; baseline also 3.2× faster at that recall) |
 | collapse | Random-Sphere | 6.46 % / **1.40 %** (HNSW also collapses) | **17.78 %** @1,867 | 17.43 % @285 (ef=1024) | **parity-or-better: 6.3–7.9× faster at matched recall** |
 | usable | GloVe-100 | 71.69 % / 82.05 % @36,047 | **93.32 %** @11,675 | 93.45 % @10,893 (ef=256) | dominated → **parity (≈1.07×)** |
-| usable | Synthetic-LR | 92.52 % / ⏳ | 97.05 % | ⏳ | ⏳ (running) |
+| usable | Synthetic-LR | 92.52 % / *not measured on the original task* | **97.05 %** @2,638 | USearch 97.45 % @375; FAISS-HNSW 97.90 % @342 | after: **QuIVer ~7.0–8.5× faster at matched recall** (no "before" verdict available) |
 | moderate | Wolt-CLIP-512 | 86.81 % / 87.86 % @19,606 | **89.05 %** @9,356 | 87.88 % @20,849 (centred curve) | dominated → **curves intersect** (≤87.9 % baseline 1.1–1.3× faster; ≥89 % QuIVer **2.3–3.9×** faster) |
-| competitive | Cohere-768 | 99.78 % / 96.30 % @9,514（HNSW's best point 99.84 % @741） | **99.89 %** | ⏳ | win → win (unchanged) |
+| competitive | Cohere-768 | 99.78 % / 96.30 % @9,514（HNSW's best point 99.84 % @741 ⇒ ≈4.6× at ~99.8 %） | **99.89 %** @4,037 | 99.93 % @1,435 (99.79 % @2,544) | win → **win, narrower: ≈2.7–3.4×** at matched recall |
 
 **The honest sentence this table requires**: *a smaller gap is not availability.* GIST and SIFT move from
-"hopeless" to "within 2–5 pp" — but at that recall the baseline is also faster. The two arms where the
-verdict actually changes are GloVe (**dominated → parity**) and Wolt-CLIP (**dominated → intersecting**).
+"hopeless" to "within 2–5 pp" — but at that recall the baseline is also faster. The arms where the verdict
+actually changes are GloVe (**dominated → parity**) and Wolt-CLIP (**dominated → intersecting**); on
+Random-Sphere and Synthetic-LR QuIVer's pipeline is the faster index at matched recall, but in the first case
+*no* graph index is usable and in the second the "before" verdict was never measured.
+On the competitive tier the win survives centring but narrows (≈4.6× → ≈2.7–3.4×), because centring helps
+HNSW as well: its centred curve is faster at the same recall (99.79 % @2,544 vs 99.84 % @741 uncentred).
 
 ## 8.5 What this repair is not
 
