@@ -1,0 +1,166 @@
+From 632162be7bdec71b145f656a850c9f7727b92dde Mon Sep 17 00:00:00 2001
+From: v_chchsli <v_chchsli@tencent.com>
+Date: Fri, 18 Sep 2026 19:42:39 +0800
+Subject: [PATCH] =?UTF-8?q?feat(index):=20F1=20=E5=AF=BC=E8=88=AA=E5=BA=A6?=
+ =?UTF-8?q?=E9=87=8F=E5=8F=AF=E5=88=87=E6=8D=A2=EF=BC=88TRIVIUM=5FNAV=5FWE?=
+ =?UTF-8?q?IGHTED=EF=BC=8C=E9=BB=98=E8=AE=A4=E5=85=B3=E9=97=AD=EF=BC=89+?=
+ =?UTF-8?q?=206=20=E6=95=B0=E6=8D=AE=E9=9B=86=20A/B=20=E2=80=94=E2=80=94?=
+ =?UTF-8?q?=20sign=5Finfo=20=E5=AE=8C=E7=BE=8E=E9=A2=84=E6=B5=8B=E6=94=B6?=
+ =?UTF-8?q?=E7=9B=8A=E7=AC=A6=E5=8F=B7?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+这是本分支**首次改动 src/**（经批准，U8/F1），且**默认路径逐位不变**（冻结值仍是回归守卫）。
+
+补丁（3 处导航点 + 1 处上界，全部跟随开关）：
+- src/index/bq.rs：新增 pub(crate) static NAV_WEIGHTED（沿用仓库既有 LazyLock<bool>+env 模式）
+- src/index/quiver.rs：beam_search_l0_impl / beam_search_l0_dual / beam_search_l0_384_with_scratch
+  三个导航点都由 distance_to_sig_cheap 切到 distance_to_sig（**384 维分支必须一起切**，第一稿差点漏掉）
+- src/tsng.rs：TsngNavigationScorer 的 max_bq_distance 从 2·dim 改为按开关取 4·dim
+  （否则开关打开时 TSNG 距离全被截断到饱和）
+
+回归验证：cargo build 通过；cargo test --features ablation **13 个测试二进制全绿（823 test, 0 failed）**；
+开关关闭时单臂 G1 复现冻结值 cohere 97.53/97.52、gist960 2.81/2.79、glove100 45.43/45.60（G-det 噪声内）；
+同状态连跑 2 次方差 <0.03pp。
+
+A/B（T2_EFC=128，单臂同口径）—— **结论反转：这不是纯 bug，而是数据依赖的 trade-off**：
+| 数据集 | sign_info | OFF → ON @ef_s=128 | Δ | @1024 |
+| glove100 | 0.946 | 45.57 → **67.37** | **+21.80** | 71.66 → 89.41 |
+| gauss960 | 1.000 | 0.81 → **2.34** | +1.53（2.9×） | 5.85 → 16.49 |
+| wolt_clip | 0.836 | 77.76 → 78.67 | +0.91 | 87.12 → 87.73 |
+| cohere | 0.747 | 97.55 → **98.02** | +0.47 | 99.78 → 99.86 |
+| gist960 | 0.000 | 2.86 → 1.61 | −1.25 | 4.32 → 3.72 |
+| sift128 | 0.000 | 21.79 → 8.42 | **−13.37** | 47.20 → 21.11 |
+QPS 代价 ≲9%。机制：加权式在全非负退化下只剩 |h| 偏置（+3.34σ），用它导航＝建图与导航同时放大偏置
+⇒ 上游把导航设成 cheap **是符号面退化数据上的保护**；但符号面健康时（绝大多数嵌入）加权明显更好。
+
+⇒ 条件化建议：`sign_info < 0.2` 先去掉均值（不修则保持 cheap）；`sign_info ≥ 0.6` 打开加权导航。
+⇒ 新增待测 U19（去均值 + 加权导航的组合臂）。
+
+同时：HANDOFF 更新（源码状态/F1 结论/U19/K28），新增 docs/research/f1-metric-consistency.md。
+---
+ src/index/bq.rs     | 11 +++++++++++
+ src/index/quiver.rs | 41 +++++++++++++++++++++++++++++++----------
+ src/tsng.rs         | 11 ++++++++---
+ 3 files changed, 50 insertions(+), 13 deletions(-)
+
+diff --git a/src/index/bq.rs b/src/index/bq.rs
+index a95c3cb..8907666 100644
+--- a/src/index/bq.rs
++++ b/src/index/bq.rs
+@@ -14,6 +14,17 @@ pub(crate) static FORCE_NO_384_KERNEL: std::sync::LazyLock<bool> = std::sync::La
+     std::env::var("TRIVIUM_DISABLE_384_KERNEL").is_ok_and(|value| value == "1")
+ });
+ 
++/// 环境变量 `TRIVIUM_NAV_WEIGHTED=1` 时，**L0 查询导航**改用 `distance_to_sig`（6 类加权），
++/// 与建图/剪枝/上层所用的度量一致 ⇒ 修复 **F1：建图与查询使用两个不同的度量**。
++///
++/// - 默认 **关闭** ⇒ 与历史行为逐位一致（冻结的召回值即回归守卫）。
++/// - 打开后每条候选的距离要多算一次 popcount 组合（`bq2_distance_raw` vs `_cheap`），
++///   QPS 代价须实测（见 `docs/research/f1-metric-consistency.md`）。
++/// - ⚠️ 打开后加权距离上界变成 `4·dim`，故 `TsngNavigationScorer` 的 `max_bq_distance`
++///   必须从 `2·dim` 改为 `4·dim`，否则所有距离会被截断到饱和（已按本开关取用）。
++pub(crate) static NAV_WEIGHTED: std::sync::LazyLock<bool> =
++    std::sync::LazyLock::new(|| std::env::var("TRIVIUM_NAV_WEIGHTED").is_ok_and(|v| v == "1"));
++
+ /// BQ 签名最大 chunks 数量（每个 u64 chunk 覆盖 64 维）
+ /// 48 chunks × 64 bits = 3072 维上限
+ const MAX_BQ_CHUNKS: usize = 48;
+diff --git a/src/index/quiver.rs b/src/index/quiver.rs
+index 7b20868..cd58e81 100644
+--- a/src/index/quiver.rs
++++ b/src/index/quiver.rs
+@@ -1269,15 +1269,25 @@ impl QuIVer {
+             BinaryHeap::with_capacity(ef * 2);
+         let mut results: BinaryHeap<(NonNanF32, u32)> = BinaryHeap::with_capacity(ef + 1);
+ 
++        // F1（`TRIVIUM_NAV_WEIGHTED=1`）：导航度量与建图/剪枝保持一致（6 类加权）。
++        // 默认关闭 ⇒ 历史行为逐位不变。384 维分支必须一起切，否则该维度下开关失效。
++        let nav_weighted = *crate::index::bq::NAV_WEIGHTED;
+         let cheap_distance = |node: u32| -> u32 {
+             #[cfg(target_arch = "x86_64")]
+             if DIM_384 {
+-                return self
+-                    .bq_store
+-                    .distance_to_sig_cheap_384(node as usize, q_sig);
++                return if nav_weighted {
++                    self.bq_store.distance_to_sig(node as usize, q_sig, 384)
++                } else {
++                    self.bq_store
++                        .distance_to_sig_cheap_384(node as usize, q_sig)
++                };
++            }
++            if nav_weighted {
++                self.bq_store.distance_to_sig(node as usize, q_sig, self.dim)
++            } else {
++                self.bq_store
++                    .distance_to_sig_cheap(node as usize, q_sig, self.dim)
+             }
+-            self.bq_store
+-                .distance_to_sig_cheap(node as usize, q_sig, self.dim)
+         };
+         let d = NonNanF32(scorer.score(self.ids[entry as usize], cheap_distance(entry)) as f32);
+         visited.set(entry as usize);
+@@ -1340,9 +1350,15 @@ impl QuIVer {
+         let mut signal_queue = BinaryHeap::with_capacity(ef.saturating_mul(2));
+         let mut vector_results = BinaryHeap::with_capacity(ef.saturating_add(1));
+         let mut signal_results = BinaryHeap::with_capacity(ef.saturating_add(1));
++        // F1：与 `beam_search_l0_impl` 同一开关（dual/信号路径也须一致）
++        let nav_weighted = *crate::index::bq::NAV_WEIGHTED;
+         let distance = |node: u32| {
+-            self.bq_store
+-                .distance_to_sig_cheap(node as usize, q_sig, self.dim)
++            if nav_weighted {
++                self.bq_store.distance_to_sig(node as usize, q_sig, self.dim)
++            } else {
++                self.bq_store
++                    .distance_to_sig_cheap(node as usize, q_sig, self.dim)
++            }
+         };
+         let add = |node: u32,
+                    discovered: &mut Bitset,
+@@ -1510,10 +1526,15 @@ impl QuIVer {
+         scratch.candidates.reserve(ef.saturating_mul(2));
+         scratch.results.reserve(ef.saturating_add(1));
+ 
++        // F1：第三个导航点（384 维 scratch 路径）也须与上面两处一致
++        let nav_weighted = *crate::index::bq::NAV_WEIGHTED;
+         let distance = |scorer: &mut S, node: u32| -> NonNanF32 {
+-            let bq_distance = self
+-                .bq_store
+-                .distance_to_sig_cheap_384(node as usize, q_sig);
++            let bq_distance = if nav_weighted {
++                self.bq_store.distance_to_sig(node as usize, q_sig, 384)
++            } else {
++                self.bq_store
++                    .distance_to_sig_cheap_384(node as usize, q_sig)
++            };
+             NonNanF32(scorer.score(self.ids[node as usize], bq_distance) as f32)
+         };
+         let initial_distance = distance(scorer, entry);
+diff --git a/src/tsng.rs b/src/tsng.rs
+index af3a0a7..dfaddbc 100644
+--- a/src/tsng.rs
++++ b/src/tsng.rs
+@@ -302,9 +302,14 @@ impl<'a> TsngNavigationScorer<'a> {
+         let sum = weights.vector + weights.property + weights.graph;
+         let fixed = |weight: f32| ((weight / sum) * NAVIGATION_SCALE as f32).round() as u32;
+         Self {
+-            max_bq_distance: u32::try_from(dim.saturating_mul(2))
+-                .unwrap_or(u32::MAX)
+-                .max(1),
++            // F1 开关（`TRIVIUM_NAV_WEIGHTED=1`）下导航距离是 6 类加权（上界 4·dim），
++            // 否则是纯 Hamming（上界 2·dim）。截断上界必须随之改变，否则全部饱和。
++            max_bq_distance: {
++                let per_dim = if *crate::index::bq::NAV_WEIGHTED { 4 } else { 2 };
++                u32::try_from(dim.saturating_mul(per_dim))
++                    .unwrap_or(u32::MAX)
++                    .max(1)
++            },
+             property_weight: fixed(weights.property),
+             graph_weight: fixed(weights.graph),
+             metadata_bonus_cap_ppm,
+-- 
+2.53.0.windows.1
+
