@@ -208,7 +208,7 @@ QuIVer 天花板 **47.21%**（ef_s=1024, 18,247 QPS）vs **hnswlib ef=64 → 97.
 4. ✅ **D1/D2（后续本轮）**：
    - **D1 判据链**：`sign_info`（逐坐标符号熵的**均值**）是"是否可被去均值修复"的分诊量
      （0.000 = gist960 全系/sift128 ⇒ 可修；1.000 但 `probe_ef<50%` = sphere ⇒ 不可修）；22 臂 21 臂判定一致。
-     ★ **硬发现**：论文默认的**加权 6 类**度量在 Random-Sphere 上给 **53.2%（>50% ⇒ "兼容"）**，
+     ★ **硬发现**：论文默认的**加权 6 类**度量在 Random-Sphere 上给 **53.9%（>50% ⇒ "兼容"）**，
      而该集实测召回 **0.91%**；**取双度量最弱（`min`）恰给 4.7% 并修掉这个假阳性**。
    - **D2 修正 A9/A11**：去均值把 **CLIP 档从"严格支配"推入"曲线相交"**
      （≥89% 高召回区 QuIVer 9,356 QPS vs hnswlib 4,124–2,394 ⇒ 快 **2.3–3.9×**；低 ef 区 HNSW 快 1.1–1.3×）；
@@ -237,7 +237,7 @@ QuIVer 天花板 **47.21%**（ef_s=1024, 18,247 QPS）vs **hnswlib ef=64 → 97.
 | `p1-snr-predictor-result.md` | **★★ P1 闸门实验：SNR 预测器主判据不成立 + 失败诊断 + 路径决定（D1–D4）** |
 | `p2-revised-result.md` | **★★ P2 修订版：复现论文的 compatibility test（P2-1~P2-4）+ 度量歧义 + 样本量依赖 + 三条可写批评** |
 | `audit-and-direction.md` | **★★★ N1–N4 结果 + 旧结论逐条审查 + 新方向（D1–D4）+ 论文可行性（含停止条件）**；§9 = D2 竞品曲线与 A9/A11 修正 |
-| `t2-deployability-gate.md` | **★★ D1 可部署性判据链**：`sign_info` 分诊 + 双度量最弱探针；含 Random-Sphere 上 **53.2% vs 0.91%** 的假阳性发现 |
+| `t2-deployability-gate.md` | **★★ D1 可部署性判据链**：`sign_info` 分诊 + 双度量最弱探针；含 Random-Sphere 上 **53.9% vs 0.91%** 的假阳性发现 |
 | `scripts/research/deployability_gate.py` | D1 脚本（22 臂，产物 `results/t2/deployability_gate.json`） |
 | `f1-metric-consistency.md` | **★★ F1 补丁（首个 `src/` 改动，默认关闭）+ 6 数据集 A/B：`sign_info` 完美预测 F1 的收益符号** |
 

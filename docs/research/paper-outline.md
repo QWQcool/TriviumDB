@@ -26,7 +26,7 @@
 |---|---|---|---|
 | **C1** | **两步数据侧修复流水线**：`sign_info` 分诊 → 去均值 → 加权导航。GIST `4.38%→82.77%`（@ef_s=1024，≈19×）、SIFT `47.23→92.47`、GloVe `71.69→93.32`；各向同性数据 `+0.03pp`（无操作对照）；`sphere` 走完全流程仍 2.91%（诚实边界）。**并把 glove100 从"被支配"推到"平价"、sift128 差距 50pp→5pp** | ★★★ | `f1-metric-consistency.md` §4.1、`audit-and-direction.md` §9.5、`t2-gist960-collapse.md` |
 | **C2** | **竞争力边界 ≠ 适用性梯度**：论文四档只描述绝对召回；有竞品数据的 3/4 档被 HNSW 严格支配（含论文称"较高"的 CLIP 档，且 QuIVer 上限 < HNSW 最低工作点 ⇒ 曲线无交点） | ★★★ | `audit-and-direction.md` §4.1 |
-| **C3** | **判据的两处不完备**：① 未指定 BQ 度量 —— 按论文默认的**加权**口径实现，在 Random-Sphere（实测 0.91%）上给 **53.2%（>50% ⇒ "兼容"）的假阳性**；② 强依赖样本量（候选样本 6.8×、查询子集 4–7pp） | ★★☆ | `p2-revised-result.md`、`t2-deployability-gate.md` §3-②④ |
+| **C3** | **判据的两处不完备**：① 未指定 BQ 度量 —— 按论文默认的**加权**口径实现，在 Random-Sphere（实测 0.91%）上给 **53.9%（>50% ⇒ "兼容"）的假阳性**；② 强依赖样本量（候选样本 6.8×、查询子集 4–7pp） | ★★☆ | `p2-revised-result.md`、`t2-deployability-gate.md` §3-②④ |
 | **C4** | **可预先计算的判据链**（同 C1 的 `sign_info` 同时决定"该不该去均值/该用哪个导航度量" + 双度量最弱探针），26 臂验证 21 臂一致、K=3 复跑裁决全不变 | ★★☆ | `t2-deployability-gate.md` §1–§3 |
 | **C5** | **两个工程缺陷**：建图/查询导航度量不一致（我们把 A/B 做全，发现它是**数据依赖的 trade-off** 而非纯 bug）+ `α` 默认值落在平台最差端 | ★★ | `f1-metric-consistency.md`、`alpha-default-reeval.md` |
 | **C6** | **独立复现**：11/12 行、最大偏差 1.84pp；cohere 上 4.6–5.0× 加速用 4 个实现复核；并给出 `faiss_exact` 并列地板（wolt_clip 90.09%）这类**协议级警告** | ★★ | `audit-and-direction.md` §1.1 |

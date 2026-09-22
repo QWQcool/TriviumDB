@@ -21,14 +21,16 @@ index**. It needs no index. Three things are left open:
 **(a) The metric flips the verdict, and can produce a false positive.**
 Implemented exactly as written with the paper's own default metric (`weighted`), the probe returns
 
-| dataset | probe (`weighted`, top-ef) | probe (`min(w, cheap)`) | measured R@10 @ef=64 |
+| dataset | probe (`weighted`, top-ef) | probe (`min(w, cheap)`, top-ef) | measured R@10 @ef=64 |
 |---|---|---|---|
-| **Random-Sphere-1M** | **53.2 % ⇒ "compatible"** | **4.7 % ⇒ "use float32"** | **0.91 %** (paper: 0.40 %) |
-| Synthetic-LR-1M | 66.95 % ⇒ compatible | **45.25 %** ⇒ **incompatible** | 43.60 % (paper: 41.76 %) |
+| **Random-Sphere-1M** | **53.9 % ⇒ "compatible"** | **4.9 % ⇒ "use float32"** | **0.91 %** (paper: 0.40 %) |
+| **Gaussian-960** (our control) | **55.0 % ⇒ "compatible"** | **4.7 % ⇒ "use float32"** | **0.83 %** |
 
-So the same dataset is *go* or *no-go* depending on an unstated choice — and on Random-Sphere the
-`weighted` reading is a false positive (**53.2 % vs an actual recall of 0.91 %**).
-Taking the weaker of the two metrics repairs it without changing any other arm's verdict.
+So the verdict is *go* or *no-go* depending on an unstated choice — and the `weighted` reading is a false
+positive on **two** datasets whose actual recall is under 1 %.
+Taking the weaker of the two metrics repairs both without changing any other arm's verdict
+(a third instance of the same ambiguity, measured with the literal top-10 instrument, is Synthetic-LR:
+`weighted` 66.95 % vs `cheap` 45.25 % — opposite verdicts on the same data).
 
 **(b) The probe is strongly sample-size dependent.** Sweeping the candidate sample size changes the probe
 value by up to **6.8×**, and the direction is systematic: *fewer samples ⇒ more optimistic*.
@@ -36,9 +38,11 @@ Independently, different query subsets give a **4–7 pp** spread, so a single-r
 
 **(c) The literal instrument is pessimistic.** "Code top-10 ∩ f32 GT" understates what a graph search
 achieves, because search uses the code to *navigate* and then re-ranks `ef` candidates in float32.
-GIST-960 (centred) is the clearest case: top-10 gives **26.7 %** while the `top-ef` instrument gives **70.7 %**
-and the measured recall is **51.96 %**. Across datasets the `top-ef` instrument tracks recall at **ρ = +0.95**
-(GloVe-100: 67.79 % ↔ 71.69 %).
+GIST-960 (centred) is the clearest case: top-10 gives **25.4–29.8 %** while the `top-ef` instrument gives
+**70.5 %**, against a measured recall of **51.96 %**. On GloVe-100 the `top-ef` instrument returns **44.8 %**
+against a measured **45.60 %**, and on Cohere **98.7 %** against **97.51 %**. In the P2 analysis the
+`code_oracle` variant of this instrument tracked recall at ρ = +0.95; we therefore report the `top-ef`
+instrument and never a single-run `top-10` value as a usability verdict.
 
 ## 7.3 The repaired chain
 
@@ -52,8 +56,10 @@ Four quantities, all computable in seconds and **before building any index**:
 ④ otherwise                            ⇒ BQ-native is usable (competitiveness is *not* predicted here)
 ```
 
-Validated on **22 arms: 21 defensible verdicts**. The single boundary case is centred GloVe-100
-(`probe_ef` = 45.6 % against a 50 % threshold), where "use float32" happens to be right for a *different*
+Validated on **22 arms: 21 defensible verdicts** (the table in `results/t2/deployability_gate.json`; the
+bimodal gap that makes rule ① work is `sign_info = 0.000` for the six GIST/SIFT arms vs **≥ 0.597** for all
+other 18). The single boundary case is centred GloVe-100
+(`probe_ef` = 44.9 % against a 50 % threshold), where "use float32" happens to be right for a *different*
 reason (it is dominated by HNSW anyway, §8.4). Re-running the whole table with K = 3 query subsets
 reproduces every verdict.
 

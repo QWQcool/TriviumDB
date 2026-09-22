@@ -27,7 +27,7 @@ what survives, what does not, and what a deployer should do instead.
    first is repairable and the second is not.
 4. **The probe is under-specified, and the gaps have consequences (§7).** §6 of the paper does not say which
    of the engine's two BQ distances to use, how many samples, or which instrument. Implemented with the
-   paper's own default metric, the probe calls Random-Sphere *compatible* (53.2 %) on a dataset whose measured
+   paper's own default metric, the probe calls Random-Sphere *compatible* (53.9%) on a dataset whose measured
    recall is **0.91 %**. Taking the weaker of the two metrics fixes this without changing any other verdict,
    and pairing it with a sign-entropy statistic yields a four-step decision chain that we validate on 22 arms.
 5. **The collapse is repairable by a two-step, data-side intervention (§8).** One translation

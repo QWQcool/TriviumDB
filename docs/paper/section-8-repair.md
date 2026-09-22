@@ -48,14 +48,14 @@ We added a default-off switch (`TRIVIUM_NAV_WEIGHTED`) that makes the three navi
 
 | Dataset | `sign_info` | ΔR@10 @ef_s=64 | ΔR@10 @ef_s=1024 | QPS cost |
 |---|---|---|---|---|
-| GloVe-100 | 0.747 | **+21.8 pp** | +21.6 pp | −4.9 % |
-| Gaussian-960 | 1.000 | **×2.9** (0.83 → 2.44 %) | ×4.6 | −9.3 % |
-| Wolt-CLIP-512 | 0.747 | +0.9 pp | +2.5 pp | −6.1 % |
-| Cohere-768 | 0.863 | +0.5 pp | +0.2 pp | −6.9 % |
+| GloVe-100 | **0.946** | **+21.8 pp** | +21.6 pp | −4.9 % |
+| Gaussian-960 | **1.000** | **×2.9** (0.83 → 2.44 %) | ×4.6 | −9.3 % |
+| Wolt-CLIP-512 | **0.836** | +0.9 pp | +2.5 pp | −6.1 % |
+| Cohere-768 | **0.747** | +0.5 pp | +0.2 pp | −6.9 % |
 | **SIFT-128** | **0.000** | **−13.4 pp** | −10.8 pp | −5.7 % |
 | **GIST-960** | **0.000** | −1.3 pp | −1.2 pp | −3.6 % |
 
-**Perfect separation by `sign_info`**: ≥ 0.75 ⇒ every dataset benefits; = 0.000 ⇒ every dataset is harmed.
+**Perfect separation by `sign_info`**: ≥ 0.74 ⇒ every dataset benefits; = 0.000 ⇒ every dataset is harmed.
 Mechanism: when the sign plane still carries information, the weighted metric also exploits the magnitude
 plane and navigates better; when it is dead, the weighted metric's `|h|` bias is *navigated into* directly.
 ⇒ This is a **data-dependent trade-off**, not an unconditional bug fix; the switch is the delivery vehicle,
@@ -70,12 +70,12 @@ verdict is machine-independent. "Pipeline upper" = centring + weighted navigatio
 | Tier | Arm | Before: QuIVer upper / HNSW `ef=64` | After: pipeline upper (@QPS) | After: HNSW (best point) | Verdict |
 |---|---|---|---|---|---|
 | collapse | GIST-960 | 4.38 % / 84.11 % @5,417 | **82.77 %** @4,717 | 84.85 % @6,734 | dominated → **dominated** (gap 79.7 → **2.1 pp**) |
-| collapse | SIFT-128 | 47.21 % / 97.06 % @50,547 | **92.47 %** @15,629 | 97.06 % @50,547 | dominated → **dominated** (49.9 → **4.6 pp**; baseline also 3.2× faster at that recall) |
+| collapse | SIFT-128 | 47.21 % / 97.46 % @45,118 | **92.47 %** @15,629 | 97.06 % @50,547 (centred curve) | dominated → **dominated** (49.9 → **4.6 pp**; baseline also 3.2× faster at that recall) |
 | collapse | Random-Sphere | 6.46 % / **1.40 %** (HNSW also collapses) | **17.78 %** @1,867 | 17.43 % @285 (ef=1024) | **parity-or-better: 6.3–7.9× faster at matched recall** |
 | usable | GloVe-100 | 71.69 % / 82.05 % @36,047 | **93.32 %** @11,675 | 93.45 % @10,893 (ef=256) | dominated → **parity (≈1.07×)** |
 | usable | Synthetic-LR | 92.52 % / ⏳ | 97.05 % | ⏳ | ⏳ (running) |
-| moderate | Wolt-CLIP-512 | 86.81 % / 87.88 % @19,606 | **89.05 %** @9,356 | 87.88 % @20,849 | dominated → **curves intersect** (≤87.9 % baseline 1.1–1.3× faster; ≥89 % QuIVer **2.3–3.9×** faster) |
-| competitive | Cohere-768 | 99.78 % / 99.84 % @741 | **99.89 %** | ⏳ | win → win (unchanged) |
+| moderate | Wolt-CLIP-512 | 86.81 % / 87.86 % @19,606 | **89.05 %** @9,356 | 87.88 % @20,849 (centred curve) | dominated → **curves intersect** (≤87.9 % baseline 1.1–1.3× faster; ≥89 % QuIVer **2.3–3.9×** faster) |
+| competitive | Cohere-768 | 99.78 % / 96.30 % @9,514（HNSW's best point 99.84 % @741） | **99.89 %** | ⏳ | win → win (unchanged) |
 
 **The honest sentence this table requires**: *a smaller gap is not availability.* GIST and SIFT move from
 "hopeless" to "within 2–5 pp" — but at that recall the baseline is also faster. The two arms where the

@@ -29,7 +29,7 @@
 |---|---|
 | §4.3 (12 rows) | `results/t2/*/` per-dataset bench logs; frozen values in `docs/research/HANDOFF.md` |
 | §5.3 (tier × competitor map) | `results/baseline/competitors_*.json` |
-| §6.3 (graph fidelity) | `results/t2/graph_quality_*.json` |
+| §6.3 (graph fidelity) | `results/t2/gist960_collapse/graph_quality_*.json`（9 个文件，字段 `overlap_cos_pct` / `overlap_w_pct` / `overlap_c_pct`） |
 | §7.2–7.3 (gate + probe sensitivity) | `results/t2/deployability_gate.json`, `results/t2/p2_probe_scaling.json` |
 | §8.2–8.3 (centre + navigation A/B) | `results/t2/gist960_collapse/*.json` |
 | §8.4 (7-arm map) | `results/baseline/competitors_*c.json` |
