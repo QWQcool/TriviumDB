@@ -25,6 +25,108 @@ pub(crate) static FORCE_NO_384_KERNEL: std::sync::LazyLock<bool> = std::sync::La
 pub(crate) static NAV_WEIGHTED: std::sync::LazyLock<bool> =
     std::sync::LazyLock::new(|| std::env::var("TRIVIUM_NAV_WEIGHTED").is_ok_and(|v| v == "1"));
 
+/// 环境变量 `TRIVIUM_SIGN_ROTATE=<seed>`（u64）：启用**签名前的种子随机正交旋转**。
+///
+/// 这是 P4-A 那条修复的引擎内实现（`docs/research/p4a-rotation-vs-centering.md`）：
+/// 对崩塌档数据（`sign_info = 0.000`），GIST-960 的 R@10@ef=64 由 `2.10%` 提升到 `60.22%`。
+///
+/// **为什么它只改编码器就自洽**：`Q` 正交 ⇒ `cos(Qa, Qb) = cos(a, b)` ⇒
+/// 码侧排序仍对齐**同一个**相似度，f32 精排 / GT / 现有数据契约全部不用动
+/// （去均值会改变相似度定义，因此**不能**在引擎里只改编码器）。
+///
+/// - 默认（未设该变量）⇒ **与历史逐位一致**。
+/// - 代价：每个向量一次 `O(dim²)` 变换（可选），`Q` 首次按维度惰性生成（`O(dim³)`，一次）。
+static SIGN_ROTATE_SEED: std::sync::LazyLock<Option<u64>> = std::sync::LazyLock::new(|| {
+    std::env::var("TRIVIUM_SIGN_ROTATE")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+});
+
+static ROTATION_CACHE: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<usize, std::sync::Arc<Vec<f32>>>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// 该维度对应的旋转矩阵（未启用时返回 `None`）。
+fn rotate_for_dim(dim: usize) -> Option<std::sync::Arc<Vec<f32>>> {
+    let seed = (*SIGN_ROTATE_SEED)?;
+    let mut cache = match ROTATION_CACHE.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let entry = cache
+        .entry(dim)
+        .or_insert_with(|| std::sync::Arc::new(random_orthogonal(dim, seed)));
+    Some(std::sync::Arc::clone(entry))
+}
+
+/// splitmix64：无依赖的确定性 PRNG（与种子一一对应 ⇒ 零存储）
+struct SplitMix64(u64);
+
+impl SplitMix64 {
+    fn next_u64(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+
+    fn next_unit(&mut self) -> f32 {
+        (self.next_u64() >> 40) as f32 / (1u64 << 24) as f32
+    }
+
+    /// Box–Muller ⇒ 标准正态（与 Python 侧 `default_rng.standard_normal` 同族，数值不必一致）
+    fn next_normal(&mut self) -> f32 {
+        let u1 = self.next_unit().max(1e-7);
+        let u2 = self.next_unit();
+        (-2.0 * u1.ln()).sqrt() * (std::f32::consts::TAU * u2).cos()
+    }
+}
+
+/// 种子随机正交阵（Mezzadri：高斯阵 + 改进 Gram–Schmidt），行主序 `dim × dim`。
+///
+/// 不需要外部线性代数库；`dim = 960` 时一次生成约 1e9 flops（启用时按维度惰性算一次）。
+fn random_orthogonal(dim: usize, seed: u64) -> Vec<f32> {
+    let mut rng = SplitMix64(seed);
+    let mut m: Vec<f32> = (0..dim * dim).map(|_| rng.next_normal()).collect();
+
+    for i in 0..dim {
+        for k in 0..i {
+            let mut dot = 0f32;
+            for j in 0..dim {
+                dot += m[i * dim + j] * m[k * dim + j];
+            }
+            for j in 0..dim {
+                m[i * dim + j] -= dot * m[k * dim + j];
+            }
+        }
+        let mut norm = 0f32;
+        for j in 0..dim {
+            norm += m[i * dim + j] * m[i * dim + j];
+        }
+        let inv = if norm > 0.0 { 1.0 / norm.sqrt() } else { 0.0 };
+        for j in 0..dim {
+            m[i * dim + j] *= inv;
+        }
+    }
+    m
+}
+
+/// `y = Q·x`（`Q` 行主序 `dim × dim`）
+fn apply_rotation<T: crate::VectorType>(vec: &[T], q: &[f32]) -> Vec<f32> {
+    let dim = vec.len();
+    let mut out = vec![0f32; dim];
+    for (i, slot) in out.iter_mut().enumerate() {
+        let row = &q[i * dim..(i + 1) * dim];
+        let mut acc = 0f32;
+        for (j, v) in vec.iter().enumerate() {
+            acc += row[j] * v.to_f32();
+        }
+        *slot = acc;
+    }
+    out
+}
+
 /// BQ 签名最大 chunks 数量（每个 u64 chunk 覆盖 64 维）
 /// 48 chunks × 64 bits = 3072 维上限
 const MAX_BQ_CHUNKS: usize = 48;
@@ -115,7 +217,22 @@ impl Bq2Signature {
         Self::default()
     }
 
+    /// 签名编码的**单一入口**：可在编码前套一个种子随机正交旋转
+    /// （环境变量 `TRIVIUM_SIGN_ROTATE=<seed>`；**默认关闭 ⇒ 与历史逐位一致**）。
+    ///
+    /// 为什么旋转能"只改编码器"就自洽：`Q` 正交 ⇒ `cos(Qa, Qb) = cos(a, b)`，
+    /// 码侧排序仍对齐**同一个**相似度 ⇒ f32 精排 / GT / 既有数据契约都不用动。
+    /// （去均值改变相似度定义，故**不能**在引擎里只改编码器；见
+    /// `docs/research/p4a-rotation-vs-centering.md` §1。）
     pub fn from_vector<T: crate::VectorType>(vec: &[T]) -> Self {
+        match rotate_for_dim(vec.len()) {
+            Some(q) => Self::encode_generic(&apply_rotation(vec, &q)),
+            None => Self::encode_generic(vec),
+        }
+    }
+
+    /// 纯编码（无任何变换）；默认路径与历史实现逐位一致。
+    fn encode_generic<T: crate::VectorType>(vec: &[T]) -> Self {
         let mut pos = [0u64; MAX_BQ_CHUNKS];
         let mut strong = [0u64; MAX_BQ_CHUNKS];
 
@@ -958,8 +1075,21 @@ impl Bq2Store {
         self.strong.reserve(additional * self.chunks);
     }
 
-    /// 从向量直接编码并追加（紧凑路径）
+    /// 从向量直接编码并追加（紧凑路径）。
+    ///
+    /// ⚠️ 这是**第二条**编码路径（`Bq2Signature::from_vector` 之外的紧凑版本）。
+    /// 任何"编码前变换"必须**同时**作用于两条路径，否则码与查询签名会错配 ——
+    /// P4-A 实测过：只改 `from_vector`（查询侧）而漏掉这里（存储侧）⇒
+    /// `sift128` 的 R@10@ef=64 从 `15.77%` 崩到 **`0.01%`**（码完全错配）。
     pub fn push_from_vector<T: crate::VectorType>(&mut self, vec: &[T]) {
+        match rotate_for_dim(vec.len()) {
+            Some(q) => self.push_from_vector_raw(&apply_rotation(vec, &q)),
+            None => self.push_from_vector_raw(vec),
+        }
+    }
+
+    /// 紧凑编码本体（无变换）；默认路径与历史逐位一致。
+    fn push_from_vector_raw<T: crate::VectorType>(&mut self, vec: &[T]) {
         let mut sum_abs = 0.0f32;
         for v in vec {
             sum_abs += v.to_f32().abs();
@@ -1160,6 +1290,37 @@ mod tests {
         *state ^= *state >> 7;
         *state ^= *state << 17;
         *state
+    }
+
+    #[test]
+    fn test_random_orthogonal_is_orthogonal_and_deterministic() {
+        let dim = 24;
+        let q = random_orthogonal(dim, 20260923);
+        for i in 0..dim {
+            for k in 0..dim {
+                let dot: f32 = (0..dim).map(|j| q[i * dim + j] * q[k * dim + j]).sum();
+                let expect = if i == k { 1.0 } else { 0.0 };
+                assert!((dot - expect).abs() < 1e-4, "QᵀQ[{i}][{k}] = {dot}（期望 {expect}）");
+            }
+        }
+        // 同种子 ⇒ 同矩阵（零存储的前提）；不同种子 ⇒ 不同矩阵
+        assert_eq!(q, random_orthogonal(dim, 20260923));
+        assert_ne!(q, random_orthogonal(dim, 7));
+    }
+
+    #[test]
+    fn test_apply_rotation_preserves_inner_product_and_norm() {
+        let dim = 32;
+        let q = random_orthogonal(dim, 1234);
+        let a: Vec<f32> = (0..dim).map(|i| (i as f32 * 0.37).sin()).collect();
+        let b: Vec<f32> = (0..dim).map(|i| (i as f32 * 0.11).cos()).collect();
+        let (ra, rb) = (apply_rotation(&a, &q), apply_rotation(&b, &q));
+        let dot_ab: f32 = a.iter().zip(&b).map(|(x, y)| x * y).sum();
+        let dot_rot: f32 = ra.iter().zip(&rb).map(|(x, y)| x * y).sum();
+        assert!((dot_ab - dot_rot).abs() < 1e-3, "内积未保持：{dot_ab} vs {dot_rot}");
+        let (na, nr): (f32, f32) = (a.iter().map(|x| x * x).sum::<f32>().sqrt(),
+                                    ra.iter().map(|x| x * x).sum::<f32>().sqrt());
+        assert!((na - nr).abs() < 1e-3, "范数未保持：{na} vs {nr}");
     }
 
     #[test]
