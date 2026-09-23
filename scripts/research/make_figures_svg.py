@@ -235,10 +235,60 @@ def fig4():
     (OUT / "fig4-probe-sample-size.svg").write_text("".join(s), encoding="utf-8")
 
 
+def fig5():
+    """同召回吞吐：QuIVer vs HNSW 家族 vs OPQ+IVF-PQ+Refine（§5.6，P7-②）。"""
+    import math
+    src = ROOT / "results" / "t2" / "pq_matched_recall_cohere.json"
+    if not src.exists():
+        print("  [跳过 fig5] 缺 results/t2/pq_matched_recall_cohere.json")
+        return
+    curves = json.loads(src.read_text(encoding="utf-8"))["curves"]
+    W, H = 820, 450
+    L, R, T, B = 72, 232, 78, 62
+    pw, ph = W - L - R, H - T - B
+    allx = [q for pts in curves.values() for _, q in pts if q]
+    ally = [r for pts in curves.values() for r, _ in pts]
+    x_lo, x_hi = 200, max(allx) * 1.6
+    y_lo, y_hi = max(0, min(ally) - 2), 100.5
+    sx = lambda v: L + pw * (math.log10(max(v, x_lo)) - math.log10(x_lo)) / (math.log10(x_hi) - math.log10(x_lo))
+    sy = lambda v: T + ph * (1 - (v - y_lo) / (y_hi - y_lo))
+    colors = {"QuIVer": "#188038", "PQ/OPQ+Refine": "#1a73e8", "hnswlib": "#d93025",
+              "FAISS-HNSW": "#f9ab00", "USearch": "#a142f4", "IVF-Flat": "#00897b"}
+    s = [head(W, H, "Same-recall throughput, Cohere-1M x 768 (M=32, ef_c=128)")]
+    for gy in range(int(y_lo) // 10 * 10, 101, 10):
+        if gy < y_lo:
+            continue
+        s.append(line(L, sy(gy), L + pw, sy(gy)))
+        s.append(txt(L - 8, sy(gy) + 4, f"{gy}%", 10, "end"))
+    for gx in (300, 1000, 3000, 10000, 30000, 100000):
+        if gx > x_hi:
+            continue
+        s.append(line(sx(gx), T, sx(gx), T + ph))
+        s.append(txt(sx(gx), T + ph + 16, f"{gx // 1000}K" if gx >= 1000 else str(gx), 10, "middle"))
+    s.append(line(L, T, L, T + ph))
+    s.append(txt(L + pw / 2, H - 14, "MT-QPS (log)", 11, "middle", weight="600"))
+    s.append(txt(16, T + ph / 2, "Recall@10", 11, "middle", weight="600", rotate=-90))
+    s.append(line(L, sy(99.8), L + pw, sy(99.8), "#d93025", 1.3, "6,4"))
+    s.append(txt(L + pw - 6, sy(99.8) - 6, "99.8% (paper's Cohere row)", 9, "end", "#d93025"))
+    for i, (name, pts) in enumerate(curves.items()):
+        pts = sorted((r, q) for r, q in pts if q)
+        c = colors.get(name, "#5f6368")
+        s.append(poly([(sx(q), sy(r)) for r, q in pts], c, 2.6 if name == "QuIVer" else 1.7))
+        for r, q in pts:
+            s.append(circle(sx(q), sy(r), 3.2, c))
+        y = T + 8 + i * 20
+        s.append(line(L + pw + 16, y, L + pw + 40, y, c, 3))
+        top = max(r for r, _ in pts)
+        s.append(txt(L + pw + 46, y + 4, f"{name}（最高 {top:.1f}%）", 10))
+    s.append("</svg>")
+    (OUT / "fig5-matched-recall.svg").write_text("".join(s), encoding="utf-8")
+
+
 if __name__ == "__main__":
     fig1()
     fig2()
     fig3()
     fig4()
+    fig5()
     for p in sorted(OUT.glob("*.svg")):
         print(f"  {p.name}  {p.stat().st_size / 1024:.1f} KB")

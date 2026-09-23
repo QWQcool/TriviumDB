@@ -44,6 +44,12 @@
 | hnswlib | 3,193 MiB | 3,348.2 | **4.73×**（paper claims 4.7× ✅） |
 | FAISS-HNSW | 3,189 MiB | 3,344.1 | 4.72× |
 | FAISS IVF-Flat (nlist ≈ 4 k) | 2,949 MiB | 3,092.3 | 4.37× |
+| **Bare IVF-PQ** (nlist = 1,024, m = 96, **no rerank**) | **92 MiB** | 96.5 | 0.14× — but its recall caps at **62.6 %** |
+| **OPQ+IVF-PQ+Refine** (PQ codes + f32 rerank copy) | ≈ **3.16 GiB** (92 MiB + 3,072 MiB) | 3,312 | 4.8× — needed to reach 99.8 % |
+
+⇒ The quantizer comparison sharpens the memory claim: **on PQ, cheap memory and high recall are mutually
+exclusive** (bare PQ is 92 MiB at 62.6 %; the refined pipeline is 3.16 GiB at 99.8 %). Only the BQ-native
+index gives 675 MiB **and** 99.8 % at the same time (§5.6 / §11.3b).
 
 Measured as index bytes (bench-reported `Hot` for QuIVer; `save_index` size for hnswlib; `serialize_index`
 length for FAISS), not peak RSS. The 2-bit code accounts for ~183 MiB of QuIVer's 675 MiB

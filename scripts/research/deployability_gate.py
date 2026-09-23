@@ -59,6 +59,10 @@ ARMS = [
     ("minilm", 384), ("bge_m3", 1024),
     # ── P6：VIBE 扩展行（**不在论文 Table 11 里**；coco_nomic 实测 R@10@ef=64 = 0.21%）──
     ("coco_nomic", 768), ("ccnews_nomic", 768),
+    ("arxiv_nomic", 768), ("codesearch_jina", 768), ("gooaq_roberta", 768),
+    ("landmark_nomic", 768), ("landmark_dino", 768),
+    # ── P7：去均值+旋转的组合臂（我们最强的修复）──
+    ("gist960rc", 960),
     ("dbpedia_openai", 1536), ("dbpedia_openai_3072", 3072),
 ]
 

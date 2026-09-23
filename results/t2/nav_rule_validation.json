@@ -1,0 +1,69 @@
+{
+  "fitted": {
+    "hit": 5,
+    "total": 6
+  },
+  "prospective": [
+    {
+      "arm": "arxiv_nomic",
+      "probe_w": 99.46666666666665,
+      "probe_c": 99.51666666666665,
+      "pred": "cheap",
+      "w0": 96.78,
+      "w1": 96.04,
+      "delta": -0.7399999999999949,
+      "ok": true
+    },
+    {
+      "arm": "codesearch_jina",
+      "probe_w": 99.91666666666667,
+      "probe_c": 99.88333333333333,
+      "pred": "加权",
+      "w0": 94.62,
+      "w1": 96.37,
+      "delta": 1.75,
+      "ok": true
+    },
+    {
+      "arm": "gooaq_roberta",
+      "probe_w": 100.0,
+      "probe_c": 99.7,
+      "pred": "加权",
+      "w0": 96.6,
+      "w1": 98.32,
+      "delta": 1.7199999999999989,
+      "ok": true
+    },
+    {
+      "arm": "landmark_nomic",
+      "probe_w": 93.73333333333333,
+      "probe_c": 99.61666666666667,
+      "pred": "cheap",
+      "w0": 93.05,
+      "w1": 81.39,
+      "delta": -11.659999999999997,
+      "ok": true
+    },
+    {
+      "arm": "landmark_dino",
+      "probe_w": 99.18333333333334,
+      "probe_c": 96.18333333333334,
+      "pred": "加权",
+      "w0": 82.9,
+      "w1": 91.58,
+      "delta": 8.679999999999993,
+      "ok": true
+    },
+    {
+      "arm": "gist960rc",
+      "probe_w": 99.58333333333333,
+      "probe_c": 95.56666666666666,
+      "pred": "加权",
+      "w0": 76.05,
+      "w1": 80.17,
+      "delta": 4.1200000000000045,
+      "ok": true
+    }
+  ],
+  "prospective_hit": 6
+}
