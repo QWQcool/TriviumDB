@@ -80,3 +80,55 @@
 4. **"zero preprocessing" 的措辞建议**：机制上这是**最大的适用性前提**。建议写明"若符号平面退化（如 GIST/SIFT 的窄正区间），**一步去均值**是可选的修复"
    —— 我们在 6 个数据集上量了（GIST `2.10 → 39.74%`、SIFT `15.77 → 30.64%`、WOLT-CLIP `71.48 → 76.81%`、
    GloVe `32.82 → 36.11%`、cohere `94.63 → 93.48%`（中性）、各向同性对照 `+0.03pp`），且**去均值后 HNSW 几乎不变**（排除"centered 任务对所有人都更容易"）。
+
+---
+
+## Issue 5 —— 建设性建议：**一个种子随机旋转**能让崩塌档恢复 44–58pp（且不改任务）
+
+这一条不是"问题"，是我们可以直接送上的修复，也是我们这边**最强的一个实测结果**：
+
+对一个**固定种子**做 QR 分解得到的随机正交阵 `Q`（⇒ **零存储**，dim+seed 足够重建；无需训练）：
+
+| 数据集 | 原始 @ef=64 | 去均值 @ef=64 | **旋转 @ef=64** | 原始 @ef=1024 | **旋转 @ef=1024** |
+|---|---|---|---|---|---|
+| GIST-960 | 2.10% | 39.74% | **60.22%** | 4.38% | **88.99%** |
+| SIFT-128 | 15.77% | 30.64% | **60.24%** | 47.23% | **95.74%** |
+
+**为什么它比"去均值"干净**：对单位向量 `cos(Qa, Qb) = cos(a, b)` ⇒ **相似度与 GT 都不变**
+（我们实测旋转后 GT ∩ 原 GT = **99.87–100%**），变的只有**编码**（负值占比 ~0.49 ⇒ 符号面复活）。
+⇒ 你们的 "zero preprocessing" 只需放宽为 "one seeded rotation"，**不需要改任务定义**；
+而且这本来就是 RaBitQ 一系的标准做法。
+
+**代价/边界（如实）**：① 竞争档（Cohere）上旋转**有害**（`94.63 → 89.82%` @ef=64，−4.8pp），
+所以判据要跟上（符号面活着就别旋转）；② 旋转会**摊平幅度面** ⇒ 旋转后要配"该用哪个导航度量"的规则
+（见 Issue 2：用 `probe_ef(加权) vs probe_ef(Hamming)` 谁大选谁，我们在 10 个臂上 9 个方向正确）；
+③ 建图反而**变快** 2–6×（GIST 290s→47s、Cohere 202s→31s）。
+
+**竞品后果**（因为任务没变，你们的 Table 11 场景下原有竞品曲线仍然有效）：
+GIST-960 在 84% 召回处 QuIVer **快 hnswlib 1.32×**（84.41% @7,148 vs 84.11% @5,417），
+而 60–84% 召回带里 HNSW 根本没有工作点（它最低 ef=64 就已经 84.11%）。
+
+---
+
+## Issue 6 —— Table 4 的 "Euclidean" 标签 vs 仓库管线
+
+Table 4 把 **SIFT-128 / GIST-960 标为 Euclidean**（queries 10,000 / 1,000），但 `prepare_all.py`
+对 euclidean 源是**归一化 + 按 cosine 重算 GT**。我们按仓库口径跑，12 行都落在 ±1.84pp 内
+（gist960 `2.10 vs 2.01`、sift128 `15.77 vs 14.85`）⇒ 怀疑 **Table 11 的数字也来自归一化-cosine 管线**，
+"Euclidean" 只是源数据集的标签。若是这样，我们会在论文里写"论文评估的是归一化-cosine 口径"，
+避免读者拿它去比 ann-benchmarks 的 Euclidean 榜单。
+
+---
+
+## Issue 7 —— `prepare_all.py` 的 `binary_vector` 分支对 `wolt_clip` 报 `TypeError`
+
+该分支假设向量是 **JSON 字符串**，而 `wolt_clip` 当前 revision 直接给 `list` ⇒
+`TypeError: the JSON object must be str, bytes or bytearray, not list`。
+我们做了最小容错（`isinstance(emb, (str, bytes, bytearray))` 判断）：
+```python
+if is_binary:
+    import json
+    if isinstance(emb, (str, bytes, bytearray)):
+        emb = json.loads(emb)
+    all_emb[count] = np.array(emb, dtype=np.float32)
+```

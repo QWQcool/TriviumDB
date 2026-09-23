@@ -34,6 +34,22 @@
 | §8.2–8.3 (centre + navigation A/B) | `results/t2/gist960_collapse/*.json` |
 | §8.4 (7-arm map) | `results/baseline/competitors_*c.json` |
 | §8.6 (rotation) | `*r_*.f32/i32` 派生集（`gist960r`/`sift128r`/`glove100r`/`coherer`，由 `gist960_collapse_prepare.py --rotate` 生成，含 GT 不变性校验）+ `.tmp/p4a_*.log`；诊断见 `docs/research/p4a-rotation-vs-centering.md` |
+| §10-L9 (memory) | `results/t2/memory_footprint_cohere.json`（脚本 `scripts/research/memory_index_footprint.py`，日志 `.tmp/p4b_memory_cohere.log`） |
+
+### 11.3a Memory footprint (1 M × 768, M = 32)
+
+| Implementation | index bytes | B/vector | vs QuIVer |
+|---|---|---|---|
+| **QuIVer (2-bit BQ)** | **675 MiB** | 707.8 | 1.00×（paper claims < 1.3 GB / 1 M ✅） |
+| hnswlib | 3,193 MiB | 3,348.2 | **4.73×**（paper claims 4.7× ✅） |
+| FAISS-HNSW | 3,189 MiB | 3,344.1 | 4.72× |
+| FAISS IVF-Flat (nlist ≈ 4 k) | 2,949 MiB | 3,092.3 | 4.37× |
+
+Measured as index bytes (bench-reported `Hot` for QuIVer; `save_index` size for hnswlib; `serialize_index`
+length for FAISS), not peak RSS. The 2-bit code accounts for ~183 MiB of QuIVer's 675 MiB
+(`0.25 B/dim × 768 × 1 M`); the rest is graph + bookkeeping, and the per-dimension increment across our
+128/256/512/768-dim arms (522 → 553 → 614 → 675 MiB, ≈ 0.25 B/dim) matches 2 bits per dimension exactly.
+The repair arms (`c` / `r`) keep the same footprint (720 MiB on `gist960` and `gist960r` alike).
 
 ## 11.4 One-command reproduction of the central claim
 

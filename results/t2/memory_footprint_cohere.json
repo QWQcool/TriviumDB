@@ -1,0 +1,11 @@
+{
+  "prefix": "cohere",
+  "dim": 768,
+  "n": 1000000,
+  "m": 32,
+  "ef_c": 128,
+  "quiver_hot_mib": 675.0,
+  "hnswlib_bytes": 3348231092,
+  "faiss-hnsw_bytes": 3344129506,
+  "faiss-ivf_bytes": 3092320139
+}
