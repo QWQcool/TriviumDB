@@ -49,7 +49,7 @@ instrument and never a single-run `top-10` value as a usability verdict.
 Four quantities, all computable in seconds and **before building any index**:
 
 ```
-① sign_info  < 0.2                     ⇒ centre (the sign plane is globally degenerate)
+① sign_info  < 0.2                     ⇒ rotate (§8.6; task-preserving) or centre — the sign plane is globally degenerate
 ② ‖μ‖ ≥ 0.3 and headroom > 5 pp        ⇒ centre as well (the shift is large and there is room to gain)
 ③ probe_ef (min over both metrics,
    code top-128 → f32 re-rank) < 50 %  ⇒ use a float32 index

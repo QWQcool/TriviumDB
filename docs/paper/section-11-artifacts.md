@@ -33,6 +33,7 @@
 | §7.2–7.3 (gate + probe sensitivity) | `results/t2/deployability_gate.json`, `results/t2/p2_probe_scaling.json` |
 | §8.2–8.3 (centre + navigation A/B) | `results/t2/gist960_collapse/*.json` |
 | §8.4 (7-arm map) | `results/baseline/competitors_*c.json` |
+| §8.6 (rotation) | `*r_*.f32/i32` 派生集（`gist960r`/`sift128r`/`glove100r`/`coherer`，由 `gist960_collapse_prepare.py --rotate` 生成，含 GT 不变性校验）+ `.tmp/p4a_*.log`；诊断见 `docs/research/p4a-rotation-vs-centering.md` |
 
 ## 11.4 One-command reproduction of the central claim
 

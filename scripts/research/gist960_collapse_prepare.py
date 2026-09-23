@@ -416,6 +416,59 @@ def center_generic(src_prefix, src_dim, dst_prefix):
     stats(dst_prefix, dim, tr, te, gt, np.random.default_rng(RNG_SEED))
 
 
+# ══════════════════════════════════════════════════════════════════
+#  P4-A：随机正交旋转臂（**保任务**的修复，与去均值头对头）
+# ══════════════════════════════════════════════════════════════════
+
+ROT_SEED = 20260923
+
+
+def random_orthogonal(dim, seed=ROT_SEED):
+    """确定性随机正交矩阵（Mezzadri 的 QR 法，用 R 的对角符号修掉 QR 的符号歧义）。
+
+    **零存储**：只要有 `dim` 与 `seed` 就能重建同一个 `Q`（论文的 "zero preprocessing" 精神）。
+    """
+    rng = np.random.default_rng(seed)
+    q, r = np.linalg.qr(rng.standard_normal((dim, dim)))
+    q = q * np.sign(np.diag(r))[None, :]
+    err = float(np.abs(q @ q.T - np.eye(dim)).max())
+    assert err < 1e-4, f"Q 不是正交阵（max|QQᵀ−I|={err}）"
+    print(f"  Q: {dim}×{dim} 随机正交（seed={seed}）  max|QQᵀ−I|={err:.2e}")
+    return np.ascontiguousarray(q.astype(np.float32))
+
+
+def rotate_generic(src_prefix, src_dim, dst_prefix, center_first=False):
+    """随机正交旋转臂：`x' = Q·x`（可选先 `x ← normalize(x − μ)`）。
+
+    **为什么它与去均值不是同一类修复**：对**单位向量**，`cos(Qa, Qb) = cos(a, b)`
+    ⇒ 旋转**不改变任务**（本函数会打印 GT 重合率来验证），只改变**编码**；
+    而去均值 `x − μ` 会改变相似度定义（论文 §8 开头声明的 L3）。
+    预期机制：全非负的窄正区间被摊平到各象限 ⇒ 符号面复活 ⇒ 2-bit 码重新可辨。
+    """
+    q = random_orthogonal(src_dim)
+    if center_first:
+        mu = streaming_mean(src_prefix, src_dim, normalize=True)
+        assert np.linalg.norm(mu) <= 1.0 + 1e-3, "‖mu‖>1 ⇒ 均值口径错（见 center_generic 守卫）"
+        print(f"  ‖mean(归一化后)‖ = {np.linalg.norm(mu):.6f}（先去均值再旋转）")
+        tf = lambda a, b: ((a - mu) @ q.T, (b - mu) @ q.T)      # noqa: E731
+    else:
+        tf = lambda a, b: (a @ q.T, b @ q.T)                   # noqa: E731
+    tr, te, gt, dim = derive(
+        src_prefix, src_dim, dst_prefix, tf, src_dim,
+        doc="随机正交旋转（保任务）" + (" + 去均值" if center_first else ""),
+    )
+
+    # ★ 任务不变性校验：旋转前后 GT 应重合（仅并列处的排序可能不同）
+    gt_src = ROOT / f"{src_prefix}_groundtruth.i32"
+    if gt_src.exists():
+        ref = np.fromfile(gt_src, dtype=np.int32).reshape(gt.shape[0], -1)[:, :TOP_K]
+        hit = np.mean([len(set(gt[i].tolist()) & set(ref[i].tolist()))
+                       for i in range(gt.shape[0])]) / TOP_K
+        print(f"  [任务不变性] 旋转后 GT ∩ 原任务 GT = {hit * 100:.2f}%"
+              f"（期望 ≈100%：cos 在正交变换下不变）")
+    stats(dst_prefix, dim, tr, te, gt, np.random.default_rng(RNG_SEED))
+
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     if "--list" in sys.argv:
@@ -427,6 +480,15 @@ def main():
         for spec in args:
             src, dim = spec.split(":")
             center_generic(src, int(dim), f"{src}c")
+        return
+    if "--rotate" in sys.argv or "--rotate-center" in sys.argv:
+        # 用法: --rotate gist960:960 sift128:128        ⇒ 产出 <src>r_*
+        #       --rotate-center glove100:100            ⇒ 产出 <src>rc_*（先居中再旋转）
+        with_center = "--rotate-center" in sys.argv
+        for spec in args:
+            src, dim = spec.split(":")
+            rotate_generic(src, int(dim), f"{src}{'rc' if with_center else 'r'}",
+                           center_first=with_center)
         return
     if "--stats" in sys.argv:
         # 只对已生成的派生集重跑统计（不重新生成/重算 GT）

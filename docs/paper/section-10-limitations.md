@@ -8,7 +8,7 @@ All of the following are stated in the body text, not hidden in an appendix.
 |---|---|---|
 | **L1** | **Single machine, no AVX-512** (Intel i9-14900K; `Avx512F = false`) — the VPOPCNTDQ path QuIVer is designed around is never exercised | Recall-level conclusions are machine-independent. For speed we report the same-recall ratio, and note that our **absolute MT-QPS is already 1.1–2.4× the paper's** (32 vs 16 threads), i.e. we are *not* measuring on a weakened platform. We do not assert the direction in which the ratio would move on Zen4. |
 | **L2** | **Metric deviation**: the published SIFT/GIST rows are *Euclidean*, while the repository's `prepare_all.py` normalises and recomputes GT by cosine, so our SIFT/GIST rows are cosine tasks | Disclosed in §4.2; our numbers are comparable to the paper's *pipeline*, not to the public Euclidean leaderboards. All our *comparisons* put both arms on the same task, so the deviation cancels. |
-| **L3** | **Centring changes the similarity function**: every "after" number in §8 is Recall@10 on the *centred-cosine* task, not an improvement on the original task | Stated at the head of §8. Centring is also known post-processing (all-but-the-top family); we claim triage + quantification, not novelty of the transform. |
+| **L3** | **Centring changes the similarity function**: every "after" number in §8.2–§8.4 is Recall@10 on the *centred-cosine* task, not an improvement on the original task | Stated at the head of §8. Centring is also known post-processing (all-but-the-top family); we claim triage + quantification, not novelty of the transform. **§8.6 covers this caveat by reporting a task-preserving alternative (seeded rotation), which on the collapse tier is both stronger and leaves the GT untouched (99.87–100 % overlap).** |
 | **L4** | The separability column (~5 % calibre uncertainty from `cos_std`) appears in the gate's development tables | It is **not** used as a criterion in the final chain (§7.3), only reported for completeness. |
 
 ## 10.2 The reproduction has one unresolved row, one tie floor
@@ -27,7 +27,7 @@ All of the following are stated in the body text, not hidden in an appendix.
 | **L9** | **Memory footprint not reproduced.** The paper reports ~4.7× lower hot memory and < 1.3 GB per 1 M vectors; we did not measure RSS in this version. |
 | **L10** | **MSMARCO-5M scalability (Table 12) is out of scope** — a 5 M-scale run is beyond this study's budget, so the paper's scaling claim is neither confirmed nor contradicted here. |
 | **L11** | **The multi-signal (TSNG) path was not A/B-tested under the navigation-metric switch** (§8.3 covers the main path only). |
-| **L12** | **Centring vs rotation was not tested head-to-head** (§9.2). We deliberately do not infer an ordering. |
+| **L12** | **Only a *random* (seeded) orthogonal transform was tested** (§8.6): we did not compare against learned rotations (OPQ-style) or other orthogonal transforms, and we do not claim rotation is optimal — only that it dominates centring on the collapse tier (60.22 % vs 39.74 % on GIST-960) while preserving the task. The row is therefore a *lower* bound on what a transform-side repair can achieve. |
 
 ## 10.4 Statistical conventions used throughout
 

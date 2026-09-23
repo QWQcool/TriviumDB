@@ -36,7 +36,11 @@ what survives, what does not, and what a deployer should do instead.
    one the graph was built with adds up to **+21.8 pp** on rows whose sign plane is alive — and *hurts* rows
    whose sign plane is dead, which is why we ship it as a default-off switch with a decision rule.
    After the repair, two arms move from "dominated" to "parity" or "intersecting" — but the paper's honest
-   sentence survives: **a smaller gap is not availability**.
+   sentence survives: **a smaller gap is not availability**. Where the sign plane is *dead*, a **seeded random
+   rotation** — which leaves the similarity function untouched (GT overlap 99.87–100 %) — does better still
+   (**60.22 % / 60.24 %** at `ef=64`) and turns GIST-960 into a *win* (1.3× faster than HNSW at 84 % recall,
+   and the only measured option in the 60–84 % recall band); on a live sign plane it hurts (Cohere −4.8 pp),
+   so the same statistic decides which of the two repairs to use.
 6. **Two engineering facts the paper does not report (§8.3, §9.2)**: the L0 query navigation uses a *different*
    distance than build/prune/upper layers, and the `α` default sits at the worst end of its own platform.
 

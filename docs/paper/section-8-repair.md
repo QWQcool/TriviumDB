@@ -92,3 +92,57 @@ HNSW as well: its centred curve is faster at the same recall (99.79 % @2,544 vs 
 * It does not touch the competitive tier's victory, and it does not create one where none existed.
 * It adds no new theory: the mechanism is the paper's own Finding 1, and centring is known post-processing.
   The contribution is the **triage rule** (`sign_info`) + the **quantification** + the two-arm delivery path.
+
+## 8.6 A second repair, and on the collapse tier a better one: a seeded rotation
+
+Centring has the defect we disclosed up front (L3): it **changes the similarity function**. There is a
+classical alternative that does not — a random orthogonal transform. For unit vectors `cos(Qa, Qb) = cos(a,b)`,
+so **the task is provably unchanged** (we verify it: the rotated task's GT overlaps the original's by
+**99.87–100 %**), while the *code* is recomputed in a basis where the sign plane is alive. We generate `Q` by
+QR-factorising a Gaussian matrix from a **fixed seed**, so it costs **zero storage** (dim + seed suffice) and
+no training — it is the same device RaBitQ uses.
+
+**Collapse tier: rotation beats centring, and keeps the task.**
+
+| Dataset | original @ef=64 | centred @ef=64 | **rotated @ef=64** | original @1024 | centred @1024 | **rotated @1024** |
+|---|---|---|---|---|---|---|
+| GIST-960 | 2.10 % | 39.74 % | **60.22 %** (+58.1 pp) | 4.38 % | 79.44 % | **88.99 %** |
+| SIFT-128 | 15.77 % | 30.64 % | **60.24 %** (+44.5 pp) | 47.23 % | 85.21 % | **95.74 %** |
+
+Graph construction also gets **2–6× faster** (GIST 290.4 s → 47.2 s; Cohere 202.4 s → 31.5 s), and the sign
+statistic moves from `sign_info = 0.000` to 0.507/0.759.
+
+**…but it is not a universal repair.** Rotation mixes coordinates: it revives the sign plane and *flattens*
+the magnitude plane. So it is a pure win exactly where the magnitude plane was a *harmful* signal, and a
+loss where both planes carried information:
+
+| Tier | Dataset | `sign_info` before → after | Δ @ef=64 | reading |
+|---|---|---|---|---|
+| collapse | GIST-960 | 0.000 → 0.507 | **+58.1 pp** | sign plane dead, magnitude plane harmful ⇒ rotating is pure gain |
+| collapse | SIFT-128 | 0.000 → 0.759 | **+44.5 pp** | same |
+| usable | GloVe-100 | 0.946 → 0.938 | −0.6 pp alone, **+21.8 pp** with the weighted navigation | magnitude plane useful ⇒ needs §8.3's nav metric to pay off |
+| competitive | Cohere-768 | 0.747 → 0.572 | **−4.8 pp** | both planes useful ⇒ rotation is a net loss |
+
+⇒ The decision rule stays `sign_info`: **0.000 ⇒ rotate** (better than centring *and* task-preserving);
+**alive ⇒ do not rotate** (Cohere's −4.8 pp is the empirical warning).
+
+**Competitor consequence** (no re-measurement needed: the task is unchanged, so the §5 curves still apply):
+
+| Dataset | matched point | rotated QuIVer | strongest competitor | verdict |
+|---|---|---|---|---|
+| **GIST-960** | ~84.4 % | **84.41 % @7,148** | hnswlib 84.11 % @5,417 | ✅ **QuIVer is 1.32× faster** |
+| | ~89.0 % | 88.99 % @3,609 | IVF-Flat 88.36 % @765 | ✅ 4.7× vs IVF; ≈parity vs HNSW (interpolated) |
+| | **60–84 % band** | 42,261 → 7,148 QPS | **no operating point** (hnswlib's lowest `ef=64` already gives 84.11 %) | ✅ in that band QuIVer is the only option measured here |
+| SIFT-128 | ~95.7 % | 95.74 % @17,536 | hnswlib **97.46 % @45,118** | ❌ still dominated (gap 49.9 → **1.7 pp**) |
+
+⇒ **GIST-960 moves from "strictly dominated (79.7 pp gap)" to "faster at both ends of the usable band, and
+the only option in the 60–84 % band".** SIFT stays dominated — HNSW is simply excellent there — but the gap
+shrinks from ~50 pp to **1.7 pp**, and no task definition is harmed in either case.
+
+**One more thing rotation buys us.** Because the two navigation metrics of §8.3 are decided by the *same*
+code-only probe, we can now pick the navigation metric *predictively* instead of by `sign_info`:
+use the weighted navigation iff `probe_ef(weighted) > probe_ef(cheap)`. Across the ten arms where we have both
+the probe pair and an A/B measurement, this rule gets the **sign right in 9 cases**; the single miss
+(`wolt_clip`) has −0.5 pp probe difference and +0.9 pp measured difference, i.e. both inside the noise floor.
+It also fixes the one place where the `sign_info ≥ 0.75` heuristic fails (`sift128r`: `sign_info = 0.759`
+would predict a gain, the measurement is **−10.2 pp**).

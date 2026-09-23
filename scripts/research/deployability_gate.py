@@ -48,6 +48,8 @@ ARMS = [
     ("sift128", 128), ("sift128c", 128),
     ("glove100", 100), ("glove100c", 100),
     ("cohere", 768), ("coherec", 768), ("coherek128", 128),
+    # ── P4-A：随机正交旋转臂（**保任务**的另一种修复；`gist960r`/`sift128r`/`glove100r`/`coherer`）──
+    ("gist960r", 960), ("sift128r", 128), ("glove100r", 100), ("coherer", 768),
     ("cohere960pad", 960),
     ("wolt_clip", 512), ("wolt_clipc", 512),
     ("random", 768), ("randomc", 768),
@@ -65,6 +67,9 @@ MEASURED = {
     "sift128": (21.88, 47.23), "sift128c": (44.16, 85.21),
     "glove100": (45.60, 71.69), "glove100c": (49.01, 73.28),
     "cohere": (97.51, 99.78), "coherec": (97.25, 99.86), "coherek128": (72.30, None),
+    # P4-A 旋转臂（cheap 导航口径，与 c 臂一致）
+    "gist960r": (70.95, 88.99), "sift128r": (74.78, 95.74),
+    "glove100r": (45.05, 71.92), "coherer": (93.82, 98.35),
     "cohere960pad": (97.11, None), "wolt_clip": (77.73, 86.81), "wolt_clipc": (82.19, 89.14),
     "random": (59.08, 92.52), "randomc": (60.28, 94.69),
     "sphere": (0.91, 6.46), "spherec": (1.11, 6.58),
@@ -222,9 +227,12 @@ def run(prefix, dim):
         "probe_raw": prs,
         "measured_r128": r128, "measured_r1024": r1024,
     }
+    # ★ P4-A：同一支探针的**两个度量之比**还决定"该用哪个导航度量"（10 臂 9 一致）
+    rec["nav_recommendation"] = (
+        "weighted" if pr_mean["topef_w"] > pr_mean["topef_c"] else "cheap")
     headroom = 100.0 - r128 if r128 is not None else None
     if sign_info < 0.2:                       # ★ 用**均值**：min 会对 cohere 这类健康集误报
-        verdict = "① 强制去均值（符号平面整体退化）"
+        verdict = "① 旋转（保任务，优先）/去均值（符号平面整体退化）"
     elif mu_norm >= 0.3 and (headroom is None or headroom > 5.0):
         verdict = "② 建议去均值（移位量可观且有余量）"
     elif rec["probe_topef_min"] < 50.0:       # ★ 用与图召回可比的仪器（P2 的 code_oracle）
@@ -254,7 +262,8 @@ def main():
         print(f"  {prefix:<16} dim={dim:<5} sign_info={r['sign_info']:.3f}"
               f"/{r['sign_info_min']:.3f} ‖μ‖={r['mu_norm']:.3f}"
               f" 可分={r['separability']:+.3f} probe10={r['probe_top10_min']:5.1f}%"
-              f" probe_ef={r['probe_topef_min']:5.1f}% 实测@128={m}  {r['verdict']}")
+              f" probe_ef={r['probe_topef_min']:5.1f}% 实测@128={m}"
+              f" 导航={r.get('nav_recommendation', '?')}  {r['verdict']}")
         OUT.parent.mkdir(parents=True, exist_ok=True)
         # ⚠️ 必须**增量合并**：否则带 argv 过滤的分批跑会把产物覆盖成只剩本次的臂
         #（曾经踩过：4 臂过滤跑把 22 臂的 JSON 覆盖了）

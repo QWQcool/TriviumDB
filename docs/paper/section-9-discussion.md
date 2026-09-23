@@ -6,7 +6,7 @@ Combining §5–§8 into one table — every quantity is computable **before** b
 
 | `sign_info` | `‖μ‖` (headroom) | `probe_ef` (min of both metrics) | what to do | expected outcome |
 |---|---|---|---|---|
-| **= 0.000** (sign plane dead) | any | — | **centre**, then re-run the gate | encoding recovered: GIST 2.10→39.74 %, SIFT 15.77→30.64 % @ef=64; **still check §9.2 before deploying** |
+| **= 0.000** (sign plane dead) | any | — | **rotate (§8.6)** — task-preserving *and* stronger; centre only if rotation is not an option | GIST 2.10→**60.22 %**, SIFT 15.77→**60.24 %** @ef=64 (centring: 39.74 / 30.64); GIST becomes **1.3× faster than HNSW** at 84 % recall |
 | **≥ 0.6**, `‖μ‖ ≥ 0.3`, headroom > 5 pp | large | ≥ 50 % | centre as a cheap option | small-to-moderate gain (+0.3…+5.3 pp), never harmful in our 6-dataset set |
 | **≥ 0.6** but headroom ≤ 5 pp | large | ≥ 50 % | **do not bother** | Cohere: −1.2 pp (neutral) — the tier is already at 95 % |
 | any | any | **< 50 %** | **use a float32 index** | the code cannot rank; the fault is not fixable by translation |
@@ -16,21 +16,21 @@ And one row the gate deliberately does **not** cover, because it needs a competi
 
 | measured recall ≥ ~88 % on a competitive embedding | — | — | **QuIVer is the right index**: 4.6–5.0× at matched recall vs the best HNSW | the only tier where the paper's index actually wins (§5) |
 
-## 9.2 Why translation, and not rotation or training
+## 9.2 Translation or rotation? The head-to-head
 
-The failure we document is **first-order**: a non-negative embedding's mass lies off the origin, so the sign
-plane is constant. An orthogonal transform would also revive it (a random rotation spreads the mass across
-coordinates, so signs vary) — indeed rotation-based quantizers like RaBitQ rely on exactly that mechanism,
-and learned variants (OPQ/PQ) go further and optimise the rotation. **We do not claim centring dominates
-them.** We chose it because it is the minimal intervention that is *diagnosable*:
+Both revive the sign plane; they differ in what *else* they change. We ran the comparison (§8.6, seeded random
+rotation, zero storage, no training):
 
-* it is a translation — no rotation matrix to store, no training, no change to the index;
-* it preserves the geometry up to a constant shift (centred cosine = Pearson correlation);
-* and, decisively, **the same statistic (`sign_info`) that detects the problem also decides whether applying
-  the fix is worth it** (§8.3). A rotation has no equivalent triage signal in our measurements.
+| tier | centring | rotation | reading |
+|---|---|---|---|
+| collapse (GIST / SIFT) | +37.6 / +14.9 pp @ef=64, but it **replaces the task** (centred-cosine) | **+58.1 / +44.5 pp**, GT untouched (99.87–100 % overlap) | **rotation wins** — stronger *and* it changes nothing but the code |
+| usable (GloVe) | +3.3 pp alone; ceiling **93.32 %** with weighted navigation | −0.6 pp alone; **88.45 %** with weighted navigation (54.06 % @ef=64) | centring is better at the ceiling, rotation is better at low `ef`; a wash in practice |
+| competitive (Cohere) | −1.2 pp (neutral) | **−4.8 pp** | centring, or leave it alone |
 
-A head-to-head of centring vs a random/learned rotation, on the same tasks, is a natural next experiment;
-**we did not run it**, and we do not infer an ordering.
+So the ordering is not "one dominates": **for a dead sign plane, rotate**; **for a live sign plane, do not
+rotate**. Both choices are made by the same free statistic, so a deployer does not have to guess. What remains
+open is the *learned*-transform direction (L12): we tested one seeded **random** rotation, not OPQ-style
+learned ones, so 60.22 % / 60.24 % should be read as a **lower bound** on what a transform-side repair can do.
 
 ## 9.3 What this says about the published applicability claim
 
