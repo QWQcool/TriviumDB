@@ -13,7 +13,7 @@ what survives, what does not, and what a deployer should do instead.
 
 **What we find.**
 
-1. **The reproduction holds (11 of 12 rows within ±1.84 pp; one row is protocol-ambiguous).** Our numbers come
+1. **All twelve rows reproduce** (eleven unconditionally within ±1.84 pp; the RedCaps row only under an assumed sampling protocol, whose four plausible readings span 7.4 pp). Our numbers come
    from the authors' own index driven by our harness, with all arms in a single process — so the table in §4
    is comparable value-for-value with the published one. This is the foundation for everything else.
 2. **The published tiers describe *applicability*, and are routinely read as *competitiveness* — they are not

@@ -186,9 +186,59 @@ def fig3():
     (OUT / "fig3-signinfo-gain.svg").write_text("".join(s), encoding="utf-8")
 
 
+def fig4():
+    """探针（论文 §6 Practical compatibility test）对**候选样本量**的敏感性（§7.2b）。"""
+    import math
+    src = ROOT / "results" / "t2" / "gist960_collapse" / "compat_probe_scaling.json"
+    data = json.loads(src.read_text(encoding="utf-8"))["rows"]
+    picks = [("gist960", "collapse"), ("sift128", "collapse"), ("gauss960", "index-agnostic"),
+             ("sphere", "index-agnostic"), ("gist960c", "repaired"),
+             ("glove100", "usable"), ("random", "usable"), ("cohere", "competitive")]
+    W, H = 780, 440
+    L, R, T, B = 74, 210, 78, 62
+    pw, ph = W - L - R, H - T - B
+    Ss = [10_000, 100_000, 1_000_000]
+    vals = [min(v["w"], v["c"]) for arm, _ in picks for k, v in data[arm]["probe"].items()]
+    y_lo, y_hi = 0, max(60.0, max(vals) * 1.1)
+    sx = lambda s: L + pw * (math.log10(s) - math.log10(5000)) / (math.log10(2_000_000) - math.log10(5000))
+    sy = lambda v: T + ph * (1 - (v - y_lo) / (y_hi - y_lo))
+    palette = ["#188038", "#0b8043", "#a142f4", "#7b1fa2", "#00897b",
+               "#1a73e8", "#f9ab00", "#d93025"]
+    s = [head(W, H, "Probe vs candidate-sample size (min over both metrics)")]
+    for gy in range(0, int(y_hi) + 1, 20):
+        s.append(line(L, sy(gy), L + pw, sy(gy)))
+        s.append(txt(L - 8, sy(gy) + 4, f"{gy}%", 10, "end"))
+    s.append(line(L, sy(50), L + pw, sy(50), "#d93025", 1.4, "5,5"))
+    s.append(txt(L + pw - 6, sy(50) - 6, "50% verdict threshold", 9, "end", "#d93025"))
+    for gx in Ss:
+        s.append(line(sx(gx), T, sx(gx), T + ph))
+        s.append(txt(sx(gx), T + ph + 16, f"{gx // 1000}K", 10, "middle"))
+    s.append(line(L, T, L, T + ph))
+    s.append(txt(L + pw / 2, H - 14, "candidate sample size S (log)", 11, "middle", weight="600"))
+    s.append(txt(16, T + ph / 2, "probe value", 11, "middle", weight="600", rotate=-90))
+    for i, (arm, group) in enumerate(picks):
+        pr = data[arm]["probe"]
+        pts = [(sx(int(k.split("=")[1])), sy(min(pr[k]["w"], pr[k]["c"]))) for k in pr]
+        pts.sort()
+        s.append(poly(pts, palette[i], 2.0))
+        for x, y in pts:
+            s.append(circle(x, y, 3.2, palette[i]))
+        y = T + 6 + i * 19
+        s.append(line(L + pw + 14, y, L + pw + 34, y, palette[i], 3))
+        rec = data[arm]["recall_ef64"]
+        s.append(txt(L + pw + 40, y + 4, f"{arm}  (R@10 {rec:.1f}%)", 10))
+    s.append(txt(L + pw + 14, T + 6 + len(picks) * 19 + 10,
+                 "smaller S ⇒ more optimistic", 9, color="#5f6368"))
+    s.append(txt(L + pw + 14, T + 6 + len(picks) * 19 + 24,
+                 "(paper says \"~10K vectors\")", 9, color="#5f6368"))
+    s.append("</svg>")
+    (OUT / "fig4-probe-sample-size.svg").write_text("".join(s), encoding="utf-8")
+
+
 if __name__ == "__main__":
     fig1()
     fig2()
     fig3()
+    fig4()
     for p in sorted(OUT.glob("*.svg")):
         print(f"  {p.name}  {p.stat().st_size / 1024:.1f} KB")
