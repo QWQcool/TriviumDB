@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "name": "gooaq-roberta",
+  "prefix": "gooaq_roberta",
+  "source": {
+    "type": "vibe-hdf5",
+    "file": "gooaq-distilroberta-768-normalized.hdf5"
+  },
+  "metric": "cosine",
+  "normalized": true,
+  "dim": 768,
+  "n_train": 1000000,
+  "n_test": 1000,
+  "groundtruth_k": 10,
+  "dtype": {
+    "train": "float32",
+    "test": "float32",
+    "groundtruth": "int32"
+  },
+  "byte_order": "little",
+  "files": {
+    "train": {
+      "name": "gooaq_roberta_train.f32",
+      "sha256": "6f13367081f39e05f69b55daf366b092a8b402bb2c5ffaf8ace667dfc17e40ce"
+    },
+    "test": {
+      "name": "gooaq_roberta_test.f32",
+      "sha256": "c064cd34768dd2b7194862d51261664aaf5087aea7f13ab7467f09fc4794f550"
+    },
+    "groundtruth": {
+      "name": "gooaq_roberta_groundtruth.i32",
+      "sha256": "f975e02458bdebf30ef6bf1e12be56effaa1c587f3f74972b63c4b805b24b2d6"
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "name": "codesearch-jina",
+  "prefix": "codesearch_jina",
+  "source": {
+    "type": "vibe-hdf5",
+    "file": "codesearchnet-jina-768-cosine.hdf5"
+  },
+  "metric": "cosine",
+  "normalized": false,
+  "dim": 768,
+  "n_train": 1000000,
+  "n_test": 1000,
+  "groundtruth_k": 10,
+  "dtype": {
+    "train": "float32",
+    "test": "float32",
+    "groundtruth": "int32"
+  },
+  "byte_order": "little",
+  "files": {
+    "train": {
+      "name": "codesearch_jina_train.f32",
+      "sha256": "5954e5559dd047471b9222e779ef5a03b8b40bf6b620cb8aedd4964b13a728a0"
+    },
+    "test": {
+      "name": "codesearch_jina_test.f32",
+      "sha256": "ca14378f2f5581037da31d2fa15832f189b1a15524965ea11915dfe095f43a79"
+    },
+    "groundtruth": {
+      "name": "codesearch_jina_groundtruth.i32",
+      "sha256": "6f5e1872c260b1bc931a8eb59354bc2d4b700801d5902a4fe4ce91bb730422a1"
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "name": "arxiv-nomic",
+  "prefix": "arxiv_nomic",
+  "source": {
+    "type": "vibe-hdf5",
+    "file": "arxiv-nomic-768-normalized.hdf5"
+  },
+  "metric": "cosine",
+  "normalized": true,
+  "dim": 768,
+  "n_train": 1000000,
+  "n_test": 1000,
+  "groundtruth_k": 10,
+  "dtype": {
+    "train": "float32",
+    "test": "float32",
+    "groundtruth": "int32"
+  },
+  "byte_order": "little",
+  "files": {
+    "train": {
+      "name": "arxiv_nomic_train.f32",
+      "sha256": "57e2b74e1573bbf8cf8f8ecb8569ae506205f0efbc9d6d920c3f6e7a31a6abe7"
+    },
+    "test": {
+      "name": "arxiv_nomic_test.f32",
+      "sha256": "279501cb6beb174f03a0cb3688fb1ed2f80d6e64af60adbca18ce92002d04bea"
+    },
+    "groundtruth": {
+      "name": "arxiv_nomic_groundtruth.i32",
+      "sha256": "a19c6ca26b601383726cbad57a497be33345fa60de7dcb693c134e7f5c1c1114"
+    }
+  }
+}

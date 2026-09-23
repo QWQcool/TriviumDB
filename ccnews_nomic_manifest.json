@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "name": "ccnews-nomic",
+  "prefix": "ccnews_nomic",
+  "source": {
+    "type": "vibe-hdf5",
+    "file": "ccnews-nomic-768-normalized.hdf5"
+  },
+  "metric": "cosine",
+  "normalized": true,
+  "dim": 768,
+  "n_train": 495328,
+  "n_test": 1000,
+  "groundtruth_k": 10,
+  "dtype": {
+    "train": "float32",
+    "test": "float32",
+    "groundtruth": "int32"
+  },
+  "byte_order": "little",
+  "files": {
+    "train": {
+      "name": "ccnews_nomic_train.f32",
+      "sha256": "cf89640292bd66ab14a6a75214464977ce3e425d7f0583600f4d2ea3890da710"
+    },
+    "test": {
+      "name": "ccnews_nomic_test.f32",
+      "sha256": "f015d2861e4b4cab4ad36b9910a6c76e22817bf9b069eaacc9de87da0494774e"
+    },
+    "groundtruth": {
+      "name": "ccnews_nomic_groundtruth.i32",
+      "sha256": "7c7d5d3565d215a7a150c9a41a67a5579f4b51f004106be8ebdbaee78acb3abe"
+    }
+  }
+}

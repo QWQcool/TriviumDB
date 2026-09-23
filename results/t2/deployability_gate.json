@@ -1458,6 +1458,112 @@
     "headroom_pp": 2.239999999999995
   },
   {
+    "prefix": "coco_nomic",
+    "dim": 768,
+    "n": 282360,
+    "nq": 1000,
+    "raw_mu_norm": 0.8824395537376404,
+    "mu_norm": 0.8824395537376404,
+    "disk_normalized": true,
+    "neg_frac_raw": 0.8728118765346838,
+    "sign_info": 0.38220132197466866,
+    "sign_info_min": 0.0002486168157361772,
+    "neg_frac": 0.8728118765346838,
+    "gt1": 0.10590791970491409,
+    "gt10": 0.09894520454108716,
+    "gap_10_11": 0.0002950721234083176,
+    "cos_std": 0.04524308815598488,
+    "separability": 0.1538956655615889,
+    "crowd_med": 1.0,
+    "crowd_mean": 1.0,
+    "probe_k": 3,
+    "probe_top10_w": 5.783333333333334,
+    "probe_top10_c": 0.05000000000000001,
+    "probe_topef_w": 26.433333333333334,
+    "probe_topef_c": 0.6499999999999999,
+    "probe_top10_min": 0.05000000000000001,
+    "probe_topef_min": 0.6499999999999999,
+    "probe_topef_min_range": 0.3999999999999999,
+    "probe_raw": [
+      {
+        "top10_w": 5.3,
+        "top10_c": 0.1,
+        "topef_w": 26.85,
+        "topef_c": 0.8999999999999999
+      },
+      {
+        "top10_w": 6.4,
+        "top10_c": 0.0,
+        "topef_w": 27.150000000000002,
+        "topef_c": 0.5
+      },
+      {
+        "top10_w": 5.65,
+        "top10_c": 0.05,
+        "topef_w": 25.3,
+        "topef_c": 0.5499999999999999
+      }
+    ],
+    "measured_r128": null,
+    "measured_r1024": null,
+    "nav_recommendation": "weighted",
+    "verdict": "② 建议去均值（移位量可观且有余量）",
+    "headroom_pp": null
+  },
+  {
+    "prefix": "ccnews_nomic",
+    "dim": 768,
+    "n": 495328,
+    "nq": 1000,
+    "raw_mu_norm": 0.7368829846382141,
+    "mu_norm": 0.7368829846382141,
+    "disk_normalized": true,
+    "neg_frac_raw": 0.5003255050609562,
+    "sign_info": 0.6897770469337839,
+    "sign_info_min": 0.0,
+    "neg_frac": 0.5003255050609562,
+    "gt1": 0.8688877409696579,
+    "gt10": 0.8027975589036942,
+    "gap_10_11": 0.00335679829120636,
+    "cos_std": 0.054268088191747665,
+    "separability": 1.217846146200039,
+    "crowd_med": 1.0,
+    "crowd_mean": 1.0,
+    "probe_k": 3,
+    "probe_top10_w": 71.64999999999999,
+    "probe_top10_c": 72.06666666666666,
+    "probe_topef_w": 99.23333333333335,
+    "probe_topef_c": 98.96666666666665,
+    "probe_top10_min": 71.64999999999999,
+    "probe_topef_min": 98.96666666666665,
+    "probe_topef_min_range": 0.5499999999999972,
+    "probe_raw": [
+      {
+        "top10_w": 72.05,
+        "top10_c": 72.5,
+        "topef_w": 99.4,
+        "topef_c": 99.2
+      },
+      {
+        "top10_w": 72.1,
+        "top10_c": 71.65,
+        "topef_w": 99.05000000000001,
+        "topef_c": 99.05000000000001
+      },
+      {
+        "top10_w": 70.8,
+        "top10_c": 72.05,
+        "topef_w": 99.25,
+        "topef_c": 98.65
+      }
+    ],
+    "measured_r128": null,
+    "measured_r1024": null,
+    "nav_recommendation": "weighted",
+    "verdict": "② 建议去均值（移位量可观且有余量）",
+    "headroom_pp": null
+  },
+  {
     "prefix": "dbpedia_openai",
     "dim": 1536,
     "n": 990000,

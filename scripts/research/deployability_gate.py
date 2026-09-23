@@ -57,6 +57,8 @@ ARMS = [
     ("gauss960", 960), ("gauss960plant", 960),
     # ── N1 ③：论文 Table 11 剩余行（缺文件会自动跳过）──
     ("minilm", 384), ("bge_m3", 1024),
+    # ── P6：VIBE 扩展行（**不在论文 Table 11 里**；coco_nomic 实测 R@10@ef=64 = 0.21%）──
+    ("coco_nomic", 768), ("ccnews_nomic", 768),
     ("dbpedia_openai", 1536), ("dbpedia_openai_3072", 3072),
 ]
 

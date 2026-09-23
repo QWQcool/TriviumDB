@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "name": "coco-nomic",
+  "prefix": "coco_nomic",
+  "source": {
+    "type": "vibe-hdf5",
+    "file": "coco-nomic-768-normalized.hdf5"
+  },
+  "metric": "cosine",
+  "normalized": true,
+  "dim": 768,
+  "n_train": 282360,
+  "n_test": 1000,
+  "groundtruth_k": 10,
+  "dtype": {
+    "train": "float32",
+    "test": "float32",
+    "groundtruth": "int32"
+  },
+  "byte_order": "little",
+  "files": {
+    "train": {
+      "name": "coco_nomic_train.f32",
+      "sha256": "46ff8d45ccaddc5d8912d630edfe550c2aca959cae4cfb87b54fe74403aee3ee"
+    },
+    "test": {
+      "name": "coco_nomic_test.f32",
+      "sha256": "1e6ba13f9a76e1e6c0bf3f520440e709e3e7331b08efe2a0def855ac866c48b2"
+    },
+    "groundtruth": {
+      "name": "coco_nomic_groundtruth.i32",
+      "sha256": "c2f9a13c9999c6267e8cbd879734e52cf8b9fb9ca7d4dc13e803fed7f14c7851"
+    }
+  }
+}

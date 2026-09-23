@@ -48,6 +48,12 @@
 **开关默认关闭 ⇒ 未开时行为逐位不变**（我们用冻结值做了回归守卫：cohere 97.52 / gist960 2.79 / glove100 45.60 全部复现）。
 
 **我们想确认的**：这是**刻意的设计**（例如用廉价度量换 QPS），还是**注释与实际不一致**？
+
+**补充（核对论文后，两种可能的结论要分开写）**：论文 §3.2 说「Vamana's α-diversity pruning directly on
+2-bit BQ **symmetric distances**」、§3.3 说「Beam search traverses the graph using **symmetric BQ distances
+(XOR + Popcount)**」—— 读起来是**同一族**度量。而实现里：建图/剪枝 = `distance_to_sig`（6 类加权，
+多次 popcount 组合），L0 查询 = `distance_to_sig_cheap`（纯 Hamming，两次 popcount）。
+⇒ 若是**实现偏离论文口径**，那是一个可修的偏差；若你们本来就想用两种，那 §3.2/§3.3 的措辞值得更明确。
 如果是刻意的，我们会在论文里按"设计选择 + 数据依赖的 trade-off"写，
 并把 `sign_info` 作为"该不该打开"的判据（这正是 Issue 3 里判据链的一环）。
 
@@ -83,9 +89,17 @@
 
 ---
 
-## Issue 5 —— 建设性建议：**一个种子随机旋转**能让崩塌档恢复 44–58pp（且不改任务）
+## Issue 5 —— 与你们"不做旋转"的设计选择对话：**种子随机旋转**让崩塌档恢复 44–58pp（且不改任务）
 
-这一条不是"问题"，是我们可以直接送上的修复，也是我们这边**最强的一个实测结果**：
+**先说我们读到的**：论文把"不旋转、不预处理"当作**明确的设计选择** ——
+Abstract：「no codebook or **rotation training** (unlike PQ/OPQ/RaBitQ)」；§1：「no codebook training or
+**rotation preprocessing** is required」；§7：「QuIVer uses a simple per-vector mean threshold with **zero preprocessing**」。
+而且**仓库里你们已经做过** no-rotation vs rotation 的对比（`README_QUIVER.md`：
+「**BQ2 (2-bit SM)**: Our approach, **no rotation**, weighted Hamming」 vs
+「**RaBitQ-sym**: 4-round **FHT-Kac rotation** + 1-bit sign + Hamming」，见 `benches/bench_rbq2_precision.rs`）。
+
+⇒ 所以这一条**不是"遗漏"**，而是：把你们那个对比**按数据分档**看之后的一个实测结论 ——
+**在崩塌档上旋转是纯赚，在竞争档上是净亏**。这也是我们这边最强的一个实测结果：
 
 对一个**固定种子**做 QR 分解得到的随机正交阵 `Q`（⇒ **零存储**，dim+seed 足够重建；无需训练）：
 
@@ -110,13 +124,17 @@ GIST-960 在 84% 召回处 QuIVer **快 hnswlib 1.32×**（84.41% @7,148 vs 84.1
 
 ---
 
-## Issue 6 —— Table 4 的 "Euclidean" 标签 vs 仓库管线
+## Issue 6 —— ~~Table 4 的 "Euclidean" 标签~~ ❌ **已自我撤回（核对 §5.1 后）**
 
-Table 4 把 **SIFT-128 / GIST-960 标为 Euclidean**（queries 10,000 / 1,000），但 `prepare_all.py`
-对 euclidean 源是**归一化 + 按 cosine 重算 GT**。我们按仓库口径跑，12 行都落在 ±1.84pp 内
-（gist960 `2.10 vs 2.01`、sift128 `15.77 vs 14.85`）⇒ 怀疑 **Table 11 的数字也来自归一化-cosine 管线**，
-"Euclidean" 只是源数据集的标签。若是这样，我们会在论文里写"论文评估的是归一化-cosine 口径"，
-避免读者拿它去比 ann-benchmarks 的 Euclidean 榜单。
+我们原本打算提这一条（Table 4 把 SIFT/GIST 标为 **Euclidean**，而 `prepare_all.py` 是"归一化 + 按 cosine 重算 GT"），
+但**论文 §5.1 已经写明**：
+
+> "SIFT-128 and GIST-960 are Euclidean CV descriptors (**L2-normalized, ground truth recomputed under cosine**)"
+> "all baselines use inner-product (IP) mode on L2-normalized vectors, matching cosine similarity"
+
+⇒ 我们的实测（12 行全部落在 ±1.84pp 内：gist960 `2.10 vs 2.01`、sift128 `15.77 vs 14.85`）**与论文口径一致，没有问题**。
+**只剩一个可选的小建议**：Table 4 的 metric 列单看仍是 "Euclidean"，建议加个脚注指向 §5.1，
+免得只读表的读者把它当 Euclidean 任务去比公开榜单。
 
 ---
 
