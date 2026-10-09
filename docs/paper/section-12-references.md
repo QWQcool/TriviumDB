@@ -5,8 +5,9 @@
 
 ## 12.1 The object of study
 
-1. **QuIVer: Rethinking ANN Graph Topology via Training-Free Binary Quantization.** W. Xiao, Z. Wang, C. Li.
-   arXiv:2605.02171 (2026), cs.DB. — the paper evaluated and extended throughout §§4–7.
+1. **QuIVer: Rethinking ANN Graph Topology via Training-Free Binary Quantization.** W. Xiao, P. Zhu, Z. Wang,
+   C. Li. arXiv:2605.02171 (2026), cs.DB. — the paper re-examined throughout §§4–7; C. Li is a co-author and
+   the provenance disclosure of §1.1 applies.
 2. **README_QUIVER.md** (shipped with the implementation). — dataset preparation, benchmark drivers, and the
    step-by-step reproduction guide this work follows. §4.2's "one protocol deviation" is a deviation from
    *this* document, not from the paper text.
@@ -47,7 +48,10 @@ absent on the evaluation machine and the `pyvsag` wheel available there is a Lin
 ## 12.4 Artifact statement (what is ours, what is upstream, and the licence)
 
 The upstream project is licensed **Apache-2.0** (`LICENSE`). This fork keeps that licence, and every change
-we made is confined to the following, so a reader can separate our work from upstream's line by line:
+we made is confined to the following, so a reader can separate our work from upstream's line by line.
+**Provenance and disclosure:** one of us (C.L.) co-authored the evaluated system and its published benchmark;
+this report is a **self-critical re-examination**, and §1.1 states what we did to keep it honest — including
+shipping every artifact and raw log it cites:
 
 | Directory / file | Ours? | Content |
 |---|---|---|
@@ -85,8 +89,8 @@ produced by one script, which assembles the sections in order, converts and embe
 
 ```bash
 python scripts/paper/build_submission.py
-# -> docs/paper/submission/quiver-independent-eval.tex
-# -> docs/paper/submission/quiver-independent-eval.pdf
+# -> docs/paper/submission/quiver-reexamination.tex
+# -> docs/paper/submission/quiver-reexamination.pdf
 # -> docs/paper/submission/abstract-short.txt   (for the arXiv metadata field)
 # -> docs/paper/submission/README.md            (fill-in checklist)
 ```

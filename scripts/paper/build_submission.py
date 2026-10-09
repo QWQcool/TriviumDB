@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PAPER = ROOT / "docs" / "paper"
 SUB = PAPER / "submission"
 SUBFIGS = SUB / "figures"
-STEM = "quiver-independent-eval"
+STEM = "quiver-reexamination"
 
 TOOLS = Path(os.environ.get("LOCALAPPDATA", "")) / "TriviumPaperTools"
 
@@ -39,16 +39,18 @@ def _tool(env_key: str, glob: str, fallback: str) -> str:
 PANDOC = _tool("PANDOC", "pandoc-*/pandoc.exe", "pandoc")
 TECTONIC = _tool("TECTONIC", "tectonic.exe", "tectonic")
 
-TITLE = ("Applicability Is Not Competitiveness: An Independent Evaluation and a Data-Side Repair "
-         "for BQ-Native Graph Indexing")
-AUTHOR_PLACEHOLDER = "Chengcheng Li (Beyondsoft), qq1330494624@outlook.com"
+TITLE = ("Applicability Is Not Competitiveness: Re-Examining Our Own BQ-Native Graph Index, "
+         "and a Data-Side Repair")
+AUTHOR_PLACEHOLDER = "Chengcheng Li, Changsha University, qq1330494624@outlook.com"
 DATE = "October 9, 2026"
 
 SHORT_ABSTRACT = (
     "Binary-quantized (BQ) graph indexes navigate on 2-bit codes instead of full-precision vectors; the "
     "published answer to \"when is that usable?\" is a 12-dataset table (0.40-95.65% Recall@10) plus one "
-    "index-free probe. Re-running it on the authors' released implementation (11 of 12 rows within +-1.84 pp; "
-    "one row protocol-ambiguous), we report five findings. (i) The tiers describe applicability but are read "
+    "index-free probe. One of us co-authored the system and that table, so this is a self-critical "
+    "re-examination, not a third-party evaluation. Re-running the benchmark on our released implementation "
+    "(11 of 12 rows within +-1.84 pp; one row protocol-ambiguous), we report five findings. (i) The tiers "
+    "describe applicability but are read "
     "as competitiveness: where competitor curves exist, three of four tiers are dominated by plain HNSW, "
     "sometimes with no curve intersection at all. (ii) The bottom tier mixes three failures - a repairable "
     "encoding failure (constant sign plane, sign_info = 0.000), an index-agnostic task failure on which every "
@@ -61,8 +63,8 @@ SHORT_ABSTRACT = (
     "SIFT-128 from 15.77% to 30.64% at ef=64 (isotropic control +0.03 pp), a task-preserving seeded rotation "
     "reaches 60.2% where the sign plane is dead, and a navigation-metric switch adds up to +21.8 pp where it "
     "is alive and hurts where it is dead. (v) A PQ/OPQ pipeline with the same exact re-ranking never collapses "
-    "on any of the six cells measured (98.99% / 98.42% on the two hardest) at about 4.7x QuIVer's memory, so "
-    "the published boundary is the 2-bit code's, not quantization's."
+    "on any of the six cells measured, at about 4.7x our memory, so the boundary is the 2-bit code's, not "
+    "quantization's."
 )
 
 HEADER_TEX = r"""

@@ -1,85 +1,28 @@
-# Draft: note to the QuIVer authors + endorsement request (NOT SENT)
+# 作废：给「QuIVer 原作者」的说明信（本文件不再需要）
 
-> Use as-is or trim. Two parts: **A** the cover note (send with the PDF), **B** the arXiv endorsement request
-> (only if arXiv asks you for an endorsement when you start the cs.DB submission).
+> **2026-10-09 作废。** 作者本人就是 QuIVer 的合著者（arXiv:2605.02171，作者 Wenxuan Xiao、Peidong Zhu、
+> Zhiyou Wang、Chengcheng Li，长沙大学），**没有"原作者"可以写信**。原先的内容（cover letter 草稿）已无意义，
+> 保留在 git 历史里。
+>
+> 原来的两件事改为：
+> 1. **上游 5 条报告 → 自家修复清单**：`docs/research/upstream-issue-draft.md` 里的 5 条（L0 导航度量、
+>    probe 三条规格、两个 vector→code path、RedCaps 采样规则、默认值与文档）现在应该当作**我们自己仓库/论文的
+>    TODO** 去修，而不是发给别人。论文正文已相应改写（§1.1 自审披露、§4.4 "我们会把规则定下来"）。
+> 2. **作者关系披露**：论文 §1.1 / §12.4 / §10-L17 已写明"这是自审而非第三方评估"，标题与文件名也已去掉
+>    "independent"。这是投稿前最重要的一条，不能回退。
 
----
+## 仍然有用的一节：arXiv endorsement 流程
 
-## A. Cover note
+**大概率不需要**：arXiv 的 endorsement 是按「作者 × 分类」自动判定的，你已在 cs.DB 有已公告的论文
+（arXiv:2605.02171）⇒ 同类别通常自动获得资格。直接开始投稿即可，表单会立刻告知。
 
-**Subject:** Independent evaluation of QuIVer — preprint + artifact repository (and five upstream reports)
+若仍被要求（或换用新账号、新邮箱投稿）：
 
-Dear QuIVer authors,
+* **可以先开始**：元数据/文件都能上传，但论文会停在 *incomplete / 不予公告*，直到有人输入担保码 ——
+  也就是说"先提交、后补担保"在形式上可行，但没有担保不会被公布。
+* **担保人不必是特定的人**：任何在 cs.DB 有近期公告的作者都行（同事、合作者）。
+* **退路**：把主分类换成你已有资格的类别（如 cs.LG / cs.IR），再 cross-list cs.DB。
 
-We have prepared an independent evaluation of QuIVer and are posting it as an arXiv preprint (cs.DB,
-cross-listed cs.IR): *“Applicability Is Not Competitiveness: An Independent Evaluation and a Data-Side Repair
-for BQ-Native Graph Indexing”* — the full PDF is attached.
-
-**What we found, in one paragraph.** We reproduce 11 of your 12 Table 11 rows within ±1.84 pp; the RedCaps
-row is the exception, for a protocol reason rather than a numeric one (see below). We then measure what the
-table does not: where competitor curves exist, three of the four tiers are dominated by plain HNSW — on
-several rows your recall *ceiling* sits below the baseline's *lowest* operating point, so the curves cannot
-intersect. The bottom tier mixes three different failures: an encoder-side failure that is repairable (the
-sign plane is globally constant), a task-side failure that is not (Random-Sphere; every HNSW implementation
-also collapses, and so does IVF-Flat), and a capacity failure (`coco_nomic`) where the bit budget, not the
-distribution, is binding — at 4 bits per dimension every collapse row measures ≥ 94.6 %. On the probe in §6,
-the three unstated specifications (which BQ distance, how many samples, which instrument) have measurable
-consequences: implemented with your own default metric it calls Random-Sphere “compatible” (53.9 %) on a
-dataset whose measured recall is 0.91 %, while taking the weaker of the two metrics removes the false positive
-without changing any other verdict. Finally, the collapse that remains is repairable **from the data side**:
-one centring step takes GIST-960 from 2.10 % to 39.74 % and SIFT-128 from 15.77 % to 30.64 % at `ef=64`
-(isotropic control +0.03 pp), and a *task-preserving* seeded rotation does better still on a dead sign plane
-(GIST-960 60.22 %) while a navigation-metric switch adds up to +21.8 pp exactly where the sign plane is alive.
-
-**What we are not claiming.** We do not claim the paper is wrong — its mechanism (the sign plane of
-non-negative embeddings carries no information) is the one we measure and reproduce. We propose no new
-quantizer, we do not claim a single scalar predicts recall (our two attempts failed and are reported as
-failures), and we retract three of our own intermediate claims in the audit trail.
-
-**Artifacts.** Everything is reproducible from
-`github.com/QWQcool/TriviumDB`, branch `research/quiver2-pipnn-rabitq-tsng`: `results/**` (including the 290
-raw stdout logs the paper cites), the patched switches (default-off, bit-identical when unset) and
-`patches/f1-nav-weighted.patch`.
-
-**Five small upstream reports** (drafted, with evidence, nothing filed behind your back): the L0 beam search
-uses plain Hamming while build/prune use the weighted BQ distance (three call sites; a default-off patch makes
-them consistent, and the effect is fully predicted by `sign_info`); the three probe specifications above; two
-vector→code paths that must share any transform (we hit this and it made SIFT read 0.01 %); the RedCaps
-sampling protocol; and two defaults/doc nits (`m = 16` vs the paper's 32, `α = 1.2`, a README table number).
-
-**One request.** If any of the above looks wrong to you, we would genuinely like to know before we finalise —
-corrections are cheap now, and we will credit them in the paper.
-
-Best regards,
-Chengcheng Li — Beyondsoft — qq1330494624@outlook.com
-
----
-
-## B. Endorsement request (only if arXiv asks)
-
-**Subject:** arXiv cs.DB endorsement request — preprint on BQ-native graph indexing
-
-Dear ⟨name⟩,
-
-arXiv is asking me for an endorsement for a first submission to **cs.DB**. The paper is *“Applicability Is Not
-Competitiveness: An Independent Evaluation and a Data-Side Repair for BQ-Native Graph Indexing”* — an
-independent evaluation of QuIVer's 2-bit sign–magnitude graph index on the authors' released implementation,
-with all artifacts and raw logs in a public repository. arXiv will send you the endorsement request by e-mail;
-entering the code there is all that is needed. Thank you either way.
-
-Chengcheng Li — Beyondsoft — qq1330494624@outlook.com
-
----
-
-## C. arXiv endorsement — what to expect (short version)
-
-* Endorsement is decided **per author, per category** by arXiv, based on your own submission history in that
-  category. If you have never submitted to `cs.DB`, arXiv very likely asks for it; if you have submitted
-  elsewhere in cs.*, you may be auto-endorsed — the submission form tells you immediately.
-* You **can start** the submission without an endorser: the metadata/form is filled in, but the paper stays
-  **incomplete / not announced** until the endorsement code arrives. So: start it early, request the code, and
-  finish afterwards.
-* The endorsement request does not have to go to the authors you evaluate — **any** `cs.DB` author with recent
-  submissions can endorse (a colleague, a co-author of a related paper, etc.). If nobody is available, an
-  alternative is to submit to a category where you are already endorsed (e.g. `cs.LG`/`cs.IR` as primary) and
-  cross-list `cs.DB`.
+（历史模板：请求邮件一句话版本 —— "arXiv asks me for an endorsement for a first cs.DB submission; the paper is
+an author-side re-examination of our own BQ-native graph index with all artifacts and raw logs public; the
+endorsement request will arrive by e-mail and entering the code is all that is needed."）

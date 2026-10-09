@@ -132,8 +132,8 @@
 \@ifundefined{xmpquote}{\newcommand{\xmpquote}[1]{#1}}{}
 \makeatother
 \hypersetup{
-  pdftitle={Applicability Is Not Competitiveness: An Independent Evaluation and a Data-Side Repair for BQ-Native Graph Indexing},
-  pdfauthor={Chengcheng Li (Beyondsoft), qq1330494624@outlook.com},
+  pdftitle={Applicability Is Not Competitiveness: Re-Examining Our Own BQ-Native Graph Index{,} and a Data-Side Repair},
+  pdfauthor={Chengcheng Li, Changsha University, qq1330494624@outlook.com},
   colorlinks=true,
   linkcolor={Maroon},
   filecolor={Maroon},
@@ -141,9 +141,9 @@
   urlcolor={Blue},
   pdfcreator={LaTeX via pandoc}}
 
-\title{Applicability Is Not Competitiveness: An Independent Evaluation
-and a Data-Side Repair for BQ-Native Graph Indexing}
-\author{Chengcheng Li (Beyondsoft), qq1330494624@outlook.com}
+\title{Applicability Is Not Competitiveness: Re-Examining Our Own
+BQ-Native Graph Index, and a Data-Side Repair}
+\author{Chengcheng Li, Changsha University, qq1330494624@outlook.com}
 \date{October 9, 2026}
 
 \begin{document}
@@ -152,19 +152,21 @@ and a Data-Side Repair for BQ-Native Graph Indexing}
 Binary-quantized graph indexes navigate on 2-bit codes instead of
 full-precision vectors, and the published answer to ``when is that
 usable?'' is a 12-dataset table spanning 0.40 \% $\rightarrow$ 95.65 \% Recall@10
-plus a single index-free compatibility probe. We re-run that benchmark
-on the authors' released implementation (11 of 12 rows reproduced within
-$\pm$1.84 pp; one row is protocol-ambiguous) and report five things the
-published account does not cover. (i) The table's tiers describe
-applicability, and are read as competitiveness; where competitor curves
-exist, three of the four tiers are dominated by plain HNSW --- on
-several rows QuIVer's recall ceiling lies below the baseline's lowest
-operating point, so the curves cannot intersect. (ii) The bottom tier
-mixes three different failures: a repairable encoding failure (the sign
-plane is globally constant, sign\_info = 0.000), an index-agnostic task
-failure on which every competitor also collapses (Random-Sphere 1.40 \%,
-Gaussian-960 1.10--1.39 \% across three HNSW implementations at ef=64),
-and a capacity failure (coco\_nomic) where the bit budget, not the
+plus a single index-free compatibility probe. One of us co-authored both
+the system and that table (§1.1), so this report is a self-critical
+re-examination rather than a third-party evaluation: we re-run our own
+benchmark with the baselines and controls we would have wanted an
+external evaluator to bring, and report five things the published
+account does not cover. (i) The table's tiers describe applicability,
+and are read as competitiveness; where competitor curves exist, three of
+the four tiers are dominated by plain HNSW --- on several rows QuIVer's
+recall ceiling lies below the baseline's lowest operating point, so the
+curves cannot intersect. (ii) The bottom tier mixes three different
+failures: a repairable encoding failure (the sign plane is globally
+constant, sign\_info = 0.000), an index-agnostic task failure on which
+every competitor also collapses (Random-Sphere 1.40 \%, Gaussian-960
+1.10--1.39 \% across three HNSW implementations at ef=64), and a
+capacity failure (coco\_nomic) where the bit budget, not the
 distribution, is binding --- at 4 bits per dimension every collapse row
 measures $\geq$ 94.6 \%. (iii) The published probe is under-specified --- it
 does not fix the BQ distance, the sample size, or the instrument.
@@ -214,11 +216,12 @@ more than 90 points of Recall@10 (0.40 \% $\rightarrow$ 95.65 \%) and a single
 index-free probe that predicts which side of the usability line a
 dataset is on.
 
-This paper is an independent evaluation of that claim, plus a
-constructive repair of its two weakest points. We re-run the published
-benchmark on the released implementation, on a machine without AVX-512,
-and report what survives, what does not, and what a deployer should do
-instead.
+This paper is a \textbf{self-critical re-examination} of that claim by
+one of its co-authors, plus a constructive repair of its two weakest
+points. We re-run the published benchmark on the released
+implementation, on a machine without AVX-512, and report what survives,
+what does not, and what a deployer should do instead. §1.1 states the
+provenance, and what we did to keep the exercise honest.
 
 \textbf{What we find.}
 
@@ -317,6 +320,45 @@ path.
 reproduction; §5 competitiveness; §6 diagnosis; §7 the probe and our
 repaired chain; §8 the repair and its competitor consequence; §9
 discussion; §10 limitations; §11 artifacts.
+
+\subsection{1.1 Provenance, conflict of interest, and how we kept
+ourselves
+honest}\label{provenance-conflict-of-interest-and-how-we-kept-ourselves-honest}
+
+\textbf{Provenance.} One of us (C.L.) is a co-author of QuIVer and of
+the accompanying implementation --- i.e.~of the artifact this report
+evaluates, and of the claims it takes as its object of study. This is
+therefore a \textbf{self-critical re-examination, not an independent
+evaluation}, and it should be cited as such. Several of our own earlier
+claims do not survive the baselines and controls added here.
+
+\textbf{Why publish it anyway.} A published boundary is only as strong
+as the strongest test it has survived, and the tests that matter for
+this boundary --- competitor curves on the same task, what a
+\emph{different} quantizer family does on the same rows, and where the
+probe's unstated parameters lead --- were missing from our own account.
+Reporting them ourselves is less comfortable, and more useful, than
+waiting for someone else to.
+
+\textbf{What we did to keep it honest.} (i) Every number, script and
+\textbf{raw stdout log} is in the artifact repository
+(\texttt{results/**}, \texttt{results/logs/}), so any claim here can be
+re-derived or refuted; (ii) findings that argue against our own
+published claims appear where they are contradicted, not in an appendix;
+(iii) our own intermediate conclusions are \textbf{retracted in the
+audit trail} (\texttt{docs/research/**}) rather than quietly dropped;
+(iv) the two single-scalar recall predictors we pre-registered failed,
+and are reported as failures (§7.4); and (v) the one comparison that
+inverted --- a same-family quantizer arm measured against a ground truth
+that disagreed with the vector files on the metric --- is documented in
+full (§5.6b) instead of deleted. External replication is welcome;
+nothing here requires trusting us.
+
+\textbf{AI-assistant disclosure.} In the spirit of the disclosure in our
+earlier paper, we note that the implementation work, the analysis
+scripts and the manuscript were prepared with substantial assistance
+from an AI coding assistant; all research design, experiment execution,
+analysis and conclusions remain the responsibility of the author.
 
 \section{2. Background and Notation}\label{background-and-notation}
 
@@ -422,7 +464,7 @@ transform.
 \subsection{3.1 Harness and equivalence}\label{harness-and-equivalence}
 
 All index-side numbers come from two benches we added on top of the
-authors' released code:
+released implementation (§1.1):
 
 \begin{itemize}
 \tightlist
@@ -574,8 +616,8 @@ Recall@10 (0.40 \% $\rightarrow$ 95.65 \%). Everything we do in §5--§8 builds 
 that table, so we first establish that we can reproduce it.
 
 We reproduce it by re-running the measurement, not by re-deriving it:
-the index under test is the released implementation in the authors'
-repository, driven from a bench harness that we added
+the index under test is the released implementation in our own
+repository (§1.1), driven from a bench harness that we added
 (\texttt{benches/bench\_t2\_b2\_partitioned.rs}) and that we verified
 against the repository's own evaluation paths. All arms in a comparison
 run in a \textbf{single process} with the same build flags, so cross-arm
@@ -782,7 +824,9 @@ pp \emph{above} the top of our three-seed range, so the residual
 difference is larger than base sampling alone explains, and the real
 explanation is more likely to be a protocol detail we have not guessed.
 We therefore report this row as \textbf{conditional on an inferred
-protocol}, and we have asked the authors to pin the rule down
+protocol}; as the artifact's owners we will pin the rule down in the
+released guide, and the script plus all four readings ship with this
+report so the rule can be checked against them
 (\texttt{docs/research/claims-audit.md} §4, topic 1).
 
 \subsection{4.5 Matched-recall speedups}\label{matched-recall-speedups}
@@ -2778,6 +2822,9 @@ the seven VIBE benchmarks only two (\texttt{coco\_nomic},
 \texttt{ccnews\_nomic}) received a full gate + real-index sweep; the
 other five carry \texttt{sign\_info}/probe verdicts and their two
 navigation arms. \\
+\textbf{L17} & \textbf{This is a self-evaluation, not a third-party one}
+(§1.1): one of us co-authored the evaluated system and its published
+claims. \\
 \end{longtable}
 }
 
@@ -3180,8 +3227,9 @@ we used.
 \tightlist
 \item
   \textbf{QuIVer: Rethinking ANN Graph Topology via Training-Free Binary
-  Quantization.} W. Xiao, Z. Wang, C. Li. arXiv:2605.02171 (2026),
-  cs.DB. --- the paper evaluated and extended throughout §§4--7.
+  Quantization.} W. Xiao, P. Zhu, Z. Wang, C. Li. arXiv:2605.02171
+  (2026), cs.DB. --- the paper re-examined throughout §§4--7; C. Li is a
+  co-author and the provenance disclosure of §1.1 applies.
 \item
   \textbf{README\_QUIVER.md} (shipped with the implementation). ---
   dataset preparation, benchmark drivers, and the step-by-step
@@ -3286,7 +3334,11 @@ licence)}\label{artifact-statement-what-is-ours-what-is-upstream-and-the-licence
 The upstream project is licensed \textbf{Apache-2.0} (\texttt{LICENSE}).
 This fork keeps that licence, and every change we made is confined to
 the following, so a reader can separate our work from upstream's line by
-line:
+line. \textbf{Provenance and disclosure:} one of us (C.L.) co-authored
+the evaluated system and its published benchmark; this report is a
+\textbf{self-critical re-examination}, and §1.1 states what we did to
+keep it honest --- including shipping every artifact and raw log it
+cites:
 
 {\def\LTcaptype{none} % do not increment counter
 \begin{longtable}[]{@{}

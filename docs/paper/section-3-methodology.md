@@ -2,7 +2,7 @@
 
 ## 3.1 Harness and equivalence
 
-All index-side numbers come from two benches we added on top of the authors' released code:
+All index-side numbers come from two benches we added on top of the released implementation (§1.1):
 
 * `benches/bench_t2_b2_partitioned.rs` — the measurement arm. It supports a **single-arm mode** (one index,
   recall + MT-QPS + build wall-clock) and an ablation mode (several arms in one process). Both modes go through

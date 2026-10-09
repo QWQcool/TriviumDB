@@ -7,9 +7,10 @@ is the question the QuIVer paper (PVLDB 20) answers with a cross-dataset table s
 Recall@10 (0.40 % → 95.65 %) and a single index-free probe that predicts which side of the usability line a
 dataset is on.
 
-This paper is an independent evaluation of that claim, plus a constructive repair of its two weakest points.
-We re-run the published benchmark on the released implementation, on a machine without AVX-512, and report
-what survives, what does not, and what a deployer should do instead.
+This paper is a **self-critical re-examination** of that claim by one of its co-authors, plus a constructive
+repair of its two weakest points. We re-run the published benchmark on the released implementation, on a
+machine without AVX-512, and report what survives, what does not, and what a deployer should do instead.
+§1.1 states the provenance, and what we did to keep the exercise honest.
 
 **What we find.**
 
@@ -63,3 +64,29 @@ one failed and are reported as failures (§7.4). The contribution is a deploymen
 **Roadmap.** §2 fixes notation; §3 the harness and protocol; §4 the reproduction; §5 competitiveness;
 §6 diagnosis; §7 the probe and our repaired chain; §8 the repair and its competitor consequence;
 §9 discussion; §10 limitations; §11 artifacts.
+
+## 1.1 Provenance, conflict of interest, and how we kept ourselves honest
+
+**Provenance.** One of us (C.L.) is a co-author of QuIVer and of the accompanying implementation — i.e. of the
+artifact this report evaluates, and of the claims it takes as its object of study. This is therefore a
+**self-critical re-examination, not an independent evaluation**, and it should be cited as such. Several of
+our own earlier claims do not survive the baselines and controls added here.
+
+**Why publish it anyway.** A published boundary is only as strong as the strongest test it has survived, and
+the tests that matter for this boundary — competitor curves on the same task, what a *different* quantizer
+family does on the same rows, and where the probe's unstated parameters lead — were missing from our own
+account. Reporting them ourselves is less comfortable, and more useful, than waiting for someone else to.
+
+**What we did to keep it honest.** (i) Every number, script and **raw stdout log** is in the artifact
+repository (`results/**`, `results/logs/`), so any claim here can be re-derived or refuted; (ii) findings that
+argue against our own published claims appear where they are contradicted, not in an appendix; (iii) our own
+intermediate conclusions are **retracted in the audit trail** (`docs/research/**`) rather than quietly dropped;
+(iv) the two single-scalar recall predictors we pre-registered failed, and are reported as failures (§7.4);
+and (v) the one comparison that inverted — a same-family quantizer arm measured against a ground truth that
+disagreed with the vector files on the metric — is documented in full (§5.6b) instead of deleted. External
+replication is welcome; nothing here requires trusting us.
+
+**AI-assistant disclosure.** In the spirit of the disclosure in our earlier paper, we note that the
+implementation work, the analysis scripts and the manuscript were prepared with substantial assistance from an
+AI coding assistant; all research design, experiment execution, analysis and conclusions remain the
+responsibility of the author.

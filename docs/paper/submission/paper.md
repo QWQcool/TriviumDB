@@ -1,9 +1,9 @@
 ---
-title: "Applicability Is Not Competitiveness: An Independent Evaluation and a Data-Side Repair for BQ-Native Graph Indexing"
-author: "Chengcheng Li (Beyondsoft), qq1330494624@outlook.com"
+title: "Applicability Is Not Competitiveness: Re-Examining Our Own BQ-Native Graph Index, and a Data-Side Repair"
+author: "Chengcheng Li, Changsha University, qq1330494624@outlook.com"
 date: "October 9, 2026"
 abstract: |
-  Binary-quantized graph indexes navigate on 2-bit codes instead of full-precision vectors, and the published answer to "when is that usable?" is a 12-dataset table spanning 0.40 % → 95.65 % Recall@10 plus a single index-free compatibility probe. We re-run that benchmark on the authors' released implementation (11 of 12 rows reproduced within ±1.84 pp; one row is protocol-ambiguous) and report five things the published account does not cover. (i) The table's tiers describe applicability, and are read as competitiveness; where competitor curves exist, three of the four tiers are dominated by plain HNSW — on several rows QuIVer's recall ceiling lies below the baseline's lowest operating point, so the curves cannot intersect. (ii) The bottom tier mixes three different failures: a repairable encoding failure (the sign plane is globally constant, sign_info = 0.000), an index-agnostic task failure on which every competitor also collapses (Random-Sphere 1.40 %, Gaussian-960 1.10–1.39 % across three HNSW implementations at ef=64), and a capacity failure (coco_nomic) where the bit budget, not the distribution, is binding — at 4 bits per dimension every collapse row measures ≥ 94.6 %. (iii) The published probe is under-specified — it does not fix the BQ distance, the sample size, or the instrument. Implemented with the paper's own default distance, it calls Random-Sphere compatible (53.9%) on a dataset whose measured recall is 0.91 %; taking the weaker of the engine's two distances removes this false positive without changing any other verdict, and a sign-entropy statistic paired with it yields a four-step decision chain validated on 22 arms. (iv) The collapse is repairable without touching the index: one translation (x' = normalize(x − μ)) takes GIST-960 from 2.10 % to 39.74 % and SIFT-128 from 15.77 % to 30.64 % at ef=64, with an isotropic control moving +0.03 pp; making the L0 navigation metric match the metric the graph was built with adds up to +21.8 pp where the sign plane is alive and hurts where it is dead, so we ship it as a default-off switch with a decision rule. After the repair two arms move from "dominated" to "parity" or "intersecting" — but the honest sentence survives: a smaller gap is not availability. (v) The missing baseline class (§5.6): an OPQ+IVF-PQ+Refine pipeline with the same f32 re-ranking never collapses on any of the six cells we measured — including the two where the 2-bit code collapses hardest — at ≈ 4.7× QuIVer's memory, so the published boundary is the 2-bit code's, not quantization's. We do not claim the paper is wrong (its mechanism is the one we measure), we propose no new quantizer, and we report our own two failed attempts at a single-scalar recall predictor.
+  Binary-quantized graph indexes navigate on 2-bit codes instead of full-precision vectors, and the published answer to "when is that usable?" is a 12-dataset table spanning 0.40 % → 95.65 % Recall@10 plus a single index-free compatibility probe. One of us co-authored both the system and that table (§1.1), so this report is a self-critical re-examination rather than a third-party evaluation: we re-run our own benchmark with the baselines and controls we would have wanted an external evaluator to bring, and report five things the published account does not cover. (i) The table's tiers describe applicability, and are read as competitiveness; where competitor curves exist, three of the four tiers are dominated by plain HNSW — on several rows QuIVer's recall ceiling lies below the baseline's lowest operating point, so the curves cannot intersect. (ii) The bottom tier mixes three different failures: a repairable encoding failure (the sign plane is globally constant, sign_info = 0.000), an index-agnostic task failure on which every competitor also collapses (Random-Sphere 1.40 %, Gaussian-960 1.10–1.39 % across three HNSW implementations at ef=64), and a capacity failure (coco_nomic) where the bit budget, not the distribution, is binding — at 4 bits per dimension every collapse row measures ≥ 94.6 %. (iii) The published probe is under-specified — it does not fix the BQ distance, the sample size, or the instrument. Implemented with the paper's own default distance, it calls Random-Sphere compatible (53.9%) on a dataset whose measured recall is 0.91 %; taking the weaker of the engine's two distances removes this false positive without changing any other verdict, and a sign-entropy statistic paired with it yields a four-step decision chain validated on 22 arms. (iv) The collapse is repairable without touching the index: one translation (x' = normalize(x − μ)) takes GIST-960 from 2.10 % to 39.74 % and SIFT-128 from 15.77 % to 30.64 % at ef=64, with an isotropic control moving +0.03 pp; making the L0 navigation metric match the metric the graph was built with adds up to +21.8 pp where the sign plane is alive and hurts where it is dead, so we ship it as a default-off switch with a decision rule. After the repair two arms move from "dominated" to "parity" or "intersecting" — but the honest sentence survives: a smaller gap is not availability. (v) The missing baseline class (§5.6): an OPQ+IVF-PQ+Refine pipeline with the same f32 re-ranking never collapses on any of the six cells we measured — including the two where the 2-bit code collapses hardest — at ≈ 4.7× QuIVer's memory, so the published boundary is the 2-bit code's, not quantization's. We do not claim the paper is wrong (its mechanism is the one we measure), we propose no new quantizer, and we report our own two failed attempts at a single-scalar recall predictor.
 ---
 
 **Evidence base.** Every number in this paper resolves to a file under `results/**` or a log under `results/logs/`;
@@ -20,9 +20,10 @@ is the question the QuIVer paper (PVLDB 20) answers with a cross-dataset table s
 Recall@10 (0.40 % → 95.65 %) and a single index-free probe that predicts which side of the usability line a
 dataset is on.
 
-This paper is an independent evaluation of that claim, plus a constructive repair of its two weakest points.
-We re-run the published benchmark on the released implementation, on a machine without AVX-512, and report
-what survives, what does not, and what a deployer should do instead.
+This paper is a **self-critical re-examination** of that claim by one of its co-authors, plus a constructive
+repair of its two weakest points. We re-run the published benchmark on the released implementation, on a
+machine without AVX-512, and report what survives, what does not, and what a deployer should do instead.
+§1.1 states the provenance, and what we did to keep the exercise honest.
 
 **What we find.**
 
@@ -76,6 +77,32 @@ one failed and are reported as failures (§7.4). The contribution is a deploymen
 **Roadmap.** §2 fixes notation; §3 the harness and protocol; §4 the reproduction; §5 competitiveness;
 §6 diagnosis; §7 the probe and our repaired chain; §8 the repair and its competitor consequence;
 §9 discussion; §10 limitations; §11 artifacts.
+
+## 1.1 Provenance, conflict of interest, and how we kept ourselves honest
+
+**Provenance.** One of us (C.L.) is a co-author of QuIVer and of the accompanying implementation — i.e. of the
+artifact this report evaluates, and of the claims it takes as its object of study. This is therefore a
+**self-critical re-examination, not an independent evaluation**, and it should be cited as such. Several of
+our own earlier claims do not survive the baselines and controls added here.
+
+**Why publish it anyway.** A published boundary is only as strong as the strongest test it has survived, and
+the tests that matter for this boundary — competitor curves on the same task, what a *different* quantizer
+family does on the same rows, and where the probe's unstated parameters lead — were missing from our own
+account. Reporting them ourselves is less comfortable, and more useful, than waiting for someone else to.
+
+**What we did to keep it honest.** (i) Every number, script and **raw stdout log** is in the artifact
+repository (`results/**`, `results/logs/`), so any claim here can be re-derived or refuted; (ii) findings that
+argue against our own published claims appear where they are contradicted, not in an appendix; (iii) our own
+intermediate conclusions are **retracted in the audit trail** (`docs/research/**`) rather than quietly dropped;
+(iv) the two single-scalar recall predictors we pre-registered failed, and are reported as failures (§7.4);
+and (v) the one comparison that inverted — a same-family quantizer arm measured against a ground truth that
+disagreed with the vector files on the metric — is documented in full (§5.6b) instead of deleted. External
+replication is welcome; nothing here requires trusting us.
+
+**AI-assistant disclosure.** In the spirit of the disclosure in our earlier paper, we note that the
+implementation work, the analysis scripts and the manuscript were prepared with substantial assistance from an
+AI coding assistant; all research design, experiment execution, analysis and conclusions remain the
+responsibility of the author.
 
 # 2. Background and Notation
 
@@ -136,7 +163,7 @@ the quantification, not the transform.
 
 ## 3.1 Harness and equivalence
 
-All index-side numbers come from two benches we added on top of the authors' released code:
+All index-side numbers come from two benches we added on top of the released implementation (§1.1):
 
 * `benches/bench_t2_b2_partitioned.rs` — the measurement arm. It supports a **single-arm mode** (one index,
   recall + MT-QPS + build wall-clock) and an ablation mode (several arms in one process). Both modes go through
@@ -219,7 +246,7 @@ cross-dataset table (Table 11) whose values span more than 90 points of Recall@1
 Everything we do in §5–§8 builds on that table, so we first establish that we can reproduce it.
 
 We reproduce it by re-running the measurement, not by re-deriving it: the index under test is the released
-implementation in the authors' repository, driven from a bench harness that we added
+implementation in our own repository (§1.1), driven from a bench harness that we added
 (`benches/bench_t2_b2_partitioned.rs`) and that we verified against the repository's own evaluation paths.
 All arms in a comparison run in a **single process** with the same build flags, so cross-arm differences are
 not confounded by run-to-run variance.
@@ -308,8 +335,9 @@ adopt the top of that spread, **77.08 %**, which is the only value that lands in
 by the other eleven rows (−1.33 pp ≤ 1.84 pp). We are explicit that this does **not** amount to a demonstration:
 the published 78.41 % sits 1.33 pp *above* the top of our three-seed range, so the residual difference is
 larger than base sampling alone explains, and the real explanation is more likely to be a protocol detail we
-have not guessed. We therefore report this row as **conditional on an inferred protocol**, and we have asked
-the authors to pin the rule down (`docs/research/claims-audit.md` §4, topic 1).
+have not guessed. We therefore report this row as **conditional on an inferred protocol**; as the artifact's
+owners we will pin the rule down in the released guide, and the script plus all four readings ship with this
+report so the rule can be checked against them (`docs/research/claims-audit.md` §4, topic 1).
 
 ## 4.5 Matched-recall speedups
 
@@ -1085,6 +1113,7 @@ All of the following are stated in the body text, not hidden in an appendix.
 | **L13** | **Two baselines named by the paper could not be built on this machine** (§5.3's DiskANN-Rust and VSAG): DiskANN-Rust fails in `openblas-src` for want of a C/C++/BLAS toolchain (`vcpkg`, `cmake`, `cl`, `gcc` all absent), and the `pyvsag` wheel installed here is a Linux/`cp310` build. These two arms are therefore **missing, not measured as slow** — a claim we deliberately do not make. Our competitor map covers hnswlib, FAISS-HNSW, USearch, IVF-Flat, `faiss_exact`, and (for quantizers) OPQ+IVF-PQ+Refine. |
 | **L14** | **The quantizer comparison is one configuration family.** Our PQ arm uses OPQ + IVF-PQ + exact f32 re-ranking; our RaBitQ arm is same-family (`IndexIVFRaBitQ` + f32 refine), with a normalised FastScan+SQ8 spot check used only as a recall-side consistency signal — neither reproduces the paper's exact implementation, and the paper's DiskANN PQ+FP and SSD arms are not run. The same-family arm also required a protocol correction (Cohere's GT is cosine while its files are raw): its raw-vector numbers are retracted, and the corrected pair is in §5.6(b). Tier-jump PQ numbers were measured on six cells; they establish that PQ does *not* collapse on them, not that PQ dominates everywhere. |
 | **L15** | **The VIBE rows are an extension, not a reproduction** (§9.5): they are not part of the paper's Table 11, and of the seven VIBE benchmarks only two (`coco_nomic`, `ccnews_nomic`) received a full gate + real-index sweep; the other five carry `sign_info`/probe verdicts and their two navigation arms. |
+| **L17** | **This is a self-evaluation, not a third-party one** (§1.1): one of us co-authored the evaluated system and its published claims. | Mitigations: every artifact and raw stdout log ships with the report; the findings that contradict our own claims are reported in the places they are contradicted rather than in an appendix; our own intermediate conclusions — and one inverted same-family comparison (§5.6b) — are retracted in the audit trail; external replication is explicitly invited. |
 
 ## 10.4 Statistical conventions used throughout
 
@@ -1228,8 +1257,9 @@ TRIVIUM_SIGN_ROTATE=20260923 T2_PREFIX=sift128 T2_DIM=128 \
 
 ## 12.1 The object of study
 
-1. **QuIVer: Rethinking ANN Graph Topology via Training-Free Binary Quantization.** W. Xiao, Z. Wang, C. Li.
-   arXiv:2605.02171 (2026), cs.DB. — the paper evaluated and extended throughout §§4–7.
+1. **QuIVer: Rethinking ANN Graph Topology via Training-Free Binary Quantization.** W. Xiao, P. Zhu, Z. Wang,
+   C. Li. arXiv:2605.02171 (2026), cs.DB. — the paper re-examined throughout §§4–7; C. Li is a co-author and
+   the provenance disclosure of §1.1 applies.
 2. **README_QUIVER.md** (shipped with the implementation). — dataset preparation, benchmark drivers, and the
    step-by-step reproduction guide this work follows. §4.2's "one protocol deviation" is a deviation from
    *this* document, not from the paper text.
@@ -1270,7 +1300,10 @@ absent on the evaluation machine and the `pyvsag` wheel available there is a Lin
 ## 12.4 Artifact statement (what is ours, what is upstream, and the licence)
 
 The upstream project is licensed **Apache-2.0** (`LICENSE`). This fork keeps that licence, and every change
-we made is confined to the following, so a reader can separate our work from upstream's line by line:
+we made is confined to the following, so a reader can separate our work from upstream's line by line.
+**Provenance and disclosure:** one of us (C.L.) co-authored the evaluated system and its published benchmark;
+this report is a **self-critical re-examination**, and §1.1 states what we did to keep it honest — including
+shipping every artifact and raw log it cites:
 
 | Directory / file | Ours? | Content |
 |---|---|---|

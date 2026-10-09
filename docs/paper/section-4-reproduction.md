@@ -12,7 +12,7 @@ cross-dataset table (Table 11) whose values span more than 90 points of Recall@1
 Everything we do in §5–§8 builds on that table, so we first establish that we can reproduce it.
 
 We reproduce it by re-running the measurement, not by re-deriving it: the index under test is the released
-implementation in the authors' repository, driven from a bench harness that we added
+implementation in our own repository (§1.1), driven from a bench harness that we added
 (`benches/bench_t2_b2_partitioned.rs`) and that we verified against the repository's own evaluation paths.
 All arms in a comparison run in a **single process** with the same build flags, so cross-arm differences are
 not confounded by run-to-run variance.
@@ -101,8 +101,9 @@ adopt the top of that spread, **77.08 %**, which is the only value that lands in
 by the other eleven rows (−1.33 pp ≤ 1.84 pp). We are explicit that this does **not** amount to a demonstration:
 the published 78.41 % sits 1.33 pp *above* the top of our three-seed range, so the residual difference is
 larger than base sampling alone explains, and the real explanation is more likely to be a protocol detail we
-have not guessed. We therefore report this row as **conditional on an inferred protocol**, and we have asked
-the authors to pin the rule down (`docs/research/claims-audit.md` §4, topic 1).
+have not guessed. We therefore report this row as **conditional on an inferred protocol**; as the artifact's
+owners we will pin the rule down in the released guide, and the script plus all four readings ship with this
+report so the rule can be checked against them (`docs/research/claims-audit.md` §4, topic 1).
 
 ## 4.5 Matched-recall speedups
 

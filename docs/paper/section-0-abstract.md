@@ -1,10 +1,11 @@
-# Applicability Is Not Competitiveness: An Independent Evaluation and a Data-Side Repair for BQ-Native Graph Indexing
+# Applicability Is Not Competitiveness: Re-Examining Our Own BQ-Native Graph Index, and a Data-Side Repair
 
 **Abstract.** Binary-quantized graph indexes navigate on 2-bit codes instead of full-precision vectors, and
 the published answer to "when is that usable?" is a 12-dataset table spanning 0.40 % → 95.65 % Recall@10 plus a
-single index-free compatibility probe. We re-run that benchmark on the authors' released implementation (11 of
-12 rows reproduced within ±1.84 pp; one row is protocol-ambiguous) and report five things the published
-account does not cover. **(i)** The table's tiers describe *applicability*, and are read as *competitiveness*;
+single index-free compatibility probe. One of us co-authored both the system and that table (§1.1), so this
+report is a **self-critical re-examination rather than a third-party evaluation**: we re-run our own benchmark
+with the baselines and controls we would have wanted an external evaluator to bring, and report five things
+the published account does not cover. **(i)** The table's tiers describe *applicability*, and are read as *competitiveness*;
 where competitor curves exist, three of the four tiers are dominated by plain HNSW — on several rows QuIVer's
 recall ceiling lies below the baseline's lowest operating point, so the curves cannot intersect. **(ii)** The
 bottom tier mixes **three** different failures: a *repairable encoding* failure (the sign plane is globally
@@ -33,7 +34,7 @@ quantizer, and we report our own two failed attempts at a single-scalar recall p
 
 | § | File | Content |
 |---|---|---|
-| 1 | `section-1-intro.md` | motivation, seven findings, what we do **not** claim, roadmap |
+| 1 | `section-1-intro.md` | motivation, seven findings, what we do **not** claim, roadmap, **provenance/disclosure (§1.1)** |
 | 2 | `section-2-background.md` | the 2-bit encoding, the two distances, what the paper already establishes, baselines, relation to rotation-based quantizers |
 | 3 | `section-3-methodology.md` | harness + equivalence, metrics, configuration, protocol deviations, noise floor, index-free instruments, the competitiveness-vs-QPS rule |
 | 4 | `section-4-reproduction.md` | the 12-row reproduction table, speed re-check, tie floors |
