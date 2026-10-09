@@ -104,7 +104,7 @@ Cohere-1M alongside an exact IVF-Flat arm on the same nprobe grid. The first run
 *impossible* if both arms are measured correctly: under the same ground truth, the exact-coarse arm saturated
 at **34.9 %** while the candidate-pool arm reached **59.8–60.2 %** — although every refine result re-ranks a
 subset of what IVF-Flat compares exactly, so IVF-Flat must be the upper bound. We did not publish either
-number, and diagnosed before writing. Three checks resolved it (all artifacts ship with the draft):
+number, and diagnosed before writing. Three checks resolved it (all artifacts ship with this report):
 
 1. **The parameters were reaching the index.** `ParameterSpace().set_index_parameter(wrapper, "nprobe", x)` is
    verified to land on the wrapped base (`base.nprobe = 256` after the call). The one real parameter bug was

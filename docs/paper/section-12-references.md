@@ -1,4 +1,4 @@
-# 12. References, Artifact Statement, and How to Assemble This Draft
+# 12. References, Artifact Statement, and How to Build This Report
 
 > Every entry below was checked against its published version on 2026-10-09 (arXiv ids, venues and author
 > lists verified against the arXiv abstract pages). We list what we actually used, with the version we used.
@@ -60,11 +60,11 @@ shipping every artifact and raw log it cites:
 | `benches/bench_t2_b2_partitioned.rs` | upstream | the index-side harness we drive via `T2_*` environment variables (no source change needed) |
 | `benches/bench_baselines.py` | upstream, **+env overrides** | grids/thread counts made overridable so the quantizer arm can be run at 32 threads (§10.4) |
 | `scripts/research/**` | **ours** | index-free gate, competitor maps, rotation/centring preparation, PQ & RaBitQ arms, bit-budget probe, memory footprint, multi-seed spread, all report scripts |
-| `docs/paper/**` | **ours** | this draft (§0–§12) |
+| `docs/paper/**` | **ours** | this report (§0–§12) |
 | `docs/research/**` | **ours** | the audit trail: every claim with its evidence, **including our own conclusions that were retracted along the way** (most recently the raw-vector RaBitQ numbers, §5.6b) |
 | `results/**` | **ours (generated)** | the citable store: every product the paper cites, plus the **raw stdout logs** under `results/logs/` (277 files copied out of the local scratch directory, so a clone of this repository is self-sufficient for verification) |
 
-**Traceability.** Every number in this draft resolves to a file under `results/**` or a log under `results/logs/**`,
+**Traceability.** Every number in this report resolves to a file under `results/**` or a log under `results/logs/**`,
 and §11.3 + §11.6 give the table → artifact mapping. Statements without an artifact are explicitly labelled
 as assumptions (e.g. the RedCaps row, §4.4).
 
@@ -80,9 +80,9 @@ quantizer arm, the external benchmarks). The full unattended batch that produced
 **What is *not* in the artifact.** The upstream paper's own source or LaTeX; the VIBE and embedding-model
 downloads (public, large, and pinned by their own repositories); and the two blocked baselines of §10.3/L13.
 
-## 12.5 Assembling this draft, and the submission build
+## 12.5 Building this report, and the submission package
 
-This draft is thirteen Markdown files, `section-0-abstract.md` … `section-12-references.md`, in that order;
+This report is thirteen Markdown files, `section-0-abstract.md` … `section-12-references.md`, in that order;
 the section index in `section-0-abstract.md` is the authoritative table of contents. A submission build is
 produced by one script, which assembles the sections in order, converts and embeds the six figures
 (SVG → PDF) and compiles the PDF with Pandoc + Tectonic:
@@ -95,6 +95,6 @@ python scripts/paper/build_submission.py
 # -> docs/paper/submission/README.md            (fill-in checklist)
 ```
 
-What remains before an actual submission, and cannot be automated: the **author/affiliation/e-mail block**
-(filled from `README.md`'s placeholder), the **license choice**, and optionally folding §12's list into a
-BibTeX bibliography. None of it changes any number in this draft.
+The author/affiliation block and the licence (CC BY 4.0, above) are already set; what remains before an
+actual submission is the author's final read-through and, optionally, folding §12's list into a BibTeX
+bibliography. None of it changes any number in this report.

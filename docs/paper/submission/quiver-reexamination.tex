@@ -1203,7 +1203,7 @@ under the same ground truth, the exact-coarse arm saturated at
 \%} --- although every refine result re-ranks a subset of what IVF-Flat
 compares exactly, so IVF-Flat must be the upper bound. We did not
 publish either number, and diagnosed before writing. Three checks
-resolved it (all artifacts ship with the draft):
+resolved it (all artifacts ship with this report):
 
 \begin{enumerate}
 \def\labelenumi{\arabic{enumi}.}
@@ -3087,9 +3087,10 @@ Content
 \endlastfoot
 \texttt{docs/research/upstream-issues.md} & the full audit of the
 upstream reports (Chinese), including the one we retracted ourselves \\
-\texttt{docs/research/upstream-issue-draft.md} & the paste-ready
-\textbf{English} version of those reports (five issues; not yet
-filed) \\
+\texttt{docs/research/upstream-issue-draft.md} & the five reports, now
+an internal fix-list for the released repository (L0 navigation metric,
+probe specification, the two code paths, the RedCaps protocol,
+defaults/docs) \\
 \texttt{patches/f1-nav-weighted.patch} & the §8.3 switch as a reviewable
 patch (default off) \\
 \texttt{docs/research/*.md} & the full audit trail: every claim, its
@@ -3097,9 +3098,9 @@ evidence, and the conclusions we retracted (three of our own) \\
 \end{longtable}
 }
 
-\subsection{11.6 Artifacts added after the first draft (second repair,
+\subsection{11.6 Artifacts added after the first release (second repair,
 quantizer arm, external
-validity)}\label{artifacts-added-after-the-first-draft-second-repair-quantizer-arm-external-validity}
+validity)}\label{artifacts-added-after-the-first-release-second-repair-quantizer-arm-external-validity}
 
 All library changes remain \textbf{default-off and bit-identical when
 unset}; \texttt{src/} now carries two such switches
@@ -3210,8 +3211,8 @@ Reproducing §8.6's engine-side switch end to end:
 \end{Highlighting}
 \end{Shaded}
 
-\section{12. References, Artifact Statement, and How to Assemble This
-Draft}\label{references-artifact-statement-and-how-to-assemble-this-draft}
+\section{12. References, Artifact Statement, and How to Build This
+Report}\label{references-artifact-statement-and-how-to-build-this-report}
 
 \begin{quote}
 Every entry below was checked against its published version on
@@ -3374,7 +3375,7 @@ at 32 threads (§10.4) \\
 competitor maps, rotation/centring preparation, PQ \& RaBitQ arms,
 bit-budget probe, memory footprint, multi-seed spread, all report
 scripts \\
-\texttt{docs/paper/**} & \textbf{ours} & this draft (§0--§12) \\
+\texttt{docs/paper/**} & \textbf{ours} & this report (§0--§12) \\
 \texttt{docs/research/**} & \textbf{ours} & the audit trail: every claim
 with its evidence, \textbf{including our own conclusions that were
 retracted along the way} (most recently the raw-vector RaBitQ numbers,
@@ -3387,7 +3388,7 @@ verification) \\
 \end{longtable}
 }
 
-\textbf{Traceability.} Every number in this draft resolves to a file
+\textbf{Traceability.} Every number in this report resolves to a file
 under \texttt{results/**} or a log under \texttt{results/logs/**}, and
 §11.3 + §11.6 give the table $\rightarrow$ artifact mapping. Statements without an
 artifact are explicitly labelled as assumptions (e.g.~the RedCaps row,

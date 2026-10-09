@@ -88,11 +88,11 @@ the gate reports `sign_info = 0.000` for `gist960` and 0.981 for `gist960c`.
 | Artifact | Content |
 |---|---|
 | `docs/research/upstream-issues.md` | the full audit of the upstream reports (Chinese), including the one we retracted ourselves |
-| `docs/research/upstream-issue-draft.md` | the paste-ready **English** version of those reports (five issues; not yet filed) |
+| `docs/research/upstream-issue-draft.md` | the five reports, now an internal fix-list for the released repository (L0 navigation metric, probe specification, the two code paths, the RedCaps protocol, defaults/docs) |
 | `patches/f1-nav-weighted.patch` | the §8.3 switch as a reviewable patch (default off) |
 | `docs/research/*.md` | the full audit trail: every claim, its evidence, and the conclusions we retracted (three of our own) |
 
-## 11.6 Artifacts added after the first draft (second repair, quantizer arm, external validity)
+## 11.6 Artifacts added after the first release (second repair, quantizer arm, external validity)
 
 All library changes remain **default-off and bit-identical when unset**; `src/` now carries two such switches
 (`TRIVIUM_NAV_WEIGHTED` from §8.3, `TRIVIUM_SIGN_ROTATE` from §8.6), plus 2 new unit tests (152 library tests

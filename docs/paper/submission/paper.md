@@ -505,7 +505,7 @@ Cohere-1M alongside an exact IVF-Flat arm on the same nprobe grid. The first run
 *impossible* if both arms are measured correctly: under the same ground truth, the exact-coarse arm saturated
 at **34.9 %** while the candidate-pool arm reached **59.8–60.2 %** — although every refine result re-ranks a
 subset of what IVF-Flat compares exactly, so IVF-Flat must be the upper bound. We did not publish either
-number, and diagnosed before writing. Three checks resolved it (all artifacts ship with the draft):
+number, and diagnosed before writing. Three checks resolved it (all artifacts ship with this report):
 
 1. **The parameters were reaching the index.** `ParameterSpace().set_index_parameter(wrapper, "nprobe", x)` is
    verified to land on the wrapped base (`base.nprobe = 256` after the call). The one real parameter bug was
@@ -1217,11 +1217,11 @@ the gate reports `sign_info = 0.000` for `gist960` and 0.981 for `gist960c`.
 | Artifact | Content |
 |---|---|
 | `docs/research/upstream-issues.md` | the full audit of the upstream reports (Chinese), including the one we retracted ourselves |
-| `docs/research/upstream-issue-draft.md` | the paste-ready **English** version of those reports (five issues; not yet filed) |
+| `docs/research/upstream-issue-draft.md` | the five reports, now an internal fix-list for the released repository (L0 navigation metric, probe specification, the two code paths, the RedCaps protocol, defaults/docs) |
 | `patches/f1-nav-weighted.patch` | the §8.3 switch as a reviewable patch (default off) |
 | `docs/research/*.md` | the full audit trail: every claim, its evidence, and the conclusions we retracted (three of our own) |
 
-## 11.6 Artifacts added after the first draft (second repair, quantizer arm, external validity)
+## 11.6 Artifacts added after the first release (second repair, quantizer arm, external validity)
 
 All library changes remain **default-off and bit-identical when unset**; `src/` now carries two such switches
 (`TRIVIUM_NAV_WEIGHTED` from §8.3, `TRIVIUM_SIGN_ROTATE` from §8.6), plus 2 new unit tests (152 library tests
@@ -1250,7 +1250,7 @@ TRIVIUM_SIGN_ROTATE=20260923 T2_PREFIX=sift128 T2_DIM=128 \
   cargo bench --features ablation --bench bench_t2_b2_partitioned   # 15.77 % -> 62.66 % @ef=64
 ```
 
-# 12. References, Artifact Statement, and How to Assemble This Draft
+# 12. References, Artifact Statement, and How to Build This Report
 
 > Every entry below was checked against its published version on 2026-10-09 (arXiv ids, venues and author
 > lists verified against the arXiv abstract pages). We list what we actually used, with the version we used.
@@ -1312,11 +1312,11 @@ shipping every artifact and raw log it cites:
 | `benches/bench_t2_b2_partitioned.rs` | upstream | the index-side harness we drive via `T2_*` environment variables (no source change needed) |
 | `benches/bench_baselines.py` | upstream, **+env overrides** | grids/thread counts made overridable so the quantizer arm can be run at 32 threads (§10.4) |
 | `scripts/research/**` | **ours** | index-free gate, competitor maps, rotation/centring preparation, PQ & RaBitQ arms, bit-budget probe, memory footprint, multi-seed spread, all report scripts |
-| `docs/paper/**` | **ours** | this draft (§0–§12) |
+| `docs/paper/**` | **ours** | this report (§0–§12) |
 | `docs/research/**` | **ours** | the audit trail: every claim with its evidence, **including our own conclusions that were retracted along the way** (most recently the raw-vector RaBitQ numbers, §5.6b) |
 | `results/**` | **ours (generated)** | the citable store: every product the paper cites, plus the **raw stdout logs** under `results/logs/` (277 files copied out of the local scratch directory, so a clone of this repository is self-sufficient for verification) |
 
-**Traceability.** Every number in this draft resolves to a file under `results/**` or a log under `results/logs/**`,
+**Traceability.** Every number in this report resolves to a file under `results/**` or a log under `results/logs/**`,
 and §11.3 + §11.6 give the table → artifact mapping. Statements without an artifact are explicitly labelled
 as assumptions (e.g. the RedCaps row, §4.4).
 
