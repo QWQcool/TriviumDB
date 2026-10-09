@@ -41,7 +41,7 @@ TECTONIC = _tool("TECTONIC", "tectonic.exe", "tectonic")
 
 TITLE = ("Applicability Is Not Competitiveness: An Independent Evaluation and a Data-Side Repair "
          "for BQ-Native Graph Indexing")
-AUTHOR_PLACEHOLDER = "AUTHOR NAMES, AFFILIATION, E-MAIL  [TO BE FILLED IN BY THE AUTHORS]"
+AUTHOR_PLACEHOLDER = "Chengcheng Li (Beyondsoft), qq1330494624@outlook.com"
 DATE = "October 9, 2026"
 
 SHORT_ABSTRACT = (

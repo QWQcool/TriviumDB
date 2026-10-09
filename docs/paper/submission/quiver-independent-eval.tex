@@ -133,7 +133,7 @@
 \makeatother
 \hypersetup{
   pdftitle={Applicability Is Not Competitiveness: An Independent Evaluation and a Data-Side Repair for BQ-Native Graph Indexing},
-  pdfauthor={AUTHOR NAMES, AFFILIATION, E-MAIL {[}TO BE FILLED IN BY THE AUTHORS{]}},
+  pdfauthor={Chengcheng Li (Beyondsoft), qq1330494624@outlook.com},
   colorlinks=true,
   linkcolor={Maroon},
   filecolor={Maroon},
@@ -143,8 +143,7 @@
 
 \title{Applicability Is Not Competitiveness: An Independent Evaluation
 and a Data-Side Repair for BQ-Native Graph Indexing}
-\author{AUTHOR NAMES, AFFILIATION, E-MAIL {[}TO BE FILLED IN BY THE
-AUTHORS{]}}
+\author{Chengcheng Li (Beyondsoft), qq1330494624@outlook.com}
 \date{October 9, 2026}
 
 \begin{document}
@@ -197,9 +196,9 @@ failed attempts at a single-scalar recall predictor.
 \tableofcontents
 }
 \textbf{Evidence base.} Every number in this paper resolves to a file
-under \texttt{results/**} or a log under \texttt{.tmp/}; the audit trail
---- including our own conclusions that were retracted along the way, and
-the protocol correction of §5.6(b) --- is in
+under \texttt{results/**} or a log under \texttt{results/logs/}; the
+audit trail --- including our own conclusions that were retracted along
+the way, and the protocol correction of §5.6(b) --- is in
 \texttt{docs/research/*.md}. The only library change is a default-off
 switch shipped as \texttt{patches/f1-nav-weighted.patch}.
 
@@ -511,7 +510,7 @@ pp} (GIST-960 0.22, SIFT-128 0.25, GloVe-100 0.10, Wolt-CLIP 0.19,
 Cohere 0.16; at \texttt{ef\_s\ =\ 1024} the spread stays $\leq$ 0.27 pp). The
 per-seed values and spreads are in
 \texttt{results/t2/p7\_stagec\_report.json} (raw logs
-\texttt{.tmp/p7q\_*\_seed\{1,2,3\}.log}). We therefore (a) treat
+\texttt{results/logs/p7q\_*\_seed\{1,2,3\}.log}). We therefore (a) treat
 differences below \textasciitilde0.3 pp as unresolved, and (b) mark any
 graph-structure quantity as a single-sample estimate. For the arms where
 a \texttt{src/} change is evaluated (§8.3) we use \textbf{frozen recall
@@ -2814,7 +2813,10 @@ Reproduction}\label{artifacts-and-reproduction}
 \begin{quote}
 Every number in §4--§9 was produced by the code below on the machine
 described in §4.2, with \texttt{RUSTFLAGS="-C\ target-cpu=native"} and
-\texttt{-\/-features\ ablation}.
+\texttt{-\/-features\ ablation}. The \textbf{raw stdout logs} those runs
+produced are shipped in \texttt{results/logs/} (290 files, one README
+mapping prefixes to sections), so a clone of the artifact repository is
+sufficient to check any number quoted above.
 \end{quote}
 
 \subsection{11.1 Index-side harness (Rust bench, no library changes
@@ -2932,11 +2934,11 @@ fields \texttt{overlap\_cos\_pct} / \texttt{overlap\_w\_pct} /
 §8.6 (rotation) & derived \texttt{*r\_*.f32/i32} sets (\texttt{gist960r}
 / \texttt{sift128r} / \texttt{glove100r} / \texttt{coherer}, produced by
 \texttt{gist960\_collapse\_prepare.py\ -\/-rotate}, with the
-GT-invariance check) + \texttt{.tmp/p4a\_*.log}; diagnosis in
+GT-invariance check) + \texttt{results/logs/p4a\_*.log}; diagnosis in
 \texttt{docs/research/p4a-rotation-vs-centering.md} \\
 §10-L9 (memory) & \texttt{results/t2/memory\_footprint\_cohere.json}
 (script \texttt{scripts/research/memory\_index\_footprint.py}; log
-\texttt{.tmp/p4b\_memory\_cohere.log}) \\
+\texttt{results/logs/p4b\_memory\_cohere.log}) \\
 \end{longtable}
 }
 
@@ -3082,17 +3084,17 @@ Product
 99.87--100 \%) and beats centring on the collapse tier &
 \texttt{scripts/research/gist960\_collapse\_prepare.py\ -\/-rotate/-\/-rotate-center}
 & \texttt{*r\_train.f32} / \texttt{*rc\_train.f32} +
-\texttt{.tmp/p4a\_*.log} \\
+\texttt{results/logs/p4a\_*.log} \\
 8.6 (rotation, engine side) & the same repair as one env var on the
 original files/GT & \texttt{src/index/bq.rs}
 (\texttt{TRIVIUM\_SIGN\_ROTATE}) + \texttt{bench\_t2\_b2\_partitioned} &
-\texttt{.tmp/p5\_*.log} \\
+\texttt{results/logs/p5\_*.log} \\
 5.6 / 8.7 (quantizers) & PQ does not collapse where the 2-bit code does
 (six cells); QuIVer is 3.7$\times$ faster at $\geq$ 99 \% on Cohere &
 \texttt{scripts/research/pq\_matched\_recall.py},
 \texttt{benches/bench\_baselines.py} (mode A/B) &
 \texttt{results/t2/pq\_matched\_recall\_\{cohere,sift128c,wolt\_clipc\}.json}
-(from \texttt{.tmp/p7\_pq\_*.log}),
+(from \texttt{results/logs/p7\_pq\_*.log}),
 \texttt{results/baseline/competitors\_cohere.json} \\
 5.6(b) (RaBitQ same-family + the normalisation trap) & the raw-vector
 inversion, the parameter audit (\texttt{k\_factor}), the GT-metric
@@ -3116,13 +3118,15 @@ optional) & \texttt{results/baseline/competitors\_gauss960.json} \\
 8.6 (engine-side \texttt{rc}) & both switches reproduce the data-side
 \texttt{rc} arm on \texttt{gist960c} (80.12 / 97.13) &
 \texttt{bench\_t2\_b2\_partitioned} + \texttt{TRIVIUM\_SIGN\_ROTATE} +
-\texttt{TRIVIUM\_NAV\_WEIGHTED} & \texttt{.tmp/p8\_10\_engine\_rc.log}
-(retry product, after the queue's first attempt failed) \\
+\texttt{TRIVIUM\_NAV\_WEIGHTED} &
+\texttt{results/logs/p8\_10\_engine\_rc.log} (retry product, after the
+queue's first attempt failed) \\
 P8 queue & the ten-step unattended batch behind the rows above &
 \texttt{scripts/research/p8\_queue.py},
 \texttt{scripts/research/p8\_collect\_numbers.py} &
-\texttt{results/t2/p8\_queue\_summary.json} + \texttt{.tmp/p8\_*.log}
-(step-10 retry note: \texttt{docs/research/p8-queue-report.md} §4-D5) \\
+\texttt{results/t2/p8\_queue\_summary.json} +
+\texttt{results/logs/p8\_*.log} (step-10 retry note:
+\texttt{docs/research/p8-queue-report.md} §4-D5) \\
 6.5 (bit budget) & 2-bit allocation vs 4-bit ceiling on the four
 collapse datasets & \texttt{scripts/research/bit\_budget\_probe.py} &
 \texttt{results/t2/bit\_budget\_*.json} \\
@@ -3133,11 +3137,11 @@ collapse datasets & \texttt{scripts/research/bit\_budget\_probe.py} &
 a new catastrophe &
 \texttt{scripts/research/download\_vibe\_parallel.py},
 \texttt{scripts/research/convert\_hdf5\_to\_f32.py} &
-\texttt{.tmp/p6\_vibe\_*.log} + gate rows in
+\texttt{results/logs/p6\_vibe\_*.log} + gate rows in
 \texttt{results/t2/deployability\_gate.json} \\
 3.5 / 10.3 (noise floor) & 3 builds $\times$ 5 datasets $\Rightarrow$ spread $\leq$ 0.25 pp &
 \texttt{bench\_t2\_b2\_partitioned} re-runs &
-\texttt{.tmp/p7q\_*\_seed\{1,2,3\}.log},
+\texttt{results/logs/p7q\_*\_seed\{1,2,3\}.log},
 \texttt{results/t2/p7\_stagec\_report.json} \\
 7.3 (probe K = 5) & K = 3 $\rightarrow$ K = 5 changes no verdict, drift $\leq$ 1.7 pp &
 \texttt{scripts/research/deployability\_gate.py} (K = 5),
@@ -3323,16 +3327,24 @@ scripts \\
 with its evidence, \textbf{including our own conclusions that were
 retracted along the way} (most recently the raw-vector RaBitQ numbers,
 §5.6b) \\
-\texttt{results/**}, \texttt{.tmp/**} & \textbf{ours (generated)} &
-products and logs. \texttt{results/**} is the citable store;
-\texttt{.tmp/**} holds raw stdout and the execution queue \\
+\texttt{results/**} & \textbf{ours (generated)} & the citable store:
+every product the paper cites, plus the \textbf{raw stdout logs} under
+\texttt{results/logs/} (290 files copied out of the local scratch
+directory, so a clone of this repository is self-sufficient for
+verification) \\
 \end{longtable}
 }
 
 \textbf{Traceability.} Every number in this draft resolves to a file
-under \texttt{results/**} or a log under \texttt{.tmp/**}, and §11.3 +
-§11.6 give the table $\rightarrow$ artifact mapping. Statements without an artifact
-are explicitly labelled as assumptions (e.g.~the RedCaps row, §4.4).
+under \texttt{results/**} or a log under \texttt{results/logs/**}, and
+§11.3 + §11.6 give the table $\rightarrow$ artifact mapping. Statements without an
+artifact are explicitly labelled as assumptions (e.g.~the RedCaps row,
+§4.4).
+
+\textbf{Licence.} This report is released under \textbf{Creative Commons
+Attribution 4.0 International (CC BY 4.0)}. The code, scripts and
+artifacts in the accompanying repository remain under the upstream
+\textbf{Apache-2.0} licence (\texttt{LICENSE}).
 
 \textbf{Reproduction entry points.} §11.4 (the central claim, five
 commands) and §11.6 (the second repair, the quantizer arm, the external

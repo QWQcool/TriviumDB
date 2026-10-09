@@ -45,7 +45,7 @@ quantizer, and we report our own two failed attempts at a single-scalar recall p
 | 10 | `section-10-limitations.md` | platform, protocol, the one unresolved row, the tie floor, scope, statistical conventions |
 | 11 | `section-11-artifacts.md` | harness, scripts, table → artifact map, one-command reproduction, upstream material |
 
-**Evidence base.** Every number in this paper resolves to a file under `results/**` or a log under `.tmp/`;
+**Evidence base.** Every number in this paper resolves to a file under `results/**` or a log under `results/logs/`;
 the audit trail — including our own conclusions that were retracted along the way, and the protocol
 correction of §5.6(b) — is in `docs/research/*.md`.
 The only library change is a default-off switch shipped as `patches/f1-nav-weighted.patch`.

@@ -1,12 +1,12 @@
 ---
 title: "Applicability Is Not Competitiveness: An Independent Evaluation and a Data-Side Repair for BQ-Native Graph Indexing"
-author: "AUTHOR NAMES, AFFILIATION, E-MAIL  [TO BE FILLED IN BY THE AUTHORS]"
+author: "Chengcheng Li (Beyondsoft), qq1330494624@outlook.com"
 date: "October 9, 2026"
 abstract: |
   Binary-quantized graph indexes navigate on 2-bit codes instead of full-precision vectors, and the published answer to "when is that usable?" is a 12-dataset table spanning 0.40 % → 95.65 % Recall@10 plus a single index-free compatibility probe. We re-run that benchmark on the authors' released implementation (11 of 12 rows reproduced within ±1.84 pp; one row is protocol-ambiguous) and report five things the published account does not cover. (i) The table's tiers describe applicability, and are read as competitiveness; where competitor curves exist, three of the four tiers are dominated by plain HNSW — on several rows QuIVer's recall ceiling lies below the baseline's lowest operating point, so the curves cannot intersect. (ii) The bottom tier mixes three different failures: a repairable encoding failure (the sign plane is globally constant, sign_info = 0.000), an index-agnostic task failure on which every competitor also collapses (Random-Sphere 1.40 %, Gaussian-960 1.10–1.39 % across three HNSW implementations at ef=64), and a capacity failure (coco_nomic) where the bit budget, not the distribution, is binding — at 4 bits per dimension every collapse row measures ≥ 94.6 %. (iii) The published probe is under-specified — it does not fix the BQ distance, the sample size, or the instrument. Implemented with the paper's own default distance, it calls Random-Sphere compatible (53.9%) on a dataset whose measured recall is 0.91 %; taking the weaker of the engine's two distances removes this false positive without changing any other verdict, and a sign-entropy statistic paired with it yields a four-step decision chain validated on 22 arms. (iv) The collapse is repairable without touching the index: one translation (x' = normalize(x − μ)) takes GIST-960 from 2.10 % to 39.74 % and SIFT-128 from 15.77 % to 30.64 % at ef=64, with an isotropic control moving +0.03 pp; making the L0 navigation metric match the metric the graph was built with adds up to +21.8 pp where the sign plane is alive and hurts where it is dead, so we ship it as a default-off switch with a decision rule. After the repair two arms move from "dominated" to "parity" or "intersecting" — but the honest sentence survives: a smaller gap is not availability. (v) The missing baseline class (§5.6): an OPQ+IVF-PQ+Refine pipeline with the same f32 re-ranking never collapses on any of the six cells we measured — including the two where the 2-bit code collapses hardest — at ≈ 4.7× QuIVer's memory, so the published boundary is the 2-bit code's, not quantization's. We do not claim the paper is wrong (its mechanism is the one we measure), we propose no new quantizer, and we report our own two failed attempts at a single-scalar recall predictor.
 ---
 
-**Evidence base.** Every number in this paper resolves to a file under `results/**` or a log under `.tmp/`;
+**Evidence base.** Every number in this paper resolves to a file under `results/**` or a log under `results/logs/`;
 the audit trail — including our own conclusions that were retracted along the way, and the protocol
 correction of §5.6(b) — is in `docs/research/*.md`.
 The only library change is a default-off switch shipped as `patches/f1-nav-weighted.patch`.
@@ -181,7 +181,7 @@ Intel i9-14900K (24 C/32 T, 63.7 GB, **no AVX-512**).
 Graph construction is concurrent, so the L0 edge set is not bit-reproducible. We built and measured five tier
 representatives **three times each**; the spread of R@10 @ef=64 is **≤ 0.25 pp** (GIST-960 0.22, SIFT-128 0.25,
 GloVe-100 0.10, Wolt-CLIP 0.19, Cohere 0.16; at `ef_s = 1024` the spread stays ≤ 0.27 pp). The per-seed values
-and spreads are in `results/t2/p7_stagec_report.json` (raw logs `.tmp/p7q_*_seed{1,2,3}.log`). We therefore
+and spreads are in `results/t2/p7_stagec_report.json` (raw logs `results/logs/p7q_*_seed{1,2,3}.log`). We therefore
 (a) treat differences below ~0.3 pp as unresolved, and (b) mark any graph-structure quantity as a
 single-sample estimate. For the arms where a `src/` change is evaluated (§8.3) we use **frozen recall values as
 a regression guard**: with the switch off, the frozen values reproduce within ≤ 0.17 pp.
@@ -1101,7 +1101,9 @@ All of the following are stated in the body text, not hidden in an appendix.
 # 11. Artifacts and Reproduction
 
 > Every number in §4–§9 was produced by the code below on the machine described in §4.2, with
-> `RUSTFLAGS="-C target-cpu=native"` and `--features ablation`.
+> `RUSTFLAGS="-C target-cpu=native"` and `--features ablation`. The **raw stdout logs** those runs produced
+> are shipped in `results/logs/` (290 files, one README mapping prefixes to sections), so a clone of the
+> artifact repository is sufficient to check any number quoted above.
 
 ## 11.1 Index-side harness (Rust bench, no library changes except the Sec. 8.3 switch)
 
@@ -1136,8 +1138,8 @@ All of the following are stated in the body text, not hidden in an appendix.
 | §7.2–7.3 (gate + probe sensitivity) | `results/t2/deployability_gate.json`, `results/t2/p2_probe_scaling.json` |
 | §8.2–8.3 (centre + navigation A/B) | `results/t2/gist960_collapse/*.json` |
 | §8.4 (7-arm map) | `results/baseline/competitors_*c.json` |
-| §8.6 (rotation) | derived `*r_*.f32/i32` sets (`gist960r` / `sift128r` / `glove100r` / `coherer`, produced by `gist960_collapse_prepare.py --rotate`, with the GT-invariance check) + `.tmp/p4a_*.log`; diagnosis in `docs/research/p4a-rotation-vs-centering.md` |
-| §10-L9 (memory) | `results/t2/memory_footprint_cohere.json` (script `scripts/research/memory_index_footprint.py`; log `.tmp/p4b_memory_cohere.log`) |
+| §8.6 (rotation) | derived `*r_*.f32/i32` sets (`gist960r` / `sift128r` / `glove100r` / `coherer`, produced by `gist960_collapse_prepare.py --rotate`, with the GT-invariance check) + `results/logs/p4a_*.log`; diagnosis in `docs/research/p4a-rotation-vs-centering.md` |
+| §10-L9 (memory) | `results/t2/memory_footprint_cohere.json` (script `scripts/research/memory_index_footprint.py`; log `results/logs/p4b_memory_cohere.log`) |
 
 ### 11.3a Memory footprint (1 M x 768, M = 32)
 
@@ -1198,17 +1200,17 @@ pass with both off and on).
 
 | § | Claim | Script | Product |
 |---|---|---|---|
-| 8.6 (rotation, data side) | rotation preserves the task (GT overlap 99.87–100 %) and beats centring on the collapse tier | `scripts/research/gist960_collapse_prepare.py --rotate/--rotate-center` | `*r_train.f32` / `*rc_train.f32` + `.tmp/p4a_*.log` |
-| 8.6 (rotation, engine side) | the same repair as one env var on the original files/GT | `src/index/bq.rs` (`TRIVIUM_SIGN_ROTATE`) + `bench_t2_b2_partitioned` | `.tmp/p5_*.log` |
-| 5.6 / 8.7 (quantizers) | PQ does not collapse where the 2-bit code does (six cells); QuIVer is 3.7× faster at ≥ 99 % on Cohere | `scripts/research/pq_matched_recall.py`, `benches/bench_baselines.py` (mode A/B) | `results/t2/pq_matched_recall_{cohere,sift128c,wolt_clipc}.json` (from `.tmp/p7_pq_*.log`), `results/baseline/competitors_cohere.json` |
+| 8.6 (rotation, data side) | rotation preserves the task (GT overlap 99.87–100 %) and beats centring on the collapse tier | `scripts/research/gist960_collapse_prepare.py --rotate/--rotate-center` | `*r_train.f32` / `*rc_train.f32` + `results/logs/p4a_*.log` |
+| 8.6 (rotation, engine side) | the same repair as one env var on the original files/GT | `src/index/bq.rs` (`TRIVIUM_SIGN_ROTATE`) + `bench_t2_b2_partitioned` | `results/logs/p5_*.log` |
+| 5.6 / 8.7 (quantizers) | PQ does not collapse where the 2-bit code does (six cells); QuIVer is 3.7× faster at ≥ 99 % on Cohere | `scripts/research/pq_matched_recall.py`, `benches/bench_baselines.py` (mode A/B) | `results/t2/pq_matched_recall_{cohere,sift128c,wolt_clipc}.json` (from `results/logs/p7_pq_*.log`), `results/baseline/competitors_cohere.json` |
 | 5.6(b) (RaBitQ same-family + the normalisation trap) | the raw-vector inversion, the parameter audit (`k_factor`), the GT-metric check, and the corrected (normalised) pair | `scripts/research/bench_rabitq_refine.py` (`RA_CONTROL`, `RA_NORMALIZE`), `ivf_recall_diagnostic.py`, `gt_metric_consistency_probe.py`, `faiss_refine_mechanics_probe.py` | `results/t2/{rabitq_refine,ivfflat_control}_cohere.json` (raw-metric; kept as the trap record), `{rabitq_refine,ivfflat_control}_norm_cohere.json` (of record), `ivf_recall_diagnostic_cohere.json`, `gt_metric_consistency_cohere.json`, `faiss_refine_mechanics_probe.json`, `rabitq_refine_gist960c.json` |
 | 6.4(ii) (second witness) | every competitor collapses on Gaussian-960 (hnswlib / FAISS-HNSW / USearch / IVF-Flat) | `scripts/research/baseline_competitors.py` (`BL_SKIP` optional) | `results/baseline/competitors_gauss960.json` |
-| 8.6 (engine-side `rc`) | both switches reproduce the data-side `rc` arm on `gist960c` (80.12 / 97.13) | `bench_t2_b2_partitioned` + `TRIVIUM_SIGN_ROTATE` + `TRIVIUM_NAV_WEIGHTED` | `.tmp/p8_10_engine_rc.log` (retry product, after the queue's first attempt failed) |
-| P8 queue | the ten-step unattended batch behind the rows above | `scripts/research/p8_queue.py`, `scripts/research/p8_collect_numbers.py` | `results/t2/p8_queue_summary.json` + `.tmp/p8_*.log` (step-10 retry note: `docs/research/p8-queue-report.md` §4-D5) |
+| 8.6 (engine-side `rc`) | both switches reproduce the data-side `rc` arm on `gist960c` (80.12 / 97.13) | `bench_t2_b2_partitioned` + `TRIVIUM_SIGN_ROTATE` + `TRIVIUM_NAV_WEIGHTED` | `results/logs/p8_10_engine_rc.log` (retry product, after the queue's first attempt failed) |
+| P8 queue | the ten-step unattended batch behind the rows above | `scripts/research/p8_queue.py`, `scripts/research/p8_collect_numbers.py` | `results/t2/p8_queue_summary.json` + `results/logs/p8_*.log` (step-10 retry note: `docs/research/p8-queue-report.md` §4-D5) |
 | 6.5 (bit budget) | 2-bit allocation vs 4-bit ceiling on the four collapse datasets | `scripts/research/bit_budget_probe.py` | `results/t2/bit_budget_*.json` |
 | 7.3 (prospective validation) | nav-metric rule held out on 6 arms: 6/6 | `scripts/research/nav_rule_validation.py` | `results/t2/nav_rule_validation.json` |
-| 9.5 (external validity) | seven VIBE benchmarks; `coco_nomic` is a new catastrophe | `scripts/research/download_vibe_parallel.py`, `scripts/research/convert_hdf5_to_f32.py` | `.tmp/p6_vibe_*.log` + gate rows in `results/t2/deployability_gate.json` |
-| 3.5 / 10.3 (noise floor) | 3 builds × 5 datasets ⇒ spread ≤ 0.25 pp | `bench_t2_b2_partitioned` re-runs | `.tmp/p7q_*_seed{1,2,3}.log`, `results/t2/p7_stagec_report.json` |
+| 9.5 (external validity) | seven VIBE benchmarks; `coco_nomic` is a new catastrophe | `scripts/research/download_vibe_parallel.py`, `scripts/research/convert_hdf5_to_f32.py` | `results/logs/p6_vibe_*.log` + gate rows in `results/t2/deployability_gate.json` |
+| 3.5 / 10.3 (noise floor) | 3 builds × 5 datasets ⇒ spread ≤ 0.25 pp | `bench_t2_b2_partitioned` re-runs | `results/logs/p7q_*_seed{1,2,3}.log`, `results/t2/p7_stagec_report.json` |
 | 7.3 (probe K = 5) | K = 3 → K = 5 changes no verdict, drift ≤ 1.7 pp | `scripts/research/deployability_gate.py` (K = 5), `scripts/research/p7_k5_vs_k3.py` | `results/t2/deployability_gate.json`, `results/t2/p7_k5_vs_k3.json` |
 | 11.3a (memory) | QuIVer 675 MiB vs refined PQ ≈ 3.16 GiB vs hnswlib 3.19 GiB | `scripts/research/memory_footprint.py` | `results/t2/memory_footprint_cohere.json` |
 
@@ -1279,11 +1281,15 @@ we made is confined to the following, so a reader can separate our work from ups
 | `scripts/research/**` | **ours** | index-free gate, competitor maps, rotation/centring preparation, PQ & RaBitQ arms, bit-budget probe, memory footprint, multi-seed spread, all report scripts |
 | `docs/paper/**` | **ours** | this draft (§0–§12) |
 | `docs/research/**` | **ours** | the audit trail: every claim with its evidence, **including our own conclusions that were retracted along the way** (most recently the raw-vector RaBitQ numbers, §5.6b) |
-| `results/**`, `.tmp/**` | **ours (generated)** | products and logs. `results/**` is the citable store; `.tmp/**` holds raw stdout and the execution queue |
+| `results/**` | **ours (generated)** | the citable store: every product the paper cites, plus the **raw stdout logs** under `results/logs/` (290 files copied out of the local scratch directory, so a clone of this repository is self-sufficient for verification) |
 
-**Traceability.** Every number in this draft resolves to a file under `results/**` or a log under `.tmp/**`,
+**Traceability.** Every number in this draft resolves to a file under `results/**` or a log under `results/logs/**`,
 and §11.3 + §11.6 give the table → artifact mapping. Statements without an artifact are explicitly labelled
 as assumptions (e.g. the RedCaps row, §4.4).
+
+**Licence.** This report is released under **Creative Commons Attribution 4.0 International (CC BY 4.0)**.
+The code, scripts and artifacts in the accompanying repository remain under the upstream **Apache-2.0**
+licence (`LICENSE`).
 
 **Reproduction entry points.** §11.4 (the central claim, five commands) and §11.6 (the second repair, the
 quantizer arm, the external benchmarks). The full unattended batch that produced the last group of numbers is

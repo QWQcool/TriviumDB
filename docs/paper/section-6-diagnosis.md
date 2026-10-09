@@ -1,6 +1,6 @@
 # 6. Diagnosis: Why the Code Fails, and Three Different Failures
 
-> **Draft** 2026-09-22 ｜ every number traceable to `results/**` or `.tmp/*.log`
+> **Draft** 2026-09-22 ｜ every number traceable to `results/**` or `results/logs/*.log`
 > Notation as in §4. *Sign plane* = the `pos = (v > 0)` plane; *magnitude plane* = the `strong = (|v| > mean|v|)` plane.
 
 ## 6.1 The mechanism, in one identity

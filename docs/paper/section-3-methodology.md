@@ -47,7 +47,7 @@ Intel i9-14900K (24 C/32 T, 63.7 GB, **no AVX-512**).
 Graph construction is concurrent, so the L0 edge set is not bit-reproducible. We built and measured five tier
 representatives **three times each**; the spread of R@10 @ef=64 is **≤ 0.25 pp** (GIST-960 0.22, SIFT-128 0.25,
 GloVe-100 0.10, Wolt-CLIP 0.19, Cohere 0.16; at `ef_s = 1024` the spread stays ≤ 0.27 pp). The per-seed values
-and spreads are in `results/t2/p7_stagec_report.json` (raw logs `.tmp/p7q_*_seed{1,2,3}.log`). We therefore
+and spreads are in `results/t2/p7_stagec_report.json` (raw logs `results/logs/p7q_*_seed{1,2,3}.log`). We therefore
 (a) treat differences below ~0.3 pp as unresolved, and (b) mark any graph-structure quantity as a
 single-sample estimate. For the arms where a `src/` change is evaluated (§8.3) we use **frozen recall values as
 a regression guard**: with the switch off, the frozen values reproduce within ≤ 0.17 pp.
