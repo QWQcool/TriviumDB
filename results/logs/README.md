@@ -1,6 +1,6 @@
 # Raw logs cited by the paper
 
-These 290 files are the **raw stdout logs** that `docs/paper/section-*.md` cites (§11.3, §11.6). They were
+These 277 files are the **raw stdout logs** that `docs/paper/section-*.md` cites (§11.3, §11.6). They were
 copied here from the local `.tmp/` scratch directory — which is `.gitignore`d (`*.tmp`) and therefore
 *not* available to anyone who clones this repository — so that **every number in the paper resolves to a
 file inside this repository**.

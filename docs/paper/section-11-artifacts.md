@@ -2,7 +2,7 @@
 
 > Every number in §4–§9 was produced by the code below on the machine described in §4.2, with
 > `RUSTFLAGS="-C target-cpu=native"` and `--features ablation`. The **raw stdout logs** those runs produced
-> are shipped in `results/logs/` (290 files, one README mapping prefixes to sections), so a clone of the
+> are shipped in `results/logs/` (277 files, one README mapping prefixes to sections), so a clone of the
 > artifact repository is sufficient to check any number quoted above.
 
 ## 11.1 Index-side harness (Rust bench, no library changes except the §8.3 switch)

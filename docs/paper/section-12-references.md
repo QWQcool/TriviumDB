@@ -58,7 +58,7 @@ we made is confined to the following, so a reader can separate our work from ups
 | `scripts/research/**` | **ours** | index-free gate, competitor maps, rotation/centring preparation, PQ & RaBitQ arms, bit-budget probe, memory footprint, multi-seed spread, all report scripts |
 | `docs/paper/**` | **ours** | this draft (§0–§12) |
 | `docs/research/**` | **ours** | the audit trail: every claim with its evidence, **including our own conclusions that were retracted along the way** (most recently the raw-vector RaBitQ numbers, §5.6b) |
-| `results/**` | **ours (generated)** | the citable store: every product the paper cites, plus the **raw stdout logs** under `results/logs/` (290 files copied out of the local scratch directory, so a clone of this repository is self-sufficient for verification) |
+| `results/**` | **ours (generated)** | the citable store: every product the paper cites, plus the **raw stdout logs** under `results/logs/` (277 files copied out of the local scratch directory, so a clone of this repository is self-sufficient for verification) |
 
 **Traceability.** Every number in this draft resolves to a file under `results/**` or a log under `results/logs/**`,
 and §11.3 + §11.6 give the table → artifact mapping. Statements without an artifact are explicitly labelled
