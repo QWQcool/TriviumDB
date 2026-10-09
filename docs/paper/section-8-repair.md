@@ -60,7 +60,7 @@ Mechanism: when the sign plane still carries information, the weighted metric al
 plane and navigates better; when it is dead, the weighted metric's `|h|` bias is *navigated into* directly.
 ⇒ This is a **data-dependent trade-off**, not an unconditional bug fix; the switch is the delivery vehicle,
 `sign_info` is the decision rule. Regression guard: with the switch **off**, frozen recall values reproduce
-(Cohere 97.52 / GIST 2.79 / GloVe 45.60 within ≤ 0.17 pp, i.e. within the measured G-det spread of 0.27 pp).
+(Cohere 97.52 / GIST 2.79 / GloVe 45.60 within ≤ 0.17 pp, i.e. within the §3.5 noise floor of ≤ 0.25 pp).
 
 ## 8.4 The competitor map: what the repair does and does not buy
 
@@ -146,3 +146,56 @@ the probe pair and an A/B measurement, this rule gets the **sign right in 9 case
 (`wolt_clip`) has −0.5 pp probe difference and +0.9 pp measured difference, i.e. both inside the noise floor.
 It also fixes the one place where the `sign_info ≥ 0.75` heuristic fails (`sift128r`: `sign_info = 0.759`
 would predict a gain, the measurement is **−10.2 pp**).
+
+**Deployment form: the rotation as a code-side switch.** Until now the rotation was *data-side* — it rewrites
+`train`/`test`, so the GT and the f32 re-ranking stage move with it. Because `cos(Qa,Qb) = cos(a,b)`, the same
+repair can ship as a switch that touches nothing else, and we implemented it (`TRIVIUM_SIGN_ROTATE=<seed>`,
+§11.1; default off ⇒ bit-identical when unset):
+
+| Dataset (original files, original GT) | off @ef=64 | **on @ef=64** | off → on @1024 | data-side rotation, for reference |
+|---|---|---|---|---|
+| SIFT-128 | 15.77 % | **62.66 %** @141,403 | 47.23 % → **95.94 %** | 60.24 % / 95.74 % |
+| GIST-960 | 2.10 % | **61.76 %** @23,148 | 4.38 % → **90.66 %** | 60.22 % / 88.99 % |
+
+The engine generates its own `Q` from a seed PRNG (no linear-algebra dependency, zero storage) — a *different*
+matrix from the Python side's — and the numbers agree within run-to-run noise, so the gain comes from the
+rotation itself, not from one lucky basis. This is also the only one of our two repairs a deployer can adopt
+without touching the data contract: centring changes the similarity function (L3), rotation cannot.
+With **both** switches on (`TRIVIUM_SIGN_ROTATE` + `TRIVIUM_NAV_WEIGHTED`) the engine-side path also reproduces
+the data-side `rc` arm of §8.7 on `gist960c`: **80.12 % @ef=64 / 97.13 % @ef=1024**, against 80.17 % / 97.53 %
+data-side — the two-step repair survives in the switch form.
+
+⚠️ Implementation trap worth reporting upstream: the engine has **two** vector→code paths
+(`Bq2Signature::from_vector` and `Bq2Store::push_from_vector`). Rotating only the first leaves the stored codes
+unrotated and SIFT-128 reads **0.01 %** at `ef=64` — worse than doing nothing. All numbers above are from the
+build where both paths share one transform (152 library tests pass).
+
+## 8.7 Is BQ-native still the right choice? The quantizer arm, and what the repair costs in memory
+
+The repair only matters if the repaired index is competitive in its *own* market — and that market is not only
+graph indexes: the paper's baseline list contains four quantizer pipelines. §5.6 gives the verdicts; here is
+what they mean for the deployment choice, with the memory term attached:
+
+| Task | QuIVer, best repair | OPQ+IVF-PQ+Refine | Who wins |
+|---|---|---|---|
+| Cohere-1M (competitive) | **99.78 % @ 8,684** | 99.82 % @ 2,330 | QuIVer **3.7×** at ≥ 99.0 % recall (11× at ≥ 99.5 %) |
+| GIST-960, centred task | 82.77 % (centred) → **88.99 %** (rotated) | **98.99 % @ 3,242** | PQ, on accuracy |
+| GIST-960, both repairs (`rc`, weighted nav) | **97.53 % @ 4,005** | 98.99 % @ 3,242 | ≈parity: 1.5 pp for **4.7× less memory** |
+| SIFT-128, centred task | 84.57 % (centred) → **95.74 %** (rotated) | **99.94 % @ 2,151** | PQ, on accuracy (and HNSW reaches 99.90 %) |
+| Wolt-CLIP-1M, centred task | 89.05 % @ 9,788 | 89.66 % @ 3,809 | tie-bound (96.1 % exact-scan ceiling) ≈parity |
+| GloVe-100, centred task | 93.32 % @ 11,675 | 96.61 % @ 4,990 | split: PQ accuracy, QuIVer QPS |
+| `coco_nomic` | 0.21 % (0.70 % rotated) | **98.42 % @ 7,771** | PQ, decisively |
+
+Memory triangle (1 M × 768, §11.3a):
+
+| Index | resident bytes | recall reached |
+|---|---|---|
+| bare IVF-PQ (no re-ranking) | **92 MB** | ~62.6 % |
+| OPQ+IVF-PQ+Refine | ≈ 92 MB + 3,072 MB f32 copy ≈ **3.16 GiB** | 99.8 % |
+| hnswlib / FAISS-HNSW | 3.19 GiB / 3.19 GiB | 99.8 % |
+| **QuIVer (BQ-native), with both repairs** | **675 MiB** | 88.99 % → **97.53 %** |
+
+The honest reading: on collapse-tier data a PQ pipeline is *more accurate* than our best repair, and what our
+repair buys is not a win but the same recall band at **4.7× less memory** — a different point on the curve, not
+a free lunch. On the competitive tier (≥ 88 % recall) the BQ-native index wins outright and the memory
+advantage becomes a bonus rather than the whole argument.

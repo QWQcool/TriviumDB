@@ -1,0 +1,99 @@
+{
+  "prefix": "cohere",
+  "dim": 768,
+  "n_base": 1000000,
+  "n_test": 1000,
+  "gt_cols": 1000,
+  "queries": [
+    {
+      "query": 0,
+      "overlap_ip_raw": 5,
+      "overlap_l2_raw": 10,
+      "overlap_ip_norm": 10,
+      "gt_top5": [
+        320440,
+        861417,
+        888721,
+        592612,
+        177275
+      ]
+    },
+    {
+      "query": 199,
+      "overlap_ip_raw": 5,
+      "overlap_l2_raw": 9,
+      "overlap_ip_norm": 10,
+      "gt_top5": [
+        190944,
+        615494,
+        858154,
+        201167,
+        865862
+      ]
+    },
+    {
+      "query": 399,
+      "overlap_ip_raw": 2,
+      "overlap_l2_raw": 9,
+      "overlap_ip_norm": 10,
+      "gt_top5": [
+        585580,
+        511459,
+        496674,
+        649056,
+        550727
+      ]
+    },
+    {
+      "query": 599,
+      "overlap_ip_raw": 3,
+      "overlap_l2_raw": 8,
+      "overlap_ip_norm": 10,
+      "gt_top5": [
+        479661,
+        233257,
+        715343,
+        565785,
+        65510
+      ]
+    },
+    {
+      "query": 799,
+      "overlap_ip_raw": 4,
+      "overlap_l2_raw": 10,
+      "overlap_ip_norm": 10,
+      "gt_top5": [
+        854816,
+        542305,
+        296517,
+        33711,
+        804233
+      ]
+    },
+    {
+      "query": 999,
+      "overlap_ip_raw": 6,
+      "overlap_l2_raw": 9,
+      "overlap_ip_norm": 10,
+      "gt_top5": [
+        387334,
+        605760,
+        464343,
+        896929,
+        724031
+      ]
+    }
+  ],
+  "norms": {
+    "train_mean": 13.81296443939209,
+    "train_std": 0.6040672063827515,
+    "test_mean": 13.83022689819336,
+    "test_std": 0.6165415644645691
+  },
+  "mean_overlap": {
+    "ip_raw": 4.166666666666667,
+    "l2_raw": 9.166666666666666,
+    "ip_norm": 10.0
+  },
+  "verdict": "GT is cosine-aligned (IP on normalised vectors); raw-vector IP search cannot reproduce it"
+}

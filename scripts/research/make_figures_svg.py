@@ -284,11 +284,66 @@ def fig5():
     (OUT / "fig5-matched-recall.svg").write_text("".join(s), encoding="utf-8")
 
 
+def fig6():
+    """位预算：把"每维 b 比特"当唯一变量（§8.7 机制统一）。"""
+    import math
+    files = [("gist960", "collapse"), ("gauss960", "index-agnostic"),
+             ("sphere", "index-agnostic"), ("coco_nomic", "VIBE")]
+    data = {}
+    for name, _ in files:
+        f = ROOT / "results" / "t2" / f"bit_budget_{name}.json"
+        if f.exists():
+            d = json.loads(f.read_text(encoding="utf-8"))
+            data[name] = [(r["bits"], r["topef"]) for r in d["rows"] if r["bits"] < 16]
+    if not data:
+        print("  [跳过 fig6] 缺 results/t2/bit_budget_*.json")
+        return
+    W, H = 800, 440
+    L, R, T, B = 76, 200, 78, 64
+    pw, ph = W - L - R, H - T - B
+    bits_axis = [1, 2, 3, 4, 6, 8]
+    sx = lambda b: L + pw * (math.log2(b) - math.log2(1)) / (math.log2(8) - math.log2(1))
+    sy = lambda v: T + ph * (1 - v / 100.0)
+    colors = {"gist960": "#188038", "gauss960": "#a142f4",
+              "sphere": "#7b1fa2", "coco_nomic": "#1a73e8"}
+    s = [head(W, H, "Bit budget: how many bits per dimension does the code need?")]
+    for gy in range(0, 101, 20):
+        s.append(line(L, sy(gy), L + pw, sy(gy)))
+        s.append(txt(L - 8, sy(gy) + 4, f"{gy}%", 10, "end"))
+    for b in bits_axis:
+        s.append(line(sx(b), T, sx(b), T + ph))
+        s.append(txt(sx(b), T + ph + 16, f"{b} bit", 10, "middle"))
+    s.append(line(L, T, L, T + ph))
+    s.append(txt(L + pw / 2, H - 14, "bits per dimension (uniform scalar code, log scale)", 11, "middle", weight="600"))
+    s.append(txt(16, T + ph / 2, "code top-128 → f32 rerank ∩ GT", 11, "middle", weight="600", rotate=-90))
+    s.append(line(L, sy(94.0), L + pw, sy(94.0), "#9aa0a6", 1.1, "4,4"))
+    s.append(txt(L + 6, sy(94.0) - 6, "94% ≈ usable", 9, "#5f6368"))
+    # QuIVer 实测（2-bit SM）作为散点标注
+    quiver = {"gist960": 2.81, "gauss960": 0.83, "sphere": 0.91, "coco_nomic": 3.59}
+    for i, (name, pts) in enumerate(data.items()):
+        c = colors.get(name, "#5f6368")
+        s.append(poly([(sx(b), sy(v)) for b, v in pts], c, 2.2))
+        for b, v in pts:
+            s.append(circle(sx(b), sy(v), 3.2, c))
+        if name in quiver:
+            s.append(circle(sx(2), sy(quiver[name]), 4.4, "#d93025", "#d93025", 2))
+        y = T + 8 + i * 20
+        s.append(line(L + pw + 14, y, L + pw + 36, y, c, 3))
+        s.append(txt(L + pw + 42, y + 4, name, 10))
+    y0 = T + 8 + len(data) * 20 + 6
+    s.append(circle(L + pw + 25, y0 - 4, 4.4, "#d93025", "#d93025", 2))
+    s.append(txt(L + pw + 42, y0, "QuIVer 2-bit SM (measured)", 9, "#d93025"))
+    s.append(txt(L + pw + 14, y0 + 22, "all four thresholds sit at ~4 bits", 9, color="#5f6368"))
+    s.append("</svg>")
+    (OUT / "fig6-bit-budget.svg").write_text("".join(s), encoding="utf-8")
+
+
 if __name__ == "__main__":
     fig1()
     fig2()
     fig3()
     fig4()
     fig5()
+    fig6()
     for p in sorted(OUT.glob("*.svg")):
         print(f"  {p.name}  {p.stat().st_size / 1024:.1f} KB")

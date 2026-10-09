@@ -1,4 +1,4 @@
-# 6. Diagnosis: Why the Code Fails, and Two Different Failures
+# 6. Diagnosis: Why the Code Fails, and Three Different Failures
 
 > **Draft** 2026-09-22 ｜ every number traceable to `results/**` or `.tmp/*.log`
 > Notation as in §4. *Sign plane* = the `pos = (v > 0)` plane; *magnitude plane* = the `strong = (|v| > mean|v|)` plane.
@@ -72,21 +72,61 @@ Three readings:
    planted neighbours are so close that even a bad graph finds them). Consistent with our two failed
    single-scalar predictors (§7.4): there is no one quantity that predicts everything.
 
-## 6.4 Two different failures inside the paper's "< 15 %" tier
+## 6.4 Three different failures inside the paper's "< 15 %" tier
 
-The competitor curves we ran on the *same* tasks (§8.4) reveal that the paper's bottom tier mixes two
-phenomena with opposite deployment advice:
+The competitor curves we ran on the *same* tasks (§8.4) plus the VIBE row `coco_nomic` (§9.5) reveal that the
+paper's bottom tier mixes three phenomena with three different deployment answers:
 
-| | **(i) Code-specific collapse** | **(ii) Index-agnostic collapse** |
-|---|---|---|
-| Representatives | GIST-960, SIFT-128 | Random-Sphere-1M, Gaussian-960 |
-| `sign_info` | **0.000** | **1.000** |
-| HNSW `ef=64` on the same task | **normal**: 84.11 % / 97.06 % | **also collapses: 1.40 %** |
-| Effect of centring | **+37.6 / +14.9 pp** (@ef_s=64: 2.10→39.74, 15.77→30.64) | **+0.03 pp** (0.48→0.51); Gaussian-960 same order |
-| `L0 ∩ cos_top64` | 1.01 % / 4.34 % (27.98 % after centring) | 4.67 % |
-| What a deployer should do | centre it — and *still* prefer HNSW unless a 2–5 pp recall gap is acceptable | **do not use any graph index on this task** |
-| QuIVer vs HNSW | dominated before and after | **parity or better**: at matched recall QuIVer is **6.3–7.9×** faster |
+| | **(i) Code-specific collapse** | **(ii) Index-agnostic collapse** | **(iii) Capacity collapse** |
+|---|---|---|---|
+| Representatives | GIST-960, SIFT-128 | Random-Sphere-1M, Gaussian-960 | `coco_nomic` (VIBE, 768-d) |
+| `sign_info` | **0.000** | **1.000** | **0.382** |
+| HNSW `ef=64`, same task | **normal**: 84.11 % / 97.06 % | **also collapses: 1.40 % (Random-Sphere) / 1.10–1.39 % (Gaussian-960, three implementations)** | **normal: 86.23 %** @ 17,053 |
+| Centring | **+37.6 / +14.9 pp** (2.10→39.74, 15.77→30.64 @ef_s=64) | **+0.03 pp** (0.48→0.51) | helps little (still 2-bit) |
+| Seeded rotation (task-preserving) | **+58.1 / +44.5 pp** (2.10→60.22 @ef=64) | no gain (report: +0.03 pp) | **useless: 0.21 → 0.70 %** |
+| PQ/OPQ+Refine, same task | — (not measured) | — (not measured) | **98.42 %** @ 7,771 |
+| 4-bit uniform code + re-rank | 99.05 % | **99.30 %** | 94.60 % |
+| `L0 ∩ cos_top64` | 1.01 % / 4.34 % (27.98 % centred) | 4.67 % | — |
+| What a deployer should do | centre **or** rotate — and still prefer HNSW unless a 2–5 pp gap is acceptable | **do not build a graph index on this task** | **change the code** (PQ pays 4.7× memory) or accept the loss |
 
-The paper answers both with one sentence ("use float32"), which is correct as far as it goes but hides that
-(i) is an *encoding* problem that can be repaired and (ii) is a *task* problem that cannot.
-`sign_info` separates them for free, before any index is built.
+**A second witness for (ii).** On Gaussian-960 we ran the full competitor set on the same task: hnswlib
+**1.10 %**, FAISS-HNSW **1.30 %**, USearch **1.39 %**, and IVF-Flat **2.41 %** at `ef=64` — with every curve
+still ≤ 19 % at `ef=1024`. Four independent indexes agree that this task has no usable neighbourhood structure,
+so the index-agnostic reading is not an artefact of one HNSW implementation.
+
+The paper answers all three with one sentence ("use float32"), which is correct as far as it goes but hides
+that (i) is an *encoding* problem that can be repaired, (ii) is a *task* problem that cannot, and (iii) is a
+*capacity* problem where the fix is a different code — the one remedy that gives up the 675 MiB advantage
+this index exists for. `sign_info` separates (i) from (ii) for free, before any index is built; (iii) is the
+case where both planes are partially alive and no pre-index statistic we tested separates it (§7.4).
+
+## 6.5 The axis that actually moves the outcome: bits per dimension
+
+To test whether "collapse" is a property of the data or of the code, hold the code family fixed and vary only
+the budget. Instrument: per-dimension uniform quantization at *b* bits (min/max scaled), re-ranked exactly in
+float32 over the code's top-128 (`ef=128`, 200 K sampled base vectors, 200 queries) — the same instrument as
+the paper's own probe (§7.1), with the resolution turned into a variable.
+
+| Dataset (tier the paper assigns) | 1 bit | **2 bit** | 3 bit | **4 bit** | 6 bit | 16 bit |
+|---|---|---|---|---|---|---|
+| GIST-960 (collapse) | 3.55 % | **55.25 %** | 60.25 % | **99.05 %** | 99.95 % | 100 % |
+| Gaussian-960 (index-agnostic collapse) | 21.85 % | **23.05 %** | 76.10 % | **99.50 %** | 100 % | 100 % |
+| Random-Sphere (collapse) | 20.85 % | **23.25 %** | 76.75 % | **99.30 %** | 100 % | 100 % |
+| `coco_nomic` (capacity collapse) | 9.75 % | **31.60 %** | 76.10 % | **94.60 %** | 99.00 % | 100 % |
+
+Three consequences, in order of how much they change the paper's wording:
+
+1. **All four "collapse" datasets are ≥ 94.6 % at 4 bits.** The bottom tier is largely "2 bits per dimension
+   cannot hold this distribution", not "this dataset cannot be quantized".
+2. **The 2-bit sign–magnitude scheme is worse than naïve 2-bit uniform quantization** on the datasets where
+   both exist: `coco_nomic` 3.59 % measured vs **31.60 %** in this table; Gaussian-960 0.83 % vs **23.05 %**.
+   Spending one of the two bits on an almost-constant sign plane has a measurable price, and it is the
+   quantity our repairs (centre / rotate) recover *without* adding bits.
+3. **Random-Sphere's failure is not (only) in the code.** A 4-bit code with exact re-ranking reaches 99.30 %
+   on that task, yet HNSW collapses (1.40 %) — so its problem is in the *graph*, consistent with §6.3's
+   fidelity instrument. Only the code-side statistic and the graph-side statistic *together* separate the
+   three failure types, which is why §7's chain uses both.
+
+⚠️ Scope: the 1-bit row of this table is **naïve 1-bit uniform**, and is *not* QuIVer's 1-bit ablation; it is
+reported to bracket the axis, not as a competing implementation. The 16-bit row is the float32-equivalent
+upper bound (100 % by construction, up to tie degeneracy).

@@ -1,0 +1,126 @@
+{
+  "prefix": "cohere",
+  "dim": 768,
+  "n_train": 1000000,
+  "n_test": 1000,
+  "threads": 32,
+  "build_s": 14.883739000186324,
+  "control": null,
+  "normalized": true,
+  "results": [
+    {
+      "name": "faiss_rabitq_refine",
+      "build_s": 14.883739000186324,
+      "rows": [
+        {
+          "ef": 64,
+          "k_factor": 1,
+          "eff_nprobe": 64,
+          "eff_k_factor": 1,
+          "recall": 78.03,
+          "st_qps": 254.48225964630845,
+          "qps": 4655.50215275148
+        },
+        {
+          "ef": 64,
+          "k_factor": 20,
+          "eff_nprobe": 64,
+          "eff_k_factor": 20,
+          "recall": 97.37,
+          "st_qps": 249.95987519831965,
+          "qps": 4363.567179996487
+        },
+        {
+          "ef": 64,
+          "k_factor": 200,
+          "eff_nprobe": 64,
+          "eff_k_factor": 200,
+          "recall": 97.38,
+          "st_qps": 193.03840950814126,
+          "qps": 2884.934669925213
+        },
+        {
+          "ef": 256,
+          "k_factor": 1,
+          "eff_nprobe": 256,
+          "eff_k_factor": 1,
+          "recall": 78.88,
+          "st_qps": 65.38741678334533,
+          "qps": 1272.2095989040517
+        },
+        {
+          "ef": 256,
+          "k_factor": 20,
+          "eff_nprobe": 256,
+          "eff_k_factor": 20,
+          "recall": 99.78999999999999,
+          "st_qps": 65.1408906917429,
+          "qps": 1268.227440480694
+        },
+        {
+          "ef": 256,
+          "k_factor": 200,
+          "eff_nprobe": 256,
+          "eff_k_factor": 200,
+          "recall": 99.82,
+          "st_qps": 61.7272717774037,
+          "qps": 1087.4205666900962
+        },
+        {
+          "ef": 512,
+          "k_factor": 1,
+          "eff_nprobe": 512,
+          "eff_k_factor": 1,
+          "recall": 78.89999999999999,
+          "st_qps": 33.53129876798243,
+          "qps": 673.1514940314333
+        },
+        {
+          "ef": 512,
+          "k_factor": 20,
+          "eff_nprobe": 512,
+          "eff_k_factor": 20,
+          "recall": 99.94999999999999,
+          "st_qps": 33.6165590061567,
+          "qps": 672.8605272572263
+        },
+        {
+          "ef": 512,
+          "k_factor": 200,
+          "eff_nprobe": 512,
+          "eff_k_factor": 200,
+          "recall": 99.97999999999999,
+          "st_qps": 32.76197754957325,
+          "qps": 610.5619275936477
+        },
+        {
+          "ef": 1024,
+          "k_factor": 1,
+          "eff_nprobe": 1024,
+          "eff_k_factor": 1,
+          "recall": 78.91,
+          "st_qps": 18.648240722909563,
+          "qps": 368.93734940655685
+        },
+        {
+          "ef": 1024,
+          "k_factor": 20,
+          "eff_nprobe": 1024,
+          "eff_k_factor": 20,
+          "recall": 99.97,
+          "st_qps": 18.924624560254394,
+          "qps": 379.7157227833967
+        },
+        {
+          "ef": 1024,
+          "k_factor": 200,
+          "eff_nprobe": 1024,
+          "eff_k_factor": 200,
+          "recall": 100.0,
+          "st_qps": 18.351486819849615,
+          "qps": 360.1513817021199
+        }
+      ]
+    }
+  ]
+}

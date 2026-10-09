@@ -46,6 +46,9 @@ THREADS = int(os.environ.get("BL_THREADS", "32"))
 EF_LIST = [64, 128, 256, 512, 1024]
 TOP_K = 10
 N_CAP = int(os.environ.get("T2_N", "0"))  # 0 = 全部
+# 可选：跳过某些臂（逗号分隔的函数名，如 `BL_SKIP=usearch`）。
+# 用途：gauss960 上 USearch 建图超出行预算（见 P8 队列第 9 步），重跑时不必重建其余臂。
+BL_SKIP = {s.strip().lower() for s in os.environ.get("BL_SKIP", "").split(",") if s.strip()}
 
 TRAIN = f"{PREFIX}_train.f32"
 TEST = f"{PREFIX}_test.f32"
@@ -224,6 +227,9 @@ def main():
 
     results = []
     for fn in (run_faiss_exact, run_hnswlib, run_faiss_hnsw, run_usearch, run_faiss_ivf):
+        if fn.__name__ in BL_SKIP:
+            print(f"  [{fn.__name__}] 跳过（BL_SKIP）")
+            continue
         try:
             r = fn(lv, qv, gt)
             if r:

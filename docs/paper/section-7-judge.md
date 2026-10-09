@@ -60,8 +60,31 @@ Validated on **22 arms: 21 defensible verdicts** (the table in `results/t2/deplo
 bimodal gap that makes rule ① work is `sign_info = 0.000` for the six GIST/SIFT arms vs **≥ 0.597** for all
 other 18). The single boundary case is centred GloVe-100
 (`probe_ef` = 44.9 % against a 50 % threshold), where "use float32" happens to be right for a *different*
-reason (it is dominated by HNSW anyway, §8.4). Re-running the whole table with K = 3 query subsets
-reproduces every verdict.
+reason (it is dominated by HNSW anyway, §8.4).
+
+**Sampling stability.** Instrument values are means over **K = 5 disjoint query subsets** (the artifact table
+carries `probe_k = 5`). Re-run against the K = 3 version of the same table, **no verdict changes** and no arm
+drifts by more than **1.7 pp** (`sift128r`; 0 of 38 arms exceed a 3 pp threshold) — the chain is not an
+artifact of an unlucky sample, which was the main way a 200-query probe could have failed.
+
+**Prospective validation (the part that is not circular).** The rule "open weighted navigation iff
+`probe_ef(weighted) > probe_ef(Hamming)`" was frozen *before* the six arms below were measured; none took part
+in fitting it, and all six follow the prediction — including both large forks:
+
+| arm (held out) | probe weighted / Hamming | rule says | measured w0 → w1 @ef=64 | Δ |
+|---|---|---|---|---|
+| `arxiv_nomic` | 99.5 % / 99.5 % | plain | 96.78 % → 96.04 % | −0.74 |
+| `codesearch_jina` | 99.9 % / 99.9 % | weighted | 94.62 % → **96.37 %** | +1.75 |
+| `gooaq_roberta` | 100.0 % / 99.7 % | weighted | 96.60 % → **98.32 %** | +1.72 |
+| `landmark_nomic` | 93.7 % / **99.6 %** | plain | 93.05 % → **81.39 %** | **−11.66** |
+| `landmark_dino` | **99.2 %** / 96.2 % | weighted | 82.90 % → **91.58 %** | **+8.68** |
+| `gist960rc` | 99.6 % / 95.6 % | weighted | 76.05 % → **80.17 %** | +4.12 |
+
+**6/6 prospective** (5/6 in the fitting set; the miss is Wolt-CLIP at −0.5 pp / +0.9 pp, inside the §3.5 noise
+floor) ⇒ **11/12 overall**, with both large forks called in advance. Note the rule predicts the *sign* of the
+navigation-metric choice, not its magnitude: `landmark_nomic` shows that opening weighted navigation on the
+wrong side costs 11.7 pp — which is why the switch ships default-off and why rule ① (rotation) is the one
+that is safe to apply mechanically.
 
 Two design notes that came out of the data, not of taste:
 

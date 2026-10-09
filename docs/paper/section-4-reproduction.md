@@ -36,8 +36,9 @@ Euclidean leaderboard; we return to this in §10.
 
 **Reproducibility of a single arm.** Graph construction is concurrent, so the L0 edge set is not
 bit-reproducible between runs. To bound what that costs, we re-built and re-measured the five tier
-representatives three times each: the spread of R@10 @ef = 64 is **≤ 0.27 pp**
-(Cohere 0.13, GloVe-100 0.27, SIFT-128 0.07, GIST-960 0.06, Wolt-CLIP 0.07). We therefore treat recall-level
+representatives three times each: the spread of R@10 @ef = 64 is **≤ 0.25 pp**
+(GIST-960 0.22, SIFT-128 0.25, GloVe-100 0.10, Wolt-CLIP 0.19, Cohere 0.16; at `ef_s = 1024` the spread stays
+≤ 0.27 pp; per-seed values in `results/t2/p7_stagec_report.json`). We therefore treat recall-level
 conclusions as comparable at that resolution, and mark any graph-structure quantity as a single-sample estimate.
 
 ## 4.3 Result: all twelve rows reproduce

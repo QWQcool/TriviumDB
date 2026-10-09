@@ -1,0 +1,53 @@
+{
+  "prefix": "gist960c",
+  "dim": 960,
+  "n_train": 1000000,
+  "n_test": 1000,
+  "threads": 32,
+  "build_s": 15.680017200065777,
+  "control": null,
+  "results": [
+    {
+      "name": "faiss_rabitq_refine",
+      "build_s": 15.680017200065777,
+      "rows": [
+        {
+          "ef": 64,
+          "k_factor": 20,
+          "eff_nprobe": 64,
+          "eff_k_factor": 20,
+          "recall": 75.78,
+          "st_qps": 281.46358247975326,
+          "qps": 4122.769476538226
+        },
+        {
+          "ef": 64,
+          "k_factor": 200,
+          "eff_nprobe": 64,
+          "eff_k_factor": 200,
+          "recall": 95.38,
+          "st_qps": 228.62343975137406,
+          "qps": 2616.9139001444037
+        },
+        {
+          "ef": 256,
+          "k_factor": 20,
+          "eff_nprobe": 256,
+          "eff_k_factor": 20,
+          "recall": 69.29,
+          "st_qps": 82.51564863901734,
+          "qps": 1256.120446980344
+        },
+        {
+          "ef": 256,
+          "k_factor": 200,
+          "eff_nprobe": 256,
+          "eff_k_factor": 200,
+          "recall": 95.76,
+          "st_qps": 76.10535242680201,
+          "qps": 1107.919932433859
+        }
+      ]
+    }
+  ]
+}

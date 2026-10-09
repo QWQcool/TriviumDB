@@ -1,0 +1,59 @@
+{
+  "synthetic": {
+    "d": 64,
+    "n_base": 20000,
+    "n_query": 200,
+    "nlist": 64,
+    "seed": 0
+  },
+  "exact_base": {
+    "base_metric": 0,
+    "refine_metric": 0,
+    "default_k_factor": 1.0,
+    "rows": [
+      {
+        "k_factor": 1.0,
+        "recall_vs_ip_gt": 100.0,
+        "recall_vs_l2_gt": 16.7
+      },
+      {
+        "k_factor": 20.0,
+        "recall_vs_ip_gt": 100.0,
+        "recall_vs_l2_gt": 16.7
+      },
+      {
+        "k_factor": 200.0,
+        "recall_vs_ip_gt": 100.0,
+        "recall_vs_l2_gt": 16.7
+      }
+    ]
+  },
+  "rabitq_base": {
+    "base_type": "IndexIVFRaBitQ",
+    "refine_metric": 0,
+    "default_k_factor": 1.0,
+    "rows": [
+      {
+        "k_factor": null,
+        "note": "default",
+        "recall_vs_ip_gt": 19.25
+      },
+      {
+        "k_factor": 1.0,
+        "recall_vs_ip_gt": 19.25
+      },
+      {
+        "k_factor": 20.0,
+        "recall_vs_ip_gt": 44.45
+      },
+      {
+        "k_factor": 200.0,
+        "recall_vs_ip_gt": 46.050000000000004
+      }
+    ]
+  },
+  "ivfflat_reference": {
+    "nprobe_8": 46.050000000000004,
+    "nprobe_64": 100.0
+  }
+}

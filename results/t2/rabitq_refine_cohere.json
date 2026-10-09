@@ -1,0 +1,89 @@
+{
+  "prefix": "cohere",
+  "dim": 768,
+  "n_train": 1000000,
+  "n_test": 1000,
+  "threads": 32,
+  "build_s": 12.177067999960855,
+  "control": null,
+  "results": [
+    {
+      "name": "faiss_rabitq_refine",
+      "build_s": 12.177067999960855,
+      "rows": [
+        {
+          "ef": 64,
+          "k_factor": 20,
+          "eff_nprobe": 64,
+          "eff_k_factor": 20,
+          "recall": 36.58,
+          "st_qps": 268.7030416232307,
+          "qps": 4174.274278886368
+        },
+        {
+          "ef": 64,
+          "k_factor": 200,
+          "eff_nprobe": 64,
+          "eff_k_factor": 200,
+          "recall": 35.08,
+          "st_qps": 241.2435060596316,
+          "qps": 2926.826413096471
+        },
+        {
+          "ef": 256,
+          "k_factor": 20,
+          "eff_nprobe": 256,
+          "eff_k_factor": 20,
+          "recall": 36.669999999999995,
+          "st_qps": 86.39812987496472,
+          "qps": 1302.2652775605538
+        },
+        {
+          "ef": 256,
+          "k_factor": 200,
+          "eff_nprobe": 256,
+          "eff_k_factor": 200,
+          "recall": 35.01,
+          "st_qps": 81.73938067194085,
+          "qps": 1170.3966428478382
+        },
+        {
+          "ef": 512,
+          "k_factor": 20,
+          "eff_nprobe": 512,
+          "eff_k_factor": 20,
+          "recall": 36.669999999999995,
+          "st_qps": 46.39080273767881,
+          "qps": 729.3857178843365
+        },
+        {
+          "ef": 512,
+          "k_factor": 200,
+          "eff_nprobe": 512,
+          "eff_k_factor": 200,
+          "recall": 34.96,
+          "st_qps": 44.3757001739303,
+          "qps": 663.6485699339166
+        },
+        {
+          "ef": 1024,
+          "k_factor": 20,
+          "eff_nprobe": 1024,
+          "eff_k_factor": 20,
+          "recall": 36.66,
+          "st_qps": 25.62277998785739,
+          "qps": 391.4230136851247
+        },
+        {
+          "ef": 1024,
+          "k_factor": 200,
+          "eff_nprobe": 1024,
+          "eff_k_factor": 200,
+          "recall": 34.96,
+          "st_qps": 24.50574011306688,
+          "qps": 371.77273844081185
+        }
+      ]
+    }
+  ]
+}

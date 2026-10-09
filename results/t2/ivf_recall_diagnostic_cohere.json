@@ -1,0 +1,75 @@
+{
+  "prefix": "cohere",
+  "dim": 768,
+  "faiss": "1.15.0",
+  "nlist": 1024,
+  "ivfflat_direct": [
+    {
+      "nprobe": 1,
+      "recall": 23.330000000000002
+    },
+    {
+      "nprobe": 4,
+      "recall": 31.97
+    },
+    {
+      "nprobe": 16,
+      "recall": 34.550000000000004
+    },
+    {
+      "nprobe": 64,
+      "recall": 34.940000000000005
+    },
+    {
+      "nprobe": 128,
+      "recall": 34.940000000000005
+    },
+    {
+      "nprobe": 256,
+      "recall": 34.88
+    },
+    {
+      "nprobe": 512,
+      "recall": 34.839999999999996
+    },
+    {
+      "nprobe": 1024,
+      "recall": 34.839999999999996
+    }
+  ],
+  "paramspace_reaches_base": true,
+  "rabitq_refine_direct": [
+    {
+      "nprobe": 1,
+      "k_factor": 200,
+      "recall": 34.19
+    },
+    {
+      "nprobe": 64,
+      "k_factor": 200,
+      "recall": 59.74999999999999
+    },
+    {
+      "nprobe": 256,
+      "k_factor": 200,
+      "recall": 60.199999999999996
+    },
+    {
+      "nprobe": 1024,
+      "k_factor": 200,
+      "recall": 60.24
+    }
+  ],
+  "ivfflat_paramspace": [
+    {
+      "nprobe": 64,
+      "recall": 34.940000000000005,
+      "index_nprobe": 64
+    },
+    {
+      "nprobe": 256,
+      "recall": 34.88,
+      "index_nprobe": 256
+    }
+  ]
+}

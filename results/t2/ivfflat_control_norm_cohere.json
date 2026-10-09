@@ -1,0 +1,54 @@
+{
+  "prefix": "cohere",
+  "dim": 768,
+  "n_train": 1000000,
+  "n_test": 1000,
+  "threads": 32,
+  "build_s": 10.725551699986681,
+  "control": "ivfflat",
+  "normalized": true,
+  "results": [
+    {
+      "name": "faiss_ivfflat_control",
+      "build_s": 10.725551699986681,
+      "rows": [
+        {
+          "ef": 64,
+          "k_factor": 1,
+          "eff_nprobe": 64,
+          "eff_k_factor": null,
+          "recall": 97.38,
+          "st_qps": 79.71180992318244,
+          "qps": 278.7739610458544
+        },
+        {
+          "ef": 256,
+          "k_factor": 1,
+          "eff_nprobe": 256,
+          "eff_k_factor": null,
+          "recall": 99.82,
+          "st_qps": 20.30179375710421,
+          "qps": 72.30881661048727
+        },
+        {
+          "ef": 512,
+          "k_factor": 1,
+          "eff_nprobe": 512,
+          "eff_k_factor": null,
+          "recall": 99.97999999999999,
+          "st_qps": 10.306457090705194,
+          "qps": 37.26392326411703
+        },
+        {
+          "ef": 1024,
+          "k_factor": 1,
+          "eff_nprobe": 1024,
+          "eff_k_factor": null,
+          "recall": 100.0,
+          "st_qps": 5.83880555629796,
+          "qps": 21.035114863862866
+        }
+      ]
+    }
+  ]
+}

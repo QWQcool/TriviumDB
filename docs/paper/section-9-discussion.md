@@ -51,3 +51,29 @@ recall**. Our two attempts to build one failed (§7.4), and the two strongest co
 (graph fidelity, `sign_info`) each have a counterexample that forbids a monotone formula. The deliverable is
 therefore a **triage rule plus a necessary condition**, with its abstention made explicit — which is, we
 suspect, the honest form of this kind of result, and the reason we report the failures alongside the wins.
+
+## 9.5 Does the boundary appear outside the paper's twelve datasets? (VIBE)
+
+Table 11 is built from twelve datasets. We ran seven modern embedding benchmarks that the paper never
+evaluates (VIBE, `vector-index-bench/vibe`; 282 K – 3.9 M vectors, 768-d) to ask whether our triage rule
+extrapolates. It does — and the extrapolation is uncomfortable for the published claim:
+
+| VIBE row | n × d | `sign_info` | `probe_ef` (min metric) | QuIVer @ ef=64 → @1024 | hnswlib @ ef=64 |
+|---|---|---|---|---|---|
+| `coco_nomic` | 282 K × 768 | 0.382 | **0.6 %** ⇒ "use float32" | **0.21 % → 3.59 %** | **86.23 %** @17,053 |
+| `ccnews_nomic` | 495 K × 768 | 0.690 | 99.0 % ⇒ "usable" | 25.65 % → **99.64 %** | (not measured) |
+
+Two readings:
+
+* **`coco_nomic` is a catastrophe of a kind the paper's table cannot contain** — a modern, widely-used
+  embedding benchmark on which the shipped index returns **0.21 %** R@10 while plain HNSW returns 86 % on the
+  same task, with an exact scan at 100 % (neither the GT nor the task is at fault). Our gate catches it before
+  any index is built (`probe_ef` = 0.6 %), and **neither of our repairs rescues it** (rotation: 0.21 → 0.70 %):
+  this is failure type (iii) of §6.4, where the honest advice is "change the code" (PQ: 98.42 %).
+* **The probe estimates a ceiling, not a latency.** `ccnews_nomic` probes at 99.0 % while delivering 25.65 % at
+  `ef=64`; its 99.64 % appears only at `ef_s=1024`. So "usable" must never be read as "fast at your operating
+  point" — the §5 caveat restated in the one place where the two could be conflated.
+
+Scope of this subsection: VIBE rows are an **extension**, not a reproduction (they are not in Table 11), and
+two of the seven rows were measured with the gate plus a single real-index sweep; the remaining five rows are
+reported with their `sign_info`/`probe` verdicts only (§11.3).

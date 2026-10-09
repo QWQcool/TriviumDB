@@ -165,6 +165,13 @@ HNSW 到 86.2%，只有 2-bit SM 码塌到 0.21%，而且**旋转修不好**（0
 
 ## 2h. item 4：IVF+RaBitQ+Refine —— **已跑，但卡在候选池（需要更大 `k_factor` 才算完）**
 
+> ⚠️ **2026-10-09 P8 队列修正（本节读法已作废，保留以示审计）**：下表"召回被候选池锁死、放大 k_factor 即可"
+> 的读法**不成立**。真实根因是 **cohere 的 shipped GT 是 cosine 口径、而 f32 文件是原始未归一化向量**
+> （`gt_metric_consistency_probe.py`：归一化 IP 复现 GT 10/10，raw-IP 仅 4.2/10），任何不归一化的臂都在
+> 对错误目标打分；`k_factor` 在此前版本里经 `ParameterSpace` 设置**静默失败**（保持默认 1.0），"放大
+> k_factor"的修正版在 raw 口径下反而把结果拉回 raw-IP 排序（~35 %）。归一化重跑后同族对照完全符合理论
+> （RaBitQ+Refine ≤ 精确 IVF-Flat，全表 100 %）。详见 `docs/research/p8-queue-report.md` §2 与论文 §5.6(b)。
+
 | 观测 | 数字 |
 |---|---|
 | faiss 1.15 `IndexIVFRaBitQ` + `IndexRefineFlat(f32)`，cohere，nprobe ∈ {4..512} × k ∈ {1,4,10,20} | 召回**恒在 60.1–60.2%**，与 nprobe 无关；QPS 753–2,881 |

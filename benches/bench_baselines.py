@@ -359,8 +359,11 @@ def bench_faiss_ivfpq(train: np.ndarray, queries: np.ndarray, gt: np.ndarray):
     # ---- 第二部分：OPQ + IVF-PQ + Refine（完整流水线） ----
     print("\n>>> 模式 B: OPQ + IVF-PQ + Refine（生产级配置）<<<")
 
-    OPQ_M_PQ_VALUES = [64, 96, 128, 192]
-    OPQ_NLIST_VALUES = [1024, 4096]
+    # 允许只跑指定配置（默认与历史完全一致）——
+    # 例：TRIVIUM_OPQ_NLIST=4096 TRIVIUM_OPQ_M_PQ=128 TRIVIUM_MT_THREADS=16
+    # ⇒ 只跑 (nlist=4096, m_pq=128) 且用 16 线程（对齐论文线程数，P7-① 用）。
+    OPQ_M_PQ_VALUES = _env_int_list("TRIVIUM_OPQ_M_PQ", [64, 96, 128, 192])
+    OPQ_NLIST_VALUES = _env_int_list("TRIVIUM_OPQ_NLIST", [1024, 4096])
 
     for nlist in OPQ_NLIST_VALUES:
         for m_pq in OPQ_M_PQ_VALUES:
