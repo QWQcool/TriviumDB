@@ -32,6 +32,8 @@ rotate**. Both choices are made by the same free statistic, so a deployer does n
 open is the *learned*-transform direction (L12): we tested one seeded **random** rotation, not OPQ-style
 learned ones, so 60.22 % / 60.24 % should be read as a **lower bound** on what a transform-side repair can do.
 
+![**Figure 1.** Repair comparison at `ef_s = 64` (cheap navigation): original, centred and seeded-rotated R@10 for four tier representatives. Rotation is a pure gain only where the sign plane is dead (GIST-960 +58.1 pp, SIFT-128 +44.5 pp) and a loss on Cohere (−4.8 pp); centring is neutral-to-small elsewhere.](figures/fig1-repair-bars.svg)
+
 ## 9.3 What this says about the published applicability claim
 
 The paper's four tiers are an **applicability** gradient (a description of achieved recall) and are read by

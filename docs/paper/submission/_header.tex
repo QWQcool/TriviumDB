@@ -1,0 +1,13 @@
+
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{etoolbox}
+\usepackage{graphicx}
+\usepackage{float}
+\AtBeginEnvironment{longtable}{\footnotesize}
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.05}
+\setlength{\emergencystretch}{2em}
+% 图注编号由正文手写（"**Figure N.**"），这里关掉 LaTeX 的自动编号与分隔符，避免双编号
+\captionsetup[figure]{labelformat=empty,labelsep=none}

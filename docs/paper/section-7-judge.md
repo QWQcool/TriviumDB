@@ -36,6 +36,8 @@ Taking the weaker of the two metrics repairs both without changing any other arm
 value by up to **6.8×**, and the direction is systematic: *fewer samples ⇒ more optimistic*.
 Independently, different query subsets give a **4–7 pp** spread, so a single-run number is not quotable.
 
+![**Figure 4.** The published probe (min over the two BQ metrics) as a function of candidate sample size `S` for eight arms (legend: measured R@10 at `ef=64`). Smaller `S` is systematically more optimistic; the paper's "≈ 10K vectors" prescription sits at the top of a curve whose total swing is 6.8× (see also (c)).](figures/fig4-probe-sample-size.svg)
+
 **(c) The literal instrument is pessimistic.** "Code top-10 ∩ f32 GT" understates what a graph search
 achieves, because search uses the code to *navigate* and then re-ranks `ef` candidates in float32.
 GIST-960 (centred) is the clearest case: top-10 gives **25.4–29.8 %** while the `top-ef` instrument gives
@@ -99,8 +101,8 @@ We pre-registered two single-scalar predictors and **both failed**; they are par
 
 | attempt | pre-registered criterion | outcome |
 |---|---|---|
-| code-estimate SNR `(GT10 − GT11)/σ_code` | ρ ≥ 0.9 vs R@10 | ❌ **ρ = +0.30** with the Random-Sphere arm — `σ_code` is scale-free and collapses on unstructured data |
-| separability (`cos_std` of random pairs) as a boundary predictor | monotone relation | ❌ **retracted** — centred SIFT is a counterexample (separability *falls* while recall doubles) |
+| code-estimate SNR `(GT10 − GT11)/σ_code` | ρ ≥ 0.9 vs R@10 | **Failed**: ρ = +0.30 with the Random-Sphere arm — `σ_code` is scale-free and collapses on unstructured data |
+| separability (`cos_std` of random pairs) as a boundary predictor | monotone relation | **Failed and retracted**: centred SIFT is a counterexample (separability *falls* while recall doubles) |
 
 Final position: the chain is **triage plus a necessary condition**, not a sufficiency claim. That is also why
 the graph-fidelity axis (§6.3) is reported as a *correlate* (9 points) and not as a formula — fidelity is high

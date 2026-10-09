@@ -1,13 +1,12 @@
 # 12. References, Artifact Statement, and How to Assemble This Draft
 
-> **Draft** 2026-10-09. ⚠️ **Before submission**, verify every bibliographic entry below against its
-> published version (venues/pages, and the arXiv ids marked *[verify]*). We list what we actually used,
-> with the version we used.
+> Every entry below was checked against its published version on 2026-10-09 (arXiv ids, venues and author
+> lists verified against the arXiv abstract pages). We list what we actually used, with the version we used.
 
 ## 12.1 The object of study
 
-1. **QuIVer: Rethinking ANN Graph Topology via Training-Free Binary Quantization.** arXiv:2605.02171 (2026).
-   — the paper evaluated and extended throughout §§4–7.
+1. **QuIVer: Rethinking ANN Graph Topology via Training-Free Binary Quantization.** W. Xiao, Z. Wang, C. Li.
+   arXiv:2605.02171 (2026), cs.DB. — the paper evaluated and extended throughout §§4–7.
 2. **README_QUIVER.md** (shipped with the implementation). — dataset preparation, benchmark drivers, and the
    step-by-step reproduction guide this work follows. §4.2's "one protocol deviation" is a deviation from
    *this* document, not from the paper text.
@@ -21,12 +20,12 @@
 |---|---|---|
 | 4 | HNSW (algorithm) | Yu. A. Malkov, D. A. Yashunin. *Efficient and robust approximate nearest neighbor search using Hierarchical Navigable Small World graphs.* IEEE TPAMI 42(4), 2020. arXiv:1603.09320 |
 | 5 | hnswlib (implementation) | https://github.com/nmslib/hnswlib |
-| 6 | FAISS (library) | J. Johnson, M. Douze, H. Jégou. *Billion-scale similarity search with GPUs.* IEEE Trans. Big Data, 2019. arXiv:1702.08734; and *The FAISS library.* arXiv:2401.08281 *[verify]* |
+| 6 | FAISS (library) | J. Johnson, M. Douze, H. Jégou. *Billion-scale similarity search with GPUs.* IEEE Trans. Big Data, 2019. arXiv:1702.08734; and M. Douze, A. Guzhva, C. Deng, J. Johnson, G. Szilvasy, P.-E. Mazaré, M. Lomeli, L. Hosseini, H. Jégou. *The Faiss library.* arXiv:2401.08281 (2025) |
 | 7 | USearch (implementation) | https://github.com/unum-cloud/usearch |
 | 8 | Inverted-file index (IVF / IVF-Flat) | J. Sivic, A. Zisserman. *Video Google: a text retrieval approach to object matching in videos.* ICCV 2003 |
 | 9 | Product quantization (PQ) | H. Jégou, M. Douze, C. Schmid. *Product quantization for nearest neighbor search.* IEEE TPAMI 33(1), 2011 |
 | 10 | Optimized PQ (OPQ) | T. Ge, K. He, Q. Ke, J. Sun. *Optimized product quantization for approximate nearest neighbor search.* CVPR 2013 |
-| 11 | RaBitQ | S. Gao, Y. Long, et al. *RaBitQ: Quantizing high-dimensional vectors with a theoretical error bound for approximate nearest neighbor search.* SIGMOD 2024. arXiv:2405.12497 *[verify authors]* |
+| 11 | RaBitQ | J. Gao, C. Long. *RaBitQ: Quantizing high-dimensional vectors with a theoretical error bound for approximate nearest neighbor search.* SIGMOD 2024 (DOI 10.1145/3654970). arXiv:2405.12497 |
 | 12 | DiskANN / Vamana graph | S. Subramanya, et al. *DiskANN: Fast accurate billion-point nearest neighbor search on a single node.* NeurIPS 2019 |
 | 13 | FAISS `IndexIVFRaBitQ` / `IndexRefineFlat` / `IndexPreTransform` | FAISS 1.15 API (the same-family RaBitQ arm of §5.6(b), and the PQ arm of §5.6(a)) |
 
@@ -38,7 +37,8 @@ absent on the evaluation machine and the `pyvsag` wheel available there is a Lin
 14. J. Mu, P. Viswanath. *All-but-the-Top: Simple and effective postprocessing for word representations.*
     ICLR 2018. arXiv:1702.01417 — the centring step of §8.1 is this post-processing, applied to the query and
     base vectors before quantization.
-15. **VIBE: Vector Index Benchmark for Embeddings.** arXiv:2505.17810 *[verify]* —
+15. **VIBE: Vector Index Benchmark for Embeddings.** E. Jääsaari, V. Hyvönen, M. Ceccarello, T. Roos,
+    M. Aumüller. arXiv:2505.17810 (2025); J. Data-centric ML Research (2026) —
     https://github.com/vector-index-bench/vector-index-bench. The seven external benchmarks of §9.5.
 16. Embedding models whose released vectors we use (Cohere-768, OpenAI-1536/3072, Nomic-768, Jina-768,
     DINOv2, MiniLM, BGE-M3, GloVe-100, Wolt-CLIP-512): cited via the dataset preparation scripts of (2) and
@@ -72,18 +72,21 @@ quantizer arm, the external benchmarks). The full unattended batch that produced
 **What is *not* in the artifact.** The upstream paper's own source or LaTeX; the VIBE and embedding-model
 downloads (public, large, and pinned by their own repositories); and the two blocked baselines of §10.3/L13.
 
-## 12.5 Assembling this draft
+## 12.5 Assembling this draft, and the submission build
 
 This draft is thirteen Markdown files, `section-0-abstract.md` … `section-12-references.md`, in that order;
-the section index in `section-0-abstract.md` is the authoritative table of contents. A PDF build is a
-straightforward Pandoc pass (the tables are pipe tables, the figures are the SVGs in
-`docs/paper/figures/`):
+the section index in `section-0-abstract.md` is the authoritative table of contents. A submission build is
+produced by one script, which assembles the sections in order, converts and embeds the six figures
+(SVG → PDF) and compiles the PDF with Pandoc + Tectonic:
 
 ```bash
-pandoc docs/paper/section-*.md -o quiver-independent-eval.pdf \
-       --pdf-engine=xelatex --toc -N --highlight-style=tango
+python scripts/paper/build_submission.py
+# -> docs/paper/submission/quiver-independent-eval.tex
+# -> docs/paper/submission/quiver-independent-eval.pdf
+# -> docs/paper/submission/abstract-short.txt   (for the arXiv metadata field)
+# -> docs/paper/submission/README.md            (fill-in checklist)
 ```
 
-⚠️ Remaining packaging work before an arXiv submission: fold §12's list into a BibTeX/`--citeproc`
-bibliography, add an explicit author/affiliation block and acknowledgements, and re-render the six figures
-(fig1–fig6) at column width. None of it changes any number in this draft.
+What remains before an actual submission, and cannot be automated: the **author/affiliation/e-mail block**
+(filled from `README.md`'s placeholder), the **license choice**, and optionally folding §12's list into a
+BibTeX bibliography. None of it changes any number in this draft.

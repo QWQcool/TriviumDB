@@ -105,7 +105,7 @@ case where both planes are partially alive and no pre-index statistic we tested 
 To test whether "collapse" is a property of the data or of the code, hold the code family fixed and vary only
 the budget. Instrument: per-dimension uniform quantization at *b* bits (min/max scaled), re-ranked exactly in
 float32 over the code's top-128 (`ef=128`, 200 K sampled base vectors, 200 queries) — the same instrument as
-the paper's own probe (§7.1), with the resolution turned into a variable.
+the paper's own probe (§7.1), with the resolution turned into a variable (Figure 6).
 
 | Dataset (tier the paper assigns) | 1 bit | **2 bit** | 3 bit | **4 bit** | 6 bit | 16 bit |
 |---|---|---|---|---|---|---|
@@ -127,6 +127,8 @@ Three consequences, in order of how much they change the paper's wording:
    fidelity instrument. Only the code-side statistic and the graph-side statistic *together* separate the
    three failure types, which is why §7's chain uses both.
 
-⚠️ Scope: the 1-bit row of this table is **naïve 1-bit uniform**, and is *not* QuIVer's 1-bit ablation; it is
+**Scope.** The 1-bit row of this table is **naïve 1-bit uniform**, and is *not* QuIVer's 1-bit ablation; it is
 reported to bracket the axis, not as a competing implementation. The 16-bit row is the float32-equivalent
 upper bound (100 % by construction, up to tie degeneracy).
+
+![**Figure 6.** Bits per dimension vs achievable recall for a uniform scalar code with exact f32 re-ranking over the code's top-128 (200 K base / 200 queries, four collapse datasets). All four cross ≈ 94 % at 4 bits; the red markers are the shipped 2-bit sign–magnitude code measured on the same tasks.](figures/fig6-bit-budget.svg)

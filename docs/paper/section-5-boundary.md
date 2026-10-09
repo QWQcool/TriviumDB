@@ -1,8 +1,8 @@
 # 5. Applicability Is Not Competitiveness
 
-> **Draft** 2026-09-20, revised 2026-10-09 ｜ all competitor arms measured on the same machine, same data,
-> same ground truth as the QuIVer arm they are compared against; every QuIVer point is a multi-arm run in one
-> process. The RaBitQ same-family arm carries a documented protocol correction (§5.6b).
+> All competitor arms are measured on the same machine, on the same data and the same ground truth as the
+> QuIVer arm they are compared against; every QuIVer point is a multi-arm run in one process. One same-family
+> arm carries a documented protocol correction (§5.6b).
 
 ## 5.1 The question a deployer actually asks
 
@@ -81,12 +81,12 @@ FAISS ones as closely as our platform allows (§10.3/L14 records the configurati
 
 | Task (same data + GT, same machine, 32 threads) | QuIVer, best | OPQ+IVF-PQ+Refine | Verdict |
 |---|---|---|---|
-| Cohere-1M (768-d; competitive tier) | **99.78 %** @ 8,684 | 99.82 % @ 2,330 | ✅ QuIVer **3.7×** faster at ≥ 99.0 % recall |
-| Wolt-CLIP-1M, after centring | 89.05 % @ 9,788 | **89.66 %** @ 3,809 | ⚖️ tie-bound: every index lands ≈ 90 % under a **96.1 %** exact-scan ceiling (L6) |
-| GloVe-100, after centring | 93.32 % @ 11,675 | **96.61 %** @ 4,990 | ⚖️ PQ higher recall, QuIVer higher QPS |
-| GIST-960, after centring | 82.77 % (centred) → **88.99 %** (rotated) | **98.99 %** @ 3,242 | ❌ PQ is more accurate **and** never collapsed |
-| SIFT-128, after centring | 84.57 % (centred) → **95.74 %** (rotated) | **99.94 %** @ 2,151 | ❌ PQ is more accurate **and** never collapsed |
-| `coco_nomic` (VIBE; outside Table 11) | **0.21 %** (0.70 % rotated) | **98.42 %** @ 7,771 | ❌ PQ does not collapse at all |
+| Cohere-1M (768-d; competitive tier) | **99.78 %** @ 8,684 | 99.82 % @ 2,330 | **QuIVer wins**: 3.7× faster at ≥ 99.0 % recall |
+| Wolt-CLIP-1M, after centring | 89.05 % @ 9,788 | **89.66 %** @ 3,809 | **Tie-bound**: every index lands ≈ 90 % under a **96.1 %** exact-scan ceiling (L6) |
+| GloVe-100, after centring | 93.32 % @ 11,675 | **96.61 %** @ 4,990 | **Split**: PQ higher recall, QuIVer higher QPS |
+| GIST-960, after centring | 82.77 % (centred) → **88.99 %** (rotated) | **98.99 %** @ 3,242 | **PQ wins**: more accurate **and** never collapsed |
+| SIFT-128, after centring | 84.57 % (centred) → **95.74 %** (rotated) | **99.94 %** @ 2,151 | **PQ wins**: more accurate **and** never collapsed |
+| `coco_nomic` (VIBE; outside Table 11) | **0.21 %** (0.70 % rotated) | **98.42 %** @ 7,771 | **PQ wins**: does not collapse at all |
 
 On all **six** cells above, a PQ/OPQ pipeline with the *same* f32 re-ranking never collapses — the hardest
 cases included: `gist960c` (39.74 % at `ef=64` after centring), `sift128c` (30.16 %), `coco_nomic` (0.21 %).
@@ -94,7 +94,9 @@ The published boundary is therefore a property of **the 2-bit sign–magnitude c
 general and not of the data. The price is memory: a refined PQ index must keep the f32 copy it re-ranks
 against, ≈ **3.16 GiB** for 1 M × 768, against QuIVer's **675 MiB** (§11.3a). "Cheap memory" and "high recall"
 are a trade-off *for PQ*; BQ-native is the arm that gives up neither — which is the honest version of the
-BQ-native value proposition, and the one §8.7 quantifies.
+BQ-native value proposition, and the one §8.7 quantifies. Figure 5 shows the same-recall comparison on Cohere.
+
+![**Figure 5.** Same-recall throughput on Cohere-1M × 768: QuIVer against the HNSW family and OPQ+IVF-PQ+Refine. At ≥ 99 % recall QuIVer is 3.7× faster than the refined PQ pipeline, which is the only competitor class that reaches the same ceiling.](figures/fig5-matched-recall.svg)
 
 **(b) The same-family arm, and the protocol trap that faked its verdict.** The paper's list also names its own
 family — "FAISS IVF+RaBitQ+Refine" — so we ran `IndexIVFRaBitQ` + `IndexRefineFlat` (f32 re-ranking) on

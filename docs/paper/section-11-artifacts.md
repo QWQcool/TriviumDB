@@ -21,7 +21,10 @@
 | `scripts/research/deployability_gate.py` | the 22-arm gate table of §7.3 (`sign_info`, `‖μ‖`, `probe10`, `probe_ef`, verdict) |
 | `scripts/research/compat_probe_scaling.py` | sample-size / query-subset sensitivity of the published probe (§7.2) |
 | `scripts/research/graph_neighbor_quality.py` | `L0 ∩ {cos, weighted, cheap}_top64` (§6.3) |
-| `scripts/research/baseline_competitors.py` | hnswlib / FAISS-HNSW / USearch / IVF-Flat / `faiss_exact` curves on the same task (§5, §8.4) |
+| `scripts/research/baseline_competitors.py` | hnswlib / FAISS-HNSW / USearch / IVF-Flat / `faiss_exact` curves on the same task (§5, §8.4); `BL_SKIP` can drop an arm |
+| `scripts/research/ivf_recall_diagnostic.py` | the wrapper/parameter audit of §5.6(b): does `nprobe` reach the wrapped base, what does `k_factor` actually do, where does the exact arm saturate |
+| `scripts/research/gt_metric_consistency_probe.py` | the GT/vector metric check of §5.6(b): which exact search reproduces the shipped ground truth |
+| `scripts/research/faiss_refine_mechanics_probe.py` | the synthetic mechanics probe of §5.6(b): refine metric, default `k_factor`, monotonicity on a self-consistent task |
 
 ## 11.3 Where each table comes from
 
@@ -29,19 +32,19 @@
 |---|---|
 | §4.3 (12 rows) | `results/t2/*/` per-dataset bench logs; frozen values in `docs/research/HANDOFF.md` |
 | §5.3 (tier × competitor map) | `results/baseline/competitors_*.json` |
-| §6.3 (graph fidelity) | `results/t2/gist960_collapse/graph_quality_*.json`（9 个文件，字段 `overlap_cos_pct` / `overlap_w_pct` / `overlap_c_pct`） |
+| §6.3 (graph fidelity) | `results/t2/gist960_collapse/graph_quality_*.json` (9 files; fields `overlap_cos_pct` / `overlap_w_pct` / `overlap_c_pct`) |
 | §7.2–7.3 (gate + probe sensitivity) | `results/t2/deployability_gate.json`, `results/t2/p2_probe_scaling.json` |
 | §8.2–8.3 (centre + navigation A/B) | `results/t2/gist960_collapse/*.json` |
 | §8.4 (7-arm map) | `results/baseline/competitors_*c.json` |
-| §8.6 (rotation) | `*r_*.f32/i32` 派生集（`gist960r`/`sift128r`/`glove100r`/`coherer`，由 `gist960_collapse_prepare.py --rotate` 生成，含 GT 不变性校验）+ `.tmp/p4a_*.log`；诊断见 `docs/research/p4a-rotation-vs-centering.md` |
-| §10-L9 (memory) | `results/t2/memory_footprint_cohere.json`（脚本 `scripts/research/memory_index_footprint.py`，日志 `.tmp/p4b_memory_cohere.log`） |
+| §8.6 (rotation) | derived `*r_*.f32/i32` sets (`gist960r` / `sift128r` / `glove100r` / `coherer`, produced by `gist960_collapse_prepare.py --rotate`, with the GT-invariance check) + `.tmp/p4a_*.log`; diagnosis in `docs/research/p4a-rotation-vs-centering.md` |
+| §10-L9 (memory) | `results/t2/memory_footprint_cohere.json` (script `scripts/research/memory_index_footprint.py`; log `.tmp/p4b_memory_cohere.log`) |
 
 ### 11.3a Memory footprint (1 M × 768, M = 32)
 
 | Implementation | index bytes | B/vector | vs QuIVer |
 |---|---|---|---|
-| **QuIVer (2-bit BQ)** | **675 MiB** | 707.8 | 1.00×（paper claims < 1.3 GB / 1 M ✅） |
-| hnswlib | 3,193 MiB | 3,348.2 | **4.73×**（paper claims 4.7× ✅） |
+| **QuIVer (2-bit BQ)** | **675 MiB** | 707.8 | 1.00× (paper claims < 1.3 GB / 1 M: confirmed) |
+| hnswlib | 3,193 MiB | 3,348.2 | **4.73×** (paper claims 4.7×: confirmed) |
 | FAISS-HNSW | 3,189 MiB | 3,344.1 | 4.72× |
 | FAISS IVF-Flat (nlist ≈ 4 k) | 2,949 MiB | 3,092.3 | 4.37× |
 | **Bare IVF-PQ** (nlist = 1,024, m = 96, **no rerank**) | **92 MiB** | 96.5 | 0.14× — but its recall caps at **62.6 %** |
@@ -82,7 +85,8 @@ the gate reports `sign_info = 0.000` for `gist960` and 0.981 for `gist960c`.
 
 | Artifact | Content |
 |---|---|
-| `docs/research/upstream-issues.md` | four paste-ready issues: RedCaps sampling protocol, the L0 navigation-metric mismatch, the probe's specification gaps, and two defaults/doc fixes |
+| `docs/research/upstream-issues.md` | the full audit of the upstream reports (Chinese), including the one we retracted ourselves |
+| `docs/research/upstream-issue-draft.md` | the paste-ready **English** version of those reports (five issues; not yet filed) |
 | `patches/f1-nav-weighted.patch` | the §8.3 switch as a reviewable patch (default off) |
 | `docs/research/*.md` | the full audit trail: every claim, its evidence, and the conclusions we retracted (three of our own) |
 
@@ -96,11 +100,11 @@ pass with both off and on).
 |---|---|---|---|
 | 8.6 (rotation, data side) | rotation preserves the task (GT overlap 99.87–100 %) and beats centring on the collapse tier | `scripts/research/gist960_collapse_prepare.py --rotate/--rotate-center` | `*r_train.f32` / `*rc_train.f32` + `.tmp/p4a_*.log` |
 | 8.6 (rotation, engine side) | the same repair as one env var on the original files/GT | `src/index/bq.rs` (`TRIVIUM_SIGN_ROTATE`) + `bench_t2_b2_partitioned` | `.tmp/p5_*.log` |
-| 5.6 / 8.7 (quantizers) | PQ does not collapse where the 2-bit code does (six cells); QuIVer is 3.7× faster at ≥ 99 % on Cohere | `scripts/research/pq_matched_recall.py`, `benches/bench_baselines.py` (mode A/B) | `results/t2/pq_matched_recall_{cohere,sift128c,wolt_clipc}.json`（from `.tmp/p7_pq_*.log`）, `results/baseline/competitors_cohere.json` |
-| 5.6(b) (RaBitQ same-family + the normalisation trap) | the raw-vector inversion, the parameter audit (`k_factor`), the GT-metric check, and the corrected (normalised) pair | `scripts/research/bench_rabitq_refine.py` (`RA_CONTROL`, `RA_NORMALIZE`), `ivf_recall_diagnostic.py`, `gt_metric_consistency_probe.py`, `faiss_refine_mechanics_probe.py` | `results/t2/{rabitq_refine,ivfflat_control}_cohere.json`（raw 口径，保留为陷阱证据）, `{rabitq_refine,ivfflat_control}_norm_cohere.json`（记录用）, `ivf_recall_diagnostic_cohere.json`, `gt_metric_consistency_cohere.json`, `faiss_refine_mechanics_probe.json`, `rabitq_refine_gist960c.json` |
+| 5.6 / 8.7 (quantizers) | PQ does not collapse where the 2-bit code does (six cells); QuIVer is 3.7× faster at ≥ 99 % on Cohere | `scripts/research/pq_matched_recall.py`, `benches/bench_baselines.py` (mode A/B) | `results/t2/pq_matched_recall_{cohere,sift128c,wolt_clipc}.json` (from `.tmp/p7_pq_*.log`), `results/baseline/competitors_cohere.json` |
+| 5.6(b) (RaBitQ same-family + the normalisation trap) | the raw-vector inversion, the parameter audit (`k_factor`), the GT-metric check, and the corrected (normalised) pair | `scripts/research/bench_rabitq_refine.py` (`RA_CONTROL`, `RA_NORMALIZE`), `ivf_recall_diagnostic.py`, `gt_metric_consistency_probe.py`, `faiss_refine_mechanics_probe.py` | `results/t2/{rabitq_refine,ivfflat_control}_cohere.json` (raw-metric; kept as the trap record), `{rabitq_refine,ivfflat_control}_norm_cohere.json` (of record), `ivf_recall_diagnostic_cohere.json`, `gt_metric_consistency_cohere.json`, `faiss_refine_mechanics_probe.json`, `rabitq_refine_gist960c.json` |
 | 6.4(ii) (second witness) | every competitor collapses on Gaussian-960 (hnswlib / FAISS-HNSW / USearch / IVF-Flat) | `scripts/research/baseline_competitors.py` (`BL_SKIP` optional) | `results/baseline/competitors_gauss960.json` |
-| 8.6 (engine-side `rc`) | both switches reproduce the data-side `rc` arm on `gist960c` (80.12 / 97.13) | `bench_t2_b2_partitioned` + `TRIVIUM_SIGN_ROTATE` + `TRIVIUM_NAV_WEIGHTED` | `.tmp/p8_10_engine_rc.log`（队列首跑失败后的重试产物） |
-| P8 queue | the ten-step unattended batch behind the rows above | `scripts/research/p8_queue.py`, `scripts/research/p8_collect_numbers.py` | `results/t2/p8_queue_summary.json` + `.tmp/p8_*.log`（step-10 重试注记见 `docs/research/p8-queue-report.md` §4-D5） |
+| 8.6 (engine-side `rc`) | both switches reproduce the data-side `rc` arm on `gist960c` (80.12 / 97.13) | `bench_t2_b2_partitioned` + `TRIVIUM_SIGN_ROTATE` + `TRIVIUM_NAV_WEIGHTED` | `.tmp/p8_10_engine_rc.log` (retry product, after the queue's first attempt failed) |
+| P8 queue | the ten-step unattended batch behind the rows above | `scripts/research/p8_queue.py`, `scripts/research/p8_collect_numbers.py` | `results/t2/p8_queue_summary.json` + `.tmp/p8_*.log` (step-10 retry note: `docs/research/p8-queue-report.md` §4-D5) |
 | 6.5 (bit budget) | 2-bit allocation vs 4-bit ceiling on the four collapse datasets | `scripts/research/bit_budget_probe.py` | `results/t2/bit_budget_*.json` |
 | 7.3 (prospective validation) | nav-metric rule held out on 6 arms: 6/6 | `scripts/research/nav_rule_validation.py` | `results/t2/nav_rule_validation.json` |
 | 9.5 (external validity) | seven VIBE benchmarks; `coco_nomic` is a new catastrophe | `scripts/research/download_vibe_parallel.py`, `scripts/research/convert_hdf5_to_f32.py` | `.tmp/p6_vibe_*.log` + gate rows in `results/t2/deployability_gate.json` |

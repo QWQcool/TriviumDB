@@ -1,7 +1,7 @@
 # 8. A Two-Step Data-Side Repair
 
 > **Draft** 2026-09-22 ｜ sources: `t2-gist960-collapse.md`, `f1-metric-consistency.md`, `audit-and-direction.md` §1.2/§9
-> ⚠️ **Read the task definition first.** Centring changes the similarity function: every "after" number below is
+> **Read the task definition first.** Centring changes the similarity function: every "after" number below is
 > Recall@10 **on the centred-cosine task**, not an improvement on the original task (limitation L3, §10).
 > Centring is also not our invention — it is standard post-processing in the embedding literature
 > (all-but-the-top family). What is new is that it is **triage-able in seconds** and that we quantify when it
@@ -62,6 +62,8 @@ plane and navigates better; when it is dead, the weighted metric's `|h|` bias is
 `sign_info` is the decision rule. Regression guard: with the switch **off**, frozen recall values reproduce
 (Cohere 97.52 / GIST 2.79 / GloVe 45.60 within ≤ 0.17 pp, i.e. within the §3.5 noise floor of ≤ 0.25 pp).
 
+![**Figure 3.** Sign-plane information (`sign_info`) vs repair gain ΔR@10 at `ef_s = 64` for the centring and seeded-rotation arms. The statistic separates the two regimes: `sign_info = 0.000` ⇒ rotate (+44…+58 pp), alive (≥ 0.6) ⇒ do not rotate (Cohere −4.8 pp). The isotropic control sits at +0.03 pp.](figures/fig3-signinfo-gain.svg)
+
 ## 8.4 The competitor map: what the repair does and does not buy
 
 Same task on both sides (the centred task's own GT; competitor curves rebuilt on the centred data), so the
@@ -75,7 +77,7 @@ verdict is machine-independent. "Pipeline upper" = centring + weighted navigatio
 | usable | GloVe-100 | 71.69 % / 82.05 % @36,047 | **93.32 %** @11,675 | 93.45 % @10,893 (ef=256) | dominated → **parity (≈1.07×)** |
 | usable | Synthetic-LR | 92.52 % / *not measured on the original task* | **97.05 %** @2,638 | USearch 97.45 % @375; FAISS-HNSW 97.90 % @342 | after: **QuIVer ~7.0–8.5× faster at matched recall** (no "before" verdict available) |
 | moderate | Wolt-CLIP-512 | 86.81 % / 87.86 % @19,606 | **89.05 %** @9,356 | 87.88 % @20,849 (centred curve) | dominated → **curves intersect** (≤87.9 % baseline 1.1–1.3× faster; ≥89 % QuIVer **2.3–3.9×** faster) |
-| competitive | Cohere-768 | 99.78 % / 96.30 % @9,514（HNSW's best point 99.84 % @741 ⇒ ≈4.6× at ~99.8 %） | **99.89 %** @4,037 | 99.93 % @1,435 (99.79 % @2,544) | win → **win, narrower: ≈2.7–3.4×** at matched recall |
+| competitive | Cohere-768 | 99.78 % / 96.30 % @9,514 (HNSW's best point 99.84 % @741 ⇒ ≈4.6× at ~99.8 %) | **99.89 %** @4,037 | 99.93 % @1,435 (99.79 % @2,544) | win → **win, narrower: ≈2.7–3.4×** at matched recall |
 
 **The honest sentence this table requires**: *a smaller gap is not availability.* GIST and SIFT move from
 "hopeless" to "within 2–5 pp" — but at that recall the baseline is also faster. The arms where the verdict
@@ -130,14 +132,16 @@ loss where both planes carried information:
 
 | Dataset | matched point | rotated QuIVer | strongest competitor | verdict |
 |---|---|---|---|---|
-| **GIST-960** | ~84.4 % | **84.41 % @7,148** | hnswlib 84.11 % @5,417 | ✅ **QuIVer is 1.32× faster** |
-| | ~89.0 % | 88.99 % @3,609 | IVF-Flat 88.36 % @765 | ✅ 4.7× vs IVF; ≈parity vs HNSW (interpolated) |
-| | **60–84 % band** | 42,261 → 7,148 QPS | **no operating point** (hnswlib's lowest `ef=64` already gives 84.11 %) | ✅ in that band QuIVer is the only option measured here |
-| SIFT-128 | ~95.7 % | 95.74 % @17,536 | hnswlib **97.46 % @45,118** | ❌ still dominated (gap 49.9 → **1.7 pp**) |
+| **GIST-960** | ~84.4 % | **84.41 % @7,148** | hnswlib 84.11 % @5,417 | **QuIVer 1.32× faster** |
+| | ~89.0 % | 88.99 % @3,609 | IVF-Flat 88.36 % @765 | 4.7× vs IVF; ≈parity vs HNSW (interpolated) |
+| | **60–84 % band** | 42,261 → 7,148 QPS | **no operating point** (hnswlib's lowest `ef=64` already gives 84.11 %) | in that band QuIVer is the only option measured here |
+| SIFT-128 | ~95.7 % | 95.74 % @17,536 | hnswlib **97.46 % @45,118** | **Still dominated** (gap 49.9 → **1.7 pp**) |
 
 ⇒ **GIST-960 moves from "strictly dominated (79.7 pp gap)" to "faster at both ends of the usable band, and
 the only option in the 60–84 % band".** SIFT stays dominated — HNSW is simply excellent there — but the gap
 shrinks from ~50 pp to **1.7 pp**, and no task definition is harmed in either case.
+
+![**Figure 2.** GIST-960 under the rotated code: recall vs throughput against the competitor curves (same task, same machine, 32 threads). In the shaded band 60.2–84.1 % there is no HNSW operating point — the baseline's *lowest* setting already yields 84.11 %; at ≈ 84.4 % the rotated index is 1.32× faster than hnswlib.](figures/fig2-gist960-curves.svg)
 
 **One more thing rotation buys us.** Because the two navigation metrics of §8.3 are decided by the *same*
 code-only probe, we can now pick the navigation metric *predictively* instead of by `sign_info`:
@@ -165,7 +169,7 @@ With **both** switches on (`TRIVIUM_SIGN_ROTATE` + `TRIVIUM_NAV_WEIGHTED`) the e
 the data-side `rc` arm of §8.7 on `gist960c`: **80.12 % @ef=64 / 97.13 % @ef=1024**, against 80.17 % / 97.53 %
 data-side — the two-step repair survives in the switch form.
 
-⚠️ Implementation trap worth reporting upstream: the engine has **two** vector→code paths
+**Implementation trap worth reporting upstream.** The engine has **two** vector→code paths
 (`Bq2Signature::from_vector` and `Bq2Store::push_from_vector`). Rotating only the first leaves the stored codes
 unrotated and SIFT-128 reads **0.01 %** at `ef=64` — worse than doing nothing. All numbers above are from the
 build where both paths share one transform (152 library tests pass).

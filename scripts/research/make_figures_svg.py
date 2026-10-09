@@ -60,8 +60,8 @@ def fig1():
     data = [  # (标签, 原始, 去均值, 旋转, 备注)
         ("GIST-960", 2.10, 39.74, 60.22, ""),
         ("SIFT-128", 15.77, 30.64, 60.24, ""),
-        ("GloVe-100", 32.82, 36.11, 32.26, "旋转+加权导航 54.06"),
-        ("Cohere-768", 94.63, 93.48, 89.82, "旋转有害 −4.8pp"),
+        ("GloVe-100", 32.82, 36.11, 32.26, "rotation + weighted nav: 54.06"),
+        ("Cohere-768", 94.63, 93.48, 89.82, "rotation hurts: −4.8 pp"),
     ]
     s = [head(W, H, "Repair comparison @ef_s=64 (cheap navigation)")]
     x0, gw, bw = L + 22, (W - L - R - 40) / len(data), 26
@@ -279,7 +279,7 @@ def fig5():
         y = T + 8 + i * 20
         s.append(line(L + pw + 16, y, L + pw + 40, y, c, 3))
         top = max(r for r, _ in pts)
-        s.append(txt(L + pw + 46, y + 4, f"{name}（最高 {top:.1f}%）", 10))
+        s.append(txt(L + pw + 46, y + 4, f"{name} (top {top:.1f}%)", 10))
     s.append("</svg>")
     (OUT / "fig5-matched-recall.svg").write_text("".join(s), encoding="utf-8")
 
