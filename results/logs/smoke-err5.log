@@ -1,8 +1,0 @@
-(node:91940) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
-(Use `node --trace-deprecation ...` to show where the warning was created)
-warning: linker stdout: 正在创建库 C:\Users\v_chchsli\Desktop\TriviumDB\target\debug\deps\triviumdb.dll.lib 和对象 C:\Users\v_chchsli\Desktop\TriviumDB\target\debug\deps\triviumdb.dll.exp
-  |
-  = note: `#[warn(linker_messages)]` on by default
-
-warning: `triviumdb` (lib) generated 1 warning
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.28s
