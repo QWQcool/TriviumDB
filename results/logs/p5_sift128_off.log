@@ -1,0 +1,31 @@
+   Compiling triviumdb v0.8.8 (C:\Users\v_chchsli\Desktop\TriviumDB)
+warning: linker stdout: 正在创建库 C:\Users\v_chchsli\Desktop\TriviumDB\target\release\deps\triviumdb.dll.lib 和对象 C:\Users\v_chchsli\Desktop\TriviumDB\target\release\deps\triviumdb.dll.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `triviumdb` (lib) generated 1 warning
+    Finished `bench` profile [optimized] target(s) in 42.04s
+     Running benches\bench_t2_b2_partitioned.rs (target\release\deps\bench_t2_b2_partitioned-60166ac12225c98c.exe)
+═══════════════════════════════════════════════════════════════════
+  T2 B2-0 — ef_construction 扫描（平凡对照，零代码）
+  数据集=sift128 dim=128  臂 = [128]   m=32 m0=64 alpha=1.2  [T2_SKIP_DET]
+═══════════════════════════════════════════════════════════════════
+  守卫G5 随机注入量恒为 128（对全部臂）PASS
+  数据集 sift128  数据 1000000 × 128，查询 10000，GT K=10；加载+归一化 0.34s
+
+  ── 臂 ef_construction=128 ──
+    建图 16.10s  62108 vec/s  avg_deg_l0=64.0  Hot 522 MiB
+    ef_search=64    R@10  15.73%     195550 QPS
+    ef_search=128   R@10  21.82%     110080 QPS
+    ef_search=256   R@10  29.27%      57823 QPS
+    ef_search=512   R@10  37.68%      31774 QPS
+    ef_search=1024  R@10  47.16%      17511 QPS
+    L0 指纹 0xb88c20f13c319ce3 / 63999996 边
+
+  ── 守卫 ──
+  守卫G1 基线同进程复现: ef_c=128/ef_s=128 → 21.82% vs 冻结 15.69% （偏差 6.13pp）FAIL
+
+thread 'main' (67464) panicked at benches\bench_t2_b2_partitioned.rs:290:13:
+守卫G1 失败: 基线未复现（偏差 6.13pp）
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+error: bench failed, to rerun pass `--bench bench_t2_b2_partitioned`

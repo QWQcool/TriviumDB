@@ -1,0 +1,18 @@
+
+  cohere: train=(1000000, 768) test=(1000, 768) nlist=1024 threads=32  normalized=True
+  构建 14.9s（含 RaBitQ 训练）；索引 ntotal=1000000
+  search object = IndexIVFRaBitQ   k_factor 可用 = True
+  nprobe  k_fac      R@10     1T-QPS     MT-QPS
+      64      1    78.03%        254      4,656
+      64     20    97.37%        250      4,364
+      64    200    97.38%        193      2,885
+     256      1    78.88%         65      1,272
+     256     20    99.79%         65      1,268
+     256    200    99.82%         62      1,087
+     512      1    78.90%         34        673
+     512     20    99.95%         34        673
+     512    200    99.98%         33        611
+    1024      1    78.91%         19        369
+    1024     20    99.97%         19        380
+    1024    200   100.00%         18        360
+  [OK] results\t2\rabitq_refine_norm_cohere.json

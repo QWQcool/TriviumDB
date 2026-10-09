@@ -1,0 +1,48 @@
+warning: linker stdout: 正在创建库 C:\Users\v_chchsli\Desktop\TriviumDB\target\release\deps\triviumdb.dll.lib 和对象 C:\Users\v_chchsli\Desktop\TriviumDB\target\release\deps\triviumdb.dll.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `triviumdb` (lib) generated 1 warning
+    Finished `bench` profile [optimized] target(s) in 0.22s
+     Running benches\bench_t2_b2_partitioned.rs (target\release\deps\bench_t2_b2_partitioned-60166ac12225c98c.exe)
+═══════════════════════════════════════════════════════════════════
+  T2 B2-0 — ef_construction 扫描（平凡对照，零代码）
+  数据集=glove100 dim=100  臂 = [128]   m=32 m0=64 alpha=1.2  [T2_SKIP_DET]
+═══════════════════════════════════════════════════════════════════
+  守卫G5 随机注入量恒为 128（对全部臂）PASS
+  数据集 glove100  数据 1183514 × 100，查询 10000，GT K=10；加载+归一化 0.24s
+
+  ── 臂 ef_construction=128 ──
+    建图 22.09s  53576 vec/s  avg_deg_l0=64.0  Hot 618 MiB
+    ef_search=64    R@10  55.96%     136396 QPS
+    ef_search=128   R@10  67.37%      72688 QPS
+    ef_search=256   R@10  76.40%      39302 QPS
+    ef_search=512   R@10  83.73%      20404 QPS
+    ef_search=1024  R@10  89.41%      11180 QPS
+    L0 指纹 0x24381fc825f4bc10 / 75744896 边
+
+  ── 守卫 ──
+  守卫G1 跳过: glove100 尚无冻结 R@10（可用 T2_FROZEN_RECALL 提供）；本臂自身即基线 67.37%
+  守卫G-det 跳过（T2_SKIP_DET=1）
+
+═══════════════════════════════════════════════════════════════════
+  B2-0 判定：ef_construction 能否独自达到成本-质量点
+═══════════════════════════════════════════════════════════════════
+  P1 门槛 = 基线 67.37% − 1pp = 66.37%
+
+
+### T2 B2-0：`ef_construction` 扫描（glove100 1183514 × 100，m=32，α=1.2，同一进程）
+
+| ef_c | 建图(s) | 相对基线 | R@10@ef_s=64 | R@10@ef_s=128 | R@10@ef_s=256 | R@10@ef_s=512 | R@10@ef_s=1024 |
+|---|---|---|---|---|---|---|---|
+| 128 | 22.09 | 1.00× | 55.96% | 67.37% | 76.40% | 83.73% | 89.41% |
+  ef_c=128  建图  22.09s（ 1.00×）  R@10(ef_s=128)  67.37%  门槛达标 ✅
+
+  ── 固定成本地板 ──
+  ef_c=128 墙钟 22.09s = **1.00×** 基线（候选获取即使完全免费也不可能低于此值；真实地板只会更低）。
+
+  ★ 最小达标臂 ef_c=128：R@10 67.37% 但成本 1.00× > 0.70×⇒ P2 **未**由平凡解满足。
+     ⇒ 进入 B2-1；目标：击败 1.00×（地板 1.00×）
+
+  守卫G-det：边集不可逐位复现但召回极差 0.00pp ⇒ 质量等价；召回级结论稳定可比。
+═══════════════════════════════════════════════════════════════════

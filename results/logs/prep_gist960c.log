@@ -1,0 +1,17 @@
+  ‖mean(train)‖ = 0.868030
+
+======================================================================
+  gist960(960) → gist960c   去均值（共同均值方向）
+======================================================================
+  [OK] 写出 gist960c_*.f32/i32  train=(1000000, 960) test=(1000, 960)
+Traceback (most recent call last):
+  File "C:\Users\v_chchsli\Desktop\TriviumDB\scripts\research\gist960_collapse_prepare.py", line 395, in <module>
+    main()
+  File "C:\Users\v_chchsli\Desktop\TriviumDB\scripts\research\gist960_collapse_prepare.py", line 390, in main
+    RECIPES[name](rng)
+  File "C:\Users\v_chchsli\Desktop\TriviumDB\scripts\research\gist960_collapse_prepare.py", line 273, in gist960c
+    stats("gist960c", dim, tr, te, gt, rng)
+  File "C:\Users\v_chchsli\Desktop\TriviumDB\scripts\research\gist960_collapse_prepare.py", line 129, in stats
+    if s[gt[q, 0]] >= s.max() - 1e-4:
+       ~^^^^^^^^^^
+IndexError: index 705443 is out of bounds for axis 0 with size 20000

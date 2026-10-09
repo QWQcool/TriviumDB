@@ -1,0 +1,151 @@
+[20:51:12] item12: gate with K=5
+
+[7m| [0mglove100 | 100 | 0.946/0.439 | 0.355 | +0.653 | 20.4% | 46.1% | 45.60% | �?建议去均值（移位量可观且有余[0m
+[7m[0m量） |[0m
+[7m| [0mglove100c | 100 | 1.000/0.993 | 0.009 | +0.879 | 18.9% | 43.9% | 49.01% | �?改用 float32（码判别力不足） |
+[7m| [0mcohere | 768 | 0.747/0.000 | 0.834 | +0.814 | 68.0% | 98.7% | 97.51% | �?BQ-native 可用（竞争力另需竞品曲�[0m
+[7m[0m���?|[0m
+[7m| [0mcoherec | 768 | 1.000/0.997 | 0.013 | +1.796 | 71.0% | 98.8% | 97.25% | �?BQ-native 可用（竞争力另需竞品�[0m
+[7m[0m�线�?|[0m
+[7m| [0mcoherek128 | 128 | 0.728/0.000 | 0.684 | +0.745 | 33.9% | 70.8% | 72.30% | �?建议去均值（移位量可观且有�[0m
+[7m[0m��量） |[0m
+[7m| [0mgist960r | 960 | 0.507/0.000 | 0.868 | +0.143 | 31.1% | 77.0% | 70.95% | �?建议去均值（移位量可观且有余[0m
+[7m[0m量） |[0m
+[7m| [0msift128r | 128 | 0.759/0.067 | 0.649 | +0.108 | 21.9% | 64.5% | 74.78% | �?建议去均值（移位量可观且有余[0m
+[7m[0m量） |[0m
+[7m| [0mglove100r | 100 | 0.938/0.664 | 0.355 | +0.728 | 20.1% | 46.6% | 45.05% | �?建议去均值（移位量可观且有�[0m
+[7m[0m��量） |[0m
+[7m| [0mcoherer | 768 | 0.572/0.000 | 0.834 | +0.725 | 63.7% | 97.8% | 93.82% | �?建议去均值（移位量可观且有余[0m
+[7m[0m量） |[0m
+[7m| [0mcohere960pad | 960 | 0.597/0.000 | 0.834 | +0.747 | 66.6% | 98.2% | 97.11% | �?BQ-native 可用（竞争力另需竞�[0m
+[7m[0m��曲线�?|[0m
+[7m| [0mwolt_clip | 512 | 0.836/0.000 | 0.797 | +0.434 | 59.5% | 88.5% | 77.73% | �?建议去均值（移位量可观且有�[0m
+[7m[0m��量） |[0m
+[7m| [0mwolt_clipc | 512 | 0.999/0.990 | 0.025 | +0.828 | 65.9% | 89.2% | 82.19% | �?BQ-native 可用（竞争力另需竞品[0m
+[7m[0m曲线�?|[0m
+[7m| [0mrandom | 768 | 0.981/0.842 | 0.204 | +0.410 | 33.2% | 83.3% | 59.08% | �?BQ-native 可用（竞争力另需竞品曲�[0m
+[7m[0m���?|[0m
+[7m| [0mrandomc | 768 | 1.000/0.999 | 0.007 | +0.481 | 32.1% | 81.8% | 60.28% | �?BQ-native 可用（竞争力另需竞品�[0m
+[7m[0m�线�?|[0m
+[7m| [0msphere | 768 | 1.000/1.000 | 0.001 | +0.609 | 0.9% | 5.0% | 0.91% | �?改用 float32（码判别力不足） |
+[7m| [0mspherec | 768 | 1.000/1.000 | 0.000 | +0.574 | 1.0% | 4.8% | 1.11% | �?改用 float32（码判别力不足） |
+[7m| [0mgauss960 | 960 | 1.000/1.000 | 0.001 | +0.628 | 0.8% | 5.1% | 0.83% | �?改用 float32（码判别力不足） |
+[7m| [0mgauss960plant | 960 | 1.000/1.000 | 0.001 | +4.077 | 100.0% | 100.0% | 100.00% | �?BQ-native 可用（竞争力另需[0m
+[7m[0m竞品曲线�?|[0m
+[7m| [0mminilm | 384 | 0.987/0.000 | 0.141 | +1.520 | 64.2% | 96.2% | 94.28% | �?BQ-native 可用（竞争力另需竞品曲�[0m
+[7m[0m���?|[0m
+[7m| [0mbge_m3 | 1024 | 0.701/0.000 | 0.752 | +0.515 | 78.2% | 100.0% | 97.76% | �?BQ-native 可用（竞争力另需竞品�[0m
+[7m[0m�线�?|[0m
+[7m| [0mcoco_nomic | 768 | 0.382/0.000 | 0.882 | +0.162 | 0.1% | 0.6% | �?| �?建议去均值（移位量可观且有余量�[0m
+[7m[0m�� |[0m
+[7m| [0mccnews_nomic | 768 | 0.690/0.000 | 0.737 | +1.230 | 71.2% | 98.9% | �?| �?建议去均值（移位量可观且有余[0m
+[7m[0m量） |[0m
+[7m| [0marxiv_nomic | 768 | 0.689/0.000 | 0.743 | +0.619 | 66.3% | 99.4% | �?| �?建议去均值（移位量可观且有余[0m
+[7m[0m量） |[0m
+[7m| [0mcodesearch_jina | 768 | 0.986/0.473 | 0.187 | +1.704 | 76.4% | 99.8% | �?| �?BQ-native 可用（竞争力另需竞�[0m
+[7m[0m��曲线�?|[0m
+[7m| [0mgooaq_roberta | 768 | 0.996/0.000 | 0.070 | +2.408 | 79.1% | 99.8% | �?| �?BQ-native 可用（竞争力另需竞品[0m
+[7m[0m曲线�?|[0m
+[7m| [0mlandmark_nomic | 768 | 0.394/0.001 | 0.872 | +0.359 | 48.8% | 93.7% | �?| �?建议去均值（移位量可观且有�[0m
+[7m[0m��量） |[0m
+[7m| [0mlandmark_dino | 768 | 0.944/0.000 | 0.375 | +0.640 | 57.2% | 96.3% | �?| �?建议去均值（移位量可观且有�[0m
+[7m[0m��量） |[0m
+[7m| [0mgist960rc | 960 | 1.000/0.995 | 0.024 | +0.379 | 53.7% | 95.8% | �?| �?BQ-native 可用（竞争力另需竞品曲�[0m
+[7m[0m���?|[0m
+[7m| [0mdbpedia_openai | 1536 | 0.959/0.002 | 0.293 | +1.909 | 77.2% | 99.9% | 98.29% | �?BQ-native 可用（竞争力另需[0m
+[7m[0m竞品曲线�?|[0m
+[7m| [0mdbpedia_openai_3072 | 3072 | 0.965/0.001 | 0.278 | +2.131 | 82.8% | 100.0% | 98.16% | �?BQ-native 可用（竞争力[0m
+[7m[0m另需竞品曲线�?|[0m
+[21:35:31] item11: multi-seed CI
+[21:35:31] bench gist960c dim=960 nav=0 rot= -> .tmp/p7q_gist960c_seed1.log
+ef_search=64    R@10  39.87%      60977 QPS
+ef_search=128   R@10  51.93%      33794 QPS
+ef_search=256   R@10  63.04%      18175 QPS
+ef_search=512   R@10  71.84%       9675 QPS
+ef_search=1024  R@10  79.24%       5066 QPS
+[21:36:50] bench gist960c dim=960 nav=0 rot= -> .tmp/p7q_gist960c_seed2.log
+ef_search=64    R@10  39.82%      60157 QPS
+ef_search=128   R@10  51.98%      33996 QPS
+ef_search=256   R@10  62.83%      18379 QPS
+ef_search=512   R@10  71.93%       9959 QPS
+ef_search=1024  R@10  79.36%       5243 QPS
+[21:37:29] bench gist960c dim=960 nav=0 rot= -> .tmp/p7q_gist960c_seed3.log
+ef_search=64    R@10  40.04%      58446 QPS
+ef_search=128   R@10  51.83%      33229 QPS
+ef_search=256   R@10  62.95%      18035 QPS
+ef_search=512   R@10  71.79%       9715 QPS
+ef_search=1024  R@10  79.17%       5171 QPS
+[21:38:09] bench sift128c dim=128 nav=0 rot= -> .tmp/p7q_sift128c_seed1.log
+ef_search=64    R@10  30.16%     209449 QPS
+ef_search=128   R@10  43.15%     107105 QPS
+ef_search=256   R@10  58.21%      56492 QPS
+ef_search=512   R@10  73.02%      30903 QPS
+ef_search=1024  R@10  84.57%      16903 QPS
+[21:38:27] bench sift128c dim=128 nav=0 rot= -> .tmp/p7q_sift128c_seed2.log
+ef_search=64    R@10  29.91%     206821 QPS
+ef_search=128   R@10  43.02%     105498 QPS
+ef_search=256   R@10  58.13%      56175 QPS
+ef_search=512   R@10  72.94%      30598 QPS
+ef_search=1024  R@10  84.55%      16669 QPS
+[21:38:45] bench sift128c dim=128 nav=0 rot= -> .tmp/p7q_sift128c_seed3.log
+ef_search=64    R@10  30.13%     188675 QPS
+ef_search=128   R@10  43.06%     103256 QPS
+ef_search=256   R@10  58.29%      55760 QPS
+ef_search=512   R@10  73.05%      30317 QPS
+ef_search=1024  R@10  84.75%      16975 QPS
+[21:39:04] bench glove100c dim=100 nav=0 rot= -> .tmp/p7q_glove100c_seed1.log
+ef_search=64    R@10  36.18%     157819 QPS
+ef_search=128   R@10  49.07%      80012 QPS
+ef_search=256   R@10  59.19%      42985 QPS
+ef_search=512   R@10  66.95%      23322 QPS
+ef_search=1024  R@10  73.26%      12177 QPS
+[21:39:26] bench glove100c dim=100 nav=0 rot= -> .tmp/p7q_glove100c_seed2.log
+ef_search=64    R@10  36.08%     152640 QPS
+ef_search=128   R@10  48.95%      79528 QPS
+ef_search=256   R@10  59.16%      42547 QPS
+ef_search=512   R@10  66.96%      23788 QPS
+ef_search=1024  R@10  73.27%      12257 QPS
+[21:39:48] bench glove100c dim=100 nav=0 rot= -> .tmp/p7q_glove100c_seed3.log
+ef_search=64    R@10  36.12%     156871 QPS
+ef_search=128   R@10  48.87%      74601 QPS
+ef_search=256   R@10  59.26%      43890 QPS
+ef_search=512   R@10  67.00%      23279 QPS
+ef_search=1024  R@10  73.33%      12242 QPS
+[21:40:12] bench wolt_clipc dim=512 nav=0 rot= -> .tmp/p7q_wolt_clipc_seed1.log
+ef_search=64    R@10  76.91%     111098 QPS
+ef_search=128   R@10  82.03%      60555 QPS
+ef_search=256   R@10  85.86%      31245 QPS
+ef_search=512   R@10  87.60%      16656 QPS
+ef_search=1024  R@10  89.05%       9788 QPS
+[21:40:32] bench wolt_clipc dim=512 nav=0 rot= -> .tmp/p7q_wolt_clipc_seed2.log
+ef_search=64    R@10  77.10%     106330 QPS
+ef_search=128   R@10  82.17%      67842 QPS
+ef_search=256   R@10  85.88%      34929 QPS
+ef_search=512   R@10  87.51%      18443 QPS
+ef_search=1024  R@10  89.08%      10094 QPS
+[21:40:52] bench wolt_clipc dim=512 nav=0 rot= -> .tmp/p7q_wolt_clipc_seed3.log
+ef_search=64    R@10  77.10%      98565 QPS
+ef_search=128   R@10  82.15%      63590 QPS
+ef_search=256   R@10  85.84%      35855 QPS
+ef_search=512   R@10  87.51%      18936 QPS
+ef_search=1024  R@10  89.32%       9772 QPS
+[21:41:11] bench coherec dim=768 nav=0 rot= -> .tmp/p7q_coherec_seed1.log
+ef_search=64    R@10  93.46%      56391 QPS
+ef_search=128   R@10  97.27%      33873 QPS
+ef_search=256   R@10  99.12%      18081 QPS
+ef_search=512   R@10  99.62%       9483 QPS
+ef_search=1024  R@10  99.86%       4978 QPS
+[21:41:46] bench coherec dim=768 nav=0 rot= -> .tmp/p7q_coherec_seed2.log
+ef_search=64    R@10  93.47%      57248 QPS
+ef_search=128   R@10  97.26%      32856 QPS
+ef_search=256   R@10  99.12%      18023 QPS
+ef_search=512   R@10  99.61%       9412 QPS
+ef_search=1024  R@10  99.86%       4918 QPS
+[21:42:22] bench coherec dim=768 nav=0 rot= -> .tmp/p7q_coherec_seed3.log
+ef_search=64    R@10  93.62%      57238 QPS
+ef_search=128   R@10  97.25%      33287 QPS
+ef_search=256   R@10  99.12%      18178 QPS
+ef_search=512   R@10  99.62%       9419 QPS
+ef_search=1024  R@10  99.86%       4922 QPS
+[21:42:57] stage C ���
+

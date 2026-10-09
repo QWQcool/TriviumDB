@@ -1,0 +1,49 @@
+  当前 JSON probe_k = [5]
+  HEAD   JSON probe_k = [3, 5]
+
+  对拍 38 个臂（K=3 → K=5）
+
+  arm               K=3 probe_ef  K=5 probe_ef     drift         sign_info  nav
+  arxiv_nomic              99.5%         99.4%     -0.1pp     0.689→0.689  cheap→cheap
+  bge_m3                  100.0%        100.0%     +0.0pp     0.701→0.701  None→cheap  <<<
+  ccnews_nomic             99.0%         98.9%     -0.1pp     0.690→0.690  weighted→weighted
+  coco_nomic                0.6%          0.6%     -0.1pp     0.382→0.382  weighted→weighted
+  codesearch_jina          99.9%         99.8%     -0.1pp     0.986→0.986  weighted→weighted
+  cohere                   98.7%         98.7%     +0.0pp     0.747→0.747  None→weighted  <<<
+  cohere960pad             98.2%         98.2%     -0.0pp     0.597→0.597  None→weighted  <<<
+  coherec                  99.0%         98.8%     -0.2pp     1.000→1.000  None→weighted  <<<
+  coherek128               70.6%         70.8%     +0.2pp     0.728→0.728  None→weighted  <<<
+  coherer                  97.6%         97.8%     +0.2pp     0.572→0.572  None→cheap  <<<
+  dbpedia_openai           99.9%         99.9%     -0.0pp     0.959→0.959  None→weighted  <<<
+  dbpedia_openai_3072        100.0%        100.0%     -0.0pp     0.965→0.965  None→weighted  <<<
+  gauss960                  4.7%          5.1%     +0.4pp     1.000→1.000  None→weighted  <<<
+  gauss960plant           100.0%        100.0%     +0.0pp     1.000→1.000  None→cheap  <<<
+  gist960                   2.5%          2.5%     +0.0pp     0.000→0.000  cheap→cheap
+  gist960c                 70.5%         69.8%     -0.7pp     0.981→0.981  None→weighted  <<<
+  gist960k128               1.2%          1.2%     +0.1pp     0.000→0.000  None→cheap  <<<
+  gist960k256               2.5%          2.7%     +0.2pp     0.000→0.000  None→cheap  <<<
+  gist960k512               2.6%          2.9%     +0.3pp     0.000→0.000  None→cheap  <<<
+  gist960k768               2.6%          3.0%     +0.4pp     0.000→0.000  None→cheap  <<<
+  gist960r                 78.4%         77.0%     -1.4pp     0.507→0.507  cheap→cheap
+  gist960rc                95.6%         95.8%     +0.3pp     1.000→1.000  weighted→weighted
+  glove100                 44.8%         46.1%     +1.3pp     0.946→0.946  None→weighted  <<<
+  glove100c                44.9%         43.9%     -1.0pp     1.000→1.000  None→weighted  <<<
+  glove100r                45.7%         46.6%     +0.9pp     0.938→0.938  None→weighted  <<<
+  gooaq_roberta            99.7%         99.8%     +0.1pp     0.996→0.996  weighted→weighted
+  landmark_dino            96.2%         96.3%     +0.1pp     0.944→0.944  weighted→weighted
+  landmark_nomic           93.7%         93.7%     -0.0pp     0.394→0.394  cheap→cheap
+  minilm                   96.1%         96.2%     +0.1pp     0.987→0.987  None→weighted  <<<
+  random                   83.3%         83.3%     -0.0pp     0.981→0.981  None→weighted  <<<
+  randomc                  82.3%         81.8%     -0.4pp     1.000→1.000  None→weighted  <<<
+  sift128                  10.4%          9.9%     -0.5pp     0.000→0.000  None→cheap  <<<
+  sift128c                 63.9%         63.6%     -0.2pp     0.918→0.918  None→weighted  <<<
+  sift128r                 66.2%         64.5%     -1.7pp     0.759→0.759  cheap→cheap
+  sphere                    4.9%          5.0%     +0.2pp     1.000→1.000  None→weighted  <<<
+  spherec                   5.0%          4.8%     -0.2pp     1.000→1.000  None→weighted  <<<
+  wolt_clip                87.0%         88.5%     +1.5pp     0.836→0.836  None→cheap  <<<
+  wolt_clipc               89.0%         89.2%     +0.2pp     0.999→0.999  None→weighted  <<<
+
+  ⇒ probe_ef 漂移 >3pp：**0** 个
+  ⇒ 导航建议变化：**27** 个（bge_m3: None→cheap, cohere: None→weighted, cohere960pad: None→weighted, coherec: None→weighted, coherek128: None→weighted, coherer: None→cheap, dbpedia_openai: None→weighted, dbpedia_openai_3072: None→weighted, gauss960: None→weighted, gauss960plant: None→cheap, gist960c: None→weighted, gist960k128: None→cheap, gist960k256: None→cheap, gist960k512: None→cheap, gist960k768: None→cheap, glove100: None→weighted, glove100c: None→weighted, glove100r: None→weighted, minilm: None→weighted, random: None→weighted, randomc: None→weighted, sift128: None→cheap, sift128c: None→weighted, sphere: None→weighted, spherec: None→weighted, wolt_clip: None→cheap, wolt_clipc: None→weighted）
+  ⇒ 新增到 JSON 的臂：[]
+  [OK] results/t2/p7_k5_vs_k3.json

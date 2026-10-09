@@ -1,0 +1,9 @@
+目标 7 个文件，合计 19.0 GiB（HF 报告值）
+  arxiv-nomic-768-normalized.hdf5                  3943.9 MiB
+  ccnews-nomic-768-normalized.hdf5                 1455.6 MiB
+  coco-nomic-768-normalized.hdf5                   1209.3 MiB
+  codesearchnet-jina-768-cosine.hdf5               4030.1 MiB
+  gooaq-distilroberta-768-normalized.hdf5          4325.8 MiB
+  landmark-nomic-768-normalized.hdf5               2233.3 MiB
+  landmark-dino-768-cosine.hdf5                    2233.3 MiB
+  [下载] arxiv-nomic-768-normalized.hdf5 ...

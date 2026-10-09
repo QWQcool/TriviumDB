@@ -1,0 +1,180 @@
+
+=========== A. PQ / 量化类对照（§5.3、§8.7）===========
+
+ -- pq_matched_recall_cohere.json: prefix=cohere dim=None m=None nbits=None threads=None metric=None
+
+ -- pq_matched_recall_sift128c.json: prefix=sift128c dim=None m=None nbits=None threads=None metric=None
+
+ -- pq_matched_recall_wolt_clipc.json: prefix=wolt_clipc dim=None m=None nbits=None threads=None metric=None
+
+=========== B. 位预算天花板（§6.4）===========
+
+ -- bit_budget_coco_nomic.json
+    {"prefix": "coco_nomic", "dim": 768, "nbase": 200000, "nq": 200, "cos_mean": 0.7784663438796997, "cos_std": 0.04493795707821846, "gap_10_11": 0.0002643693005666137, "ef": 128, "rows": [{"bits": 1, "code_mib_per_vec": 9.1552734375e-05, "top10": 1.5, "topef": 9.75}, {"bits": 2, "code_mib_per_vec": 0.00018310546875, "top10": 7.6499999999999995, "topef": 31.6}, {"bits": 3, "code_mib_per_vec": 0.000274658203125, "top10": 26.150000000000002, "topef": 76.1}, {"bits": 4, "code_mib_per_vec": 0.0003662109375, "top10": 48.8, "topef": 94.6}, {"bits": 6, "code_mib_per_vec": 0.00054931640625, "top10": 66.14999999999999, "topef": 99.0}, {"bits": 8, "code_mib_per_vec": 0.000732421875, "top10": 66.9, "topef": 98.85000000000001}, {"bits": 16, "code_mib_per_vec": 0.00146484375, "top10": 100.0, "topef": 100.0}]}
+
+ -- bit_budget_gauss960.json
+    {"prefix": "gauss960", "dim": 960, "nbase": 200000, "nq": 200, "cos_mean": -0.0005002682446502149, "cos_std": 0.032372016459703445, "gap_10_11": 0.0005518224788829684, "ef": 128, "rows": [{"bits": 1, "code_mib_per_vec": 0.00011444091796875, "top10": 4.8, "topef": 21.85}, {"bits": 2, "code_mib_per_vec": 0.0002288818359375, "top10": 5.45, "topef": 23.05}, {"bits": 3, "code_mib_per_vec": 0.00034332275390625, "top10": 28.499999999999996, "topef": 76.1}, {"bits": 4, "code_mib_per_vec": 0.000457763671875, "top10": 59.199999999999996, "topef": 99.5}, {"bits": 6, "code_mib_per_vec": 0.0006866455078125, "top10": 88.0, "topef": 100.0}, {"bits": 8, "code_mib_per_vec": 0.00091552734375, "top10": 96.1, "topef": 100.0}, {"bits": 16, "code_mib_per_vec": 0.0018310546875, "top10": 100.0, "topef": 100.0}]}
+
+ -- bit_budget_gist960.json
+    {"prefix": "gist960", "dim": 960, "nbase": 200000, "nq": 200, "cos_mean": 0.75351482629776, "cos_std": 0.07982592284679413, "gap_10_11": 0.0006371447816491127, "ef": 128, "rows": [{"bits": 1, "code_mib_per_vec": 0.00011444091796875, "top10": 1.2, "topef": 3.55}, {"bits": 2, "code_mib_per_vec": 0.0002288818359375, "top10": 16.150000000000002, "topef": 55.25}, {"bits": 3, "code_mib_per_vec": 0.00034332275390625, "top10": 21.8, "topef": 60.25}, {"bits": 4, "code_mib_per_vec": 0.000457763671875, "top10": 59.050000000000004, "topef": 99.05000000000001}, {"bits": 6, "code_mib_per_vec": 0.0006866455078125, "top10": 88.85, "topef": 99.95}, {"bits": 8, "code_mib_per_vec": 0.00091552734375, "top10": 97.39999999999999, "topef": 99.95}, {"bits": 16, "code_mib_per_vec": 0.0018310546875, "top10": 100.0, "topef": 100.0}]}
+
+ -- bit_budget_sphere.json
+    {"prefix": "sphere", "dim": 768, "nbase": 200000, "nq": 200, "cos_mean": 0.0003911603707820177, "cos_std": 0.03580517694354057, "gap_10_11": 0.0007919620256870985, "ef": 128, "rows": [{"bits": 1, "code_mib_per_vec": 9.1552734375e-05, "top10": 5.050000000000001, "topef": 20.849999999999998}, {"bits": 2, "code_mib_per_vec": 0.00018310546875, "top10": 5.55, "topef": 23.25}, {"bits": 3, "code_mib_per_vec": 0.000274658203125, "top10": 27.900000000000002, "topef": 76.75}, {"bits": 4, "code_mib_per_vec": 0.0003662109375, "top10": 60.3, "topef": 99.3}, {"bits": 6, "code_mib_per_vec": 0.00054931640625, "top10": 89.95, "topef": 100.0}, {"bits": 8, "code_mib_per_vec": 0.000732421875, "top10": 96.45, "topef": 100.0}, {"bits": 16, "code_mib_per_vec": 0.00146484375, "top10": 100.0, "topef": 100.0}]}
+
+=========== C. RaBitQ / 控制臂（§5.3）===========
+
+ -- rabitq_refine_cohere.json  control=None  build=12.2s  threads=32
+    nprobe=64    k_fac=20     36.58%  1T=     269  MT=   4,174
+    nprobe=64    k_fac=200    35.08%  1T=     241  MT=   2,927
+    nprobe=256   k_fac=20     36.67%  1T=      86  MT=   1,302
+    nprobe=256   k_fac=200    35.01%  1T=      82  MT=   1,170
+    nprobe=512   k_fac=20     36.67%  1T=      46  MT=     729
+    nprobe=512   k_fac=200    34.96%  1T=      44  MT=     664
+    nprobe=1024  k_fac=20     36.66%  1T=      26  MT=     391
+    nprobe=1024  k_fac=200    34.96%  1T=      25  MT=     372
+
+ -- rabitq_refine_gist960c.json  control=None  build=15.7s  threads=32
+    nprobe=64    k_fac=20     75.78%  1T=     281  MT=   4,123
+    nprobe=64    k_fac=200    95.38%  1T=     229  MT=   2,617
+    nprobe=256   k_fac=20     69.29%  1T=      83  MT=   1,256
+    nprobe=256   k_fac=200    95.76%  1T=      76  MT=   1,108
+
+ -- rabitq_refine_norm_cohere.json  control=None  build=14.9s  threads=32
+    nprobe=64    k_fac=1      78.03%  1T=     254  MT=   4,656
+    nprobe=64    k_fac=20     97.37%  1T=     250  MT=   4,364
+    nprobe=64    k_fac=200    97.38%  1T=     193  MT=   2,885
+    nprobe=256   k_fac=1      78.88%  1T=      65  MT=   1,272
+    nprobe=256   k_fac=20     99.79%  1T=      65  MT=   1,268
+    nprobe=256   k_fac=200    99.82%  1T=      62  MT=   1,087
+    nprobe=512   k_fac=1      78.90%  1T=      34  MT=     673
+    nprobe=512   k_fac=20     99.95%  1T=      34  MT=     673
+    nprobe=512   k_fac=200    99.98%  1T=      33  MT=     611
+    nprobe=1024  k_fac=1      78.91%  1T=      19  MT=     369
+    nprobe=1024  k_fac=20     99.97%  1T=      19  MT=     380
+    nprobe=1024  k_fac=200   100.00%  1T=      18  MT=     360
+
+ -- ivfflat_control_cohere.json  control=ivfflat  build=8.6s  threads=32
+    nprobe=64    k_fac=1      34.94%  1T=      89  MT=     268
+    nprobe=256   k_fac=1      34.88%  1T=      23  MT=      69
+    nprobe=512   k_fac=1      34.84%  1T=      12  MT=      36
+    nprobe=1024  k_fac=1      34.84%  1T=       7  MT=      21
+
+ -- ivfflat_control_norm_cohere.json  control=ivfflat  build=10.7s  threads=32
+    nprobe=64    k_fac=1      97.38%  1T=      80  MT=     279
+    nprobe=256   k_fac=1      99.82%  1T=      20  MT=      72
+    nprobe=512   k_fac=1      99.98%  1T=      10  MT=      37
+    nprobe=1024  k_fac=1     100.00%  1T=       6  MT=      21
+
+=========== D. 旋转 / 引擎开关 / VIBE 日志===========
+
+ -- P4-A 旋转: 13 个文件
+    p4a_coherer_w0.log
+       建图 31.45s  31800 vec/s  avg_deg_l0=64.0  Hot 675 MiB
+       ef_search=64    R@10  89.82%      65045 QPS
+       ef_search=1024  R@10  98.35%       5225 QPS
+       ef_c=128  建图  31.45s（ 1.00×）  R@10(ef_s=128)  93.82%  门槛达标 ✅
+    p4a_coherer_w1.log
+       建图 33.66s  29706 vec/s  avg_deg_l0=64.0  Hot 675 MiB
+       ef_search=64    R@10  88.42%      62140 QPS
+       ef_search=1024  R@10  98.28%       4889 QPS
+       ef_c=128  建图  33.66s（ 1.00×）  R@10(ef_s=128)  92.75%  门槛达标 ✅
+    p4a_gist960r_w0.log
+       建图 47.24s  21167 vec/s  avg_deg_l0=64.0  Hot 720 MiB
+       ef_search=64    R@10  60.22%      42261 QPS
+       ef_search=1024  R@10  88.99%       3609 QPS
+       ef_c=128  建图  47.24s（ 1.00×）  R@10(ef_s=128)  70.95%  门槛达标 ✅
+    p4a_gist960r_w1.log
+       建图 47.67s  20980 vec/s  avg_deg_l0=64.0  Hot 720 MiB
+       ef_search=64    R@10  53.10%      40276 QPS
+       ef_search=1024  R@10  87.13%       3579 QPS
+       ef_c=128  建图  47.67s（ 1.00×）  R@10(ef_s=128)  63.83%  门槛达标 ✅
+    p4a_glove100r_w0.log
+       建图 19.96s  59287 vec/s  avg_deg_l0=64.0  Hot 618 MiB
+       ef_search=64    R@10  32.26%     167336 QPS
+       ef_search=1024  R@10  71.92%      12489 QPS
+       ef_c=128  建图  19.96s（ 1.00×）  R@10(ef_s=128)  45.05%  门槛达标 ✅
+    p4a_glove100r_w1.log
+       建图 20.57s  57543 vec/s  avg_deg_l0=64.0  Hot 618 MiB
+       ef_search=64    R@10  54.06%     158273 QPS
+       ef_search=1024  R@10  88.45%      12977 QPS
+       ef_c=128  建图  20.57s（ 1.00×）  R@10(ef_s=128)  66.00%  门槛达标 ✅
+
+ -- P4-A 组合: 0 个文件
+
+ -- P5 引擎开关: 4 个文件
+    p5_gist960_rot.log
+       建图 456.81s  2189 vec/s  avg_deg_l0=64.0  Hot 720 MiB
+       ef_search=64    R@10  61.76%      23148 QPS
+       ef_search=1024  R@10  90.66%       3134 QPS
+       ef_c=128  建图 456.81s（ 1.00×）  R@10(ef_s=128)  71.97%  门槛达标 ✅
+    p5_sift128_off.log
+       建图 16.10s  62108 vec/s  avg_deg_l0=64.0  Hot 522 MiB
+       ef_search=64    R@10  15.73%     195550 QPS
+       ef_search=1024  R@10  47.16%      17511 QPS
+    p5_sift128_rot.log
+       建图 20.31s  49231 vec/s  avg_deg_l0=64.0  Hot 522 MiB
+       ef_search=64    R@10   0.01%     138270 QPS
+       ef_search=1024  R@10   0.14%      11163 QPS
+       ef_c=128  建图  20.31s（ 1.00×）  R@10(ef_s=128)   0.01%  门槛达标 ✅
+    p5_sift128_rot_fix.log
+       建图 27.46s  36413 vec/s  avg_deg_l0=64.0  Hot 522 MiB
+       ef_search=64    R@10  62.66%     141403 QPS
+       ef_search=1024  R@10  95.94%      13622 QPS
+       ef_c=128  建图  27.46s（ 1.00×）  R@10(ef_s=128)  75.95%  门槛达标 ✅
+
+ -- P6 VIBE: 6 个文件
+    p6_vibe_ccnews.log
+       建图 11.70s  42337 vec/s  avg_deg_l0=64.0  Hot 334 MiB
+       ef_search=64    R@10  25.65%     206924 QPS
+       ef_search=1024  R@10  99.64%       6044 QPS
+       ef_c=128  建图  11.70s（ 1.00×）  R@10(ef_s=128)  49.40%  门槛达标 ✅
+    p6_vibe_coco.log
+       建图 4.64s  60860 vec/s  avg_deg_l0=64.0  Hot 190 MiB
+       ef_search=64    R@10   0.21%     104768 QPS
+       ef_search=1024  R@10   3.59%       6561 QPS
+       ef_c=128  建图   4.64s（ 1.00×）  R@10(ef_s=128)   0.49%  门槛达标 ✅
+    p6_vibe_coco_bl.log
+       建图 19.17s  14727 vec/s
+       建图 19.09s  14789 vec/s
+       建图 24.87s  11355 vec/s
+       建图 30.27s  nlist=4096
+    p6_vibe_coco_rot.log
+       建图 63.97s  4414 vec/s  avg_deg_l0=64.0  Hot 190 MiB
+       ef_search=64    R@10   0.70%      50988 QPS
+       ef_search=1024  R@10   8.88%       6122 QPS
+       ef_c=128  建图  63.97s（ 1.00×）  R@10(ef_s=128)   1.59%  门槛达标 ✅
+
+ -- P7 前瞻: 5 个文件
+    p7q_coherec_seed1.log
+       ef_search=64    R@10  93.46%      56391 QPS
+       ef_search=1024  R@10  99.86%       4978 QPS
+    p7q_gist960c_seed1.log
+       ef_search=64    R@10  39.87%      60977 QPS
+       ef_search=1024  R@10  79.24%       5066 QPS
+    p7q_glove100c_seed1.log
+       ef_search=64    R@10  36.18%     157819 QPS
+       ef_search=1024  R@10  73.26%      12177 QPS
+    p7q_sift128c_seed1.log
+       ef_search=64    R@10  30.16%     209449 QPS
+       ef_search=1024  R@10  84.57%      16903 QPS
+    p7q_wolt_clipc_seed1.log
+       ef_search=64    R@10  76.91%     111098 QPS
+       ef_search=1024  R@10  89.05%       9788 QPS
+
+=========== E. Stage C：多种子 CI + K=5（§3.5、§7.3）===========
+
+ -- p7_stagec_report.json
+    item11 多种子极差：
+      gist960c       @64 极差 0.22pp  @1024 极差 0.19pp  [39.87, 39.82, 40.04]
+      sift128c       @64 极差 0.25pp  @1024 极差 0.20pp  [30.16, 29.91, 30.13]
+      glove100c      @64 极差 0.10pp  @1024 极差 0.07pp  [36.18, 36.08, 36.12]
+      wolt_clipc     @64 极差 0.19pp  @1024 极差 0.27pp  [76.91, 77.1, 77.1]
+      coherec        @64 极差 0.16pp  @1024 极差 0.00pp  [93.46, 93.47, 93.62]
+
+ -- p7_k5_vs_k3.json
+    对拍 38 臂：漂移>3pp 0 个，导航真变化 27 个，probe_k=[5]
+
+=========== F. 判据链前瞻验证（§7.3）===========
+
+ -- nav_rule_validation.json
+    {"fitted": {"hit": 5, "total": 6}, "prospective": [{"arm": "arxiv_nomic", "probe_w": 99.46666666666665, "probe_c": 99.51666666666665, "pred": "cheap", "w0": 96.78, "w1": 96.04, "delta": -0.7399999999999949, "ok": true}, {"arm": "codesearch_jina", "probe_w": 99.91666666666667, "probe_c": 99.88333333333333, "pred": "加权", "w0": 94.62, "w1": 96.37, "delta": 1.75, "ok": true}, {"arm": "gooaq_roberta", "probe_w": 100.0, "probe_c": 99.7, "pred": "加权", "w0": 96.6, "w1": 98.32, "delta": 1.7199999999999989, "ok": true}, {"arm": "landmark_nomic", "probe_w": 93.73333333333333, "probe_c": 99.61666666666667, "pred": "cheap", "w0": 93.05, "w1": 81.39, "delta": -11.659999999999997, "ok": true}, {"arm": "landmark_dino", "probe_w": 99.18333333333334, "probe_c": 96.18333333333334, "pred": "加权", "w0": 82.9, "w1": 91.58, "delta": 8.679999999999993, "ok": true}, {"arm": "gist960rc", "probe_w": 99.58333333333333, "probe_c": 95.56666666666666, "pred": "加权", "w0": 76.05, "w1": 80.17, "delta": 4.1200000000000045, "ok": true}], "prospective_hit": 6}

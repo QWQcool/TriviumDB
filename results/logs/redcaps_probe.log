@@ -1,0 +1,7 @@
+keys: {'random_test': ((10000, 512), 'float32'), 'test': ((800, 512), 'float32'), 'train': ((11588824, 512), 'float32')}
+  train[:20k]    行范数 mean=1.000000 std=0.000000 min=1.000000 max=1.000000
+  random_test    行范数 mean=1.000000 std=0.000000 min=1.000000 max=1.000000
+  test           行范数 mean=1.000000 std=0.000000 min=1.000000 max=1.000000
+  random_test: 与前 1M 基底的**最大 cosine** 中位=0.863499 min=0.544286  max=1.000000   ≥1-1e-6 的查询数=21/200
+  test: 与前 1M 基底的**最大 cosine** 中位=0.324327 min=0.273409  max=0.376066   ≥1-1e-6 的查询数=0/200
+  random_test 内随机对 cosine: 0.4829 ± 0.0943

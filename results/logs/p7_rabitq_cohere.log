@@ -1,0 +1,14 @@
+
+  cohere: train=(1000000, 768) test=(1000, 768) nlist=1024 threads=32
+Traceback (most recent call last):
+  File "C:\Users\v_chchsli\Desktop\TriviumDB\scripts\research\bench_rabitq_refine.py", line 99, in <module>
+    main()
+  File "C:\Users\v_chchsli\Desktop\TriviumDB\scripts\research\bench_rabitq_refine.py", line 63, in main
+    refine = faiss.IndexRefineFlat(ivf)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\v_chchsli\Desktop\TriviumDB\.venv\Lib\site-packages\faiss\__init__.py", line 269, in replacement_init_multiple
+    original_init(self, *args)
+  File "C:\Users\v_chchsli\Desktop\TriviumDB\.venv\Lib\site-packages\faiss\swigfaiss.py", line 5405, in __init__
+    _swigfaiss.IndexRefineFlat_swiginit(self, _swigfaiss.new_IndexRefineFlat(*args))
+                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: Error in __cdecl faiss::IndexRefine::IndexRefine(struct faiss::Index *,struct faiss::Index *) at D:\a\faiss\faiss\faiss\IndexRefine.cpp:31: Error: 'base_index->ntotal == refine_index->ntotal' failed

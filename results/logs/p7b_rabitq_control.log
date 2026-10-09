@@ -1,0 +1,2 @@
+
+  cohere: train=(1000000, 768) test=(1000, 768) nlist=1024 threads=32

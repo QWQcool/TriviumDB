@@ -1,0 +1,9 @@
+[ui-smoke] 1/6 cargo build -p triviumdb-server (browser=chromium)
+[ui-smoke] 2/6 启动临时 server: 127.0.0.1:8081, db=C:\Users\v_chchsli\Desktop\TriviumDB\.tmp\smoke-73476-1788846601207.tdb
+[ui-smoke] 3/6 等待 /health/ready 就绪
+[ui-smoke] 3/6 注入种子数据 (2 个 person 节点 + 1 条 KNOWS 边)
+[ui-smoke] 4/6 打开 http://127.0.0.1:8081/ui 执行冒烟路径
+[ui-smoke]   ✓ 默认查询出结果 (2 行)
+[ui-smoke]   ✓ 节点 360° 抽屉打开/关闭
+[ui-smoke]   ✓ 三个主标签切换
+[ui-smoke]   注入 700 个规模节点 (350 次链式 CREATE)

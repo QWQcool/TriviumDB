@@ -1,0 +1,1594 @@
+﻿cargo :  Downloading crates ...
+At line:1 char:1
++ cargo test 2>&1 | Out-File -Encoding utf8 .tmp/cargo-test.log
++ ~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ( Downloading crates ...:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  Downloaded rand v0.8.5
+  Downloaded rand v0.9.2
+  Downloaded regex v1.12.3
+   Compiling serde_core v1.0.228
+   Compiling serde v1.0.228
+   Compiling getrandom v0.3.4
+   Compiling regex-syntax v0.8.10
+   Compiling either v1.15.0
+   Compiling memchr v2.8.0
+   Compiling smallvec v1.15.1
+   Compiling serde_json v1.0.149
+   Compiling parking_lot_core v0.9.12
+   Compiling plotters-backend v0.3.7
+   Compiling scopeguard v1.2.0
+   Compiling windows-sys v0.61.2
+   Compiling num-traits v0.2.19
+   Compiling getrandom v0.2.17
+   Compiling ciborium-io v0.2.2
+   Compiling clap_builder v4.6.0
+   Compiling fnv v1.0.7
+   Compiling wait-timeout v0.2.1
+   Compiling bit-vec v0.8.0
+   Compiling quick-error v1.2.3
+   Compiling cast v0.3.0
+   Compiling anes v0.1.6
+   Compiling num_cpus v1.17.0
+   Compiling oorandom v11.1.5
+   Compiling unarray v0.1.4
+   Compiling tracing v0.1.44
+   Compiling ppv-lite86 v0.2.21
+   Compiling lock_api v0.4.14
+   Compiling rand_core v0.6.4
+   Compiling rayon v1.11.0
+   Compiling itertools v0.10.5
+   Compiling plotters-svg v0.3.7
+   Compiling bit-set v0.8.0
+   Compiling rand_chacha v0.3.1
+   Compiling aho-corasick v1.1.4
+   Compiling winapi-util v0.1.11
+   Compiling nu-ansi-term v0.50.3
+   Compiling tempfile v3.27.0
+   Compiling is-terminal v0.4.17
+   Compiling criterion-plot v0.5.0
+   Compiling rand_core v0.9.5
+   Compiling same-file v1.0.6
+   Compiling parking_lot v0.12.5
+   Compiling rand v0.8.5
+   Compiling walkdir v2.5.0
+   Compiling rusty-fork v0.3.1
+   Compiling rand_xorshift v0.4.0
+   Compiling rand v0.9.2
+   Compiling rand_chacha v0.9.0
+   Compiling clap v4.6.0
+   Compiling regex-automata v0.4.14
+   Compiling plotters v0.3.7
+   Compiling chrono v0.4.45
+   Compiling ordered-float v3.9.2
+   Compiling proptest v1.11.0
+   Compiling instant-distance v0.6.1
+   Compiling matchers v0.2.0
+   Compiling regex v1.12.3
+   Compiling half v2.7.1
+   Compiling bincode v1.3.3
+   Compiling tracing-subscriber v0.3.23
+   Compiling tinytemplate v1.2.1
+   Compiling ciborium-ll v0.2.2
+   Compiling ciborium v0.2.2
+   Compiling criterion v0.5.1
+   Compiling triviumdb v0.8.6 (C:\Users\v_chchsli\Desktop\TriviumDB)
+warning: linker stdout: 正在创建库 C:\Users\v_chchsli\Desktop\TriviumDB\target\debug\deps\triviumdb.dll.lib 和对象 C:\Users\v_c
+hchsli\Desktop\TriviumDB\target\debug\deps\triviumdb.dll.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `triviumdb` (lib) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 33.95s
+     Running unittests src\lib.rs (target\debug\deps\triviumdb-de8cfe3301d820c0.exe)
+
+running 148 tests
+test database::pipeline::tests::test_execute_pipeline_empty_db ... ok
+test database::pipeline::tests::test_rrf单路保持稠密原始分数 ... ok
+test database::pipeline::tests::test_recall_text_disabled_is_noop ... ok
+test database::pipeline::tests::test_recall_residual_empty_seeds_is_noop ... ok
+test database::pipeline::tests::test_aggregate_seeds_empty_map ... ok
+test database::pipeline::tests::test_execute_pipeline_dimension_mismatch ... ok
+test database::pipeline::tests::test_execute_pipeline_nan_query_rejected ... ok
+test database::pipeline::tests::test_recall_vector_none_query_is_noop ... ok
+test database::pipeline::tests::test_execute_pipeline_inf_query_rejected ... ok
+test database::pipeline::tests::test_recall_text_none_query_is_noop ... ok
+test database::pipeline::tests::test_recall_residual_disabled_is_noop ... ok
+test database::pipeline::tests::test_hook_abort_returns_empty ... ok
+test database::pipeline::tests::test_aggregate_seeds_filters_by_min_score ... ok
+test database::pipeline::tests::test_aggregate_seeds_sorts_descending_and_truncates ... ok
+test database::pipeline::tests::test_apply_dpp_returns_none_when_pool_too_small ... ok
+test database::pipeline::tests::test_aggregate_seeds_with_payload_filter ... ok
+test database::pipeline::tests::test_rrf融合不依赖跨量纲原始分数 ... ok
+test database::pipeline::tests::test_hook_custom_recall_overrides_builtin ... ok
+test database::pipeline::tests::test_apply_dpp_selects_diverse_subset ... ok
+test database::pipeline::tests::test_sanitize_config解耦候选池 ... ok
+test database::pipeline::tests::aggregate_seeds_only_hydrates_rerank_pool ... ok
+test database::pipeline::tests::test_pipeline_clamps_extreme_config ... ok
+test database::pipeline::tests::test_hook回调期间写重入保护已激活 ... ok
+test database::pipeline::tests::test_execute_pipeline_records_timings ... ok
+test database::pipeline::tests::test_recall_vector_with_payload_filter ... ok
+test database::pipeline::tests::test_recall_vector_basic ... ok
+test database::pipeline::tests::test_hook_rerank_reverses_order ... ok
+test database::pipeline::tests::pure_vector_recall_does_not_touch_payload ... ok
+test filter::tests::contains_no_match ... ok
+test database::pipeline::tests::test_hook_post_recall_filters ... ok
+test database::pipeline::tests::test_execute_pipeline_basic_vector_search ... ok
+test filter::tests::from_json_contains ... ok
+test database::pipeline::tests::test_pipeline_with_graph_expansion ... ok
+test filter::tests::from_json_starts_with ... ok
+test filter::tests::from_json_starts_with_invalid_type ... ok
+test database::pipeline::tests::test_execute_pipeline_respects_top_k ... ok
+test database::pipeline::tests::test_recall_vector_filters_before_top_k ... ok
+test filter::tests::or_with_starts_with ... ok
+test filter::tests::contains_basic_match ... ok
+test filter::tests::starts_with_basic_match ... ok
+test filter::tests::starts_with_exact_match ... ok
+test filter::tests::starts_with_missing_field ... ok
+test hook::tests::ffi命中校验拒绝保留_id和非有限分数 ... ok
+test filter::tests::starts_with_no_match ... ok
+test hook::tests::test_composite_hook_default ... ok
+test graph::leiden::tests::test_fragment_filtering ... ok
+test filter::tests::starts_with_non_string_field ... ok
+test graph::leiden::tests::test_empty_graph ... ok
+test graph::leiden::tests::test_centroid_computation ... ok
+test graph::leiden::tests::refinement_保证每个输出社区内部连通 ... ok
+test graph::leiden::tests::test_two_cliques ... ok
+test hook::tests::test_composite_hook ... ok
+test hook::tests::test_composite_on_custom_recall_all_none ... ok
+test graph::leiden::tests::标准_leiden_弱桥双团稳定分离且结果确定 ... ok
+test hook::tests::test_composite_on_custom_recall_first_wins ... ok
+test hook::tests::test_composite_on_post_search ... ok
+test hook::tests::test_composite_on_pre_graph_expand ... ok
+test hook::tests::test_composite_on_rerank_first_wins ... ok
+test hook::tests::test_custom_hook ... ok
+test hook::tests::test_composite_on_pre_search_abort ... ok
+test database::pipeline::tests::test_recall_vector_quiver_filter_fills_top_k ... ok
+test hook::tests::test_ffi_search_hit_repr ... ok
+test hook::tests::test_ffi_hook_load_nonexistent ... ok
+test hook::tests::test_hook_context ... ok
+test hook::tests::test_hook_context_default ... ok
+test hook::tests::test_noop_hook_is_default ... ok
+test index::art::tests::art_node48_删除空槽后重用映射保持有序 ... ok
+test index::art::tests::art_真实节点布局跨越全部容量边界 ... ok
+test index::art::tests::art_前缀扫描与_btreemap_结果一致 ... ok
+test index::art::tests::art_稠密节点位图跨越四个字边界 ... ok
+test index::art::tests::art_路径压缩增删和有序遍历 ... ok
+test index::art::tests::art_节点自适应升级并在删除后收缩 ... ok
+test index::bq::tests::test_bq2_distance ... ok
+test index::bq::tests::test_bq2_distance_raw_scalar ... ok
+test index::bq::tests::test_bq2_signature_creation ... ok
+test index::bq::tests::test_bq2_store ... ok
+test index::bq::tests::test_bq2_store_long_vector ... ok
+test index::bq::tests::dim384紧凑存储最后节点距离安全 ... ok
+test index::property::tests::浮点零使用统一键 ... ok
+test index::property::tests::稳定键区分_json_标量类型 ... ok
+test index::brute_force::tests::filter_map_excludes_candidates_before_top_k ... ok
+test index::quiver::tests::bq_internal_slot_cache_严格遵守字节预算并按最近使用淘汰 ... ok
+test index::bq::tests::非完整尾块在所有奇偶chunk组合下保持标量语义 ... ok
+test index::property::tests::复合索引支持最长左前缀且拒绝跳列 ... ok
+test database::tests::普通crud_wal失败不修改内存状态 ... ok
+test index::bq::tests::非384维保持通用距离语义 ... ok
+test index::art::tests::art_范围和降序_limit ... ok
+test index::quiver::tests::bq_有界预筛边界输入安全且排序确定 ... ok
+test index::quiver::tests::fuzz发现的四十八字节样本不得触发panic ... ok
+test index::quiver::tests::sidecar固定头部逐字节截断不得触发panic ... ok
+test index::quiver::tests::sidecar畸形计数不得触发panic或巨量分配 ... ok
+test index::quiver::tests::sparse_bitset跨查询不串扰并支持扩容 ... ok
+test index::quiver::tests::test_cosine_sim_函数 ... ok
+test index::quiver::tests::test_quiver_config_default ... ok
+test index::quiver::tests::test_quiver_search_config_rerank_limit ... ok
+test index::quiver::tests::test_quiver_soft_delete_不存在的id ... ok
+test index::quiver::tests::test_quiver_单节点图 ... ok
+test index::quiver::tests::test_quiver_基础建图与搜索 ... ok
+test index::quiver::tests::test_quiver_空图搜索 ... ok
+test index::quiver::tests::test_quiver_序列化错误路径 ... ok
+test observability::tests::进程内存快照在支持平台返回有效值 ... ok
+test query::tql_lexer::tests::test_comment_skip ... ok
+test query::tql_lexer::tests::parse_tql_with_pos_ok_returns_query ... ok
+test query::tql_lexer::tests::parse_tql_with_pos_reports_position ... ok
+test index::quiver::tests::test_quiver_中等规模搜索 ... ok
+test query::tql_lexer::tests::test_dot_dot_not_float ... ok
+test query::tql_lexer::tests::test_find_query ... ok
+test query::tql_lexer::tests::test_match_variable_length ... ok
+test query::tql_lexer::tests::test_negative_number ... ok
+test query::tql_lexer::tests::test_order_by ... ok
+test query::tql_lexer::tests::test_pipe_multi_label ... ok
+test query::tql_lexer::tests::test_search_entry ... ok
+test query::tql_lexer::tests::tokenize_with_positions_lex_error_carries_byte_pos ... ok
+test query::tql_lexer::tests::tokenize_with_positions_records_byte_starts ... ok
+test query::tql_lexer::tests::科学计数法支持正负指数且拒绝非法与非有限值 ... ok
+test storage::payload_store::tests::cache_zero_and_oversized_entries_bypass_storage ... ok
+test storage::payload_store::tests::cache_lru_eviction_is_bounded_and_deterministic ... ok
+test storage::payload_store::tests::duplicate_and_invalid_records_fail_closed ... ok
+test storage::payload_store::tests::heap_crud_and_raw_round_trip ... ok
+test storage::payload_store::tests::pinned_value_survives_eviction_and_update_invalidates_cache ... ok
+test tsng::bounded_bonus_tests::bounded_bonus_上限增强时命中节点距离单调不增 ... ok
+test tsng::bounded_bonus_tests::bounded_bonus_实际抵消量不超过配置比例 ... ok
+test tsng::bounded_bonus_tests::bounded_bonus_零上限严格保持向量距离 ... ok
+test vector::tests::dim384专用余弦处理零向量 ... ok
+test vector::tests::test_cosine_scalar_loop ... ok
+test index::quiver::tests::bq_internal_slot_posting_命中缓存且增量变更后安全失效 ... ok
+test vector::tests::test_cosine_similarity ... ok
+test vector::tests::test_zero_and_f32_conv ... ok
+test index::quiver::tests::test_quiver_多路径建图与序列化 ... ok
+test storage::payload_store::tests::concurrent_cache_reads_return_stable_values ... ok
+test storage::fs::tests::robust_rename_and_sync_正常重命名并同步父目录 ... ok
+test vector::tests::dim384专用余弦与通用路径误差受控 ... ok
+test index::quiver::tests::sidecar入口节点越界时安全拒绝 ... ok
+test index::bq::tests::dim384专用廉价距离与通用循环位级一致 ... ok
+test storage::fs::tests::robust_rename_and_sync_目标已存在时覆盖 ... ok
+test storage::payload_store::tests::sidecar_round_trip_uses_mapped_raw ... ok
+test storage::payload_store::tests::sidecar_rejects_whole_file_and_record_corruption ... ok
+test storage::payload_store::tests::sidecar_layout_mutations_fail_closed ... ok
+test index::bq::tests::dim384专用完整距离与通用标量位级一致 ... ok
+test database::tests::close落盘失败恢复open并保留文件锁 ... ok
+test database::tests::close成功后可失败公开操作拒绝旧句柄 ... ok
+test storage::payload_store::tests::fixed_seed_heap_mapped_delta_state_machine_matches_reference ... ok
+test index::quiver::tests::dim384专用搜索与通用路径结果一致 ... ok
+test index::art::tests::art_十万随机操作与_btreemap_差分一致 ... ok
+test index::quiver::tests::bq_有界预筛与全量排序结果逐项一致 ... ok
+test index::quiver::tests::c1a_bq_scorer_与历史算法访问序列和候选逐项一致 ... ok
+test index::quiver::tests::c1a_公开纯向量搜索与_bq_scorer_路径逐项一致 ... ok
+test index::art::tests::art_范围随机差分覆盖四种边界和双向顺序 ... ok
+
+test result: ok. 148 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.32s
+
+     Running tests\concurrency\main.rs (target\debug\deps\concurrency-9c5b1e5d2c7e1950.exe)
+
+running 30 tests
+test concurrent::并发_编译期验证_Database是Send和Sync ... ok
+test concurrency_invariants::Slot复用_旧ID绝不读取新节点的向量或Payload ... ok
+test concurrency_invariants::图更新_正向反向入度与标签索引始终联动 ... ok
+test concurrency_invariants::Generation规则_向量与非向量修改推进正确代际 ... ok
+test concurrency_invariants::BQ重建_重复准备后容量与内容保持稳定 ... ok
+test deterministic::DET_02_similarity数学不变量_大规模验证 ... ok
+test concurrent::并发_8线程TQL查询_结果互不干扰 ... ok
+test concurrency_invariants::QuIVer与Slot复用_旧候选不得读取新节点向量 ... ok
+test concurrency_invariants::容量规划_ExpectedNodes受内存预算约束且打开失败不污染数据 ... ok
+test concurrency_invariants::容量规划_ReserveNodes零值与溢出均防呆拒绝 ... ok
+test deterministic::DET_05_TQL查询_50次结果一致 ... ok
+test concurrency_invariants::容量规划_批次中非法向量不得产生半批数据 ... ok
+test concurrency_invariants::容量规划_事务预留拒绝前后WAL与代际完全不变 ... ok
+test concurrency_invariants::向量更新_查询只能看到完整旧排名或完整新排名 ... ok
+test concurrency_invariants::QuIVer流式签名构建_FP16无需全量FP32副本仍可检索 ... ok
+test concurrency_invariants::容量规划_更新与图边增长在WAL前统一拒绝 ... ok
+test concurrency_invariants::Writer进展_持续并发读结束前写者最终取得写锁 ... ok
+test concurrency_invariants::QuIVer构建峰值预算_显式构建应在分配前拒绝 ... ok
+test deterministic::DET_01_相同查询_100次结果bit_exact一致 ... ok
+test concurrent::并发_1写4读_写入期间读取一致性 ... ok
+test deterministic::DET_04_flush前后数据bit_exact一致 ... ok
+test concurrency_invariants::容量规划_已有Mmap库ExpectedNodes按目标总量补足 ... ok
+test concurrency_invariants::串行提交基线_多线程写入后Flush重载不丢提交 ... ok
+test concurrency_invariants::并发读_冷Payload首次惰性解析只产生一致值 ... ok
+test concurrency_invariants::并发读_16线程同版本精确搜索结果完全一致 ... ok
+test deterministic::DET_03_QuIVer与BruteForce_Top1近似一致性 ... ok
+test concurrency_invariants::QuIVer构建峰值预算_自动构建应返回明确错误 ... ok
+test concurrency_invariants::Flush不得隐式构建QuIVer索引 ... ok
+test deterministic::DET_03B_自动QuIVer路由_结果结构正确 ... ok
+test concurrent::并发_8线程同时只读查询_不恐慌不矛盾 ... ok
+
+test result: ok. 30 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.57s
+
+     Running tests\contracts\main.rs (target\debug\deps\contracts-a308e84f63dac0fe.exe)
+
+running 33 tests
+test hook_and_search::COV3_06_hook_context_record_timing ... ok
+test hook_and_search::COV3_05_ffi_hook_load_nonexistent ... ok
+test shared_cases::共享json契约由rust适配器完整执行 ... ok
+test hook_and_search::COV3_09_tql_variable_length_path ... ok
+test hook_and_search::COV3_15_tql_comparison_operators ... ok
+test hook_and_search::COV3_21_tql_match_inline_filter ... ok
+test hook_and_search::COV3_16_advanced_pipeline ... ok
+test public_matrix::Hook非法命中不得越过最终公共结果契约 ... ok
+test hook_and_search::Hook修改查询向量后_维度和有限值必须重新校验 ... ok
+test hook_and_search::COV3_03_composite_hook_custom_recall ... ok
+test hook_and_search::Hook修改配置后_diffusion_bias边界必须重新校验 ... ok
+test hook_and_search::COV3_02_composite_hook_abort ... ok
+test hook_and_search::COV3_10_tql_backward_edge ... ok
+test hook_and_search::分组检索独立保留语义与图扩散结果 ... ok
+test hook_and_search::COV3_01_composite_hook_all_stages ... ok
+test hook_and_search::COV3_04_composite_hook_rerank ... ok
+test hook_and_search::COV3_17_hybrid_text_vector ... ok
+test hook_and_search::COV3_08_tql_explain ... ok
+test hook_and_search::COV3_20_tql_offset_overflow ... ok
+test hook_and_search::COV3_12_tql_search_expand ... ok
+test hook_and_search::COV3_13_tql_search_where ... ok
+test hook_and_search::COV3_18_payload_filter ... ok
+test hook_and_search::COV3_07_tql_optional_match ... ok
+test hook_and_search::COV3_11_tql_bidirectional ... ok
+test hook_and_search::COV3_19_tql_create_with_edge ... ok
+test hook_and_search::payload_filter同时约束图扩散结果 ... ok
+test hook_and_search::COV3_14_tql_and_or_not ... ok
+test hook_and_search::payload_filter_applies_before_top_k ... ok
+test public_matrix::结构化错误契约覆盖维度_节点_只读_查询预算和API迁移 ... ok
+test public_matrix::CRUD_索引_分页和重开公共契约保持一致 ... ok
+warning: linker stdout: 正在创建库 C:\Users\V_CHCH~1\AppData\Local\Temp\triviumdb_ffi_hook_v2_overflow_92352\overflow.dll.li
+b 和对象 C:\Users\V_CHCH~1\AppData\Local\Temp\triviumdb_ffi_hook_v2_overflow_92352\overflow.dll.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: linker stdout: 正在创建库 C:\Users\V_CHCH~1\AppData\Local\Temp\triviumdb_ffi_hook_v2_mismatch_92352\mismatch.dll.li
+b 和对象 C:\Users\V_CHCH~1\AppData\Local\Temp\triviumdb_ffi_hook_v2_mismatch_92352\mismatch.dll.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: linker stdout: 正在创建库 C:\Users\V_CHCH~1\AppData\Local\Temp\triviumdb_ffi_hook_v2_valid_92352\valid.dll.lib 和对象 
+C:\Users\V_CHCH~1\AppData\Local\Temp\triviumdb_ffi_hook_v2_valid_92352\valid.dll.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: 1 warning emitted
+
+warning: 1 warning emitted
+
+warning: 1 warning emitted
+
+test ffi_hook_v2::FFI_ABI_v2拒绝版本不匹配 ... ok
+test ffi_hook_v2::FFI_ABI_v2覆盖六阶段并传播错误 ... ok
+test ffi_hook_v2::FFI_ABI_v2拒绝越界返回数量 ... ok
+
+test result: ok. 33 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+
+     Running tests\core\main.rs (target\debug\deps\core-586f4e5c426abb79.exe)
+
+running 164 tests
+test boundary::BND_03_dim等于65537_超限拒绝 ... ok
+test boundary::BND_09_top_k大于节点总数 ... ok
+test boundary::BND_10_expand_depth极大值_小图不栈溢出 ... ok
+test boundary::BND_03A_超3072维手动QuIVer构建安全拒绝并保持可检索 ... ok
+test database_advanced::COV2_06_property_index ... ok
+test database_advanced::COV2_04_contains_and_dim ... ok
+test database_advanced::COV2_16_tql_mut_detach_delete ... ok
+test database_advanced::COV2_02_neighbors ... ok
+test database_advanced::COV2_15_tql_mut_delete ... ok
+test database_advanced::COV2_17_tql_mut_rejects_read_query ... ok
+test database_advanced::COV2_12_tql_distinct ... ok
+test database_advanced::COV2_18_tql_complex_where ... ok
+test database_advanced::COV2_01_get_node_view ... ok
+test database_advanced::COV2_08_tql_aggregate ... ok
+test database_advanced::COV2_11_tql_search_vector ... ok
+test boundary::BND_02_dim等于65536_最大维度 ... ok
+test database_advanced::COV2_10_tql_match_label_filter ... ok
+test database_advanced::COV2_07_tql_order_limit_skip ... ok
+test database_advanced::COV2_13_tql_mut_create ... ok
+test database_advanced::COV2_09_tql_match_where ... ok
+test database_advanced::COV2_14_tql_mut_set ... ok
+test boundary::BND_08_边权重极端值 ... ok
+test boundary::BND_04_单节点数据库_所有操作 ... ok
+test database_advanced::COV2_02b_标签邻居稳定排序与完整入边 ... ok
+test database_advanced::COV2_19_tql_return_fields ... ok
+test endian_limit::测试_超大维数模拟拦截_防平台指针溢出 ... ok
+test database_advanced::COV2_20_insert_with_id_happy ... ok
+test engine_deep::COV7_01_optional_match_null_fill ... ok
+test engine_deep::COV7_05_varlen_cycle ... ok
+test engine_deep::COV7_04_varlen_zero_hop ... ok
+test engine_deep::COV7_02_optional_match_mixed ... ok
+test engine_deep::COV7_03_varlen_path_deep ... ok
+test engine_deep::COV7_07_find_return_aggregate ... ok
+test engine_deep::COV7_06_find_return_expression ... ok
+test engine_deep::COV7_12_match_set_verify ... ok
+test proptest_core::cosine_similarity_对称性 ... ok
+test engine_deep::COV7_08_aggregate_empty_result ... ok
+test engine_deep::COV7_09_order_by_with_nulls ... ok
+test engine_deep::COV7_10_match_create_ref ... ok
+test engine_deep::COV7_11_match_create_edge_between_existing ... ok
+test proptest_core::link_unlink_in_degree_不变量 ... ok
+test engine_deep::COV7_13_detach_delete_no_match ... ok
+test engine_deep::COV7_14_filter_not ... ok
+test engine_deep::COV7_15_find_null_value ... ok
+test proptest_core::cosine_similarity_绝对范围 ... ok
+test proptest_core::cosine_similarity_范围不变量 ... ok
+test engine_deep::COV7_16_find_bool_value ... ok
+test proptest_core::memtable_crud_node_count_不变量 ... ok
+test proptest_core::filter_matches_绝不panic ... ok
+test proptest_core::memtable_insert_get_delete_一致性 ... ok
+test public_api_alignment::历史静默_api全部明确拒绝 ... ok
+test public_api_alignment::prepared_tql和一等路径列表值可通过公共_api执行 ... ok
+test engine_deep::COV7_17_find_float_value ... ok
+test engine_deep::COV7_18_find_array_value ... ok
+test public_api_alignment::四类属性索引和存储格式可结构化观测 ... ok
+test engine_deep::COV7_21_unlink_nonexistent ... ok
+test engine_deep::COV7_22_update_payload_search ... ok
+test engine_deep::COV7_20_delete_twice ... ok
+test database_advanced::COV2_03_close ... ok
+test boundary::FMT_01_未来版本号文件_优雅拒绝 ... ok
+test engine_deep::COV7_19_wal_truncated_recovery ... ok
+test engine_deep::COV7_25_match_all_order_limit ... ok
+test engine_deep::COV7_24_search_expand_multi_label ... ok
+test engine_deep::COV7_23_match_budget_exceeded ... ok
+test endian_limit::测试_恢复next_id耗尽后插入应返回错误而非回绕 ... ok
+test boundary::BND_01_dim等于1_最小维度全流程 ... ok
+test boundary::BND_07_边标签为空字符串 ... ok
+test database_advanced::COV2_21_insert_with_id_payload_too_large ... ok
+test runtime_types::COV5_03_where_string_cmp ... ok
+test runtime_types::COV5_01_where_float_cmp ... ok
+test runtime_types::COV5_02_where_bool_cmp ... ok
+test boundary::BND_05_payload为空JSON对象 ... ok
+test boundary::BND_06_payload含Unicode和特殊字符 ... ok
+test runtime_types::COV5_04_where_int_float_cross ... ok
+test runtime_types::COV5_05_where_id_field ... ok
+test runtime_types::COV5_06_order_by_types ... ok
+test runtime_types::COV5_07_order_by_id ... ok
+test runtime_types::COV5_09_find_and_or_not ... ok
+test runtime_types::COV5_08_find_where_order_limit ... ok
+test endian_limit::测试_人为端序颠倒污染_魔数与长度域应有效拦截不崩溃 ... ok
+test endian_limit::测试_恶意BQ计数字段截断_应拒绝且不崩溃 ... ok
+test boundary::BND_03B_3072维QuIVer可构建且3073维自动路由保持暴力检索 ... ok
+test endian_limit::测试_恶意BQ计数溢出_应拒绝且不崩溃 ... ok
+test runtime_types::COV5_13_tql_create_weighted_edge ... ok
+test runtime_types::COV5_14_tql_syntax_errors ... ok
+test search::P1_5_BQ搜索_删除后不返回被删节点 ... ok
+test search::批量搜索_任一非法查询整批失败 ... ok
+test search::基础搜索_余弦相似度最高的节点排在最前 ... ok
+test search::P1_5_BQ搜索与BruteForce一致性 ... ok
+test search::P1_5_BQ搜索_更新向量后_结果反映变化 ... ok
+test runtime_types::COV5_15_tql_distinct_edge ... ok
+test runtime_types::COV5_16_search_complex_where ... ok
+test runtime_types::COV5_18_match_order_by ... ok
+test search::批量搜索_拒绝危险配置 ... ok
+test search::批量搜索_结果顺序与逐条搜索严格一致 ... ok
+test runtime_types::COV5_19_tql_mut_complex ... ok
+test runtime_types::COV5_20_tql_mut_delete_multi ... ok
+test runtime_types::COV5_17_match_where_on_b ... ok
+test search::批量搜索_空批次与单查询边界 ... ok
+test search::搜索_min_score过滤_低分节点不出现 ... ok
+test search::搜索_top_k超过总节点数_只返回实际节点数 ... ok
+test search::搜索_单节点库_总是返回该节点 ... ok
+test search::搜索_批量删除后_库变空_搜索返回空 ... ok
+test search::空库搜索_应返回空结果不panic ... ok
+test search::精确搜索_参数与空库边界 ... ok
+test search::精确搜索_同分按NodeId稳定排序 ... ok
+test search::精确搜索_与朴素全量排序结果一致 ... ok
+test search::精确搜索_跳过删除节点并反映向量更新 ... ok
+test transaction::事务_delete_节点后_contains返回false ... ok
+test search::精确搜索_返回全库真实TopK和完整Payload ... ok
+test transaction::P1_4_删除后更新payload_应失败 ... ok
+test typed_facade::类型化门面拒绝错误访问模式配置 ... ok
+test transaction::事务_ID耗尽预检失败且不写入状态 ... ok
+test transaction::P1_4_删除后更新向量_应失败 ... ok
+test transaction::事务_dry_run_维度不匹配_应拒绝整个事务 ... ok
+test transaction::事务_基本提交_返回正确的生成ID ... ok
+test transaction::事务_dry_run_insert_with_id_重复_应拒绝 ... ok
+test transaction::事务_指定标签断边_仅删除匹配边 ... ok
+test transaction::事务_insert_with_id_ID0拒绝且无状态残留 ... ok
+test transaction::事务_update_payload_正常工作 ... ok
+test transaction::事务_update_vector_正常工作 ... ok
+test transaction::事务_insert_with_id_重复ID_预检失败 ... ok
+test endian_limit::测试_损坏Edge标签和非有限权重_应拒绝且不崩溃 ... ok
+test transaction::事务_unlink_正常移除边 ... ok
+test runtime_types::COV5_11_flush_reopen_mmap ... ok
+test transaction::事务_空事务_提交成功并返回空列表 ... ok
+test transaction::事务_插入边_可以查询 ... ok
+test transaction::事务_跨操作依赖_先insert再link ... ok
+test transaction::事务_非法边权在WAL前拒绝且状态不变 ... ok
+test search::批量搜索_关闭后拒绝旧句柄 ... ok
+test transaction::条件更新与原子批量删除保持稳定失败语义 ... ok
+test vector_types::F16_图谱边_插入与查询 ... ok
+test vector_types::F16_基础CRUD_插入查询删除 ... ok
+test vector_types::F16_事务_提交与维度校验 ... ok
+test database_advanced::COV2_05_migrate_to ... ok
+test vector_types::F16_批量搜索_保持输入顺序 ... ok
+test typed_facade::reader门面支持共享只读和完整查询能力 ... ok
+test typed_facade::reader门面支持immutable并验证manifest ... ok
+test vector_types::F16_搜索_余弦相似度正确排序 ... ok
+test vector_types::F16_更新向量与Payload ... ok
+test vector_types::F16_精度边界_极小值不丢失 ... ok
+test vector_types::F16_精确搜索_使用半精度存储值排序 ... ok
+test vector_types::U64_事务_多操作原子提交 ... ok
+test search::批量搜索_同一实例多调用方并发稳定 ... ok
+test typed_facade::writer门面保留完整写能力并可发布generation ... ok
+test vector_types::F16_WAL恢复_未flush数据通过WAL回放 ... ok
+test vector_types::U64_WAL恢复 ... ok
+test runtime_types::COV5_10_f16_full_lifecycle ... ok
+test vector_types::U64_基础CRUD_插入查询删除 ... ok
+test vector_types::U64_批量搜索_汉明结果正确 ... ok
+test vector_types::U64_全零与全一_哈希极端值 ... ok
+test vector_types::U64_更新向量与Payload ... ok
+test vector_types::U64_搜索_汉明相似度正确排序 ... ok
+test runtime_types::COV5_12_incremental_flush_reopen ... ok
+test transaction::事务批内唯一冲突在_wal_前拒绝 ... ok
+test transaction::事务唯一约束支持键交换与删除后复用 ... ok
+test vector_types::U64_持久化_flush后重新加载 ... ok
+test vector_types::U64_大批量插入搜索_50节点 ... ok
+test workflow::测试_全业务链路_社交网络复杂流转 ... ok
+test vector_types::F16_大批量插入搜索_50节点 ... ok
+test vector_types::F16_持久化_flush后重新加载数据完整 ... ok
+test workflow::测试_独立写操作API_与无事务修改的一致性 ... ok
+test proptest_core::transaction_原子性 ... ok
+test proptest_core::wal_往返一致性 ... ok
+
+test result: ok. 164 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.41s
+
+     Running tests\differential\main.rs (target\debug\deps\differential-e0ab44fb0a3f9158.exe)
+
+running 26 tests
+test expression::tests::值系统区分_missing_null_并支持数值跨类型比较 ... ok
+test canonical::tests::canonical覆盖全部一等TQL值且无序行按多重集合比较 ... ok
+test expression::tests::完整算术_is_null_list_path均有明确语义 ... ok
+test graph_reference::tests::集合代数满足幂等交换和差集性质 ... ok
+test matrix::reference_缺失字段与异类型比较fail_closed ... ok
+test graph_reference::tests::多方向可达性与最短路径满足深度单调性 ... ok
+test replay::tests::replay记录包含固定seed配置TQL和fixture规模 ... ok
+test shrinker::tests::shrinker单调移除谓词排序分页与标签复杂度 ... ok
+test matrix::metamorphic_布尔恒等分页与索引不改变语义 ... ok
+test graph_reference::tests::节点双射重映射保持图可达结构同构 ... ok
+test replay::tests::贪心shrinker与数据库缩减均由失败判定器驱动 ... ok
+test extended_pipeline_generator::扩展case打印稳定且可单调缩减 ... ok
+test pipeline_generator::pipeline_case_打印稳定_缩减单调且replay完整 ... ok
+test graph_algorithms_reference::图算法_metamorphic_性质保持成立 ... ok
+test prepared::Prepared与Direct在多组参数下逐行一致 ... ok
+test pipeline_reference::集合代数生产Pipeline与独立BTreeSet_reference一致 ... ok
+test pipeline_reference::shortest_path生产结果与独立BFS_reference一致 ... ok
+test cognitive_pipeline_metamorphic::多阶段认知with保留前序指标并且聚合与逐行结果一致 ... ok
+test cognitive_pipeline_metamorphic::文本入口固定种子查询重复执行确定且top_k满足前缀关系 ... ok
+test graph_algorithms_reference::固定种子随机小图_g3_g4_与穷举reference一致 ... ok
+test pipeline_generator::类型正确_pipeline_generator_与独立reference逐案一致 ... ok
+test cognitive_pipeline_metamorphic::dpp生成参数下输出是输入子集且top_k硬边界成立 ... ok
+test cognitive_pipeline_metamorphic::residual与topics固定种子参数满足有界有限和行保持契约 ... ok
+test extended_pipeline_generator::expand_图算法_聚合_多阶段with生成差分 ... ok
+test graph_algorithms_reference::固定种子随机小图_g1_g2_与独立reference一致 ... ok
+test matrix::FIND_MATCH_聚合在索引与持久化矩阵下和独立_reference一致 ... ok
+
+test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.44s
+
+     Running tests\fault_allocator\main.rs (target\debug\deps\fault_allocator-6bac4468058de585.exe)
+
+running 5 tests
+test __allocator_failure_child_entry ... ok
+test 测试_真实分配失败_try_reserve安全返回且不申请物理大内存 ... ok
+test 测试_深层海量多重自连边_避免调用栈溢出 ... ok
+
+running 1 test
+test __allocator_failure_child_entry ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.02s
+
+test 测试_真实allocator_failure隔离子进程并保持数据库可恢复 ... ok
+test 测试_巨量边极速扩张图谱_评估软隔离能力 ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.06s
+
+     Running tests\fault_crash\main.rs (target\debug\deps\fault_crash-cf98a92ba3e92583.exe)
+
+running 11 tests
+test __hw_crash_child_entry ... ok
+
+running 1 test
+test __hw_crash_child_entry ... 
+running 1 test
+test __hw_crash_child_entry ... 
+running 1 test
+test __hw_crash_child_entry ... 
+running 1 test
+test __hw_crash_child_entry ... 
+running 1 test
+test __hw_crash_child_entry ... 
+running 1 test
+test __hw_crash_child_entry ... 
+running 1 test
+test __hw_crash_child_entry ... 
+running 1 test
+test __hw_crash_child_entry ... 
+running 1 test
+test __hw_crash_child_entry ... 
+running 1 test
+test __hw_crash_child_entry ... test HW03_DIV0_除零异常_崩溃恢复 ... ok
+test HW04_NULL_DEREF_空指针写入异常_崩溃恢复 ... ok
+
+running 1 test
+test __hw_crash_child_entry ... test HW06_MFENCE_内存屏障后崩溃恢复 ... ok
+test HW08_大Payload_8KB_WAL缓冲压力崩溃恢复 ... ok
+
+running 1 test
+test __hw_crash_child_entry ... 
+running 1 test
+test __hw_crash_child_entry ... test HW09_连续三次崩溃_累积WAL回放恢复 ... ok
+
+running 1 test
+test __hw_crash_child_entry ... 
+running 1 test
+test __hw_crash_child_entry ... 
+running 1 test
+test __hw_crash_child_entry ... 
+running 1 test
+test __hw_crash_child_entry ... test HW10_全异常向量交叉轰炸_同一DB连续恢复 ... ok
+test HW01_UD2_未定义指令异常_崩溃恢复 ... ok
+test HW05_寄存器毒化_GPR和SSE全清零后崩溃恢复 ... ok
+test HW02_INT3_断点陷阱_崩溃恢复 ... ok
+test HW07_写入中途UD2崩溃_数据库仍可打开 ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.10s
+
+     Running tests\fault_hardware\main.rs (target\debug\deps\fault_hardware-101e005c850722ac.exe)
+
+running 21 tests
+test unsafe_audit::UNSAFE_02_SIMD_极端浮点值_不产生NaN_Inf ... ok
+test unsafe_audit::UNSAFE_01_SIMD_非8倍数维度_尾部处理正确性 ... ok
+test unsafe_audit::UNSAFE_03_SIMD_与标量路径结果一致 ... ok
+test unsafe_audit::UNSAFE_09_零字节文件_不panic ... ok
+test unsafe_audit::UNSAFE_07_截断Header_只有Magic ... ok
+test unsafe_audit::UNSAFE_10_单字节文件_不panic ... ok
+test unsafe_audit::UNSAFE_05_VecPool_文件被删除后读取不崩溃 ... ok
+test emi_bitflip::EMI_02_向量数据区10_percent翻转_搜索降级不崩溃 ... ok
+test unsafe_audit::UNSAFE_04_VecPool_文件外部截断后读取不崩溃 ... ok
+test hw_intrusion::INTRUDE_02_MOVNTI非时序毒写_DMA级侵入 ... ok
+test hw_intrusion::INTRUDE_01_BTS单比特翻转_TDB文件多点侵入 ... ok
+test hw_intrusion::INTRUDE_05_文件头Magic全覆写_格式校验拦截 ... ok
+test hw_intrusion::INTRUDE_04_ASM构造NaN查询向量_搜索输入验证 ... ok
+test hw_intrusion::INTRUDE_06_渐进式比特衰减_NAND_Flash老化模拟 ... ok
+test emi_bitflip::EMI_01_连续8字节全翻转_burst_error ... ok
+test hw_intrusion::INTRUDE_07_TDB加WAL双文件同时侵入_灾难级容错 ... ok
+test emi_bitflip::EMI_04_TDB全零覆写_安全拒绝 ... ok
+test unsafe_audit::UNSAFE_08_node_count溢出_声明百万实际为空 ... ok
+test hw_intrusion::INTRUDE_03_WAL尾部注入垃圾帧_回放容错 ... ok
+test unsafe_audit::UNSAFE_06_畸形Header偏移量越界_不panic ... ok
+test emi_bitflip::EMI_03_WAL单比特翻转_CRC检测率 ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 15.66s
+
+     Running tests\fault_io\main.rs (target\debug\deps\fault_io-e6c5cecdd1d3ae57.exe)
+
+running 20 tests
+test sector_tearing::测试_深层页撕裂_模拟写入一半断电截断 ... ignored, 故障注入测试由 fault-injection workflow 显式运行
+test wal_midwrite::WAL_单帧字段边界截断_len_data_crc各字段 ... ok
+test wal_midwrite::WAL_有效前缀加垃圾尾部_前缀条目必须完整恢复 ... ok
+test wal_midwrite::WAL_事务边界截断_未提交事务必须被丢弃 ... ok
+test wal_midwrite::WAL_逐字节截断_覆盖每个断电时间点 ... ok
+test io_fault::IO_06_文件锁_同一路径不能打开两次 ... ok
+test io_fault::IO_09_SyncMode_Off未flush_writer时允许WAL不可见 ... ok
+test io_fault::IO_07_纯WAL恢复_不flush直接退出 ... ok
+test io_fault::IO_10_SyncMode_Normal写入后WAL应立即可见_Full至少同等可见 ... ok
+test io_fault::IO_02_WAL文件注入随机垃圾_安全恢复 ... ok
+test io_fault::IO_05_残留tmp文件_不影响正常启动 ... ok
+test io_fault::IO_01_WAL文件被清空_安全启动 ... ok
+test io_fault::IO_05D_vec追加半截_flush_ok不匹配_不得产生脏节点 ... ok
+test io_fault::IO_04_vec与tdb大小不匹配_降级加载 ... ok
+test wal_midwrite::WAL_端到端_文件物理截断后Database重新加载 ... ok
+test io_fault::IO_03_TDB文件全覆写随机数据_安全拒绝 ... ok
+test io_fault::IO_05B_tdb_tmp半截矩阵_必须忽略并保留旧快照 ... ok
+test io_fault::IO_05C_vec_tmp半截矩阵_必须忽略并保留旧向量文件 ... ok
+test io_fault::IO_08_SyncMode_Normal和Full_drop后必须恢复完整WAL ... ok
+test wal_midwrite::WAL_解析器_10000轮随机字节绝不panic ... ok
+
+test result: ok. 19 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.56s
+
+     Running tests\fault_lock\main.rs (target\debug\deps\fault_lock-6537b6e2cbe60d54.exe)
+
+running 4 tests
+test 双写跨进程辅助进程 ... ok
+test 相对路径绝对路径与父目录别名共享同一writer锁 ... ok
+test 符号链接别名在权限允许时不能绕过writer锁 ... ok
+
+running 1 test
+test 双写跨进程辅助进程 ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+test 同一路径跨进程第二个writer被拒绝且文件字节不变 ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running tests\fault_power\main.rs (target\debug\deps\fault_power-2fb6dc34bb2f3486.exe)
+
+running 8 tests
+test __group_commit_power_loss_child_entry ... ok
+test __power_loss_child_entry ... ok
+test PWR_04_事务commit后断电_WAL原子回放 ... ok
+
+running 1 test
+
+running 1 test
+test PWR_02_flush中途断电_tmp残留_原子性验证 ... ok
+test PWR_00_真实强杀子进程后WAL保持可恢复 ... ok
+test PWR_00B_group_commit确认后强杀可恢复全部独立事务 ... ok
+test PWR_03_删除后断电_tombstone持久化 ... ok
+test PWR_01_快速断电循环_100轮 ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.00s
+
+     Running tests\format_mutation\main.rs (target\debug\deps\format_mutation-453b19ff90aaed95.exe)
+
+running 3 tests
+test 文件读取工具自身覆盖偏移边界且不产生危险分配 ... ok
+test flush_marker和vec等长变异由v2_crc_fail_closed且只读零写 ... ok
+test tdb格式变异全部拒绝或安全降级且绝不改写损坏输入 ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running tests\format_spec\main.rs (target\debug\deps\format_spec-6b9e45f37bc03ede.exe)
+
+running 17 tests
+test mutation::字段变异只修改目标范围且checksum修复有界 ... ok
+test spec::所有固定规格字段不重叠且完全落在声明头部内 ... ok
+test replay::格式失败记录可序列化且mutation可确定性缩减 ... ok
+test wal_spec::wal长度零_最大值_超出剩余和尾部垃圾不越过损坏边界 ... ok
+test wal_spec::未提交事务_缺commit与commit后残帧均保持原子恢复 ... ok
+test wal_spec::wal未知版本只读打开零写拒绝 ... ok
+test cross_generation::修复marker_crc不能掩盖tdb和vec内容损坏 ... ok
+test snapshot_spec::marker修复自身crc后_错误尺寸和文件crc仍被语义校验拒绝 ... ok
+test cross_generation::sidecar跨代际不能产生幽灵节点或错误索引结果 ... ok
+test snapshot_spec::vec长度元素边界和非有限值由跨文件校验拒绝 ... ok
+test sidecar_spec::sidecar未知版本与恶意计数不得触发危险分配 ... ok
+test cross_generation::tdb_vec_marker所有跨代际组合均不得拼出混合快照 ... ok
+test wal_spec::wal头部字段边界与所有帧边界逐字节截断均安全停止 ... ok
+test snapshot_spec::tdb头部每个字段边界与逐字段截断均不panic且只读零写 ... ok
+test snapshot_spec::flush_marker_v1_v2兼容且v3完整字段边界_marker_crc和未知版本矩阵 ... ok
+test sidecar_spec::图索引字段边界_逐点截断_crc损坏和修复crc后语义非法均安全 ... ok
+test sidecar_spec::属性索引字段边界_逐点截断_crc损坏和修复crc后语义非法均安全 ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.23s
+
+     Running tests\generation\main.rs (target\debug\deps\generation-12255794dd974bf8.exe)
+
+running 13 tests
+test generation跨进程租约辅助进程 ... ok
+test current拒绝路径穿越和损坏指针 ... ok
+test current损坏缺失和未知版本时回收全部fail_closed ... ok
+test generation_reader不在不可变目录创建租约文件 ... ok
+test manifest_node_count错配时reader拒绝打开 ... ok
+test 当前代永远不能被回收 ... ok
+test current残留临时文件不影响旧指针和后续发布 ... ok
+test publish_current拒绝损坏manifest和generation_id错配且保留旧current ... ok
+test 活跃reader阻止旧代回收释放后可以回收 ... ok
+
+running 1 test
+test current原子切换后新reader读新代旧reader保持旧代 ... ok
+test 真实跨进程reader阻止回收且异常退出后租约自动释放 ... ok
+test 并发open与回收不会删除刚解析到的generation ... ok
+test 并发切代时current始终是完整json ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.29s
+
+     Running tests\graph\main.rs (target\debug\deps\graph-124e5daa2c8557bd.exe)
+
+running 45 tests
+test graph_algorithms::WCC_空图 ... ok
+test graph_algorithms::PageRank_空图 ... ok
+test graph_algorithms::度中心性_空图 ... ok
+test graph_algorithms::字段查找_多匹配 ... ok
+test graph_algorithms::WCC_单节点 ... ok
+test graph_algorithms::Betweenness_采样模式 ... ok
+test graph_algorithms::度中心性_双向边 ... ok
+test graph_algorithms::最短路径_不可达 ... ok
+test graph_algorithms::WCC_断开图谱 ... ok
+test graph_algorithms::可变长路径_基础 ... ok
+test graph_algorithms::最短路径_标签过滤 ... ok
+test graph_algorithms::全路径_无路由 ... ok
+test graph_algorithms::度中心性_星形图_中心最高 ... ok
+test graph_algorithms::可变长路径_最小深度 ... ok
+test graph_algorithms::全路径_熔断 ... ok
+test graph_algorithms::全路径_标签过滤 ... ok
+test graph_algorithms::K跳邻域_标签过滤 ... ok
+test graph_algorithms::全路径_双路由 ... ok
+test graph_algorithms::最短路径_同节点 ... ok
+test graph_algorithms::K跳邻域_基础 ... ok
+test graph_algorithms::可变长路径_结果数熔断 ... ok
+test graph_algorithms::最短路径_深度限制 ... ok
+test graph_algorithms::WCC_全连通 ... ok
+test graph_algorithms::度中心性_归一化 ... ok
+test graph_algorithms::最短路径_直达 ... ok
+test graph_algorithms::最短路径_两跳 ... ok
+test graph_algorithms::K跳邻域_两跳 ... ok
+test graph_algorithms::Betweenness_星形图_叶节点无中介 ... ok
+test graph_algorithms::Betweenness_链式图_中间节点最高 ... ok
+test graph_algorithms::PageRank_降序排列 ... ok
+test graph_algorithms::PageRank_星形图_叶节点高于中心 ... ok
+test graph_algorithms::PageRank_标签过滤 ... ok
+test graph_algorithms::边标签索引_delete后清理 ... ok
+test graph_algorithms::Betweenness_标签过滤 ... ok
+test graph_algorithms::边标签索引_unlink后更新 ... ok
+test graph_algorithms::PageRank_总和收敛到1 ... ok
+test graph_algorithms::边标签索引_正确维护 ... ok
+test graph_b2::reachability_四维预算和指标全部生效 ... ok
+test graph_b2::双向_bfs_预算默认报错且_partial显式截断 ... ok
+test graph_b2::双向_bfs_处理不可达_零深度_自环和标签过滤 ... ok
+test graph_b2::双向_bfs_与单向_bfs最短长度一致且路径确定 ... ok
+test graph_b2::explain_analyze_暴露图统计和遍历预算 ... ok
+test graph_b2::图统计在_link_unlink_delete_和重启后保持一致 ... ok
+test graph_b2::双向_bfs_随机图与单向_bfs最短长度差分一致 ... ok
+test reverse_edge::test_reverse_edge_avalanche_deletion ... ok
+
+test result: ok. 45 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.63s
+
+     Running tests\hardening\main.rs (target\debug\deps\hardening-68efddbf8e67cb49.exe)
+
+running 7 tests
+test security::测试_跨进程文件锁_强硬阻断双重绑定 ... ok
+test security::测试_毒素向量拦截_拒绝NaN与Inf ... ok
+test security::测试_WAL遇尾部乱码死字节_精确截除防止污染 ... ok
+test security::测试_WAL丢失TxCommit的幽灵事务_被正确截断并保护后续追加 ... ok
+test security::测试_密集图谱_万级笛卡尔积防OOM_LazyEvaluation有效性 ... ok
+test security::测试_巨型恶意载荷拦截_防OOM与日志撑爆 ... ok
+test security::测试_大规模写入_安全触发Mmap多次扩容 ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.92s
+
+     Running tests\long_running\main.rs (target\debug\deps\long_running-833b36a2fd7b315a.exe)
+
+running 11 tests
+test soak::SOAK_01_连续运行5分钟_内存不泄漏 ... ignored
+test soak::SOAK_02_连续flush_500轮_文件大小不膨胀 ... ignored
+test stress::测试_图谱自环与重边_极度震荡防雪崩 ... ok
+test stress::测试_悬空边防御_删除节点后不得返回幽灵搜索结果 ... ok
+test stress::测试_极端病态向量_零向量不得引发NaN ... ok
+test stress::测试_ID单调性_跨越删除和WAL回放后绝不复用 ... ok
+test stress::测试_Mmap到Rom热切换_数据不丢不裂 ... ok
+test stress::测试_暴力中断随机重放_多轮假死不丢数据 ... ok
+test stress::测试_空库极端操作_一切安全返回 ... ok
+test stress::测试_反复全删全插_墓碑与ID分配器绝不错位 ... ok
+test stress::测试_并发读写安全_单写多读互不恐慌 ... ok
+
+test result: ok. 9 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 2.90s
+
+     Running tests\model\main.rs (target\debug\deps\model-8f78935639484f19.exe)
+
+running 1 test
+test 阶段A_固定种子状态机覆盖_Mmap与Rom ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.03s
+
+     Running tests\pipeline\main.rs (target\debug\deps\pipeline-d9908ebd6289335f.exe)
+
+running 99 tests
+test pipeline_deep::COV6_03_nmf_multiplicative ... ok
+test pipeline_graph_algorithms::g2_无三角低度节点与_hits_参数预算边界正确 ... ok
+test pipeline_graph_algorithms::g1_链星团与自环边界图结果正确 ... ok
+test pipeline_graph_algorithms::g1_scc_kcore_割点与手工_reference_一致 ... ok
+test cascades_optimizer::增量图统计覆盖自环多标签和删除 ... ok
+test cascades_optimizer::图属性和向量_generation_彼此解耦 ... ok
+test pipeline_graph_algorithms::g2_三角聚类系数与_hits_保持精确确定 ... ok
+test cascades_optimizer::pipeline默认不采集指标且显式profile可采集 ... ok
+test cascades_optimizer::跨模统计在写入后失效并按新_generation_重算 ... ok
+test pipeline_graph_algorithms::g1_g2_pipeline_保留命名指标并受工作区预算约束 ... ok
+test cascades_optimizer::零优化预算显式返回_budget_exceeded且仍给出完整fallback计划 ... ok
+test pipeline_graph_algorithms::g3_加权路径调和中心性与_yen_reference_一致 ... ok
+test pipeline_graph_algorithms::g4_pairset_jaccard_结果有界确定且预算拒绝 ... ok
+test cascades_optimizer::规划计时仅在显式请求时采集 ... ok
+test pipeline_graph_algorithms::leiden_算子预算超限_fail_closed ... ok
+test cascades_optimizer::两个合法物理计划保持完全相同结果 ... ok
+test cascades_optimizer::变换规则拒绝跨越_expand_并记录语义原因 ... ok
+test cascades_optimizer::graphstats_标签扇出影响_expand_基数估算 ... ok
+test cascades_optimizer::similarity_仅在下游引用时插入精确重排 ... ok
+test cascades_optimizer::统计需求按管线阶段精确启用 ... ok
+test cascades_optimizer::物理候选暴露索引类型_expand方向_融合和完整属性 ... ok
+test cascades_optimizer::优化器搜索预算有界且预算切片总量不超限 ... ok
+test pipeline_graph_algorithms::wcc_度中心性和_brandes_与小图_reference_一致 ... ok
+test pipeline_graph_algorithms::图算法预算超限_fail_closed ... ok
+test pipeline_graph_algorithms::子集_pagerank_与手工矩阵迭代一致且不扫描集合外节点 ... ok
+test cascades_optimizer::pipeline_explain_暴露_cascades_阶段成本和预算 ... ok
+test pipeline_graph_algorithms::c1_6_d_三种子集模式和分数质量正确 ... ok
+test cascades_optimizer::物理变换合并相邻filter且结果与单个and谓词一致 ... ok
+test cascades_optimizer::pipeline_explain_analyze_暴露规划和逐阶段实际指标 ... ok
+test cascades_optimizer::memo_计划确定且每组选择最低成本实现 ... ok
+test cascades_optimizer::索引候选lowering与扫描reference逐行一致 ... ok
+test cascades_optimizer::直方图二阶矩避免幂律_hub_扇出被平均值低估 ... ok
+test cascades_optimizer::属性图偏斜让高扇出与低扇出集合得到不同_expand_估算 ... ok
+test cascades_optimizer::相关字段对修正独立性假设导致的基数低估 ... ok
+test pipeline_differential::q1_到_q14_独立_reference_与双物理计划全部一致 ... ok
+test pipeline_graph_algorithms::位图_bfs_跨线程方向标签空洞和预算完全确定 ... ok
+test pipeline_deep::COV6_01_fista_shadow_query ... ok
+test pipeline_deep::COV6_04_refractory_dpp ... ok
+test pipeline_graph_algorithms::标签传播确定性且明确不是_leiden ... ok
+test pipeline_graph_algorithms::采样中介中心性显式标记近似且零采样拒绝 ... ok
+test pipeline_iterate::iterate_零轮数明确拒绝 ... ok
+test pipeline_iterate::sa_ppr_明确标记_depth_bounded_且确定 ... ok
+test pipeline_iterate::iterate_最大轮数严格限制传播深度 ... ok
+test pipeline_iterate::iterate_去重并在固定点终止 ... ok
+test pipeline_operator_contract::exact_vector_search在pipeline归一化后仍保持相似度排名 ... ok
+test pipeline_operator_contract::exact_rerank_topk_选择算法与全排序完全一致 ... ok
+test pipeline_graph_algorithms::第二批并行算法预算仍然_fail_closed ... ok
+test pipeline_operator_contract::nodeset_dedup_将后续行合并进保留行且加权距离与路径同源 ... ok
+test pipeline_operator_contract::expand_rank_融合算子与分离执行结果完全一致 ... ok
+test pipeline_operator_contract::compact_遍历与完整参考实现逐项一致 ... ok
+test pipeline_operator_contract::nodeset_去重排序与集合运算合并来源 ... ok
+test pipeline_operator_contract::expand_紧凑物化保留多来源与最小深度 ... ok
+test pipeline_operator_contract::并行预算小任务串行且线程上限生效 ... ok
+test pipeline_operator_contract::vector_expand_rerank_filter_limit_四阶段语义正确 ... ok
+test pipeline_operator_contract::属性入口走索引并可与图入口求交 ... ok
+test pipeline_paths::多路径算子聚合强度和路径数 ... ok
+test pipeline_operator_contract::管线阶段节点向量图与_payload_预算均提前拒绝 ... ok
+test pipeline_operator_contract::并行_expand_全局预算仍然_fail_closed ... ok
+test pipeline_paths::多锚点加权聚合保留全部来源 ... ok
+test pipeline_paths::批量最短路径选取确定性最短链 ... ok
+test pipeline_paths::有界路径确定性且强度与标签序列正确 ... ok
+test pipeline_graph_algorithms::并行_pagerank安全忽略子集外边并与串行一致 ... ok
+test pipeline_paths::禁经节点与最大路径数严格生效 ... ok
+test pipeline_paths::路径预算耗尽默认_fail_closed ... ok
+test pipeline_operator_contract::第一批并行算子与单线程逐字段完全一致 ... ok
+test pipeline_graph_algorithms::第二批并行算法与串行参考完全一致 ... ok
+test ablation::test_fatigue_and_specificity_ablation ... ok
+test pipeline_deep::COV6_02_migrate_with_edges ... ok
+test tsng_c0::c0_质量指标覆盖完全命中乱序重复与零_k ... ok
+test tsng_c0::c0_纯向量_ground_truth_与精确余弦排序一致且确定 ... ok
+test tsng_c0::c0_非法维度权重图配置和预算明确报错 ... ok
+test tsng_c0::c0_图权重在扩展前过滤并保留更长合法路径 ... ok
+test tsng_c0::c0_payload_filter_是最终候选硬约束 ... ok
+test tsng_c0::c0_三信号冲突按精确加权分数与_node_id_稳定决胜 ... ok
+test tsng_c1::c1_没有_quiver_时明确回退精确_ground_truth ... ok
+test tsng_c1::c1_5_图信号自动_graph_vector_union_并保持候选有界 ... ok
+test tsng_c1::c1_5_无索引属性安全回退_ann_post_filter_且结果只含硬过滤命中 ... ok
+test tsng_c1::c1_5_累计_wal_观测区分逻辑负载且查询零写入 ... ok
+test tsng_c1::c1_5_非法工业阈值明确拒绝且不写盘 ... ok
+test tsng_c1::c1_纯向量忽略双队列与图通道配置 ... ok
+test tsng_c1::c1_非法导航配置明确拒绝 ... ok
+test tsng_c1::c1_图候选并集覆盖可达集合时与精确答案一致 ... ok
+test tsng_c1::c1_5_候选与页读取预算在分配前拒绝且不产生_spill ... ok
+test tsng_c1::c1_bounded_bonus_非法上限明确拒绝 ... ok
+test tsng_c1::c1_bounded_bonus_零上限与后过滤基线逐项一致 ... ok
+test tsng_c1::c1_5_1_bq_预筛在无索引时安全回退工业路径 ... ok
+test tsng_c1::c1_串行后过滤基线使用原始_bq_导航并执行相同精确重排 ... ok
+test tsng_c1::c1_属性硬过滤不允许未命中节点进入最终结果 ... ok
+test tsng_c1::c1_图通道按上限注入业务节点且最终语义精确 ... ok
+test tsng_c1::c1_5_1_bq_预筛只读属性候选并保持结果硬过滤 ... ok
+test tsng_c1::c1_5_属性候选少时自动_property_first_且与精确答案一致 ... ok
+test tsng_c1::c1_纯向量_tsng_显式走原始_bq_路径且结果确定 ... ok
+test tsng_c1::c1_三信号导航返回精确重排分量与质量指标 ... ok
+test tsng_c1::c1_双队列确定性且保持_payload_硬过滤 ... ok
+test tsng_c1::c1_5_索引_and_交集自动_property_first_且与精确答案一致 ... ok
+test tsng_c1::c1_5_密度感知_beam_暴露三方模式且不改变硬过滤语义 ... ok
+test tsng_c1::c1_5_1_属性更新推进身份并令_internal_slot_缓存失效 ... ok
+test tsng_c1::c1_5_中等选择性属性自动_bq_prefilter_且保持精确语义 ... ok
+test tsng_c1::c1_5_只读工业查询数据库文件零写且暴露内存统计 ... ok
+
+test result: ok. 99 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.49s
+
+     Running tests\query\main.rs (target\debug\deps\query-5a844faf29b61695.exe)
+
+running 192 tests
+test aggregation_tx::COV4_22_nmf_analyze_query ... ok
+test aggregation_tx::COV4_14_filter_size ... ok
+test aggregation_tx::COV4_18_tx_ops_nonexistent ... ok
+test aggregation_tx::COV4_23_parser_errors ... ok
+test aggregation_tx::COV4_07_tql_agg_with_group ... ok
+test aggregation_tx::COV4_27_tql_return_property ... ok
+test aggregation_tx::COV4_01_tql_agg_count ... ok
+test aggregation_tx::COV4_02_tql_agg_sum ... ok
+test aggregation_tx::COV4_08_tql_return_alias ... ok
+test aggregation_tx::COV4_09_filter_in ... ok
+test aggregation_tx::COV4_28_tql_explain_variants ... ok
+test aggregation_tx::COV4_05_tql_agg_max ... ok
+test aggregation_tx::COV4_24_tql_matches_predicate ... ok
+test aggregation_tx::COV4_03_tql_agg_avg ... ok
+test aggregation_tx::COV4_11_filter_exists ... ok
+test aggregation_tx::COV4_25_tql_not_predicate ... ok
+test aggregation_tx::COV4_12_filter_type ... ok
+test aggregation_tx::COV4_19_tx_dim_mismatch ... ok
+test aggregation_tx::COV4_26C_tql_create_continuous_edges_atomically ... ok
+test aggregation_tx::COV4_17_tx_link_nonexistent ... ok
+test query_memory_budget_dimensions::候选上限随维度单调下降且非常规维度没有分档 ... ok
+test query_memory_budget_dimensions::候选与并集预算按真实元素字节推导 ... ok
+test query_memory_budget_dimensions::相同字节预算按任意维度精确推导候选上限 ... ok
+test aggregation_tx::COV4_20_tx_duplicate_id ... ok
+test aggregation_tx::COV4_13_filter_all ... ok
+test aggregation_tx::COV4_26_tql_multi_order ... ok
+test aggregation_tx::COV4_04_tql_agg_min ... ok
+test aggregation_tx::COV4_06_tql_agg_collect ... ok
+test aggregation_tx::COV4_10_filter_nin ... ok
+test aggregation_tx::COV4_26B_tql_aggregate_before_order_and_limit ... ok
+test aggregation_tx::COV4_29_search_expand_where ... ok
+test aggregation_tx::COV4_15_filter_and_or ... ok
+test aggregation_tx::COV4_16_tx_full_ops ... ok
+test aggregation_tx::COV4_26A_tql_order_before_offset_limit ... ok
+test aggregation_tx::COV4_21_wal_replay_full ... ok
+test query_memory_budget_dimensions::各维度超预算均在查询前拒绝且不写盘 ... ok
+test tql_dml::测试_MATCH_CREATE_边 ... ok
+test tql_dml::测试_CREATE_多节点 ... ok
+test tql_dml::测试_DETACH_DELETE_删除节点及边 ... ok
+test tql_dml::测试_CREATE_单节点 ... ok
+test tql_dml::测试_SET_批量更新 ... ok
+test tql_dml::测试_SET_更新字段 ... ok
+test aggregation_tx::legacy标量RETURN通过统一query入口执行 ... ok
+test tql_executor::GraphFirst在图匹配集合内精确排序并去重Anchor ... ok
+test tql_executor::SEARCH_EXPAND多标签与空标签语义正确 ... ok
+test tql_executor::GraphFirst未绑定Rank变量明确报错 ... ok
+test tql_executor::Break仅允许普通查询返回部分结果 ... ok
+test tql_dml::测试_tql_mut_读查询明确拒绝 ... ok
+test tql_executor::TQL_FIND_带ORDER_BY ... ok
+test tql_executor::GraphFirst分页在排名后执行且显式排序可覆盖排名 ... ok
+test tql_executor::TQL_FIND_操作符Gt ... ok
+test tql_executor::TQL_FIND_操作符In ... ok
+test tql_executor::SEARCH_EXPAND支持Incoming和Both方向 ... ok
+test tql_executor::TQL_FIND_Or逻辑 ... ok
+test tql_dml::测试_DELETE_删除节点 ... ok
+test tql_dml::DML匹配集不受查询行上限截断 ... ok
+test tql_executor::GraphFirst_EXPLAIN报告精确Anchor排序 ... ok
+test tql_executor::TQL_FIND_带LIMIT ... ok
+test aggregation_tx::count星号统计全部匹配行且裸FIND属性明确拒绝 ... ok
+test tql_dml::测试_SET_添加新字段 ... ok
+test tql_executor::TQL_FIND_简单等值 ... ok
+test tql_executor::TQL_MATCH_内联Mongo操作符 ... ok
+test tql_executor::TQL_MATCH_单跳 ... ok
+test tql_executor::TQL_MATCH_多跳 ... ok
+test tql_executor::TQL_MATCH_可变长路径 ... ok
+test tql_executor::TQL_MATCH_任意边 ... ok
+test tql_executor::TQL_MATCH_多标签 ... ok
+test tql_executor::FIND范围与复合过滤小LIMIT保持稳定提前终止语义 ... ok
+test tql_executor::TQL_MATCH_WHERE_MATCHES ... ok
+test tql_parser::FIND_All操作符 ... ok
+test tql_parser::FIND_Exists操作符 ... ok
+test tql_parser::FIND_In操作符 ... ok
+test tql_parser::FIND_RFC3339操作符 ... ok
+test tql_parser::FIND_多字段隐式AND ... ok
+test tql_parser::FIND_带LIMIT_OFFSET ... ok
+test tql_parser::FIND_带ORDER_BY ... ok
+test tql_parser::FIND_操作符语法 ... ok
+test tql_parser::FIND_简单等值匹配 ... ok
+test tql_parser::FIND_逻辑组合_Or ... ok
+test tql_parser::MATCH_RANK解析 ... ok
+test tql_parser::MATCH_任意边 ... ok
+test tql_parser::MATCH_内联Mongo操作符 ... ok
+test tql_parser::MATCH_单节点 ... ok
+test tql_parser::JSON数组嵌套超过解析预算时安全拒绝 ... ok
+test tql_parser::MATCH_单跳路径 ... ok
+test tql_parser::MATCH_可变长路径 ... ok
+test tql_parser::MATCH_多标签_可变长_组合 ... ok
+test tql_parser::MATCH_多标签边_管道分隔 ... ok
+test tql_parser::MATCH_多跳路径 ... ok
+test tql_parser::RANK关键字仍可作为Payload字段名 ... ok
+test tql_parser::RETURN_多变量 ... ok
+test tql_parser::RETURN_星号 ... ok
+test tql_parser::SEARCH_基础向量检索 ... ok
+test tql_parser::SEARCH_EXPAND方向解析 ... ok
+test tql_parser::SEARCH_完整三融合 ... ok
+test tql_parser::SEARCH_带EXPAND ... ok
+test tql_parser::SEARCH_带WHERE过滤 ... ok
+test tql_parser::SEARCH_负数向量 ... ok
+test tql_parser::WHERE_AND组合 ... ok
+test tql_parser::WHERE_Cypher比较 ... ok
+test tql_parser::WHERE_NOT ... ok
+test tql_parser::WHERE_OR组合 ... ok
+test tql_parser::WHERE_变量绑定MATCHES ... ok
+test tql_parser::WHERE_括号优先级 ... ok
+test tql_parser::WHERE_文档过滤 ... ok
+test tql_parser::WHERE_混合Cypher和MATCHES ... ok
+test tql_parser::行注释被跳过 ... ok
+test tql_parser::错误_匿名中间节点 ... ok
+test tql_executor::TQL_MATCH_带WHERE ... ok
+test tql_parser::错误_未知操作符 ... ok
+test tql_parser::错误_空文档过滤 ... ok
+test tql_parser::错误_未知查询入口 ... ok
+test tql_parser::错误_缺少RETURN ... ok
+test tql_parser::错误_跳数范围反转 ... ok
+test tql_executor::TQL_空结果_不报错 ... ok
+test tql_executor::TQL_SEARCH_带EXPAND ... ok
+test tql_executor::TQL_SEARCH_带WHERE过滤 ... ok
+test tql_executor::TQL_SEARCH_基础 ... ok
+test tql_executor::全表分页按节点ID稳定且差集不会遗漏 ... ok
+test tql_executor::FIND小LIMIT在扫描与Hash索引路径保持相同稳定语义 ... ok
+test tql_executor::显式LIMIT可覆盖配置行上限但OFFSET仍受内存硬上限 ... ok
+test tql_executor::TQL显式分页超过内存硬预算必须失败而非静默截断 ... ok
+test tql_index::测试_新插入节点自动进入索引 ... ok
+test tql_index::测试_创建索引后_FIND加速 ... ok
+test tql_executor::TQL_SEARCH_带索引WHERE返回过滤集合内TopK ... ok
+test tql_index::测试_删除索引后仍可查询 ... ok
+test tql_executor::TQL_错误_语法解析 ... ok
+test tql_pipeline_parser::all_paths_参数化语法端到端执行 ... ok
+test tql_pipeline_parser::expand_rank_融合端到端保持精确_topk ... ok
+test tql_pipeline_parser::find_和_match_可作为统一_pipeline_source ... ok
+test tql_pipeline_parser::dpp_sa_ppr_fista_nmf_作为有界_tql_算子执行 ... ok
+test tql_pipeline_parser::explain_暴露四类认知物理算子且估算受预算约束 ... ok
+test tql_pipeline_parser::g3_g4_加权路径_yen_调和中心性与_pairset_端到端执行 ... ok
+test tql_pipeline_parser::iterate_参数化语法端到端执行并校验边界 ... ok
+test tql_pipeline_parser::path_标量表达式可解析且无查询向量的_similarity_明确拒绝 ... ok
+test tql_pipeline_parser::prepared_search_vector逐维参数绑定后与字面量热路径一致 ... ok
+test tql_pipeline_parser::g1_g2_图算法通过_tql_输出命名指标 ... ok
+test tql_pipeline_parser::search_with_expand_similarity_filter_端到端执行 ... ok
+test tql_pipeline_parser::prepared_tql_严格绑定并可重复执行 ... ok
+test tql_pipeline_parser::with_作用域遮蔽和重复别名明确拒绝 ... ok
+test tql_pipeline_parser::with_标量必须显式_as_且函数变量受作用域校验 ... ok
+test tql_pipeline_parser::with_链和一等分数表达式解析正确 ... ok
+test tql_pipeline_parser::旧_tql_语法保持无_pipeline ... ok
+test tql_pipeline_parser::shortest_path_和集合代数端到端稳定执行 ... ok
+test tql_pipeline_parser::标量返回和别名排序不污染_payload ... ok
+test tql_pipeline_parser::text_bm25_ac_hybrid_入口与分数稳定执行 ... ok
+test tql_pipeline_parser::算术_coalesce_空值与括号表达式端到端执行 ... ok
+test tql_pipeline_parser::图算法阶段通过统一_tql_pipeline_执行 ... ok
+test tql_pipeline_parser::管线聚合支持分组_count_数值聚合_collect_和空输入 ... ok
+test tql_pipeline_parser::认知算子预算和参数_fail_closed ... ok
+test tql_index::测试_多字段索引 ... ok
+test tql_index::测试_创建索引后_MATCH加速 ... ok
+test tql_index::测试_删除后索引清理 ... ok
+test tql_executor::cooperative_cancellation在全表扫描前和扫描中fail_closed ... ok
+test tql_planner::explain_analyze_返回估算实际行数和耗时 ... ok
+test tql_planner::planner_不反转可变长和_optional_match ... ok
+test tql_planner::planner_按选择性反转单链_match_且结果不变 ... ok
+test tql_planner::planner_稳定选择主键属性交集和标签索引 ... ok
+test tql_planner::planner_复合与_bitmap_访问路径和扫描结果一致 ... ok
+test tql_index::测试_更新后索引同步 ... ok
+test tql_planner::planner_有无索引执行结果差分一致 ... ok
+test tql_phase2::match_distinct属性和id投影按实际值去重 ... ok
+test tql_phase2::测试_EXPLAIN_ID短路策略 ... ok
+test tql_phase2::测试_AS别名_属性访问 ... ok
+test tql_phase2::测试_DISTINCT_去重 ... ok
+test tql_phase2::测试_EXPLAIN_全扫描策略 ... ok
+test tql_phase2::测试_EXPLAIN_优化提示 ... ok
+test tql_phase2::测试_EXPLAIN_标签索引下推策略 ... ok
+test tql_phase2::测试_EXPLAIN_FIND入口 ... ok
+test tql_phase2::测试_OPTIONAL_MATCH_语法解析 ... ok
+test tql_phase2::测试_聚合函数_COUNT ... ok
+test tql_phase2::测试_标签索引下推_减少扫描 ... ok
+test tql_phase2::测试_投影裁剪_EXPLAIN显示 ... ok
+test tql_phase2::测试_EXPLAIN_基础计划 ... ok
+test tql_phase2::测试_投影裁剪_完整引用保留向量 ... ok
+test tql_reverse::测试_EXPLAIN_反向模式 ... ok
+test tql_phase2::测试_聚合函数_COLLECT ... ok
+test tql_reverse::测试_入度统计_反向COUNT ... ok
+test tql_phase2::测试_聚合函数_AVG ... ok
+test tql_phase2::测试_投影裁剪_属性引用剥离向量 ... ok
+test tql_phase2::测试_聚合函数_SUM_MIN_MAX ... ok
+test tql_reverse::测试_反向单跳_谁认识Bob ... ok
+test tql_reverse::测试_反向单跳_Carol ... ok
+test tql_reverse::测试_反向可变长_溯源 ... ok
+test tql_reverse::测试_双向遍历_无标签 ... ok
+test tql_reverse::测试_反向单跳_无标签 ... ok
+test tql_reverse::测试_双向遍历_Bob的所有关联 ... ok
+test aggregation_tx::COV4_30_double_flush ... ok
+test aggregation_tx::COV4_26D_tql_create_failure_is_atomic ... ok
+test proptest_query::测试_完全乱码_语法解析器绝不Panic ... ok
+test proptest_query::测试_属性驱动_随机语法解析不恐慌 ... ok
+test tql_executor::TQL_FIND和MATCH超过五千行仍完整分页 ... ok
+
+test result: ok. 192 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.83s
+
+     Running tests\storage\main.rs (target\debug\deps\storage-b84430dcf8fee4d7.exe)
+
+running 102 tests
+test compaction_core::COV_18_cosine_zero_vector ... ok
+test compaction_core::COV_20_cosine_scalar_tail ... ok
+test compaction_core::COV_19_u64_vector_similarity ... ok
+test format_migration::v6_BQ块使用显式自描述布局 ... ok
+test compaction_core::COV_06_dim_zero_rejected ... ok
+test format_migration::v5_四十八chunk从零点七一后可读并在close后升级v6 ... ok
+test compaction_core::COV_09_hook_lifecycle ... ok
+test compaction_core::COV_15_insert_with_id_errors ... ok
+test compaction_core::COV_23_get_all_ids ... ok
+test compaction_core::COV_21_search_advanced_params ... ok
+test compaction_core::COV_22_leiden_cluster ... ok
+test compaction_core::COV_05_open_with_config_sync ... ok
+test compaction_core::COV_10_search_hybrid_with_context ... ok
+test compaction_core::COV_07_memory_limit_rejects_without_auto_flush ... ok
+test compaction_core::COV_13_unlink ... ok
+test format_migration::v5_readonly可读但不会原地升级或改写 ... ok
+test compaction_core::COV_14_update_vector ... ok
+test format_migration::v5_未知签名布局和v6损坏格式头均安全拒绝 ... ok
+test compaction_core::COV_08_set_sync_mode ... ok
+test compaction_core::COV_12_get_edges ... ok
+test compaction_core::COV_17_in_memory_storage_mode ... ok
+test compaction_core::COV_11_text_index_apis ... ok
+test ordered_property_index::ordered_index_crud_同步且删除后无幽灵命中 ... ok
+test ordered_property_index::hash与bitmap索引区分超过f64精度的大整数 ... ok
+test ordered_property_index::ordered_index_不同数字表示共享数值顺序 ... ok
+test ordered_property_index::ordered_index_大整数范围保持精确边界 ... ok
+test ordered_property_index::ordered_index_复杂类型安全回退全扫描 ... ok
+test compaction_core::COV_03_empty_compact ... ok
+test format_migration::早于零点七零与未来版本均明确拒绝且文件不变 ... ok
+test ordered_property_index::ordered_limit不得在其他入口条件过滤前提前截断候选 ... ok
+test property_index_persistence::indexed_equality_lookup_只走索引并受结果预算约束 ... ok
+test compaction_core::COV_04F_compact成功_wal已清空_快照完整恢复 ... ok
+test format_migration::v5_三十二chunk从零点七零可读并在flush后升级v6 ... ok
+test ordered_property_index::ordered_index_整数范围与复合等值组合不得返回空集 ... ok
+test graph_block_persistence::图块_readonly_mmap_与_rw_结果差分一致 ... ok
+test graph_block_persistence::图块_v2_目录独立_crc_与超大计数_fail_closed ... ok
+test compaction_core::COV_02_manual_compact_删除后压实 ... ok
+test immutable::不可变模式拒绝缺失或未完成manifest ... ok
+test immutable::不可变模式拒绝待恢复wal且不修改 ... ok
+test ordered_property_index::旧键编码sidecar只读打开内存重建且保持零写 ... ok
+test immutable::不可变模式拒绝写入且关闭不产生文件 ... ok
+test compaction_core::COV_04C_compact中断_tdb已更新_flush_ok未更新_已提交数据不丢 ... ok
+test compaction_core::COV_04G_compact中断_flush_ok大小不匹配_已提交数据不丢 ... ok
+test compaction_core::COV_04B_compact中断_vec已扩大_tdb未更新_已提交数据不丢 ... ok
+test compaction_core::COV_04D_compact中断_flush_ok_tmp残留_已提交数据不丢 ... ok
+test immutable::不可变模式拒绝文件篡改和文件缺失 ... ok
+test immutable::不可变模式无锁打开并保持可查询 ... ok
+test compaction_core::COV_04_triple_compact ... ok
+test property_index_persistence::ngram_子串索引维护持久化并精确复核 ... ok
+test compaction_core::COV_04E_compact成功_wal清理前断电_已提交数据不丢 ... ok
+test ordered_property_index::ordered_index_重启只读不可变和统计保持一致 ... ok
+test read_only::只读跨进程辅助进程 ... ok
+test compaction_core::COV_16_payload_too_large ... ok
+test property_index_persistence::复合唯一约束拒绝重复与非标量并允许字段缺失 ... ok
+test immutable::不可变模式拒绝manifest外新增sidecar和非法后缀 ... ok
+test graph_block_persistence::图块_immutable_manifest_覆盖_sidecar_且只读零写 ... ok
+test property_index_persistence::复合与_bitmap_索引_v4_重启更新删除无幽灵命中 ... ok
+test ordered_property_index::ordered_index_order_by_limit_保持排序并安全早停 ... ok
+test property_index_persistence::属性索引_v5_posting块_crc_独立拒绝损坏 ... ok
+test property_index_persistence::属性索引在更新删除和槽位复用后无幽灵命中 ... ok
+test recovery::P0_1_Rom模式_不应残留flush_ok标记 ... ok
+test read_only::reader严格索引策略拒绝缺失quiver且fallback可查询 ... ok
+test read_only::reader严格索引策略拒绝损坏quiver且不删除 ... ok
+
+running 1 test
+test property_index_persistence::唯一约束由主文件恢复且_sidecar_缺失时仍然生效 ... ok
+test read_only::只读加载损坏sidecar保持所有文件字节不变 ... ok
+test read_only::只读句柄拒绝写入事务索引和持久化操作 ... ok
+test read_only::只读和不可变reader拒绝进程本地fatigue ... ok
+test read_only::只读与不可变遇到非空v2_wal均拒绝且完整文件状态零写 ... ok
+test property_index_persistence::属性索引重启后直接恢复并保持负命中语义 ... ok
+test read_only::只读打开遇到待恢复_wal明确拒绝且不修改文件 ... ok
+test recovery::P0_零秒自动压缩被拒绝 ... ok
+test read_only::只读与读写锁双向互斥 ... ok
+test read_only::只读拒绝缺失一致性标记的跨文件代际且不修改文件 ... ok
+test read_only::只读打开遇到空旧版本_wal拒绝且字节不变 ... ok
+test read_only::只读查询close和drop保持完整文件状态不变 ... ok
+test read_only::多个只读句柄共享锁并可并发查询 ... ok
+test property_index_persistence::旧数据库没有属性索引_sidecar_仍可兼容打开 ... ok
+test recovery::P0_1_Mmap模式_flush后应生成flush_ok标记 ... ok
+test recovery::P0_1_删除flush_ok后重加载_应fail_closed ... ok
+test recovery::Mmap模式_持久化后重新加载_数据完整 ... ok
+test property_index_persistence::只读与不可变模式加载属性索引且零副作用 ... ok
+test recovery::P0_2_WAL恢复后_新插入不复用已有ID ... ok
+test recovery::Rom模式_持久化后重新加载_数据完整 ... ok
+test property_index_persistence::损坏属性索引按策略回退或报错 ... ok
+test recovery::P0_TextIndex精确持久化_重启后不从Payload猜测重建 ... ok
+test recovery::P0_TextIndex缺失时打开不扫描Payload自动重建 ... ok
+test recovery::删除后持久化再加载_节点确实消失 ... ok
+test recovery::回归_marker_version不匹配时拒绝加载vec ... ok
+test recovery::回归_marker_magic被篡改时fail_closed ... ok
+test recovery::P0_Payload冷存储重启后按需读取且可再次持久化 ... ok
+test recovery::TextIndex_sidecar损坏时安全清理并降级为空索引 ... ok
+test recovery::flush_marker_v2检测_tdb和vec等长位翻转 ... ok
+test recovery::QuIVer_sidecar错配主数据时_拒绝加载并清理 ... ok
+test recovery::回归_marker_generation单调递增 ... ok
+test graph_block_persistence::图块_crc_与逐字节截断全部_fail_closed ... ok
+test property_index_persistence::属性索引逐字节截断均不触发_panic ... ok
+test recovery::P0_关闭自动QuIVer构建时_flush不生成sidecar ... ok
+test ordered_property_index::ordered_index_数字和字符串范围与全扫描差分一致 ... ok
+test compaction_core::COV_01_auto_compaction_启动停止 ... ok
+test read_only::只读跨进程辅助进程 ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 101 filtered out; finished in 3.01s
+
+test read_only::两个独立进程可以共享只读锁并查询 ... ok
+test ordered_property_index::ordered_index_sidecar_逐字节截断全部拒绝且不_panic ... ok
+test property_index_persistence::属性索引与全扫描随机数据结果一致 ... ok
+
+test result: ok. 102 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.78s
+
+     Running tests\unit\main.rs (target\debug\deps\unit-7a76dce094c3f73b.exe)
+
+running 323 tests
+test cognitive::dot_零向量 ... ok
+test cognitive::dot_基础 ... ok
+test cognitive::vec_scale_基础 ... ok
+test cognitive::vec_sub_基础 ... ok
+test cognitive::dpp_k等于n ... ok
+test cognitive::dpp_k大于n ... ok
+test cognitive::l2_norm_零向量 ... ok
+test core::edge_创建和克隆 ... ok
+test cognitive::dpp_quality_weight为零_纯多样性 ... ok
+test cognitive::dpp_多样性选择 ... ok
+test cognitive::fista_单实体 ... ok
+test cognitive::fista_零查询 ... ok
+test cognitive::soft_threshold_基础 ... ok
+test core::error_database_locked ... ok
+test core::error_from_io ... ok
+test cognitive::vec_add_基础 ... ok
+test cognitive::vec_scale_零 ... ok
+test cognitive::l2_norm_三维 ... ok
+test core::config_default ... ok
+test cognitive::l2_norm_单位向量 ... ok
+test cognitive::fista_基础分解 ... ok
+test core::error_corrupted_file ... ok
+test cognitive::nmf_基本分解 ... ok
+test cognitive::mat_vec_mul_一般情况 ... ok
+test cognitive::nmf_1x1_退化情况 ... ok
+test core::error_node_not_found ... ok
+test cognitive::nmf_重建误差应下降 ... ok
+test core::error_hook_load ... ok
+test core::error_invalid_input ... ok
+test cognitive::mat_vec_mul_单位矩阵 ... ok
+test core::edge_序列化反序列化 ... ok
+test core::error_display_格式正确 ... ok
+test core::error_node_already_exists ... ok
+test core::error_invalid_vector ... ok
+test core::error_wal_closed ... ok
+test core::error_query_execution ... ok
+test core::search_config_default ... ok
+test core::error_query_parse ... ok
+test core::error_payload_too_large ... ok
+test core::searchhit_创建和排序 ... ok
+test core::nodeview_创建 ... ok
+test core::storage_mode_variants ... ok
+test core::sync_mode_variants ... ok
+test database::open_维度0报错 ... ok
+test database::open_新建数据库 ... ok
+test database::insert_维度不匹配 ... ok
+test database::delete_不存在节点 ... ok
+test database::insert_和_get ... ok
+test database::create_index_和_drop_index ... ok
+test database::search_hybrid_text_only ... ok
+test database::get_不存在返回None ... ok
+test database::get_all_ids ... ok
+test database::delete_操作 ... ok
+test database::search_advanced ... ok
+test database::patch_payload_unset_操作 ... ok
+test database::link_和_unlink ... ok
+test database::patch_payload_简写模式明确拒绝 ... ok
+test database::open_with_config_sync ... ok
+test database::dim_和_all_node_ids ... ok
+test database::neighbors_基础 ... ok
+test database::patch_payload_不存在节点 ... ok
+test database::index_keyword_和_text ... ok
+test database::insert_with_id_和_get ... ok
+test database::insert_with_id_ID0拒绝且无状态残留 ... ok
+test database::patch_payload_组合操作 ... ok
+test database::link_不存在节点 ... ok
+test database::patch_payload_set_操作 ... ok
+test database::patch_payload_inc_操作 ... ok
+test database::group_commit多个事务共享一次fsync并保持独立结果 ... ok
+test database::search_基础 ... ok
+test database::search_hybrid_with_context ... ok
+test database::set_hook_和_clear_hook ... ok
+test database::tx_delete_不存在节点报错 ... ok
+test database::tql_find_读查询 ... ok
+test database::set_sync_mode ... ok
+test database::set_memory_limit_和_estimated_memory ... ok
+test database::tx_insert_NaN向量报错 ... ok
+test database::tx_delete ... ok
+test database::tql_mut_读查询明确拒绝 ... ok
+test filter::bloom_mask_and合并多个掩码 ... ok
+test filter::bloom_mask_eq_值为非字符串 ... ok
+test filter::bloom_mask_eq产生非零掩码 ... ok
+test filter::bloom_mask_gt等返回零 ... ok
+test filter::bloom_mask_or返回零 ... ok
+test filter::bloom_mask_其他变体返回零 ... ok
+test filter::filter_all_数组包含所有 ... ok
+test filter::filter_and_逻辑与 ... ok
+test filter::filter_eq_精确匹配 ... ok
+test filter::filter_exists_字段存在性 ... ok
+test filter::filter_gt_大于 ... ok
+test filter::filter_gte_大于等于 ... ok
+test filter::filter_in_值在集合中 ... ok
+test filter::filter_lt_小于 ... ok
+test filter::filter_lte_小于等于 ... ok
+test filter::filter_ne_不等于 ... ok
+test filter::filter_nin_值不在集合中 ... ok
+test filter::filter_or_逻辑或 ... ok
+test filter::filter_size_数组长度 ... ok
+test filter::filter_type_match_字段不存在 ... ok
+test filter::filter_type_match_类型匹配 ... ok
+test filter::from_json_RFC3339按绝对时间比较并忽略脏字段 ... ok
+test filter::from_json_RFC3339非法查询操作数报错 ... ok
+test filter::from_json_all_非数组报错 ... ok
+test filter::from_json_and_非数组报错 ... ok
+test filter::from_json_and组合 ... ok
+test filter::from_json_exists_非布尔报错 ... ok
+test filter::from_json_gt_布尔值报错 ... ok
+test filter::from_json_gte_字符串合法 ... ok
+test filter::from_json_in_非数组报错 ... ok
+test filter::from_json_lt_非数字报错 ... ok
+test filter::from_json_lte_非数字报错 ... ok
+test filter::from_json_nin_非数组报错 ... ok
+test filter::from_json_or_非数组报错 ... ok
+test filter::from_json_or组合 ... ok
+test filter::from_json_size_非正整数报错 ... ok
+test filter::from_json_type_非字符串报错 ... ok
+test filter::from_json_多字段隐式AND ... ok
+test filter::from_json_字符串范围按字典序且类型严格 ... ok
+test filter::from_json_嵌套and_or ... ok
+test filter::from_json_所有操作符 ... ok
+test filter::from_json_操作符语法 ... ok
+test filter::from_json_显式eq ... ok
+test filter::from_json_未知操作符应报错 ... ok
+test filter::from_json_空对象应报错 ... ok
+test filter::from_json_隐式eq ... ok
+test filter::from_json_非对象应报错 ... ok
+test index::bq_empty签名 ... ok
+test index::bq_hamming_distance_完全不同 ... ok
+test index::bq_hamming_distance_完全相同 ... ok
+test index::bq_全正向量_所有位为1 ... ok
+test index::bq_全负向量_所有位为0 ... ok
+test index::bq_混合向量_交替位 ... ok
+test index::bq_空向量 ... ok
+test index::bq_超长向量_超过2048维被截断 ... ok
+test index::brute_force_min_score过滤 ... ok
+test index::brute_force_基础搜索 ... ok
+test index::brute_force_空向量池 ... ok
+test index::text_ac_大小写不敏感 ... ok
+test index::text_bm25_中文保留二元组匹配 ... ok
+test index::text_ac_精准匹配 ... ok
+test index::text_bm25_基础检索 ... ok
+test index::text_bm25_无匹配 ... ok
+test index::text_bm25_空查询 ... ok
+test index::text_bm25_英文按词而非字符片段匹配 ... ok
+test index::text_clear_重置 ... ok
+test index::text_空索引不panic ... ok
+test memtable::advance_next_id ... ok
+test memtable::active_entries_跳过tombstone ... ok
+test memtable::bq_signatures_重建 ... ok
+test memtable::contains_存在与不存在 ... ok
+test memtable::delete_不存在报错 ... ok
+test memtable::delete_后槽位回收 ... ok
+test memtable::delete_基础 ... ok
+test memtable::delete_清理出边和入边 ... ok
+test memtable::estimated_memory_bytes_非零 ... ok
+test memtable::fast_tags_非空 ... ok
+test memtable::fatigue_批量消耗 ... ok
+test memtable::fatigue_标记和查询 ... ok
+test memtable::fatigue_消耗 ... ok
+test memtable::find_nodes_by_field_基础 ... ok
+test memtable::flat_vectors_和_ensure_cache ... ok
+test memtable::get_edges_by_label ... ok
+test memtable::get_id_by_index ... ok
+test memtable::get_in_degree_和_incoming_sources ... ok
+test memtable::get_payload_往返 ... ok
+test memtable::get_vector_不存在 ... ok
+test memtable::get_vector_往返 ... ok
+test memtable::indexed_field_names ... ok
+test memtable::insert_Infinity拒绝 ... ok
+test memtable::insert_NaN拒绝 ... ok
+test memtable::insert_with_id_ID0拒绝 ... ok
+test memtable::insert_with_id_基础 ... ok
+test memtable::insert_with_id_重复ID报错 ... ok
+test memtable::insert_维度不匹配 ... ok
+test memtable::insert_自增ID ... ok
+test memtable::internal_indices ... ok
+test memtable::link_不存在的节点报错 ... ok
+test memtable::link_同三元组更新权重且索引不重复 ... ok
+test memtable::link_基础 ... ok
+test memtable::link_拒绝非有限权重 ... ok
+test memtable::new_with_next_id ... ok
+test memtable::new_空表 ... ok
+test memtable::patch_payload_inc_字段不存在视为零 ... ok
+test memtable::patch_payload_inc_整数递增 ... ok
+test memtable::patch_payload_set_基础 ... ok
+test memtable::patch_payload_unset_删除字段 ... ok
+test memtable::patch_payload_不存在报错 ... ok
+test memtable::patch_payload_属性索引自动维护 ... ok
+test memtable::patch_payload_简写模式明确拒绝 ... ok
+test memtable::patch_payload_组合操作 ... ok
+test memtable::property_index_drop ... ok
+test memtable::property_index_update后更新 ... ok
+test memtable::property_index_删除后清理 ... ok
+test memtable::property_index_插入后自动维护 ... ok
+test memtable::property_index_无索引返回None ... ok
+test memtable::property_index_注册和查询 ... ok
+test memtable::quiver_手动构建和失效 ... ok
+test memtable::quiver_事务同步超过退化阈值后立即重建 ... ok
+test memtable::quiver自动阈值随维度下降并保持上下界 ... ok
+test memtable::raw_insert_跳过NaN检查 ... ok
+test memtable::rebuild_text_index_from_payloads ... ok
+test memtable::register_node_和_register_tombstone ... ok
+test memtable::text_index_keyword_和_bm25 ... ok
+test memtable::unlink_label_保留其他标签及反向索引 ... ok
+test memtable::unlink_基础 ... ok
+test memtable::update_payload_不存在报错 ... ok
+test memtable::update_payload_基础 ... ok
+test memtable::update_vector_NaN拒绝 ... ok
+test memtable::update_vector_基础 ... ok
+test database::tql_mut_create_节点 ... ok
+test memtable::update_vector_维度不匹配 ... ok
+test memtable::节点ID耗尽时拒绝且不修改状态 ... ok
+test tql_ast::agg_func_eq ... ok
+test tql_ast::comp_op_所有变体 ... ok
+test tql_ast::edge_direction_eq ... ok
+test tql_ast::expand_clause ... ok
+test tql_ast::hop_range ... ok
+test tql_ast::literal_所有变体 ... ok
+test tql_ast::mutation_action_变体 ... ok
+test tql_ast::node_pattern_和_edge_pattern ... ok
+test tql_ast::predicate_构造 ... ok
+test tql_ast::query_entry_所有变体 ... ok
+test tql_ast::return_clause_变体 ... ok
+test tql_ast::tql_statement_变体 ... ok
+test traversal::expand_SA_PPR出度不放大单层能量 ... ok
+test traversal::expand_SA_PPR按出边权重归一化 ... ok
+test traversal::expand_SA_PPR重启因子 ... ok
+test traversal::expand_depth0_返回原始seeds ... ok
+test traversal::expand_depth1_扩展邻居 ... ok
+test traversal::expand_depth2_扩展二跳 ... ok
+test traversal::expand_inhibition边_负能量 ... ok
+test traversal::expand_不应期疲劳 ... ok
+test traversal::expand_侧向截断 ... ok
+test traversal::expand_双向自环不重复计入且组合过滤保持确定性 ... ok
+test traversal::expand_反向抑制 ... ok
+test database::tx_insert_后_在同一事务delete ... ok
+test database::tx_insert_后_在同一事务link ... ok
+test database::tx_insert_和_commit ... ok
+test database::tx_insert_with_id_维度不匹配 ... ok
+test database::tx_insert_with_id ... ok
+test database::tx_link_不存在节点报错 ... ok
+test traversal::expand_权重阈值使用绝对值并在归一化前过滤 ... ok
+test traversal::expand_方向分别支持出边入边和双向 ... ok
+test traversal::expand_标签白名单在归一化前过滤 ... ok
+test traversal::expand_清空疲劳恢复无状态评测 ... ok
+test traversal::expand_每节点边上限按绝对权重稳定选择且重新归一化 ... ok
+test traversal::expand_空seeds ... ok
+test traversal::expand_空标签白名单禁止扩散 ... ok
+test traversal::graph_first_排序去重并忽略不存在的Anchor ... ok
+test traversal::reachability_不存在源节点和非法配置明确报错 ... ok
+test traversal::graph_first_参数和预算门禁 ... ok
+test traversal::reachability_支持反向和多标签过滤 ... ok
+test traversal::reachability_双向环和自环只返回每个节点的最短路径 ... ok
+test traversal::reachability_空标签列表禁止遍历 ... ok
+test vector::cosine_similarity_f32_公开函数 ... ok
+test traversal::reachability_返回确定性最短路径和标签 ... ok
+test traversal::reachability_零深度包含源节点 ... ok
+test vector::f16_similarity_基础精度 ... ok
+test traversal::reachability_预算超限返回部分结果和截断标记 ... ok
+test vector::f16_similarity_正交 ... ok
+test vector::f16_similarity_大维度 ... ok
+test vector::f16_similarity_零向量 ... ok
+test vector::f16_zero_和_to_f32_和_from_f32 ... ok
+test vector::f32_similarity_11元素_SIMD余数3 ... ok
+test vector::f32_similarity_1元素 ... ok
+test vector::f32_similarity_5元素_非4对齐 ... ok
+test vector::f32_similarity_双零向量 ... ok
+test vector::f32_similarity_反向 ... ok
+test vector::f32_similarity_9元素_SIMD余数1 ... ok
+test vector::f32_similarity_大维度不panic ... ok
+test vector::f32_similarity_完全正交 ... ok
+test vector::f32_similarity_完全对齐 ... ok
+test vector::f32_similarity_空向量 ... ok
+test vector::f32_similarity_长向量_超过8元素触发SIMD ... ok
+test vector::f32_similarity_零向量 ... ok
+test vector::f32_zero_和_to_f32_和_from_f32 ... ok
+test vector::u64_similarity_完全不同 ... ok
+test vector::u64_similarity_完全相同 ... ok
+test vector::u64_similarity_空向量 ... ok
+test vector::u64_similarity_部分匹配 ... ok
+test vector::u64_zero_和_to_f32_和_from_f32 ... ok
+test wal::wal_crc_错误时停止恢复 ... ok
+test wal::wal_len过大_合理性检查 ... ok
+test database::tx_update_payload_不存在报错 ... ok
+test database::tx_insert_with_id_NaN报错 ... ok
+test database::tx_rollback_不影响数据库 ... ok
+test database::tx_insert_with_id_重复ID报错 ... ok
+test database::tx_link_和_unlink ... ok
+test database::tx_insert_维度不匹配 ... ok
+test database::tx_update_vector_NaN报错 ... ok
+test database::tx_unlink_不存在src报错 ... ok
+test database::update_payload_不存在 ... ok
+test database::tx_update_payload_和_vector ... ok
+test database::tx_update_vector_维度不匹配 ... ok
+test database::tx_update_vector_不存在报错 ... ok
+test database::update_payload_操作 ... ok
+test wal::wal_append_batch_事务完整性 ... ok
+test wal::wal_append_和_read_entries_往返 ... ok
+test database::flush_空数据库 ... ok
+test database::patch_payload_WAL持久化 ... ok
+test database::update_vector_操作 ... ok
+test wal::wal_needs_recovery_空文件 ... ok
+test wal::wal_needs_recovery_非空文件 ... ok
+test wal::wal拒绝历史无头记录并提示迁移 ... ok
+test wal::wal_所有Entry变体往返 ... ok
+test wal::wal非空旧版本不能升级且字节不变 ... ok
+test database::tx_空事务提交 ... ok
+test wal::wal_group_commit空组不执行同步且拒绝嵌套 ... ok
+test database::update_vector_不存在 ... ok
+test wal::wal_group_commit保留独立事务且仅同步一次 ... ok
+test wal::wal明确拒绝不支持的非空版本 ... ok
+test wal::wal损坏v2迁移失败且原文件不变 ... ok
+test database::close_操作 ... ok
+test wal::wal_clear_后读取为空 ... ok
+test wal::wal_v2全部历史变体迁移后保持事务过滤和字段语义 ... ok
+test wal::wal空旧版本头只能显式升级 ... ok
+test database::patch_payload_超限拒绝且保留原状态 ... ok
+test wal::wal_sync_mode_切换 ... ok
+test wal::wal非空v2可安全迁移并补齐link元数据 ... ok
+test database::open_空旧WAL自动升级且首次写入后二次打开成功 ... ok
+test database::open_非空v2_wal自动迁移并恢复已提交事务 ... ok
+test database::flush_和_compact ... ok
+test memtable::quiver自动构建严格遵守动态阈值与禁用配置 ... ok
+
+test result: ok. 323 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s
+
+   Doc-tests triviumdb
+
+running 10 tests
+test src\database\mod.rs - database::Database<T>::build_quiver_index (line 812) ... ignored
+test src\database\mod.rs - database::Database<T>::create_index (line 2092) ... ignored
+test src\database\mod.rs - database::Database<T>::patch_payload (line 1412) ... ignored
+test src\database\mod.rs - database::Database<T>::set_hook (line 758) ... ignored
+test src\database\mod.rs - database::Database<T>::tql (line 2253) ... ignored
+test src\database\mod.rs - database::Database<T>::tql_mut (line 2354) ... ignored
+test src\database\transaction.rs - database::transaction::Database<T>::commit_tx (line 731) ... ignored
+test src\database\transaction.rs - database::transaction::Transaction (line 142) ... ignored
+test src\database\transaction.rs - database::transaction::TxBuilder (line 273) ... ignored
+test src\hook.rs - hook::FfiHook (line 409) ... ignored
+
+test result: ok. 0 passed; 0 failed; 10 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+all doctests ran in 0.37s; merged doctests compilation took 0.25s

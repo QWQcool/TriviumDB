@@ -39,6 +39,9 @@ package-lock.json
 *.log
 *.tmp
 
+# 例外：论文引用的原始 stdout 日志随仓库分发（见 results/logs/README.md）
+!results/logs/*.log
+
 # ══════ 系统文件 ══════
 .DS_Store
 Thumbs.db

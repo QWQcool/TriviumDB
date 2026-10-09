@@ -1,0 +1,9 @@
+
+  gist960: base(sample)=(200000, 960) test=(1000, 960)  dim=960
+Traceback (most recent call last):
+  File "C:\Users\v_chchsli\Desktop\TriviumDB\scripts\research\bit_budget_ceiling.py", line 105, in <module>
+    main()
+  File "C:\Users\v_chchsli\Desktop\TriviumDB\scripts\research\bit_budget_ceiling.py", line 67, in main
+    cos = np.einsum("ij,ij->i", tr[pair[:, 0]], tr[pair[:, 1]])
+                                ~~^^^^^^^^^^^^
+IndexError: arrays used as indices must be of integer (or boolean) type

@@ -1,0 +1,48 @@
+[ui-smoke] 1/6 cargo build -p triviumdb-server (browser=chromium)
+[ui-smoke] 2/6 启动临时 server: 127.0.0.1:8081, db=C:\Users\v_chchsli\Desktop\TriviumDB\.tmp\smoke-95976-1788847822567.tdb
+[ui-smoke] 3/6 等待 /health/ready 就绪
+[ui-smoke] 3/6 注入种子数据 (2 个 person 节点 + 1 条 KNOWS 边)
+[ui-smoke] 4/6 打开 http://127.0.0.1:8081/ui 执行冒烟路径
+[ui-smoke]   ✓ 默认查询出结果 (2 行)
+[ui-smoke]   ✓ 节点 360° 抽屉打开/关闭
+[ui-smoke]   ✓ 三个主标签切换
+[ui-smoke]   注入 700 个规模节点 (350 次链式 CREATE)
+[ui-smoke]   ✓ 图规模护栏生效 (700 节点 → 力学暂停 + 提示条，页面未冻结)
+[ui-smoke] 5/6 打开 http://127.0.0.1:8081/ui?selftest=1 断言自检套件
+[ui-smoke]   ✓ [自检基建] fetch mock 生效：/health/ready 驱动连接徽章
+[ui-smoke]   ✓ [主题] 主题切换：light→dark→light 并持久化到 localStorage
+[ui-smoke]   ✓ [标签页] 标签页切换：三个主标签互斥激活
+[ui-smoke]   ✓ [标签页] 结果视图切换：grid/graph/json 三视图互斥
+[ui-smoke]   ✓ [渲染管线] renderGrid：列数/行数/单元格内容
+[ui-smoke]   ✓ [渲染管线] renderGrid：节点行携带可点击 360° 入口
+[ui-smoke]   ✓ [渲染管线] mutation 结果渲染：受影响行数与 createdIds
+[ui-smoke]   ✓ [渲染管线] 错误渲染：标题/详情同时呈现在表格与 JSON 视图
+[ui-smoke]   ✓ [渲染管线] JSON 树：类型着色与计数徽标
+[ui-smoke]   ✓ [渲染管线] JSON 树：默认展开 2 层、点击可折叠
+[ui-smoke]   ✓ [向量实验台] 向量实验台：非法 JSON 报「JSON 解析失败」
+[ui-smoke]   ✓ [向量实验台] 向量实验台：维度不匹配报「维度不匹配」
+[ui-smoke]   ✓ [向量实验台] 向量实验台：无向量节点报「节点无向量」
+[ui-smoke]   ✓ [向量实验台] 向量实验台：mock 检索流水线渲染 hits 表格
+[ui-smoke]   ✓ [向量实验台] score 比例条：单条命中为满条
+[ui-smoke]   ✓ [节点抽屉] 节点抽屉：Trinity 三平面渲染 (Payload/Vector/Edges)
+[ui-smoke]   ✓ [节点抽屉] 节点抽屉：边跳转到目标节点后重渲染
+[ui-smoke]   ✓ [节点抽屉] 向量热力条：抽屉色块、tooltip 与 L2 摘要
+[ui-smoke]   ✓ [力导向] 力导向收敛：400 tick 后节点无重叠且在界内
+[ui-smoke]   ✓ [回归修复] 死按钮修复：加载全图拓扑用合法语法出图
+[ui-smoke]   ✓ [边界加固] XSS 防护：payload 含 img onerror / script 均以文本渲染
+[ui-smoke]   ✓ [边界加固] JSON 树：40 层深嵌套可渲染、带省略标记并可逐层展开
+[ui-smoke]   ✓ [边界加固] JSON 树：10000 元素数组懒渲染，首屏 DOM 受限且展开可用
+[ui-smoke]   ✓ [边界加固] 网格：10000 行分块渲染完成且行数与首尾内容正确
+[ui-smoke]   ✓ [边界加固] 行数上限：rows=10000 时提示条出现且可关闭
+[ui-smoke]   ✓ [边界加固] 图护栏：700 节点自动暂停力学并显示提示条
+[ui-smoke]   ✓ [边界加固] 图护栏：1600 节点只渲染前 1500 且提示总数
+[ui-smoke]   ✓ [边界加固] 图护栏：规模禁用下点「恢复力学」仅提示不恢复，随后还原状态
+[ui-smoke]   ✓ [渲染管线] 语法高亮：叠加层与 textarea 完全对齐（中文/换行/长行）
+[ui-smoke]   ✓ [命令面板] 命令面板：Ctrl+K 呼出、Esc 关闭
+[ui-smoke]   ✓ [命令面板] 命令面板：子序列搜索过滤 + 命中高亮
+[ui-smoke]   ✓ [命令面板] 命令面板：Enter 键盘执行第一条（代码片段填充并运行）
+[ui-smoke]   ✓ [命令面板] 命令面板：主题切换命令生效
+[ui-smoke]   ✓ [命令面板（预留）] 扩展点就绪：__selftestRegister 可动态注入断言
+[ui-smoke]   ✓ [命令面板（预留）] 扩展点自证：动态注册的断言被执行
+[ui-smoke]   ✓ 页内自检全部通过 (35 条)
+[ui-smoke] 6/6 清理浏览器进程 / server 进程 / 临时库

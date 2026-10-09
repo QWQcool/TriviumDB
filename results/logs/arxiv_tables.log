@@ -1,0 +1,194 @@
+HTML 432,317 字符
+标题标记: ['QuIVer: Rethinking ANN Graph Topology via Training-Free Binary Quantization']
+
+共 17 个 <table>
+====================================================================================================
+
+--- table #1  id=S2.E1 ---
+CAPTION: (前 12000 字符内无 figcaption)
+   | (1) |  | 𝔼 ⁡ [ d H ​ ( h ⁡ ( 𝐮 ) , h ⁡ ( 𝐯 ) ) ] = D ⋅ θ π . \mathbb{E}\bigl[d_{H}(h(\mathbf{u}),h(\mathbf{v}))\bigr]=\frac{D\cdot\theta}{\pi}. | 
+
+--- table #2  id=S3.EGx1 ---
+CAPTION: Figure 1. QuIVer system overview. Blue-shaded components operate in 2-bit BQ metric space (hot path); the orange-shaded reranking step is the only cold-path access to float32 vectors. A flow diagram showing QuIVer's pipeline: Float32 vectors are encoded into 2-bit BQ signatures, used for BQ-Vamana graph construction and BQ graph navigatio
+   | (2) |  | pos i \displaystyle\text{pos}_{i} | = 𝟏 [ x i > 0 ] , \displaystyle=\mathbf{1}[x_{i}>0], | 
+   | (3) |  | strong i \displaystyle\text{strong}_{i} | = 𝟏 [ | x i | > τ ] . \displaystyle=\mathbf{1}[|x_{i}|>\tau]. | 
+
+--- table #3  id=S3.T1.2 ---
+CAPTION: Table 1. 2-bit Sign-Magnitude symmetric distance penalty assignment. A dimension contributes zero distance when signs agree and a positive penalty when signs differ; the penalty magnitude is determined by the two magnitude bits.
+   | Category | Same sign | Different sign
+   | Both strong | 0 0 | 4 4
+   | One strong, one weak | 0 0 | 2 2
+   | Both weak | 0 0 | 1 1
+
+--- table #4  id=S3.E4 ---
+CAPTION: Table 1. 2-bit Sign-Magnitude symmetric distance penalty assignment. A dimension contributes zero distance when signs agree and a positive penalty when signs differ; the penalty magnitude is determined by the two magnitude bits.
+   | (4) |  | Pr [ d ^ 2 ( 𝐮 , 𝐯 ) ≥ d ^ 2 ( 𝐮 , 𝐰 ) ] ≤ exp ( − μ 2 2 ​ v + 2 3 ​ B ​ μ ) , \Pr\!\left[\hat{d}_{2}(\mathbf{u},\mathbf{v})\geq\hat{d}_{2}(\mathbf{u},\mathbf{w})\right]\leq\exp\!\left(-\frac{\mu^{2}}{2v+\tfrac{2}{3}B\mu}\right), | 
+
+--- table #5  id=S4.T2.2.1 ---
+CAPTION: Table 2. Hot/cold memory breakdown (measured resident set).
+   | Component | MiniLM (384-d) | Cohere (768-d) | DBpedia (1536-d)
+   | Hot: BQ signatures | 96 MB | 192 MB | 380 MB
+   | Hot: Adjacency + metadata † | 487 MB | 483 MB | 469 MB
+   | Hot total | 583 MB | 675 MB | 849 MB
+   | Cold: Float32 vectors | 1465 MB | 2929 MB | 5800 MB
+   | Total | 2048 MB | 3604 MB | 6649 MB
+   | † Theoretical adjacency-only minimum: N × ( 2 ​ m + 1 ) × 4 = 260 N{\times}(2m{+}1){\times}4=260 MB for 1M nodes at m = 32 m{=}32 . Measured value includes degree counters, allocator alignment padding, node metadata, and OS page rounding.
+
+--- table #6  id=S4.T3.2 ---
+CAPTION: Table 3. Cold-path storage tolerance: QPS impact of placing float32 vectors in a memory-mapped file vs. heap memory (Cohere-1M, 768-d, 2.93 GB). Recall is identical across all three modes.
+   | ef | RAM QPS | Warm QPS | Cold QPS | Cold/RAM
+   | 32 | 6,129 | 6,570 | 6,320 | 103.1%
+   | 64 | 3,032 | 3,836 | 4,169 | 137.5%
+   | 128 | 1,981 | 2,241 | 2,386 | 120.5%
+   | 256 | 1,292 | 1,314 | 1,357 | 105.0%
+
+--- table #7  id=S5.T4.2 ---
+CAPTION: Table 4. Evaluation datasets.
+   | Dataset | Dim | Base | Queries | Native metric
+   | MiniLM-1M | 384 | 1,000,000 | 1,000 | Cosine
+   | Wolt-CLIP-1M | 512 | 1,000,000 | 1,000 | Cosine
+   | Cohere-1M | 768 | 1,000,000 | 1,000 | Cosine
+   | BGE-M3-1M | 1024 | 1,000,000 | 1,000 | Cosine
+   | DBpedia-1M | 1536 | 990,000 | 10,000 | Cosine
+   | DBpedia-3072 | 3072 | 990,000 | 10,000 | Cosine
+   | RedCaps-1M | 512 | 1,000,000 | 10,000 | Cosine
+   | GloVe-100 | 100 | 1,183,514 | 10,000 | Angular
+   | SIFT-128 | 128 | 1,000,000 | 10,000 | Euclidean
+   | GIST-960 | 960 | 1,000,000 | 1,000 | Euclidean
+   | Random-Sphere | 768 | 1,000,000 | 1,000 | Cosine
+   | Synthetic-LR | 768 | 1,000,000 | 1,000 | Cosine
+   | MSMARCO-5M | 1024 | 5,000,000 | 10,000 | Cosine
+
+--- table #8  id=S5.T5.2.1 ---
+CAPTION: Table 5. QuIVer on embedding datasets across 384–3072 dimensions. QPS is multi-threaded (16 threads). All indices use m = 32 m{=}32 , ef c = 128 \text{ef}_{c}{=}128 , α = 1.2 \alpha{=}1.2 .
+   |  | MiniLM (384-d) | Wolt-CLIP (512-d) | Cohere (768-d) | BGE-M3 (1024-d) | DBpedia (1536-d) | DBpedia (3072-d)
+   | ef | R@10 | QPS | R@10 | QPS | R@10 | QPS | R@10 | QPS | R@10 | QPS | R@10 | QPS
+   | 64 | 88.1% | 41,106 | 70.7% | 62,367 | 95.1% | 36,729 | 93.8% | 41,182 | 95.3% | 22,035 | 95.7% | 12,910
+   | 128 | 93.8% | 23,506 | 77.4% | 39,064 | 97.7% | 21,021 | 97.1% | 25,911 | 97.7% | 12,996 | 97.9% | 7,428
+   | 256 | 96.9% | 13,468 | 81.7% | 22,560 | 99.0% | 11,837 | 98.7% | 15,200 | 98.8% | 7,309 | 98.8% | 4,171
+   | 512 | 98.4% | 7,371 | 84.3% | 12,128 | 99.6% | 6,032 | 99.4% | 8,325 | 99.3% | 3,969 | 99.3% | 2,259
+   | 1024 | 99.2% | 3,800 | 85.7% | 6,606 | 99.7% | 3,376 | 99.6% | 4,284 | 99.6% | 2,104 | 99.6% | 1,194
+   | Build time | 83 s |  | 58 s |  | 93 s |  | 78 s |  | 142 s |  | 262 s
+   | Hot memory | 583 MB |  | 614 MB |  | 675 MB |  | 736 MB |  | 849 MB |  | 1,212 MB
+
+--- table #9  id=S5.T6.2.1 ---
+CAPTION: Table 6. Matched-recall throughput comparison on Cohere-1M (768-d). All speedups are QuIVer over baseline at interpolated recall. IVF-PQ uses OPQ rotation + float32 reranking (production configuration).
+   | Recall | System | 1T-QPS | MT-QPS | 1T speedup | MT speedup
+   | ∼ {\sim} 95% | QuIVer (ef=64) | 3,555 | 36,729 | — | —
+   | DiskANN Rust | 2,975 | 11,557 | 1.2 × 1.2\times | 3.2 × 3.2\times
+   | DiskANN PQ+FP | 2,732 | 10,535 | 1.3 × 1.3\times | 3.5 × 3.5\times
+   | hnswlib | 1,900 | 8,500 | 1.9 × 1.9\times | 4.3 × 4.3\times
+   | FAISS HNSW | 2,700 | 7,600 | 1.3 × 1.3\times | 4.8 × 4.8\times
+   | USearch | 1,100 | 6,700 | 3.2 × 3.2\times | 5.5 × 5.5\times
+   | FAISS IVF-PQ | 1,555 | 5,566 | 2.3 × 2.3\times | 6.6 × 6.6\times
+   | DiskANN SSD | — | 3,392 | — | 10.8 × 10.8\times
+   | FAISS RaBitQ | 780 | 2,525 | 4.6 × 4.6\times | 14.5 × 14.5\times
+   | ∼ {\sim} 97% | QuIVer (ef=128) | 2,140 | 21,021 | — | —
+   | DiskANN Rust | 2,085 | 8,047 | 1.0 × 1.0\times | 2.6 × 2.6\times
+   | DiskANN PQ+FP | 1,617 | 6,093 | 1.3 × 1.3\times | 3.4 × 3.4\times
+   | hnswlib | 1,350 | 5,900 | 1.6 × 1.6\times | 3.6 × 3.6\times
+   | FAISS HNSW | 1,950 | 5,500 | 1.1 × 1.1\times | 3.8 × 3.8\times
+   | USearch | 780 | 4,900 | 2.7 × 2.7\times | 4.3 × 4.3\times
+   | FAISS IVF-PQ | 855 | 3,200 | 2.5 × 2.5\times | 6.6 × 6.6\times
+   | DiskANN SSD | — | 2,600 | — | 8.1 × 8.1\times
+   | FAISS RaBitQ | 399 | 1,728 | 5.4 × 5.4\times | 12.2 × 12.2\times
+   | ∼ {\sim} 99% | QuIVer (ef=256) | 1,182 | 11,837 | — | —
+   | DiskANN Rust | 879 | 3,538 | 1.3 × 1.3\times | 3.3 × 3.3\times
+   | DiskANN PQ+FP | 740 | 2,820 | 1.6 × 1.6\times | 4.2 × 4.2\times
+   | hnswlib | 560 | 2,500 | 2.1 × 2.1\times | 4.7 × 4.7\times
+   | FAISS HNSW | 850 | 2,400 | 1.4 × 1.4\times | 4.9 × 4.9\times
+   | USearch | 350 | 2,200 | 3.4 × 3.4\times | 5.4 × 5.4\times
+   | FAISS IVF-PQ | 313 | 1,501 | 3.8 × 3.8\times | 7.9 × 7.9\times
+   | DiskANN SSD | — | 1,285 | — | 9.2 × 9.2\times
+   | FAISS RaBitQ | 198 | 925 | 6.0 × 6.0\times | 12.8 × 12.8\times
+
+--- table #10  id=S5.T7.4.1 ---
+CAPTION: Table 7. Recall@10 (%) vs. m m on Cohere-1M (ef c =128, α \alpha =1.2).
+   | m m | Build (s) | Hot (MB) | ef=32 | ef=64 | ef=128 | ef=256 | ef=1024
+   | 4 | 19 | 247 | 17.9 | 32.5 | 46.1 | 55.8 | 66.7
+   | 8 | 25 | 308 | 51.4 | 69.2 | 79.4 | 85.8 | 91.2
+   | 16 | 41 | 431 | 78.5 | 88.3 | 93.8 | 96.2 | 98.2
+   | 24 | 66 | 553 | 86.0 | 93.3 | 96.8 | 98.3 | 99.4
+   | 32 | 95 | 675 | 88.7 | 95.1 | 97.7 | 98.9 | 99.7
+   | 48 | 174 | 919 | 91.0 | 96.3 | 98.4 | 99.3 | 99.8
+   | 64 | 278 | 1163 | 91.9 | 96.8 | 98.6 | 99.6 | 99.9
+
+--- table #11  id=S5.T8.6.1 ---
+CAPTION: Table 8. Recall@10 (%) vs. ef c on Cohere-1M ( m m =32, α \alpha =1.2). Hot memory (675 MB) is invariant to ef c .
+   | ef c | Build (s) | ef=32 | ef=64 | ef=128 | ef=256 | ef=512 | ef=1024
+   | 16 | 68 | 79.1 | 87.7 | 92.3 | 95.0 | 97.1 | 98.4
+   | 32 | 69 | 87.4 | 93.3 | 96.4 | 97.8 | 98.8 | 99.3
+   | 64 | 75 | 87.7 | 94.2 | 96.9 | 98.2 | 99.0 | 99.3
+   | 128 | 93 | 88.6 | 95.1 | 97.7 | 99.0 | 99.6 | 99.7
+   | 256 | 122 | 89.0 | 95.3 | 98.0 | 99.2 | 99.7 | 99.8
+   | 512 | 176 | 89.0 | 95.3 | 98.0 | 99.2 | 99.7 | 99.9
+
+--- table #12  id=S5.T9.4.1 ---
+CAPTION: Table 9. Recall@10 (%) vs. α \alpha on Cohere-1M ( m m =32, ef c =128).
+   | α \alpha | Build (s) | ef=32 | ef=64 | ef=128 | ef=256 | ef=512 | ef=1024
+   | 1.00 | 225 | 91.4 | 96.7 | 98.7 | 99.6 | 99.8 | 100.0
+   | 1.05 | 101 | 89.3 | 95.5 | 97.9 | 99.1 | 99.6 | 99.8
+   | 1.10 | 94 | 88.7 | 95.1 | 97.7 | 99.0 | 99.6 | 99.7
+   | 1.20 | 93 | 88.7 | 95.1 | 97.7 | 99.0 | 99.6 | 99.7
+   | 1.25 | 92 | 88.5 | 95.1 | 97.6 | 98.9 | 99.5 | 99.7
+
+--- table #13  id=S5.T10.8.1 ---
+CAPTION: Table 10. Encoding ablation on Cohere-100K. Top-10 overlap : fraction of BQ-ranked Top-10 that match float32 ground truth (brute-force). Dist. latency : single pairwise distance computation. Recall@10 / QPS : graph search with float32 reranking.
+   |  |  | Top-10 | Dist. | Graph Search Recall@10 (%) / QPS
+   | Encoding | Ops | overlap | latency | ef=32 | ef=64 | ef=128 | ef=256
+   | 1-bit sign | bit | 55.0% | 46 ns | 76.6 / 7370 | 86.1 / 4394 | 92.0 / 2530 | 96.1 / 1354
+   | 2-bit SM | bit | 64.7% | 29 ns | 88.6 / 5282 | 95.0 / 3102 | 98.2 / 2079 | 99.3 / 1166
+   | 2-bit SQ | int | 70.1% | 292 ns | 92.3 / 806 | 97.1 / 517 | 98.7 / 344 | 99.7 / 198
+
+--- table #14  id=S5.T11.2.1 ---
+CAPTION: Table 11. Cross-dataset Recall@10 and MT-QPS at ef=64 ( m = 32 m{=}32 , ef c = 128 {}_{c}{=}128 , α = 1.2 \alpha{=}1.2 ).
+   | Dataset | Dim | Distribution | R@10 | MT-QPS
+   | Random-Sphere | 768 | Uniform random | 0.40% | 24,314
+   | GIST-960 | 960 | Euclidean CV | 2.01% | 103,832
+   | SIFT-128 | 128 | Euclidean CV | 14.85% | 87,212
+   | GloVe-100 | 100 | Angular word vec | 32.08% | 59,372
+   | Synthetic-LR | 768 | Low-rank synth. | 41.76% | 28,091
+   | Wolt-CLIP | 512 | Multimodal CLIP | 70.68% | 62,367
+   | RedCaps-1M | 512 | Multimodal CLIP | 78.41% | 36,291
+   | MiniLM-1M | 384 | LLM contrastive | 88.09% | 41,106
+   | BGE-M3-1M | 1024 | LLM contrastive | 93.81% | 41,182
+   | Cohere-1M | 768 | LLM contrastive | 95.13% | 36,729
+   | DBpedia-1M | 1536 | LLM contrastive | 95.34% | 22,035
+   | DBpedia-3072 | 3072 | LLM contrastive | 95.65% | 12,910
+
+--- table #15  id=S5.T12.2.1 ---
+CAPTION: Table 12. Scalability: MSMARCO Cohere-v3 (1024-d) at 1M and 5M vectors. Δ \Delta R@10 is the recall change from 1M to 5M.
+   | ef | 1M | 5M | Δ \Delta R@10 | QPS
+   |  | R@10 | MT-QPS | R@10 | MT-QPS |  | ratio
+   | 64 | 72.2% | 44,581 | 71.6% | 31,367 | − - 0.7 | 0.70
+   | 128 | 82.4% | 24,956 | 82.5% | 18,523 | +0.1 | 0.74
+   | 256 | 88.8% | 12,906 | 88.8% | 10,326 | +0.0 | 0.80
+   | 512 | 92.6% | 6,437 | 91.9% | 5,559 | − - 0.6 | 0.86
+   | 1024 | 94.9% | 3,099 | 93.7% | 2,777 | − - 1.2 | 0.90
+
+--- table #16  id=S6.T13.2.1 ---
+CAPTION: Table 13. Strong-bit rate p s p_{s} and effective squared weight ν 2 = ( 1 + 3 ​ p s ) 2 \nu_{2}=(1{+}3p_{s})^{2} across all datasets. Despite > > 90 points of Recall@10 variation, p s p_{s} and ν 2 \nu_{2} are remarkably stable.
+   | Dataset | Type | D D | p s p_{s} | ν 2 \nu_{2} | R@10 (%)
+   | MiniLM-1M | contrastive | 384 | 0.424 | 5.16 | 88.1
+   | BGE-M3-1M | contrastive | 1024 | 0.413 | 5.02 | 93.8
+   | Cohere-1M | contrastive | 768 | 0.390 | 4.71 | 95.1
+   | DBpedia-1536 | contrastive | 1536 | 0.417 | 5.06 | 95.3
+   | DBpedia-3072 | contrastive | 3072 | 0.409 | 4.96 | 95.7
+   | Wolt-CLIP-1M | multimodal | 512 | 0.377 | 4.54 | 70.7
+   | GloVe-100 | word-vec | 100 | 0.423 | 5.15 | 32.1
+   | GIST-960 | euclidean | 960 | 0.402 | 4.86 | 2.0
+   | SIFT-128 | euclidean | 128 | 0.312 | 3.75 | 14.9
+   | Random-768 | random | 768 | 0.425 | 5.18 | 0.4
+   | Synthetic-LR | synthetic | 768 | 0.425 | 5.18 | 41.8
+
+--- table #17  id=S7.T14.2.1 ---
+CAPTION: Table 14. Positioning of QuIVer against related systems. “BQ-native topology” indicates whether graph edge selection and pruning operate entirely in binary-quantized metric space.
+   | System | Quantization role | BQ-native topology | Training
+   | HNSW ( 4 ) | Storage compression or search acceleration | No | None
+   | DiskANN ( 5 ) | PQ for memory-resident distance; SSD for vectors | No | PQ codebook
+   | RaBitQ ( 12 ) | Distance estimator with error bounds + rotation | No | Rotation matrix
+   | SVS ( 37 ) | Locally-adaptive compression for streaming search | No | Per-cluster
+   | VSAG ( 33 ) | SQ/FP16 for distance acceleration in production | No | None
+   | Flash ( 42 ) | Compact coding to accelerate construction distance | No | None
+   | PAG ( 44 ) | Projection-based routing to reduce distance evals | No | None
+   | QuIVer | Graph construction, navigation, and hot-path layout | Yes | None

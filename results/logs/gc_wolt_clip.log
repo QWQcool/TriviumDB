@@ -1,0 +1,25 @@
+warning: linker stdout: 正在创建库 C:\Users\v_chchsli\Desktop\TriviumDB\target\release\deps\triviumdb.dll.lib 和对象 C:\Users\v_chchsli\Desktop\TriviumDB\target\release\deps\triviumdb.dll.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `triviumdb` (lib) generated 1 warning
+    Finished `bench` profile [optimized] target(s) in 0.24s
+     Running benches\bench_t2_build_recon.rs (target\release\deps\bench_t2_build_recon-42b5137d1a052928.exe)
+═══════════════════════════════════════════════════════════════════
+  T2 摸底 — QuIVer 图构建成本基线   数据集=wolt_clip dim=512
+  规模 N=全部  增量样本=200  反向剪枝模式=lazy 惰性 (默认)
+═══════════════════════════════════════════════════════════════════
+  数据 1000000 × 512，归一化 + 加载 1.80s
+
+  ── 阶段 A/B: 批量建图 ──
+  墙钟 20.88s  47900 vec/s  Hot 614 MiB
+  守卫1 跳过（仅默认规模 1M + 惰性模式检查）
+
+  ── 阶段 C: 增量 insert 延迟（N=1000000）──
+  无可用增量样本，跳过
+
+  ── 阶段 D: 导出 L0 CSR ──
+  守卫2 导出完整性 PASS: n=1000000 边=64000000 平均度 64.0（stats: 64.0）自环 0 entry=0
+  已导出 .tmp/l0_csr_wolt_clip.bin  (260 MB)
+
+═══════════════════════════════════════════════════════════════════

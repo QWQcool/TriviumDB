@@ -1,0 +1,10 @@
+
+  cohere: train=(1000000, 768) test=(1000, 768) nlist=1024 threads=32  normalized=True
+  构建 10.7s（控制臂：精确 f32 粗排）；索引 ntotal=1000000
+  search object = IndexIVFFlat   k_factor 可用 = False
+  nprobe  k_fac      R@10     1T-QPS     MT-QPS
+      64      1    97.38%         80        279
+     256      1    99.82%         20         72
+     512      1    99.98%         10         37
+    1024      1   100.00%          6         21
+  [OK] results\t2\ivfflat_control_norm_cohere.json

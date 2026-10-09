@@ -1,0 +1,20 @@
+
+=== 拟合集（F1 时代的 10 个臂，规则由此得出）===
+  glove100         probe w= 72.8% c= 44.8% ⇒ 规则:加权     实测 Δ= +21.8 ⇒ ✅
+  gauss960         probe w= 55.0% c=  4.7% ⇒ 规则:加权     实测 Δ=  ×2.9 ⇒ ✅
+  cohere           probe w= 99.1% c= 98.7% ⇒ 规则:加权     实测 Δ=  +0.5 ⇒ ✅
+  wolt_clip        probe w= 87.0% c= 87.5% ⇒ 规则:cheap  实测 Δ=  +0.9 ⇒ ❌
+  gist960          probe w=  2.2% c= 20.9% ⇒ 规则:cheap  实测 Δ=  −1.3 ⇒ ✅
+  sift128          probe w= 10.4% c= 30.3% ⇒ 规则:cheap  实测 Δ= −13.4 ⇒ ✅
+  拟合集命中 5/6
+
+=== ★ 前瞻集（规则定下来之后才跑的臂，未参与拟合）===
+  arxiv_nomic      probe w= 99.5% c= 99.5% ⇒ 规则:cheap  实测 w0= 96.78% → w1= 96.04%（Δ= -0.74）⇒ ✅
+  codesearch_jina  probe w= 99.9% c= 99.9% ⇒ 规则:加权     实测 w0= 94.62% → w1= 96.37%（Δ= +1.75）⇒ ✅
+  gooaq_roberta    probe w=100.0% c= 99.7% ⇒ 规则:加权     实测 w0= 96.60% → w1= 98.32%（Δ= +1.72）⇒ ✅
+  landmark_nomic   probe w= 93.7% c= 99.6% ⇒ 规则:cheap  实测 w0= 93.05% → w1= 81.39%（Δ=-11.66）⇒ ✅
+  landmark_dino    probe w= 99.2% c= 96.2% ⇒ 规则:加权     实测 w0= 82.90% → w1= 91.58%（Δ= +8.68）⇒ ✅
+  gist960rc        probe w= 99.6% c= 95.6% ⇒ 规则:加权     实测 w0= 76.05% → w1= 80.17%（Δ= +4.12）⇒ ✅
+  前瞻集命中 6/6
+
+  [OK] results/t2/nav_rule_validation.json

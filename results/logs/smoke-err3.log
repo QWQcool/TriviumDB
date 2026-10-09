@@ -1,0 +1,11 @@
+   Compiling triviumdb v0.8.6 (C:\Users\v_chchsli\Desktop\TriviumDB)
+warning: linker stdout: 正在创建库 C:\Users\v_chchsli\Desktop\TriviumDB\target\debug\deps\triviumdb.dll.lib 和对象 C:\Users\v_chchsli\Desktop\TriviumDB\target\debug\deps\triviumdb.dll.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `triviumdb` (lib) generated 1 warning
+   Compiling triviumdb-server v0.8.6 (C:\Users\v_chchsli\Desktop\TriviumDB\crates\triviumdb-server)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.52s
+(node:90216) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+[ui-smoke] 页内自检存在 1 条失败

@@ -1,0 +1,9 @@
+  原始 Ground truth 不适用于前 1000000 条训练向量，正在重新计算
+  [完成] arxiv_nomic: train=(1000000, 768), test=(1000, 768), GT=(1000, 10)
+  原始 Ground truth 不适用于前 1000000 条训练向量，正在重新计算
+  [完成] codesearch_jina: train=(1000000, 768), test=(1000, 768), GT=(1000, 10)
+  原始 Ground truth 不适用于前 1000000 条训练向量，正在重新计算
+  [完成] gooaq_roberta: train=(1000000, 768), test=(1000, 768), GT=(1000, 10)
+  [完成] landmark_nomic: train=(760757, 768), test=(1000, 768), GT=(1000, 10)
+  [完成] landmark_dino: train=(760757, 768), test=(1000, 768), GT=(1000, 10)
+全部转换完成: 5/5

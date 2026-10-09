@@ -1,0 +1,87 @@
+   Compiling triviumdb v0.8.8 (C:\Users\v_chchsli\Desktop\TriviumDB)
+warning: linker stdout: 正在创建库 C:\Users\v_chchsli\Desktop\TriviumDB\target\release\deps\triviumdb.dll.lib 和对象 C:\Users\v_chchsli\Desktop\TriviumDB\target\release\deps\triviumdb.dll.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `triviumdb` (lib) generated 1 warning
+    Finished `bench` profile [optimized] target(s) in 46.82s
+     Running benches\bench_tsng_c0.rs (target\release\deps\bench_tsng_c0-9926f3579cd70ca5.exe)
+{
+  "schema_version": 1,
+  "package_version": "0.8.8",
+  "config": {
+    "nodes": 100000,
+    "queries": 50,
+    "warmup": 5,
+    "dim": 64,
+    "seed": 13889475442559614977
+  },
+  "build_seconds": 1.1530826,
+  "scenarios": [
+    {
+      "name": "exact_vector",
+      "iterations": 50,
+      "p50_ms": 29.4028,
+      "p95_ms": 30.7941,
+      "p99_ms": 31.101,
+      "qps": 33.90728419335995,
+      "result_items": 500,
+      "cost": {
+        "candidates_scanned": 100000,
+        "payload_checks": 0,
+        "vector_comparisons": 100000,
+        "graph_visited_nodes": 0,
+        "graph_examined_edges": 0
+      }
+    },
+    {
+      "name": "exact_vector_property",
+      "iterations": 50,
+      "p50_ms": 26.626299999999997,
+      "p95_ms": 31.7348,
+      "p99_ms": 34.0952,
+      "qps": 36.84054593857664,
+      "result_items": 500,
+      "cost": {
+        "candidates_scanned": 100000,
+        "payload_checks": 100000,
+        "vector_comparisons": 1000,
+        "graph_visited_nodes": 0,
+        "graph_examined_edges": 0
+      }
+    },
+    {
+      "name": "exact_vector_graph",
+      "iterations": 50,
+      "p50_ms": 38.04,
+      "p95_ms": 63.770900000000005,
+      "p99_ms": 64.6966,
+      "qps": 23.677143771215906,
+      "result_items": 500,
+      "cost": {
+        "candidates_scanned": 100000,
+        "payload_checks": 0,
+        "vector_comparisons": 100000,
+        "graph_visited_nodes": 10,
+        "graph_examined_edges": 12
+      }
+    },
+    {
+      "name": "exact_three_signal",
+      "iterations": 50,
+      "p50_ms": 26.028,
+      "p95_ms": 32.069100000000006,
+      "p99_ms": 34.3791,
+      "qps": 37.462893004479064,
+      "result_items": 500,
+      "cost": {
+        "candidates_scanned": 100000,
+        "payload_checks": 100000,
+        "vector_comparisons": 1000,
+        "graph_visited_nodes": 10,
+        "graph_examined_edges": 12
+      }
+    }
+  ]
+}
+C0 基准报告已写入 target/bench-reports/tsng-c0.json / C0 benchmark report written to target/bench-reports/tsng-c0.json

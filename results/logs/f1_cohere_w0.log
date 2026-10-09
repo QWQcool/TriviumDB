@@ -1,0 +1,48 @@
+warning: linker stdout: 正在创建库 C:\Users\v_chchsli\Desktop\TriviumDB\target\release\deps\triviumdb.dll.lib 和对象 C:\Users\v_chchsli\Desktop\TriviumDB\target\release\deps\triviumdb.dll.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `triviumdb` (lib) generated 1 warning
+    Finished `bench` profile [optimized] target(s) in 0.24s
+     Running benches\bench_t2_b2_partitioned.rs (target\release\deps\bench_t2_b2_partitioned-60166ac12225c98c.exe)
+═══════════════════════════════════════════════════════════════════
+  T2 B2-0 — ef_construction 扫描（平凡对照，零代码）
+  数据集=cohere dim=768  臂 = [128]   m=32 m0=64 alpha=1.2  [T2_SKIP_DET]
+═══════════════════════════════════════════════════════════════════
+  守卫G5 随机注入量恒为 128（对全部臂）PASS
+  数据集 cohere  数据 1000000 × 768，查询 1000，GT K=1000；加载+归一化 1.64s
+
+  ── 臂 ef_construction=128 ──
+    建图 36.79s  27181 vec/s  avg_deg_l0=64.0  Hot 675 MiB
+    ef_search=64    R@10  94.71%      55796 QPS
+    ef_search=128   R@10  97.55%      30979 QPS
+    ef_search=256   R@10  98.87%      15995 QPS
+    ef_search=512   R@10  99.53%       8514 QPS
+    ef_search=1024  R@10  99.78%       4507 QPS
+    L0 指纹 0x83375ef74166e521 / 64000000 边
+
+  ── 守卫 ──
+  守卫G1 基线同进程复现: ef_c=128/ef_s=128 → 97.55% vs 冻结 97.55% （偏差 0.00pp）PASS
+  守卫G-det 跳过（T2_SKIP_DET=1）
+
+═══════════════════════════════════════════════════════════════════
+  B2-0 判定：ef_construction 能否独自达到成本-质量点
+═══════════════════════════════════════════════════════════════════
+  P1 门槛 = 基线 97.55% − 1pp = 96.55%
+
+  ef_c=128  建图  36.79s（ 1.00×）  R@10(ef_s=128)  97.55%  门槛达标 ✅
+
+  ── 固定成本地板 ──
+  ef_c=128 墙钟 36.79s = **1.00×** 基线（候选获取即使完全免费也不可能低于此值；真实地板只会更低）。
+
+  ★ 最小达标臂 ef_c=128：R@10 97.55% 但成本 1.00× > 0.70×⇒ P2 **未**由平凡解满足。
+     ⇒ 进入 B2-1；目标：击败 1.00×（地板 1.00×）
+
+  守卫G-det：边集不可逐位复现但召回极差 0.00pp ⇒ 质量等价；召回级结论稳定可比。
+═══════════════════════════════════════════════════════════════════
+
+### T2 B2-0：`ef_construction` 扫描（cohere 1000000 × 768，m=32，α=1.2，同一进程）
+
+| ef_c | 建图(s) | 相对基线 | R@10@ef_s=64 | R@10@ef_s=128 | R@10@ef_s=256 | R@10@ef_s=512 | R@10@ef_s=1024 |
+|---|---|---|---|---|---|---|---|
+| 128 | 36.79 | 1.00× | 94.71% | 97.55% | 98.87% | 99.53% | 99.78% |

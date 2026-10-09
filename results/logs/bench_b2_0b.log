@@ -1,0 +1,89 @@
+   Compiling triviumdb v0.8.8 (C:\Users\v_chchsli\Desktop\TriviumDB)
+warning: linker stdout: 正在创建库 C:\Users\v_chchsli\Desktop\TriviumDB\target\release\deps\triviumdb.dll.lib 和对象 C:\Users\v_chchsli\Desktop\TriviumDB\target\release\deps\triviumdb.dll.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `triviumdb` (lib) generated 1 warning
+    Finished `bench` profile [optimized] target(s) in 39.03s
+     Running benches\bench_t2_b2_partitioned.rs (target\release\deps\bench_t2_b2_partitioned-60166ac12225c98c.exe)
+═══════════════════════════════════════════════════════════════════
+  T2 B2-0 — ef_construction 扫描（平凡对照，零代码）
+  臂 = [128, 64, 32, 16]   m=32 m0=64 alpha=1.2
+═══════════════════════════════════════════════════════════════════
+  守卫G5 随机注入量恒为 128（对全部臂）PASS
+  数据 1000000 × 768，查询 1000，GT K=1000；加载+归一化 1.61s
+
+  ── 臂 ef_construction=128 ──
+    建图 36.10s  27697 vec/s  avg_deg_l0=64.0  Hot 675 MiB
+    ef_search=64    R@10  94.51%      60353 QPS
+    ef_search=128   R@10  97.56%      31245 QPS
+    ef_search=256   R@10  98.86%      16798 QPS
+    ef_search=512   R@10  99.54%       8400 QPS
+    ef_search=1024  R@10  99.78%       4610 QPS
+    L0 指纹 0xe592db9f8f4e57d0 / 64000000 边
+
+  ── 臂 ef_construction=64 ──
+    建图 23.77s  42068 vec/s  avg_deg_l0=64.0  Hot 675 MiB
+    ef_search=64    R@10  94.65%      56362 QPS
+    ef_search=128   R@10  97.24%      31147 QPS
+    ef_search=256   R@10  98.71%      16174 QPS
+    ef_search=512   R@10  99.44%       7647 QPS
+    ef_search=1024  R@10  99.70%       4042 QPS
+    L0 指纹 0x0c7d133e3b28f98f / 64000000 边
+
+  ── 臂 ef_construction=32 ──
+    建图 20.55s  48663 vec/s  avg_deg_l0=64.0  Hot 675 MiB
+    ef_search=64    R@10  93.74%      48652 QPS
+    ef_search=128   R@10  96.34%      28774 QPS
+    ef_search=256   R@10  98.21%      14307 QPS
+    ef_search=512   R@10  99.02%       6765 QPS
+    ef_search=1024  R@10  99.61%       3775 QPS
+    L0 指纹 0x804257f45f92a3e4 / 64000000 边
+
+  ── 臂 ef_construction=16 ──
+    建图 16.80s  59540 vec/s  avg_deg_l0=64.0  Hot 675 MiB
+    ef_search=64    R@10  87.93%      42211 QPS
+    ef_search=128   R@10  92.55%      22913 QPS
+    ef_search=256   R@10  95.68%      11839 QPS
+    ef_search=512   R@10  97.42%       5996 QPS
+    ef_search=1024  R@10  98.70%       3103 QPS
+    L0 指纹 0xca8cbed1460ce747 / 64000000 边
+
+  ── 守卫 ──
+  守卫G1 基线同进程复现: ef_c=128/ef_s=128 → 97.56% vs 冻结 97.55% （偏差 0.01pp）PASS
+  守卫G-det 正在背靠背重复建图（ef_c=128）×2 并各自测召回 ...
+    rep0: 指纹 0x490b65d3bf651cab  R@10 97.54%
+    rep1: 指纹 0x166b38dd701b8e1e  R@10 97.54%
+  守卫G-det 背靠背两次: 指纹不同 ⚠️（，且与臂1不同）
+  守卫G-det 非确定性对召回的影响: 97.54% vs 97.54%（极差 0.00pp）→ 质量等价（边集不同但召回稳定）
+
+═══════════════════════════════════════════════════════════════════
+  B2-0 判定：ef_construction 能否独自达到成本-质量点
+═══════════════════════════════════════════════════════════════════
+  P1 门槛 = 基线 97.56% − 1pp = 96.56%
+
+  ef_c=128  建图  36.10s（ 1.00×）  R@10(ef_s=128)  97.56%  门槛达标 ✅
+  ef_c=64   建图  23.77s（ 0.66×）  R@10(ef_s=128)  97.24%  门槛达标 ✅
+  ef_c=32   建图  20.55s（ 0.57×）  R@10(ef_s=128)  96.34%  门槛未达 ❌
+  ef_c=16   建图  16.80s（ 0.47×）  R@10(ef_s=128)  92.55%  门槛未达 ❌
+
+  ★ 结论：ef_c=128 即达到 P1（R@10 97.56%），建图成本 **1.00×**。
+     ⇒ 81% 的束搜索成本可仅靠配置项压缩 1.0×。
+     ⇒ 按设计文档 §7 第一行：**PiPNN 的靶点消失，应停止 T2。**
+
+  ── 固定成本地板 ──
+
+### T2 B2-0：`ef_construction` 扫描（1M × 768，m=32，α=1.2，同一进程）
+
+| ef_c | 建图(s) | 相对基线 | R@10@ef_s=64 | R@10@ef_s=128 | R@10@ef_s=256 | R@10@ef_s=512 | R@10@ef_s=1024 |
+|---|---|---|---|---|---|---|---|
+| 128 | 36.10 | 1.00× | 94.51% | 97.56% | 98.86% | 99.54% | 99.78% |
+| 64 | 23.77 | 0.66× | 94.65% | 97.24% | 98.71% | 99.44% | 99.70% |
+| 32 | 20.55 | 0.57× | 93.74% | 96.34% | 98.21% | 99.02% | 99.61% |
+| 16 | 16.80 | 0.47× | 87.93% | 92.55% | 95.68% | 97.42% | 98.70% |
+  ef_c=16 的墙钟 16.80s = **0.47×** 基线，是"候选获取完全免费"时的成本上界。
+  ⇒ ef_c=128（1.00×）与地板（0.47×）之间仅剩 **2.15×** 空间，这就是 PiPNN 全部可争夺的收益。
+
+  ⚠️ 守卫G-det：并发建图的**边集不可逐位复现**，召回极差 0.00pp。
+     各臂之间的比较仍成立（同进程同条件），但**绝对数字须附抖动范围**。
+═══════════════════════════════════════════════════════════════════

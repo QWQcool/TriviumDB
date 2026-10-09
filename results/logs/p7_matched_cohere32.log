@@ -1,0 +1,24 @@
+  PQ 配置数 9：
+    �� IVF-PQ nlist=1024, m_pq=96                最高 62.62% @ 986 MT-QPS
+    OPQ+IVF-PQ+Refine nlist=1024, m_pq=64        最高 99.22% @ 1,714 MT-QPS
+    OPQ+IVF-PQ+Refine nlist=1024, m_pq=96        最高 99.79% @ 682 MT-QPS
+    OPQ+IVF-PQ+Refine nlist=1024, m_pq=128       最高 99.82% @ 658 MT-QPS
+    OPQ+IVF-PQ+Refine nlist=1024, m_pq=192       最高 99.80% @ 368 MT-QPS
+    OPQ+IVF-PQ+Refine nlist=4096, m_pq=64        最高 98.63% @ 4,402 MT-QPS
+    OPQ+IVF-PQ+Refine nlist=4096, m_pq=96        最高 99.03% @ 2,321 MT-QPS
+    OPQ+IVF-PQ+Refine nlist=4096, m_pq=128       最高 99.03% @ 2,330 MT-QPS
+    OPQ+IVF-PQ+Refine nlist=4096, m_pq=192       最高 99.06% @ 1,563 MT-QPS
+
+================================================================================================
+  cohere：同召回对照（≥r 召回里最快的点）
+================================================================================================
+  方法                      最高召回          ≥99.0%        ≥99.5%        ≥99.8%        ≥99.9%
+  PQ/OPQ+Refine         99.82%           2,330           776           752             —
+  hnswlib               99.82%           2,767         1,555           819             —
+  FAISS-HNSW            99.73%           2,823         1,516             —             —
+  USearch               99.50%           2,801           821             —             —
+  IVF-Flat              99.03%             234             —             —             —
+  QuIVer                99.78%           8,684         8,684             —             —
+
+  （竞品 JSON 记录的线程数 = 32；PQ 脚本自报 32 线程；QuIVer 线程数见其日志——跨线程的行不可直接比）
+  [OK] results/t2/pq_matched_recall_cohere.json

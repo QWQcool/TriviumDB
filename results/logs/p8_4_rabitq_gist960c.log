@@ -1,0 +1,10 @@
+
+  gist960c: train=(1000000, 960) test=(1000, 960) nlist=1024 threads=32
+  构建 15.7s（含 RaBitQ 训练）；索引 ntotal=1000000
+  search object = IndexIVFRaBitQ   k_factor 可用 = True
+  nprobe  k_fac      R@10     1T-QPS     MT-QPS
+      64     20    75.78%        281      4,123
+      64    200    95.38%        229      2,617
+     256     20    69.29%         83      1,256
+     256    200    95.76%         76      1,108
+  [OK] results\t2\rabitq_refine_gist960c.json

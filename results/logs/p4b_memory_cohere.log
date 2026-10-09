@@ -1,0 +1,17 @@
+  train (1000000, 768)  = 2.86 GiB (float32, 仅用于构建)
+
+==============================================================================
+  cohere  n=1,000,000 dim=768  (M=32, ef_c=128, threads=32)
+==============================================================================
+  QuIVer(BQ)     索引     675.0 MiB（   707.8 B/向量）[bench 自报 Hot]
+  hnswlib        索引    3193.1 MiB（  3348.2 B/向量）（含原始 float32 向量副本）
+  FAISS-HNSW     索引    3189.2 MiB（  3344.1 B/向量）（faiss.serialize_index 长度）
+  FAISS-IVF      索引    2949.1 MiB（  3092.3 B/向量）（faiss.serialize_index 长度）
+
+  ── 与论文宣称对拍 ──
+  QuIVer 相对 hnswlib 的热内存比 = 1 : 4.73（论文宣称 4.7×）
+  每 1M 向量：QuIVer 675 MiB（论文宣称 <1.3 GB） / hnswlib 3193 MiB
+
+  ── 2-bit 模型（解释随维度的增量）──
+  码 = 2 bit/维 = 0.25 B/维/向量 ⇒ 675 MiB 中约 183 MiB 是码，其余是图/结构
+  [OK] 写出 results/t2/memory_footprint_cohere.json

@@ -1,0 +1,23 @@
+
+======================================================================
+  T-ctrl: 随机各向同性高斯 1000000 × 960
+======================================================================
+  [OK] 写出 gauss960_*.f32/i32  train=(1000000, 960) test=(1000, 960)
+  负值占比=0.50000  零值占比=0.00000  随机对 cos=+0.0000±0.0324
+  GT1=+0.1560  GT10=+0.1374  可分性=+0.5727
+  GT10−GT11 中位间隔=+0.000387  拥挤度 中位=82 均值=184
+  守卫: cosine≤1 max=0.161324 PASS | GT 自校验 100.0% (PASS)
+
+======================================================================
+  T-plant: 高斯 1000000 × 960 + 每查询植入 10 个真近邻
+  δ=0.15..0.60 ⇒ 植入 cos ≈ 0.989..0.857（随机点最大 cos 约 0.15）
+======================================================================
+  守卫 植入命中率 = 23.88%（须 100% ⇒ 植入的近邻确实是真 top-10）
+Traceback (most recent call last):
+  File "C:\Users\v_chchsli\Desktop\TriviumDB\scripts\research\gist960_collapse_prepare.py", line 409, in <module>
+    main()
+  File "C:\Users\v_chchsli\Desktop\TriviumDB\scripts\research\gist960_collapse_prepare.py", line 404, in main
+    RECIPES[name](rng)
+  File "C:\Users\v_chchsli\Desktop\TriviumDB\scripts\research\gist960_collapse_prepare.py", line 256, in gauss960plant
+    assert hit == nq * TOP_K, "T-plant ֲ��ʧ�ܣ�GT δ����ֲ������"
+AssertionError: T-plant ֲ��ʧ�ܣ�GT δ����ֲ������

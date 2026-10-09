@@ -1,0 +1,136 @@
+   Compiling proc-macro2 v1.0.106
+   Compiling quote v1.0.45
+   Compiling unicode-ident v1.0.24
+   Compiling cfg-if v1.0.4
+   Compiling windows-link v0.2.1
+   Compiling zerocopy v0.8.47
+   Compiling serde_core v1.0.228
+   Compiling autocfg v1.5.0
+   Compiling serde v1.0.228
+   Compiling crossbeam-utils v0.8.21
+   Compiling once_cell v1.21.4
+   Compiling getrandom v0.3.4
+   Compiling regex-syntax v0.8.10
+   Compiling rayon-core v1.13.0
+   Compiling zmij v1.0.21
+   Compiling either v1.15.0
+   Compiling getrandom v0.4.2
+   Compiling serde_json v1.0.149
+   Compiling smallvec v1.15.1
+   Compiling memchr v2.8.0
+   Compiling winapi v0.3.9
+   Compiling itoa v1.0.18
+   Compiling parking_lot_core v0.9.12
+   Compiling fastrand v2.4.1
+   Compiling napi-build v2.3.1
+   Compiling pin-project-lite v0.2.17
+   Compiling clap_lex v1.1.0
+   Compiling log v0.4.29
+   Compiling crc32fast v1.5.0
+   Compiling anstyle v1.0.14
+   Compiling lazy_static v1.5.0
+   Compiling ciborium-io v0.2.2
+   Compiling windows-sys v0.61.2
+   Compiling getrandom v0.2.17
+   Compiling thiserror v1.0.69
+   Compiling tracing-core v0.1.36
+   Compiling plotters-backend v0.3.7
+   Compiling scopeguard v1.2.0
+   Compiling triviumdb v0.8.8 (C:\Users\v_chchsli\Desktop\TriviumDB)
+   Compiling itertools v0.10.5
+   Compiling sharded-slab v0.1.7
+   Compiling rand_core v0.6.4
+   Compiling clap_builder v4.6.0
+   Compiling thread_local v1.1.9
+   Compiling bit-vec v0.8.0
+   Compiling num-traits v0.2.19
+   Compiling fnv v1.0.7
+   Compiling wait-timeout v0.2.1
+   Compiling quick-error v1.2.3
+   Compiling cast v0.3.0
+   Compiling lock_api v0.4.14
+   Compiling byteorder v1.5.0
+   Compiling plotters-svg v0.3.7
+   Compiling aho-corasick v1.1.4
+   Compiling tracing-log v0.2.0
+   Compiling winapi-util v0.1.11
+   Compiling nu-ansi-term v0.50.3
+   Compiling is-terminal v0.4.17
+   Compiling libloading v0.8.9
+   Compiling bit-set v0.8.0
+   Compiling memmap2 v0.9.10
+   Compiling unarray v0.1.4
+   Compiling num_cpus v1.17.0
+   Compiling anes v0.1.6
+   Compiling bitflags v2.11.0
+   Compiling oorandom v11.1.5
+   Compiling regex-automata v0.4.14
+   Compiling criterion-plot v0.5.0
+   Compiling clap v4.6.0
+   Compiling parking_lot v0.12.5
+   Compiling same-file v1.0.6
+   Compiling rand_core v0.9.5
+   Compiling tempfile v3.27.0
+   Compiling crossbeam-epoch v0.9.18
+   Compiling walkdir v2.5.0
+   Compiling rand v0.9.2
+   Compiling rand_xorshift v0.4.0
+   Compiling syn v2.0.117
+   Compiling rusty-fork v0.3.1
+   Compiling crossbeam-deque v0.8.6
+   Compiling plotters v0.3.7
+   Compiling chrono v0.4.45
+   Compiling ordered-float v3.9.2
+   Compiling rayon v1.11.0
+   Compiling fs2 v0.4.3
+   Compiling matchers v0.2.0
+   Compiling regex v1.12.3
+   Compiling zerocopy-derive v0.8.47
+   Compiling serde_derive v1.0.228
+   Compiling bytemuck_derive v1.10.2
+   Compiling tracing-attributes v0.1.31
+   Compiling thiserror-impl v1.0.69
+   Compiling tracing v0.1.44
+   Compiling bytemuck v1.25.0
+   Compiling tracing-subscriber v0.3.23
+   Compiling roaring v0.11.4
+   Compiling bincode v1.3.3
+   Compiling tinytemplate v1.2.1
+   Compiling ppv-lite86 v0.2.21
+   Compiling half v2.7.1
+   Compiling rand_chacha v0.3.1
+   Compiling rand_chacha v0.9.0
+   Compiling ciborium-ll v0.2.2
+   Compiling proptest v1.11.0
+   Compiling ciborium v0.2.2
+   Compiling rand v0.8.5
+   Compiling criterion v0.5.1
+   Compiling instant-distance v0.6.1
+warning: linker stdout: 正在创建库 C:\Users\v_chchsli\Desktop\TriviumDB\target\release\deps\triviumdb.dll.lib 和对象 C:\Users\v_chchsli\Desktop\TriviumDB\target\release\deps\triviumdb.dll.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `triviumdb` (lib) generated 1 warning
+    Finished `bench` profile [optimized] target(s) in 59.32s
+     Running benches\bench_rbq2_precision.rs (target\release\deps\bench_rbq2_precision-e881cbdb02efc23e.exe)
+======================================================================
+BQ2 vs RaBitQ 1-bit 公平对比
+======================================================================
+
+加载 100000 训练 200 查询, 耗时 1.65s
+
+编码中...
+  编码完成: 0.100s
+
+K          BQ2(2bit)       RBQ-sym      RBQ-asym
+------------------------------------------------
+1             66.50%        35.50%        21.00%    (1.4s)
+10            61.90%        41.00%        23.35%    (1.4s)
+100           58.94%        39.40%        18.17%    (1.4s)
+500           59.21%        42.46%        19.56%    (1.4s)
+
+说明:
+  BQ2(2bit): 我们的 2-bit sign-magnitude, 无旋转, 加权距离
+  RBQ-sym:   RaBitQ 4轮旋转 + 1-bit, 对称 hamming
+  RBQ-asym:  RaBitQ 4轮旋转 + 1-bit, f32 query 非对称 + 修正项
+======================================================================

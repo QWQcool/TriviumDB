@@ -1,0 +1,90 @@
+
+==========================================================================
+  target/bench-reports/tsng-c0.json
+==========================================================================
+  顶层键: ['schema_version', 'package_version', 'config', 'build_seconds', 'scenarios']
+    schema_version: 1
+    package_version: 0.8.8
+    config: dict['nodes', 'queries', 'warmup', 'dim', 'seed']
+    build_seconds: 1.1530826
+    scenarios: list[4]
+
+==========================================================================
+  C0 — 精确基线
+==========================================================================
+  exact_vector                 p50=  29.4028 p95=  30.7941 p99=  31.1010 qps=   33.91 结果=500 候选扫描=100000 向量比较=100000
+  exact_vector_property        p50=  26.6263 p95=  31.7348 p99=  34.0952 qps=   36.84 结果=500 候选扫描=100000 向量比较=1000
+  exact_vector_graph           p50=  38.0400 p95=  63.7709 p99=  64.6966 qps=   23.68 结果=500 候选扫描=100000 向量比较=100000
+  exact_three_signal           p50=  26.0280 p95=  32.0691 p99=  34.3791 qps=   37.46 结果=500 候选扫描=100000 向量比较=1000
+
+==========================================================================
+  target/bench-reports/tsng-c1-matched-recall.json
+==========================================================================
+  顶层键: ['schema_version', 'package_version', 'config', 'build_seconds', 'dataset_validation', 'scenarios']
+    schema_version: 2
+    package_version: 0.8.8
+    config: dict['nodes', 'queries', 'warmup', 'dim', 'seed', 'clusters', 'property_selectivity', 'graph_selectivity']
+    build_seconds: 1.8802495000000001
+    dataset_validation: dict['unique_query_clusters', 'property_matches', 'graph_edges', 'exact_property_results_full', 'exact_graph_results_full', 'exact_three_signal_results_full']
+    scenarios: list[3]
+
+==========================================================================
+  C1 — 五条执行路径 × ef 扫描（matched recall）
+==========================================================================
+
+### 场景: vector_property
+  gate: target_recall=0.8 fixed_ef=256 selectivity_ef=128 density_ef=128
+        p95 fixed=0.33080000000000004 sel=2.1622999999999997 dens=1.9094
+        density_speedup=1.1324499842882578 page_read_reduction=0.0 candidate_reduction=0.0
+        quality=True density_work=True memory=True ssd=True **passed=True**
+        reason: 三方达到目标 Recall，密度感知无质量回退并降低至少一项工作量
+
+  曲线点字段: ['bq_slot_cache_hits', 'bq_slot_cache_misses', 'checkpoint_bytes_delta', 'ef_search', 'estimated_graph_page_reads', 'estimated_payload_page_reads', 'estimated_vector_page_reads', 'filtered_ann_path_cost', 'graph_path_cost', 'graph_seed_limit', 'mapped_bytes', 'mean_adaptive_ef_search', 'mean_bq_heap_scan_ms', 'mean_bq_mapped_candidates', 'mean_bq_node_mapping_ms', 'mean_bq_output_sort_ms', 'mean_bq_posting_lookup_ms', 'mean_candidates_reranked', 'mean_navigation_scores', 'mean_ndcg_at_10', 'mean_recall_at_10', 'mean_result_count', 'mean_vector_density_skew_ppm', 'metadata_bonus_cap_ppm', 'method', 'p50_ms', 'p95_ms', 'p99_ms', 'peak_candidates', 'peak_temp_bytes', 'property_path_cost', 'resident_heap_bytes', 'selected_access_path', 'sidecar_bytes_delta', 'signal_queue_quota_ppm', 'temporary_spill_bytes_delta', 'wal_bytes_delta']
+  方法: ['bq_prefilter', 'industrial_density', 'industrial_fixed', 'industrial_selectivity', 'post_filter', 'tsng']
+  ef: [64, 128, 256, 512, 1024, 2048, 4096]
+
+  [bq_prefilter]
+        ef     R@10     P95ms      结果数
+        64   90.31%    0.0963     10.0
+       128  100.00%    0.1231     10.0
+       256  100.00%    0.2243     10.0
+       512  100.00%    0.3436     10.0
+      1024  100.00%    0.5182     10.0
+      2048  100.00%    0.8107     10.0
+      4096  100.00%    1.3139     10.0
+
+  [industrial_density]
+        ef     R@10     P95ms      结果数
+        64   75.00%    1.1419     10.0
+       128   96.88%    1.9094     10.0
+       256  100.00%    0.2609     10.0
+       512  100.00%    0.6266     10.0
+      1024  100.00%    0.6054     10.0
+      2048  100.00%    0.9722     10.0
+      4096  100.00%    2.0281     10.0
+
+  [industrial_fixed]
+        ef     R@10     P95ms      结果数
+        64    4.38%    0.1295      2.8
+       128   12.81%    0.1933      5.1
+       256  100.00%    0.3308     10.0
+       512  100.00%    0.4128     10.0
+      1024  100.00%    0.6587     10.0
+      2048  100.00%    1.0074     10.0
+      4096  100.00%    1.8434     10.0
+
+  [industrial_selectivity]
+        ef     R@10     P95ms      结果数
+        64   75.00%    1.1584     10.0
+       128   96.88%    2.1623     10.0
+       256  100.00%    0.2370     10.0
+       512  100.00%    0.3827     10.0
+      1024  100.00%    0.7222     10.0
+      2048  100.00%    1.1725     10.0
+      4096  100.00%    1.9009     10.0
+
+  [post_filter]
+        ef     R@10     P95ms      结果数
+        64    4.38%    0.1143      2.8
+       128   12.81%    0.2120      5.1
+       256   19.38%    0.3764      8.7

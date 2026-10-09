@@ -1,0 +1,67 @@
+[20:35:00] item9: gate + bench arxiv_nomic
+[20:35:00] bench arxiv_nomic dim=768 nav=0 rot= -> .tmp/p7q_arxiv_nomic_w0.log
+ef_search=64    R@10  96.78%      59175 QPS
+ef_search=128   R@10  98.79%      34866 QPS
+ef_search=256   R@10  99.52%      19783 QPS
+ef_search=512   R@10  99.75%      10707 QPS
+ef_search=1024  R@10  99.95%       5613 QPS
+[20:36:11] bench arxiv_nomic dim=768 nav=1 rot= -> .tmp/p7q_arxiv_nomic_w1.log
+ef_search=64    R@10  96.04%      54490 QPS
+ef_search=128   R@10  98.75%      32285 QPS
+ef_search=256   R@10  99.46%      18038 QPS
+ef_search=512   R@10  99.79%       9578 QPS
+ef_search=1024  R@10  99.90%       5027 QPS
+[20:37:21] item9: gate + bench codesearch_jina
+[20:37:21] bench codesearch_jina dim=768 nav=0 rot= -> .tmp/p7q_codesearch_jina_w0.log
+ef_search=64    R@10  94.62%      64212 QPS
+ef_search=128   R@10  97.63%      35981 QPS
+ef_search=256   R@10  99.09%      19518 QPS
+ef_search=512   R@10  99.63%      10087 QPS
+ef_search=1024  R@10  99.84%       5244 QPS
+[20:37:55] bench codesearch_jina dim=768 nav=1 rot= -> .tmp/p7q_codesearch_jina_w1.log
+ef_search=64    R@10  96.37%      57111 QPS
+ef_search=128   R@10  98.28%      33245 QPS
+ef_search=256   R@10  99.28%      17956 QPS
+ef_search=512   R@10  99.64%       9212 QPS
+ef_search=1024  R@10  99.85%       4673 QPS
+[20:38:29] item9: gate + bench gooaq_roberta
+[20:38:29] bench gooaq_roberta dim=768 nav=0 rot= -> .tmp/p7q_gooaq_roberta_w0.log
+ef_search=64    R@10  96.60%      63353 QPS
+ef_search=128   R@10  99.01%      37936 QPS
+ef_search=256   R@10  99.46%      20772 QPS
+ef_search=512   R@10  99.77%      10664 QPS
+ef_search=1024  R@10  99.91%       5544 QPS
+[20:39:01] bench gooaq_roberta dim=768 nav=1 rot= -> .tmp/p7q_gooaq_roberta_w1.log
+ef_search=64    R@10  98.32%      65595 QPS
+ef_search=128   R@10  99.32%      36500 QPS
+ef_search=256   R@10  99.66%      20319 QPS
+ef_search=512   R@10  99.83%      10395 QPS
+ef_search=1024  R@10  99.89%       5396 QPS
+[20:39:31] item9: gate + bench landmark_nomic
+[20:39:31] bench landmark_nomic dim=768 nav=0 rot= -> .tmp/p7q_landmark_nomic_w0.log
+ef_search=64    R@10  93.05%      82385 QPS
+ef_search=128   R@10  96.49%      47571 QPS
+ef_search=256   R@10  98.12%      26905 QPS
+ef_search=512   R@10  98.82%      13810 QPS
+ef_search=1024  R@10  99.35%       7400 QPS
+[20:39:51] bench landmark_nomic dim=768 nav=1 rot= -> .tmp/p7q_landmark_nomic_w1.log
+ef_search=64    R@10  81.39%      73178 QPS
+ef_search=128   R@10  89.87%      44893 QPS
+ef_search=256   R@10  94.97%      24728 QPS
+ef_search=512   R@10  97.36%      13171 QPS
+ef_search=1024  R@10  98.54%       7148 QPS
+[20:40:10] item9: gate + bench landmark_dino
+[20:40:10] bench landmark_dino dim=768 nav=0 rot= -> .tmp/p7q_landmark_dino_w0.log
+ef_search=64    R@10  82.90%      64090 QPS
+ef_search=128   R@10  90.94%      39864 QPS
+ef_search=256   R@10  95.86%      22236 QPS
+ef_search=512   R@10  98.21%      12136 QPS
+ef_search=1024  R@10  99.11%       6426 QPS
+[20:40:32] bench landmark_dino dim=768 nav=1 rot= -> .tmp/p7q_landmark_dino_w1.log
+ef_search=64    R@10  91.58%      61531 QPS
+ef_search=128   R@10  95.46%      37107 QPS
+ef_search=256   R@10  97.81%      21583 QPS
+ef_search=512   R@10  98.97%      11625 QPS
+ef_search=1024  R@10  99.47%       6316 QPS
+[20:40:54] item8: bit budget
+[20:41:12] stage B Íê³É

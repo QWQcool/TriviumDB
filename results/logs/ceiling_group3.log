@@ -1,0 +1,16 @@
+
+  负值占比 = 0.500004   零值占比 = 0.000000
+  pos  平面: 位密度=0.5000  随机对 Hamming 率=0.5000  （0=零信息，0.5=满信息）
+  ★ 有效 bit/维 ≈ 2.0
+  code_oracle@128  cheap =   5.23%   weighted =  54.45%
+  code_oracle@1024 cheap =  15.92%   weighted =  86.59%
+  （仅码、无 f32 精排）top-10 cheap = 0.91%   weighted = 17.64%
+  负值占比 = 0.500005   零值占比 = 0.000000
+  pos  平面: 位密度=0.5000  随机对 Hamming 率=0.5000  （0=零信息，0.5=满信息）
+  ★ 有效 bit/维 ≈ 2.0
+  ★ cheap 口径 code_oracle@128 = 100.00%   vs bench R@10 = 100.00%   差 = +0.00pp
+  code_oracle@128  cheap = 100.00%   weighted = 100.00%
+  code_oracle@1024 cheap = 100.00%   weighted = 100.00%
+  （仅码、无 f32 精排）top-10 cheap = 100.00%   weighted = 100.00%
+| 数据集 | dim | 负值占比 | pos 平面 Hamming 率 | 有效bit/维 | code_oracle@128(cheap) | code_oracle@1024(cheap) | bench R@10@128 |
+

@@ -1,0 +1,42 @@
+warning: linker stdout: 正在创建库 C:\Users\v_chchsli\Desktop\TriviumDB\target\release\deps\triviumdb.dll.lib 和对象 C:\Users\v_chchsli\Desktop\TriviumDB\target\release\deps\triviumdb.dll.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `triviumdb` (lib) generated 1 warning
+   Compiling triviumdb v0.8.8 (C:\Users\v_chchsli\Desktop\TriviumDB)
+    Finished `bench` profile [optimized] target(s) in 7.86s
+     Running benches\bench_cohere1m.rs (target\release\deps\bench_cohere1m-56838108e93a3ea5.exe)
+加载数据集 / Loading dataset: cohere-1m...
+训练集文件 / Training file: cohere_train.f32
+测试集文件 / Test file: cohere_test.f32
+GroundTruth 文件 / Ground-truth file: cohere_groundtruth.i32
+向量维度 / Vector dimension: 768
+加载完成 / Loading completed! 耗时 / Elapsed: 1.70s
+训练集 / Training set: 1000000 x 768（原始 / original 1000000 x 768）
+测试集 / Test set: 1000 x 768
+原始 GroundTruth K / Original ground-truth K: 1000
+使用原始 1M GroundTruth Top-10 / Using original 1M ground-truth Top-10
+
+开始构建 BQ-Vamana / Starting BQ-Vamana build (m=32, ef_c=128, alpha=1.2)...
+使用并发构图路径（默认）/ Using default concurrent graph-build path
+构建完成 / Build completed! 耗时 / Elapsed: 34.43s (29043 vecs/s)
+内存统计 / Memory statistics: Hot 675 MB
+
+加载原始 GroundTruth Top-10 用于 1M 标准评测 / Loading original ground-truth Top-10 for the standard 1M evaluation...
+
+计算 Exact Flat Cosine 基准 / Running Exact Flat Cosine baseline (Top-10, 50 条查询 / queries)...
+归一化耗时 / Normalization elapsed: 2.08s
+Exact Flat 单线程 / single-threaded: QPS=2.3, latency=428.68ms/q
+Exact Flat 多线程 / multi-threaded: QPS=21.5
+
+ef         rerank  Recall@10       MT-QPS    lat(ms)      vs BF
+--------------------------------------------------------------
+ef=64      ef(64)     94.68%        52006      0.02   22294.0x
+ef=128    ef(128)     97.55%        31568      0.03   13532.5x
+ef=256    ef(256)     98.88%        17357      0.06    7440.4x
+ef=512    ef(512)     99.54%         8721      0.11    3738.7x
+ef=1024  ef(1024)     99.78%         4673      0.21    2003.1x
+
+构图速率 / Graph-build throughput: 29043 vecs/s
+Exact Flat 基准 / baseline QPS: 2.3（单线程 / single-threaded）/ 21.5（多线程 / multi-threaded）
+结构化结果已写入 / Structured results written to: results/l1/cohere1m.json

@@ -1,0 +1,29 @@
+  faiss 1.15.0  cohere (1000000, 768) nlist=1024
+
+  [1] IndexIVFFlat（精确 f32）：nprobe 扫描
+      train 后的默认 nprobe = 1
+      nprobe=1     R@10  23.33%   (index.nprobe=1)
+      nprobe=4     R@10  31.97%   (index.nprobe=4)
+      nprobe=16    R@10  34.55%   (index.nprobe=16)
+      nprobe=64    R@10  34.94%   (index.nprobe=64)
+      nprobe=128   R@10  34.94%   (index.nprobe=128)
+      nprobe=256   R@10  34.88%   (index.nprobe=256)
+      nprobe=512   R@10  34.84%   (index.nprobe=512)
+      nprobe=1024  R@10  34.84%   (index.nprobe=1024)
+
+  [2] ParameterSpace().set_index_parameter(IndexRefineFlat, 'nprobe', x) 是否穿透到 base？
+      包装前 base.nprobe=1
+      set_index_parameter(wrapper, nprobe=256) 之后：wrapper.nprobe=N/A base.nprobe=256  ⇒ 穿透 ✓
+
+  [3] RaBitQ+Refine，直接给 base 赋 nprobe（k_factor=200）
+      k_factor 设置失败：Error in void __cdecl faiss::ParameterSpace::set_index_parameter(struct faiss::Index *,const class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > &,double) const at D:\a\faiss\faiss\faiss\AutoTune.cpp:627: ParameterSpace::set_index_parameter:could not set parameter k_factor
+      nprobe=1     k_factor=200  R@10  34.19%
+      nprobe=64    k_factor=200  R@10  59.75%
+      nprobe=256   k_factor=200  R@10  60.20%
+      nprobe=1024  k_factor=200  R@10  60.24%
+
+  [4] 对照：把 IVF-Flat 也用 ParameterSpace 设一遍（应与 [1] 一致）
+      nprobe=64    R@10  34.94%  (index.nprobe=64)
+      nprobe=256   R@10  34.88%  (index.nprobe=256)
+
+  [OK] results\t2\ivf_recall_diagnostic_cohere.json

@@ -1,0 +1,8 @@
+读取 redcaps-512-angular.hdf5：base=random 1000000 rows of 11588824 (seed=42)，queries=random_test（10000）
+  train=(1000000, 512) test=(10000, 512)
+  行范数 train mean=1.000000 std=0.000000 | test mean=1.000000 std=0.000000
+  口径守卫 cosine≤1: max=0.961973 PASS
+  ★ 排除自匹配的查询数 = 1003/10000（10.0%）  —— 与'随机取自同一池'相符（1M/11.59M ≈ 8.6%）
+  GT1=0.8809  GT10=0.8493  落差=0.0316
+  [OK] redcapsr42_*.f32/i32  train=(1000000, 512) test=(10000, 512) gt=(10000, 10)
+[OK] 写出 results\t2\gist960_collapse\redcapsr42.json

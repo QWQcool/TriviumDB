@@ -1,0 +1,49 @@
+   Compiling triviumdb v0.8.8 (C:\Users\v_chchsli\Desktop\TriviumDB)
+warning: linker stdout: 正在创建库 C:\Users\v_chchsli\Desktop\TriviumDB\target\release\deps\triviumdb.dll.lib 和对象 C:\Users\v_chchsli\Desktop\TriviumDB\target\release\deps\triviumdb.dll.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `triviumdb` (lib) generated 1 warning
+    Finished `bench` profile [optimized] target(s) in 39.72s
+     Running benches\bench_t2_b2_partitioned.rs (target\release\deps\bench_t2_b2_partitioned-60166ac12225c98c.exe)
+═══════════════════════════════════════════════════════════════════
+  T2 B2-0 — ef_construction 扫描（平凡对照，零代码）
+  数据集=gist960c dim=960  臂 = [128]   m=32 m0=64 alpha=1.2  [T2_SKIP_DET]
+═══════════════════════════════════════════════════════════════════
+  守卫G5 随机注入量恒为 128（对全部臂）PASS
+  数据集 gist960c  数据 1000000 × 960，查询 1000，GT K=10；加载+归一化 3.83s
+
+  ── 臂 ef_construction=128 ──
+    建图 37.70s  26527 vec/s  avg_deg_l0=64.0  Hot 720 MiB
+    ef_search=64    R@10  40.00%      58810 QPS
+    ef_search=128   R@10  52.11%      32149 QPS
+    ef_search=256   R@10  63.01%      16702 QPS
+    ef_search=512   R@10  71.92%       9460 QPS
+    ef_search=1024  R@10  79.36%       4906 QPS
+    L0 指纹 0x89868ed5f655df83 / 64000000 边
+
+  ── 守卫 ──
+  守卫G1 跳过: gist960c 尚无冻结 R@10（可用 T2_FROZEN_RECALL 提供）；本臂自身即基线 52.11%
+  守卫G-det 跳过（T2_SKIP_DET=1）
+
+═══════════════════════════════════════════════════════════════════
+  B2-0 判定：ef_construction 能否独自达到成本-质量点
+═══════════════════════════════════════════════════════════════════
+  P1 门槛 = 基线 52.11% − 1pp = 51.11%
+
+  ef_c=128  建图  37.70s（ 1.00×）  R@10(ef_s=128)  52.11%  门槛达标 ✅
+
+  ── 固定成本地板 ──
+  ef_c=128 墙钟 37.70s = **1.00×** 基线（候选获取即使完全免费也不可能低于此值；真实地板只会更低）。
+
+  ★ 最小达标臂 ef_c=128：R@10 52.11% 但成本 1.00× > 0.70×⇒ P2 **未**由平凡解满足。
+     ⇒ 进入 B2-1；目标：击败 1.00×（地板 1.00×）
+
+  守卫G-det：边集不可逐位复现但召回极差 0.00pp ⇒ 质量等价；召回级结论稳定可比。
+
+### T2 B2-0：`ef_construction` 扫描（gist960c 1000000 × 960，m=32，α=1.2，同一进程）
+
+| ef_c | 建图(s) | 相对基线 | R@10@ef_s=64 | R@10@ef_s=128 | R@10@ef_s=256 | R@10@ef_s=512 | R@10@ef_s=1024 |
+|---|---|---|---|---|---|---|---|
+| 128 | 37.70 | 1.00× | 40.00% | 52.11% | 63.01% | 71.92% | 79.36% |
+═══════════════════════════════════════════════════════════════════

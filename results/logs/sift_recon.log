@@ -1,0 +1,32 @@
+   Compiling triviumdb v0.8.8 (C:\Users\v_chchsli\Desktop\TriviumDB)
+warning: linker stdout: 正在创建库 C:\Users\v_chchsli\Desktop\TriviumDB\target\release\deps\triviumdb.dll.lib 和对象 C:\Users\v_chchsli\Desktop\TriviumDB\target\release\deps\triviumdb.dll.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `triviumdb` (lib) generated 1 warning
+    Finished `bench` profile [optimized] target(s) in 44.10s
+     Running benches\bench_t2_build_recon.rs (target\release\deps\bench_t2_build_recon-42b5137d1a052928.exe)
+═══════════════════════════════════════════════════════════════════
+  T2 摸底 — QuIVer 图构建成本基线   数据集=sift128 dim=128
+  规模 N=全部  增量样本=200  反向剪枝模式=lazy 惰性 (默认)
+═══════════════════════════════════════════════════════════════════
+  数据 1000000 × 128，归一化 + 加载 0.26s
+2026-09-16T13:23:42.851733Z  INFO triviumdb::index::quiver: 构图性能探针完成 (Graph build profiler completed) nodes=999999 threads=32 wall_seconds=13.8506887 total_cpu_ms=357163.1099
+2026-09-16T13:23:42.851785Z  INFO triviumdb::index::quiver: 构图阶段性能 (Graph build stage profile) stage="Bitset分配/allocate" cpu_ms=22235.4751 percent=6.225579989553115 per_node_ns=22235.497335497337
+2026-09-16T13:23:42.851807Z  INFO triviumdb::index::quiver: 构图阶段性能 (Graph build stage profile) stage="束搜索寻路/beam search" cpu_ms=291626.3479 percent=81.65074718429088 per_node_ns=291626.63952663954
+2026-09-16T13:23:42.851811Z  INFO triviumdb::index::quiver: 构图阶段性能 (Graph build stage profile) stage="前向选边/forward select" cpu_ms=26188.0374 percent=7.332234677688924 per_node_ns=26188.06358806359
+2026-09-16T13:23:42.851815Z  INFO triviumdb::index::quiver: 构图阶段性能 (Graph build stage profile) stage="反向剪枝锁等待/reverse wait" cpu_ms=452.1177 percent=0.12658577760916737 per_node_ns=452.1181521181521
+2026-09-16T13:23:42.851820Z  INFO triviumdb::index::quiver: 构图阶段性能 (Graph build stage profile) stage="反向剪枝工作/reverse work" cpu_ms=16661.1318 percent=4.664852370857912 per_node_ns=16661.148461148463
+
+  ── 阶段 A/B: 批量建图 ──
+  墙钟 14.40s  69435 vec/s  Hot 522 MiB
+  守卫1 跳过（仅默认规模 1M + 惰性模式检查）
+
+  ── 阶段 C: 增量 insert 延迟（N=1000000）──
+  无可用增量样本，跳过
+
+  ── 阶段 D: 导出 L0 CSR ──
+  守卫2 导出完整性 PASS: n=1000000 边=64000000 平均度 64.0（stats: 64.0）自环 0 entry=0
+  已导出 .tmp/l0_csr_sift128.bin  (260 MB)
+
+═══════════════════════════════════════════════════════════════════

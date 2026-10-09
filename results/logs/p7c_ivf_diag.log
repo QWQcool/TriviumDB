@@ -1,0 +1,9 @@
+  faiss 1.15.0  cohere (1000000, 768) nlist=1024
+
+  [1] IndexIVFFlat（精确 f32）：nprobe 扫描
+      train 后的默认 nprobe = 1
+      nprobe=1     R@10  23.33%   (index.nprobe=1)
+      nprobe=4     R@10  31.97%   (index.nprobe=4)
+      nprobe=16    R@10  34.55%   (index.nprobe=16)
+      nprobe=64    R@10  34.94%   (index.nprobe=64)
+      nprobe=128   R@10  34.94%   (index.nprobe=128)

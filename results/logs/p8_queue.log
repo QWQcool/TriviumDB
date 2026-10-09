@@ -1,0 +1,54 @@
+
+===== P8 队列开始 2026-10-09 10:51:32 =====
+
+[10:51:32] >>> 1 诊断 IVF-Flat vs RaBitQ
+    log → .tmp/p8_1_diag.log
+[10:54:15] OK  1 诊断 IVF-Flat vs RaBitQ  2.7 min  exit=0
+
+[10:54:15] >>> 2 RaBitQ+Refine 修正版（cohere）
+    log → .tmp/p8_2_rabitq_cohere.log
+[10:57:25] OK  2 RaBitQ+Refine 修正版（cohere）  3.2 min  exit=0
+
+[10:57:25] >>> 3 IVF-Flat 控制臂（cohere）
+    log → .tmp/p8_3_ivfflat_control.log
+[11:05:37] OK  3 IVF-Flat 控制臂（cohere）  8.2 min  exit=0
+
+[11:05:37] >>> 4 RaBitQ 在 gist960c
+    log → .tmp/p8_4_rabitq_gist960c.log
+[11:06:33] OK  4 RaBitQ 在 gist960c  0.9 min  exit=0
+
+[11:06:33] >>> 5/6 PQ 跨档位 sift128c
+    log → .tmp/p7_pq_sift128c.log
+[11:29:47] OK  5/6 PQ 跨档位 sift128c  23.2 min  exit=0
+
+[11:29:47] >>> 7/8 同召回对照 sift128c
+    log → .tmp/p8_matched_sift128c.log
+[11:29:48] OK  7/8 同召回对照 sift128c  0.0 min  exit=0
+
+[11:29:48] >>> 5/6 PQ 跨档位 wolt_clipc
+    log → .tmp/p7_pq_wolt_clipc.log
+[11:39:50] OK  5/6 PQ 跨档位 wolt_clipc  10.0 min  exit=0
+
+[11:39:50] >>> 7/8 同召回对照 wolt_clipc
+    log → .tmp/p8_matched_wolt_clipc.log
+[11:39:50] OK  7/8 同召回对照 wolt_clipc  0.0 min  exit=0
+
+[11:39:50] >>> 9 gauss960 竞品曲线
+    log → .tmp/p8_9_gauss960_competitors.log
+[12:39:48] OK  9 gauss960 竞品曲线  60.0 min  exit=0
+
+[12:39:48] >>> 10 引擎侧旋转复现 rc 臂（gist960c + SIGN_ROTATE + NAV_WEIGHTED）
+    log → .tmp/p8_10_engine_rc.log
+[12:39:48] 失败 10 引擎侧旋转复现 rc 臂（gist960c + SIGN_ROTATE + NAV_WEIGHTED）  0.0 min  FileNotFoundError: [WinError 2] 系统找不到指定的文件。
+
+===== P8 队列结束，总耗时 108.3 min =====
+  ✅ 1 诊断 IVF-Flat vs RaBitQ                                 2.7 min  .tmp/p8_1_diag.log
+  ✅ 2 RaBitQ+Refine 修正版（cohere）                             3.2 min  .tmp/p8_2_rabitq_cohere.log
+  ✅ 3 IVF-Flat 控制臂（cohere）                                  8.2 min  .tmp/p8_3_ivfflat_control.log
+  ✅ 4 RaBitQ 在 gist960c                                     0.9 min  .tmp/p8_4_rabitq_gist960c.log
+  ✅ 5/6 PQ 跨档位 sift128c                                    23.2 min  .tmp/p7_pq_sift128c.log
+  ✅ 7/8 同召回对照 sift128c                                      0.0 min  .tmp/p8_matched_sift128c.log
+  ✅ 5/6 PQ 跨档位 wolt_clipc                                  10.0 min  .tmp/p7_pq_wolt_clipc.log
+  ✅ 7/8 同召回对照 wolt_clipc                                    0.0 min  .tmp/p8_matched_wolt_clipc.log
+  ✅ 9 gauss960 竞品曲线                                        60.0 min  .tmp/p8_9_gauss960_competitors.log
+  ❌ 10 引擎侧旋转复现 rc 臂（gist960c + SIGN_ROTATE + NAV_WEIGHTED）    0.0 min  .tmp/p8_10_engine_rc.log
