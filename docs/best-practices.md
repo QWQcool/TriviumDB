@@ -739,11 +739,13 @@ with triviumdb.TriviumDB("knowledge_v2.tdb", dim=NEW_DIM) as new_db:
 
 ## QuIVer 索引策略与调优
 
-TriviumDB v0.7.0 起采用自研的 **QuIVer**（Quantized Indexed Vector Retrieval）SOTA 级 ANN 图索引。常规查询会按配置和数据规模自动选择、构建与维护索引；Rust Core 也提供显式 `build_quiver_index()`，nightly Server 提供 `/v1/indexes/quiver` 管理入口。显式构建仍受访问模式、维度、generation 和内存预算约束。
+TriviumDB 使用自研的 **QuIVer**（Quantized Index for Vector Retrieval）ANN 图索引。常规查询会按配置和数据规模自动选择、构建与维护索引；Rust Core 也提供显式 `build_quiver_index()`，nightly Server 提供 `/v1/indexes/quiver` 管理入口。显式构建仍受访问模式、维度、generation 和内存预算约束。
+
+本节描述包含 `461855e` / `619dd7b` 的当前源码；现有发布包即使同为 `0.8.8` 也须核对构建提交。QuIVer 重构以 **ICDE** 为投稿目标，旧预印本的数字不直接代表新内核。架构、模式和复现边界统一见 [QuIVer 说明](quiver.md)。
 
 普通 QuIVer 向量查询默认使用无训练 **SM-L2**：以两位重建向量的平方L2评分导航，最终从原始向量计算余弦相似度。支持1–3072维及非完整尾块，无需调用 `enable_quiver_sm_l2()`。构图仍使用原BQ规则，搜索召回取决于数据和预算。
 
-SM状态随构图生成；增量插入只追加新节点的紧凑位码与幅值，墓碑仍可作为导航中转但不会进入精排结果。数据库加载旧BQ索引时，从向量池逐条恢复SM状态，不重建图、不改变持久化格式、不常驻第二份FP32向量。启动时会因此读取一次索引涉及的冷向量。查询线程复用工作区，SM拥有内存计入索引和内核预算。
+SM状态随构图生成；增量插入只追加新节点的紧凑位码与幅值，墓碑仍可作为导航中转但不会进入精排结果。数据库加载旧BQ索引时，从向量池逐条恢复SM状态，不重建图、不改变持久化格式、不常驻第二份FP32向量。启动时会因此读取一次索引涉及的冷向量，不能按零开销恢复估算启动时间。热内存还包括仍保留的原 BQ、SM 元数据、图、ID/slot 映射和各线程工作区，不能只计 SM 位码。查询线程复用工作区，SM拥有内存计入索引和内核预算。
 
 底层 `QuIVerSearchConfig` 未指定精排预算时，上限默认为64；实际预算受候选宽度限制，并至少覆盖请求的 `top_k`。上层管线显式传入的预算继续生效。过滤拒绝及墓碑不占成功精排名额，低搜索宽度不再导致普通查询退回旧BQ。
 

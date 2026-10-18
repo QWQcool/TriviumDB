@@ -426,8 +426,7 @@ RoaringTreemap tombstones
 下列路径在最终结果 hydrate 之前不得访问 PayloadStore：
 
 ```text
-BQ 签名初筛
-QuIVer 图导航
+QuIVer 默认 SM-L2 图导航（保留旧 BQ/自定义导航的独立路径）
 向量候选收集
 Exact rerank
 Top-K 截断
@@ -436,7 +435,7 @@ Top-K 截断
 正确顺序：
 
 ```text
-ANN/BQ/Exact
+ANN（默认 SM-L2，或显式 BQ/自定义导航）/Exact
 → Top-K NodeId + score
 → RETURN/公共 API 需要时 hydrate Payload
 ```

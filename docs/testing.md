@@ -157,7 +157,7 @@ tests/
 | `Traversal` | `unit/traversal.rs` | PPR 扩散、Reachability 方向/最短路径/环/预算、GraphFirst 参数门禁 |
 | `TQL AST`   | `unit/tql_ast.rs`   | 语法树节点构造、枚举完整性                                     |
 | `Cognitive` | `unit/cognitive.rs` | FISTA 稀疏残差、DPP 多样性采样                                 |
-| `Index`     | `unit/index.rs`     | QuIVer/BQ 二值化、BruteForce 精确搜索                                 |
+| `Index`     | `unit/index.rs`     | QuIVer/BQ 二值化、BruteForce 精确搜索；默认 SM-L2 专项入口见 [架构说明](quiver.md#检查与复现入口) |
 
 TQL 集成测试还覆盖 WITH 作用域、Cascades、聚合/空输入、算术/COALESCE/Null、Prepared 严格绑定、Path/Shortest、UNION/INTERSECT/EXCEPT、图算法、预算、确定性和 EXPLAIN。`core/public_api_alignment.rs`、`python/public_api.py`、`node/public_api.js` 与 `contracts/` 验证三语言能力对齐和历史入口拒绝。数据库生命周期测试验证 `reachable()` 与 `search_graph_first()` 在 close 后与其他可失败 API 一样返回 `DatabaseClosed`。
 
