@@ -9,7 +9,8 @@
 //! 由 Database 层统一执行并写入 WAL。
 
 use super::planner::{
-    AccessPath, plan_filter, plan_filter_ordered, plan_filter_with_limit, plan_match,
+    AccessPath, NodeAccessPlan, plan_filter, plan_filter_ordered, plan_filter_with_limit,
+    plan_match,
 };
 use super::tql_ast::*;
 use crate::VectorType;
@@ -207,6 +208,12 @@ fn requested_row_limit<T: VectorType>(
     Ok((requested, user_limited))
 }
 
+fn requires_full_input(query: &TqlQuery, ordered_find: bool) -> bool {
+    query.rank.is_some()
+        || (!query.order_by.is_empty() && !ordered_find)
+        || matches!(&query.returns, ReturnClause::Expressions(exprs) if exprs.iter().any(|expr| is_aggregate(&expr.kind) || expr.distinct))
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 //  公开入口
 // ═══════════════════════════════════════════════════════════════════════
@@ -237,6 +244,23 @@ pub fn execute_tql_with_limits<T: VectorType>(
     limits.check_cancelled()?;
     ensure_search_vector_bound(query)?;
     if query.explain {
+        // EXPLAIN 与执行共用候选规划及行数预算，不能另走忽略 LIMIT 的路径。
+        let find_plan = if query.pipeline.is_empty()
+            && let QueryEntry::Find { filter } = &query.entry
+        {
+            let ordered = find_ordered_find_plan(query, filter, memtable);
+            let (row_limit, _) = requested_row_limit(
+                query,
+                requires_full_input(query, ordered.is_some()),
+                &limits,
+                memtable,
+            )?;
+            Some(ordered.unwrap_or_else(|| {
+                plan_find_filter(query, filter, memtable, row_limit.saturating_add(1))
+            }))
+        } else {
+            None
+        };
         if query.analyze {
             let started = std::time::Instant::now();
             let mut executable = query.clone();
@@ -254,6 +278,7 @@ pub fn execute_tql_with_limits<T: VectorType>(
                         started.elapsed().as_secs_f64() * 1000.0,
                         profile,
                     )),
+                    find_plan,
                 ));
             }
             let rows = execute_tql_with_limits(&executable, memtable, limits)?;
@@ -261,9 +286,10 @@ pub fn execute_tql_with_limits<T: VectorType>(
                 query,
                 memtable,
                 Some((rows.len(), started.elapsed().as_secs_f64() * 1000.0, None)),
+                find_plan,
             ));
         }
-        return Ok(generate_explain_plan(query, memtable, None));
+        return Ok(generate_explain_plan(query, memtable, None, find_plan));
     }
     if !query.pipeline.is_empty() {
         return execute_pipeline_node_query(query, memtable);
@@ -273,9 +299,7 @@ pub fn execute_tql_with_limits<T: VectorType>(
         &query.entry,
         QueryEntry::Find { filter } if find_ordered_find_plan(query, filter, memtable).is_some()
     );
-    let requires_full_input = query.rank.is_some()
-        || (!query.order_by.is_empty() && !ordered_find)
-        || matches!(&query.returns, ReturnClause::Expressions(exprs) if exprs.iter().any(|expr| is_aggregate(&expr.kind) || expr.distinct));
+    let requires_full_input = requires_full_input(query, ordered_find);
     let (row_limit, user_limited) =
         requested_row_limit(query, requires_full_input, &limits, memtable)?;
     let scan_limit = row_limit.saturating_add(1);
@@ -957,7 +981,7 @@ fn execute_pipeline_set<T: VectorType>(
                     Some(crate::query::cascades::PhysicalOperator::RankAlreadyOrdered)
                 ) && (disable_fusion
                     || !matches!(
-                        stage_index.checked_sub(1).and_then(&physical_stage),
+                        stage_index.checked_sub(1).and_then(physical_stage),
                         Some(crate::query::cascades::PhysicalOperator::ExpandExactRerank)
                     ))
                 {
@@ -1937,12 +1961,9 @@ fn execute_find<T: VectorType>(
     let mut results = Vec::new();
     let ordered_plan = find_ordered_find_plan(query, filter, mt);
     let ordered_output = ordered_plan.is_some();
-    let candidate_limit = (query.predicate.is_none()
-        && !matches!(filter, Filter::Eq(field, _) if field == "id"))
-    .then_some(row_limit);
     let access_plan = ordered_plan
         .clone()
-        .unwrap_or_else(|| plan_filter_with_limit(filter, candidate_limit, mt));
+        .unwrap_or_else(|| plan_find_filter(query, filter, mt, row_limit));
     let full_scan = matches!(access_plan.access_path, AccessPath::FullNodeScan);
     let filter_covered = query.predicate.is_none()
         && matches!(
@@ -2012,6 +2033,18 @@ fn execute_find<T: VectorType>(
 
     Ok((results, ordered_output))
 }
+fn plan_find_filter<T: VectorType>(
+    query: &TqlQuery,
+    filter: &Filter,
+    mt: &MemTable<T>,
+    row_limit: usize,
+) -> NodeAccessPlan {
+    let candidate_limit = (query.predicate.is_none()
+        && !matches!(filter, Filter::Eq(field, _) if field == "id"))
+    .then_some(row_limit);
+    plan_filter_with_limit(filter, candidate_limit, mt)
+}
+
 fn find_ordered_find_plan<T: VectorType>(
     query: &TqlQuery,
     filter: &Filter,
@@ -3441,6 +3474,7 @@ fn generate_explain_plan<T: VectorType>(
     query: &TqlQuery,
     mt: &MemTable<T>,
     actual: Option<(usize, f64, Option<PipelineExecutionProfile>)>,
+    find_plan: Option<NodeAccessPlan>,
 ) -> TqlResult<T> {
     let mut plan = serde_json::Map::new();
 
@@ -3473,7 +3507,7 @@ fn generate_explain_plan<T: VectorType>(
 
     let (access_path, estimated_rows, reversed) = match &query.entry {
         QueryEntry::Find { filter } => {
-            let planned = plan_filter(filter, mt);
+            let planned = find_plan.unwrap_or_else(|| plan_filter(filter, mt));
             (planned.access_path, planned.estimated_rows, false)
         }
         QueryEntry::Match { pattern } => {
@@ -3670,7 +3704,13 @@ fn generate_explain_plan<T: VectorType>(
             optimizations.push("aggregation");
         }
     }
-    if query.limit.is_some() {
+    let ordered_find = matches!(&query.entry, QueryEntry::Find { .. })
+        && matches!(access_path, AccessPath::OrderedPropertyIndex { .. })
+        && query.order_by.len() == 1;
+    if query.limit.is_some()
+        && query.pipeline.is_empty()
+        && !requires_full_input(query, ordered_find)
+    {
         optimizations.push("LIMIT early termination");
     }
     if query.rank.is_some() {
@@ -3679,10 +3719,7 @@ fn generate_explain_plan<T: VectorType>(
     plan.insert("optimizations".into(), serde_json::json!(optimizations));
 
     // 统计信息
-    plan.insert(
-        "total_nodes".into(),
-        serde_json::json!(mt.all_node_ids().len()),
-    );
+    plan.insert("total_nodes".into(), serde_json::json!(mt.node_count()));
     if let Some(lim) = query.limit {
         plan.insert("limit".into(), serde_json::json!(lim));
     }

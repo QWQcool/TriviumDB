@@ -47,7 +47,7 @@ Our goal: **SQLite for AI applications.**
 - 🧠 **AI-native** — Optional hybrid recall (AC-automaton BM25 + dense vector) triggers graph spreading activation, with built-in cognitive pipelines (FISTA / DPP / PPR)
 - 🛡️ **4-layer data safety** — Atomic replacement + WAL + dry-run transaction validation + mmap COW isolation; `.flush_ok` v3 binds `.tdb/.vec/.pld` generation, sizes, and whole-file CRCs into one fail-closed commit
 - 🐍 **Python / Node.js native** — `pip install` or `npm install`, MongoDB-style query syntax
-- ⚡ **High-performance search** — rayon parallel brute-force (100% exact at small scale) + in-house SOTA ANN index **QuIVer**, dynamically activated at 2,500–10,000 nodes based on an approximately 8M-component workload
+- ⚡ **High-performance search** — rayon parallel brute-force (100% exact at small scale) + in-house ANN index **QuIVer**; current source uses training-free SM-L2 navigation and cosine reranking, activated at 2,500–10,000 nodes by vector workload
 - 💾 **SSD-friendly** — Append-only WAL + background compaction + independent QuIVer persistence
 - 🔒 **Shared read-only opens** — Multiple reader processes can query a completed generation under shared locks while writers retain exclusive WAL ownership
 - 🧩 **Typed access capabilities** — Rust `DatabaseReader` hides mutation APIs at compile time while `DatabaseWriter` retains the complete embedded write surface
@@ -139,15 +139,15 @@ Suppose you're building an **AI conversation memory system** and the user says "
 
 ---
 
-## QuIVer: SOTA ANN Graph Index
+## QuIVer: ANN Graph Index
 
-**QuIVer** (**Qu**antized **I**ndex for **V**ector R**e**t**r**ieval) is TriviumDB's in-house ANN graph index, combining **2-bit Sign-Magnitude binary quantization** with **Vamana graph navigation** in a hot/cold memory separation architecture.
+**QuIVer** (Quantized Index for Vector Retrieval) is TriviumDB's in-house ANN graph index. Current source combines **fast BQ graph construction, training-free SM-L2 navigation, and cosine reranking of original vectors**. Navigation uses two-bit codes and per-vector magnitudes to score reconstructed squared L2; recall and throughput depend on the workload, parameters, and reranking budget.
 
-> 📄 **Paper**: [QuIVer: Rethinking ANN Graph Topology via Training-Free Binary Quantization](https://arxiv.org/abs/2605.02171)
+> 📄 **Submission status**: The rebuilt version targets **ICDE**; this is not an acceptance or publication claim. The [earlier arXiv preprint](https://arxiv.org/abs/2605.02171) describes the historical method and experiments.
 >
-> 🔬 **Reproducibility**: Full dataset preparation, benchmark scripts, and step-by-step reproduction guide: **[README_QUIVER.md](README_QUIVER.md)**
+> 🔬 **Implementation and experiments**: [Current architecture, modes, and evidence boundaries](docs/quiver.md) · [Experiment guide](README_QUIVER.md). Default SM-L2 describes `0.8.9` source containing `461855e` / `619dd7b`; earlier `0.8.8` packages do not include these changes.
 >
-> Validated on 12 million-scale datasets (384-d to 3072-d): ≥88% Recall@10 at 13–41K multi-threaded QPS with <1.3 GB hot memory — outperforming DiskANN Rust by 2.5–3.3×, hnswlib by 3.6–4.7×, and FAISS HNSW by 3.8–4.9× in multi-threaded throughput at matched recall.
+> The earlier preprint's 12-dataset Recall/QPS and hot-memory figures do not directly describe the rebuilt version. Bind results to their implementation, graph, metric, budget, and data identity; distinguish cosine SM-L2, explicit native L2, and historical BQ measurements.
 
 > ⚠️ **Dimension guidance: keeping database vectors at or below 3072 dimensions is strongly recommended.** TriviumDB storage and exact BruteForce retrieval support higher dimensions, but QuIVer's BQ signature safety limit is 3072 dimensions. Above this limit, automatic QuIVer construction is disabled and search safely falls back to BruteForce; manual QuIVer construction returns an explicit error. Higher-dimensional databases remain usable, but do not receive QuIVer ANN acceleration and incur substantially higher memory and compute costs.
 
@@ -156,13 +156,13 @@ TriviumDB uses an **intelligent auto-routing dual engine**. The automatic thresh
 | Phase | Engine | Activation Condition | Characteristics |
 |---|---|---|---|
 | **Small-scale hot zone** | BruteForce | Below the dimension-dependent threshold, or QuIVer not ready | 100% exact recall, rayon multi-core |
-| **Large-scale cold zone** | **QuIVer** | Dimension ≤ 3072 and the dynamic threshold is reached | BQ signatures + Vamana graph + f32 reranking, independently persisted |
+| **Large-scale cold zone** | **QuIVer** | Dimension ≤ 3072 and the dynamic threshold is reached | BQ construction + SM-L2 navigation + original-vector cosine reranking |
 
 For example, 384/768 dimensions trigger at 10,000 nodes, 1024 at about 7,813, 1536 at about 5,209, and 3072 at about 2,605.
 
-### Key Innovations
+### Key Design
 
-**Hot/cold memory separation**: QuIVer internally stores only BQ signatures (hot) and graph topology; f32 raw vectors remain in MemTable (cold), accessed on-demand for reranking — **halving memory usage**.
+**Hot/cold memory separation**: Original vectors remain in the cold vector pool and are read within the reranking budget. Hot memory includes retained BQ, SM codes and magnitudes, graph topology, ID/slot mappings, and thread workspaces. Measure savings for the evaluated configuration instead of reusing a historical fixed ratio.
 
 > Mmap removes eager full loading and duplicate copies; it does not remove storage I/O. Non-resident cold-vector pages still cause major page faults. When a random-access working set exceeds physical memory, throughput and tail latency depend on page-cache hit rate, storage random-read capability, and reclaim pressure. QuIVer's hot index is anonymous heap memory rather than file page cache, and the configured memory budget does not include OS page cache.
 
@@ -173,7 +173,7 @@ For example, 384/768 dimensions trigger at 10,000 nodes, 1024 at about 7,813, 15
 - ✅ **Incremental Update**: soft_delete + incremental_insert, atomic replacement
 - ✅ **Transaction-safe**: Separated timeline architecture — transaction commit cannot fail, QuIVer sync needs no rollback
 
-**Independent persistence**: QuIVer index stored as `.tdb.quiver` file, POD data memcpy ultra-fast serialization, zero-cost recovery on restart.
+**Independent persistence**: The graph is stored in `.tdb.quiver`. After loading an older BQ file, the database streams original vectors to restore default SM state. This avoids rebuilding the graph and retaining a second full FP32 copy, but cold-vector reads contribute to startup cost.
 
 ---
 
@@ -396,7 +396,7 @@ These modes are complementary rather than interchangeable: **Reachability answer
 | 🧠 **Cognitive pipeline**        | `search_advanced()` is the toggleable fixed-order official template; TQL freely composes stateless FISTA / parameterized SA-PPR / DPP / NMF, while refractory fatigue remains stateful API-only |
 | 🔌 **Hook system**               | 6-stage pipeline injection points with C/C++ FFI dynamic library plugin support                                            |
 | 📦 **O(1) operations**           | FreeList tombstone reuse + Reverse Hash Net for O(1) reverse edge lookup                                                   |
-| ⚡ **QuIVer ANN index**          | BQ signatures + Vamana graph navigation, hot/cold separation, incremental insert/delete/update                             |
+| ⚡ **QuIVer ANN index**          | BQ graph construction + default SM-L2 navigation + cosine reranking, hot/cold separation, incremental maintenance         |
 | 💾 **Dual storage**              | Mmap (zero-copy cold start) / Rom (SQLite-style single-file portability)                                                   |
 | 🛡️ **4-layer disaster recovery** | WAL + atomic replacement + dry-run validation + OS-level COW isolation                                                     |
 | 🔄 **Zero-cost transactions**    | `begin_tx()` with pre-validation; errors never pollute memory state                                                        |
@@ -415,7 +415,7 @@ These modes are complementary rather than interchangeable: **Reachability answer
 | -------------------- | ------------ | ------------- | -------------- | ---------------- | ------------------ | --------------- | -------------- | ----------------------------------------------- |
 | Concurrent multi-writer | ⚠️ Single-writer (WAL) | ✅ MVCC multi-writer | ⚠️ Single-process writer | ✅ Server-side concurrent writes | ✅ Concurrent tx writes | ✅ Distributed write nodes | ✅ MVCC+OCC concurrent writes | ⚠️ Single-writer + shared-read/immutable generations |
 | Document data        | ✅ SQL       | ✅ SQL+JSONB  | ⚠️ Fixed table schema | ❌ Filter only | ⚠️ Property KV    | ✅ SurrealQL    | ✅ Arrow schema | ✅ Free JSON + full `$op` suite                 |
-| Vector search        | ⚠️ Extension | ✅ HNSW/IVFFlat | ✅ HNSW ext.  | ✅ HNSW          | ✅ Native HNSW     | ✅ MTree/HNSW   | ✅ IVF+quant    | ✅ QuIVer (BQ+Vamana)                           |
+| Vector search        | ⚠️ Extension | ✅ HNSW/IVFFlat | ✅ HNSW ext.  | ✅ HNSW          | ✅ Native HNSW     | ✅ MTree/HNSW   | ✅ IVF+quant    | ✅ QuIVer (BQ construction + SM-L2)             |
 | Graph traversal      | ⚠️ JOIN      | ⚠️ Recursive CTE | ✅ Cypher    | ❌ No graph ops  | ✅ Cypher          | ✅ Graph        | ❌ No graph ops | ✅ Native adjacency + `.gidx`                   |
 | Embedded portable storage | ✅ One file  | ❌ PG server  | ✅ One file     | ⚠️ Memory/dir embedded | ❌ JVM        | ✅ Switchable   | ⚠️ Dir embedded | ✅ Single `.tdb` in Rom / committed file set in Mmap |
 | Hybrid query freedom | ❌           | ⚠️ SQL JOINs  | ⚠️ Filtered ANN | ❌ Vector-only  | ⚠️ SEARCH-filtered | ⚠️ Manual       | ⚠️ Vec+FTS+SQL | ✅ WITH pipeline composition                    |
@@ -466,7 +466,7 @@ TriviumDB/
 │   ├── index/
 │   │   ├── brute_force.rs  # rayon parallel exact search
 │   │   ├── bq.rs           # BQ binary quantization signatures (QuIVer foundation)
-│   │   ├── quiver.rs       # 🚀 QuIVer ANN index (BQ + Vamana graph + hot/cold separation)
+│   │   ├── quiver.rs       # 🚀 BQ 构图、默认 SM-L2 导航与冷热分离
 │   │   ├── property.rs     # 📊 Four property indexes (Hash / Ordered ART / Composite ART / Roaring Bitmap)
 │   │   ├── text.rs         # 📝 TextIndex (Aho-Corasick + BM25 2-Gram persistence)
 │   │   └── graph_blocks.rs # 🔗 Business graph block index .gidx (edge blocks / in-edge / label directories)
@@ -616,7 +616,7 @@ TriviumDB's cognitive retrieval pipeline implements the following academic works
 
 In-house data structures and algorithms:
 
-- **QuIVer** — SOTA ANN graph index fusing BQ with Vamana graph navigation
+- **QuIVer** — ANN graph index with fast BQ construction, training-free SM-L2 navigation, and cosine reranking in current source; the rebuilt version targets ICDE
 - **TSNG** (Tri-Signal Navigation Graph) — tri-signal (vector / property / graph) hybrid retrieval research track with multiple access-path strategies and exact ground-truth evaluation
 - **Parallel Bit-Tag Array** — Bloom-filter-inspired JSON fast filtering
 - **Reverse Hash Net** — O(1) reverse edge lookup hash index
@@ -625,7 +625,7 @@ In-house data structures and algorithms:
 
 ### 📝 Citing QuIVer
 
-If you use QuIVer or TriviumDB in your research, please cite:
+The entry below identifies the earlier preprint. Also record the evaluated software revision when using the rebuilt implementation; do not turn the ICDE submission target into a proceedings citation:
 
 ```bibtex
 @article{quiver2026,

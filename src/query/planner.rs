@@ -153,18 +153,19 @@ pub fn plan_filter_with_limit<T: VectorType>(
             candidates,
         };
     }
-    let plan = plan_filter(filter, mt);
-    if limit.is_some() && matches!(plan.access_path, AccessPath::ColdPayloadScan) {
-        return NodeAccessPlan {
-            access_path: AccessPath::FullNodeScan,
-            estimated_rows: plan.estimated_rows,
-            candidates: Vec::new(),
-        };
-    }
-    plan
+    // 保留全部索引路径，只让扫描兜底按需物化，避免先收集整库 ID 再丢弃。
+    plan_filter_impl(filter, mt, limit.is_none())
 }
 
 pub fn plan_filter<T: VectorType>(filter: &Filter, mt: &MemTable<T>) -> NodeAccessPlan {
+    plan_filter_impl(filter, mt, true)
+}
+
+fn plan_filter_impl<T: VectorType>(
+    filter: &Filter,
+    mt: &MemTable<T>,
+    materialize_scan: bool,
+) -> NodeAccessPlan {
     if let Filter::Contains(field, needle) = filter
         && let Ok(Some(candidates)) = mt.find_by_ngram_property_index(field, needle)
     {
@@ -270,9 +271,17 @@ pub fn plan_filter<T: VectorType>(filter: &Filter, mt: &MemTable<T>) -> NodeAcce
     }
 
     NodeAccessPlan {
-        access_path: AccessPath::ColdPayloadScan,
+        access_path: if materialize_scan {
+            AccessPath::ColdPayloadScan
+        } else {
+            AccessPath::FullNodeScan
+        },
         estimated_rows: mt.node_count(),
-        candidates: mt.all_node_ids(),
+        candidates: if materialize_scan {
+            mt.all_node_ids()
+        } else {
+            Vec::new()
+        },
     }
 }
 
@@ -447,7 +456,7 @@ fn bitmap_filter_candidates<T: VectorType>(
     fn evaluate<T: VectorType>(
         filter: &Filter,
         mt: &MemTable<T>,
-        universe: &[NodeId],
+        universe: &mut Option<Vec<NodeId>>,
     ) -> Option<(HashSet<String>, Vec<NodeId>)> {
         match filter {
             Filter::Eq(field, value) if field != "id" => Some((
@@ -465,6 +474,7 @@ fn bitmap_filter_candidates<T: VectorType>(
             }
             Filter::Ne(field, value) => {
                 let excluded = mt.find_by_bitmap_property_index(field, value)?;
+                let universe = universe.get_or_insert_with(|| mt.all_node_ids());
                 Some((
                     HashSet::from([field.clone()]),
                     difference_sorted(universe, &excluded),
@@ -477,6 +487,7 @@ fn bitmap_filter_candidates<T: VectorType>(
                 }
                 excluded.sort_unstable();
                 excluded.dedup();
+                let universe = universe.get_or_insert_with(|| mt.all_node_ids());
                 Some((
                     HashSet::from([field.clone()]),
                     difference_sorted(universe, &excluded),
@@ -509,8 +520,8 @@ fn bitmap_filter_candidates<T: VectorType>(
         }
     }
 
-    let universe = mt.all_node_ids();
-    let (fields, candidates) = evaluate(filter, mt, &universe)?;
+    // 只有存在可用 bitmap 的补集运算才需要全集；普通探测不得物化全库。
+    let (fields, candidates) = evaluate(filter, mt, &mut None)?;
     let mut fields = fields.into_iter().collect::<Vec<_>>();
     fields.sort();
     Some((fields, candidates))

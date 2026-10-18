@@ -521,7 +521,7 @@ fn main() {
 
     // rerank_limit 扫描：固定 ef 下精排候选数对 recall 的影响（C 实验）。
     // 设置 TRIVIUM_ANN_RERANK=10,20,50,... 时启用内层扫描（复用同一个图，避免重复构建）；
-    // 未设置时退化为 None（rerank_limit=ef_search，即原始行为）。
+    // 未设置时传 None，由当前评分模式决定预算：默认 SM 为 64 并收紧至候选宽度，旧 BQ 为 ef。
     let rerank_values: Vec<Option<usize>> = std::env::var("TRIVIUM_ANN_RERANK")
         .ok()
         .map(|value| {

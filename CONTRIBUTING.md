@@ -146,10 +146,12 @@ Rust Embedded Core 是产品主体和公共语义权威。Python、Node、CLI �
 
 #### A14. QuIVer 与 ANN 算法的产品边界
 
+QuIVer 重构版本当前以 ICDE 为投稿目标，不得把历史 VLDB 投稿稿件或 arXiv 预印本写成正式录用。默认 SM-L2、显式校正/原生 L2 与历史 BQ 结果必须按真实版本区分，详见 [架构与实验边界](docs/quiver.md)。
+
 QuIVer 是 TriviumDB 的核心 ANN 底座与主要产品卖点。以下规则区分两类变更：
 
 - **新增 ANN 算法：允许。** 作为可选后端或实验路径接入时不触碰 QuIVer 语义，需保证确定性、事务安全、Late Materialization 不变量与完整测试；
-- **直接修改 QuIVer 核心：必须提供跨数据集帕累托前沿证据。** 调整 BQ 编码、图导航、精排、构建或持久化语义时，必须在多个数据集与多个 Recall 工作点上同时对比 QPS、延迟与内存，证明新实现整体不劣且在关键指标上明显更优，才可合并。单一工作点或单一数据集的局部胜利不足以替换已发表并经过广泛实测的基线。
+- **直接修改 QuIVer 核心：必须提供跨数据集帕累托前沿证据。** 调整 BQ 编码、图导航、精排、构建或持久化语义时，必须在多个数据集与多个 Recall 工作点上同时对比 QPS、延迟与内存，证明新实现整体不劣且在关键指标上明显更优，才可合并。单一工作点或单一数据集的局部胜利不足以替换已有且经过广泛实测的版本基线。
 
 无论哪类变更，都不得破坏 Recall 语义、稳定排序、事务安全与确定性；性能数据必须可复现。
 
@@ -344,10 +346,12 @@ For core algorithms and format changes, consider at least: an independent refere
 
 #### A14. Product boundaries for QuIVer and ANN algorithms
 
+The rebuilt QuIVer targets ICDE; earlier VLDB submission drafts and the arXiv preprint are not acceptance claims. Distinguish default SM-L2, explicit corrected/native-L2 modes, and historical BQ measurements by their actual revisions; see [architecture and evidence boundaries](docs/quiver.md).
+
 QuIVer is the core ANN foundation and a primary product differentiator of TriviumDB. The rules distinguish two kinds of change:
 
 - **Adding a new ANN algorithm: allowed.** Wiring it in as an optional backend or experimental path must not touch QuIVer semantics, and must preserve determinism, transaction safety, the late-materialization invariant, and complete tests;
-- **Directly modifying the QuIVer core: requires cross-dataset Pareto-frontier evidence.** Changes to BQ encoding, graph navigation, reranking, construction, or persistence semantics must compare QPS, latency, and memory across multiple datasets and multiple recall operating points, demonstrating that the new implementation is no worse overall and clearly better on key metrics before merging. A local win at a single operating point or on a single dataset is not sufficient to replace a published, widely benchmarked baseline.
+- **Directly modifying the QuIVer core: requires cross-dataset Pareto-frontier evidence.** Changes to BQ encoding, graph navigation, reranking, construction, or persistence semantics must compare QPS, latency, and memory across multiple datasets and multiple recall operating points, demonstrating that the new implementation is no worse overall and clearly better on key metrics before merging. A local win at a single operating point or on a single dataset is not sufficient to replace an established, widely benchmarked versioned baseline.
 
 Neither kind of change may break recall semantics, stable ordering, transaction safety, or determinism; performance data must be reproducible.
 

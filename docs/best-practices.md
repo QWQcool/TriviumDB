@@ -65,7 +65,7 @@ cargo add triviumdb
 
 ```toml
 [dependencies]
-triviumdb = "0.8.7"
+triviumdb = "0.8.9"
 ```
 
 ### 30 秒入门模板
@@ -739,14 +739,24 @@ with triviumdb.TriviumDB("knowledge_v2.tdb", dim=NEW_DIM) as new_db:
 
 ## QuIVer 索引策略与调优
 
-TriviumDB v0.7.0 起采用自研的 **QuIVer**（Quantized Indexed Vector Retrieval）SOTA 级 ANN 图索引。常规查询会按配置和数据规模自动选择、构建与维护索引；Rust Core 也提供显式 `build_quiver_index()`，nightly Server 提供 `/v1/indexes/quiver` 管理入口。显式构建仍受访问模式、维度、generation 和内存预算约束。
+TriviumDB 使用自研的 **QuIVer**（Quantized Index for Vector Retrieval）ANN 图索引。常规查询会按配置和数据规模自动选择、构建与维护索引；Rust Core 也提供显式 `build_quiver_index()`，nightly Server 提供 `/v1/indexes/quiver` 管理入口。显式构建仍受访问模式、维度、generation 和内存预算约束。
+
+本节描述 `0.8.9` 源码（包含 `461855e` / `619dd7b`）；旧 `0.8.8` 发布包不含这些变更。QuIVer 重构以 **ICDE** 为投稿目标，旧预印本的数字不直接代表新内核。架构、模式和复现边界统一见 [QuIVer 说明](quiver.md)。
+
+普通 QuIVer 向量查询默认使用无训练 **SM-L2**：以两位重建向量的平方L2评分导航，最终从原始向量计算余弦相似度。支持1–3072维及非完整尾块，无需调用 `enable_quiver_sm_l2()`。构图仍使用原BQ规则，搜索召回取决于数据和预算。
+
+SM状态随构图生成；增量插入只追加新节点的紧凑位码与幅值，墓碑仍可作为导航中转但不会进入精排结果。数据库加载旧BQ索引时，从向量池逐条恢复SM状态，不重建图、不改变持久化格式、不常驻第二份FP32向量。启动时会因此读取一次索引涉及的冷向量，不能按零开销恢复估算启动时间。热内存还包括仍保留的原 BQ、SM 元数据、图、ID/slot 映射和各线程工作区，不能只计 SM 位码。查询线程复用工作区，SM拥有内存计入索引和内核预算。
+
+底层 `QuIVerSearchConfig` 未指定精排预算时，上限默认为64；实际预算受候选宽度限制，并至少覆盖请求的 `top_k`。上层管线显式传入的预算继续生效。过滤拒绝及墓碑不占成功精排名额，低搜索宽度不再导致普通查询退回旧BQ。
+
+查询样本校正／锚点模式及原生欧氏模式仍需通过Rust接口显式选择；图或向量变化后取消显式覆盖并恢复默认SM-L2。原生欧氏模式返回负平方距离，不等同于默认余弦查询。直接使用自定义 `NavigationScorer` 的TSNG路径保留原评分协议；仅从字节加载、尚未绑定原始向量的独立旧 `QuIVer` 对象也保留BQ兼容入口，数据库加载流程会自动补齐默认状态。
 
 ### QuIVer 自动激活条件
 
 | 条件 | 检索引擎 | 行为 |
 |------|----------|------|
 | 低于当前维度的动态阈值 | **BruteForce** | 100% 精确召回 |
-| 达到动态阈值 + 首次构建完成 | **QuIVer (BQ + Vamana)** | BQ 签名 + 图导航 + f32 精排，Recall@10 > 97% |
+| 达到动态阈值 + 首次构建完成 | **QuIVer (BQ构图 + SM-L2导航)** | 紧凑位码和图常驻，原始向量按预算做余弦精排 |
 
 动态阈值为 `ceil(8,000,000 / dim)`，并限制在 2,500–10,000 节点。例如 768 维为 10,000，1536 维约 5,209，3072 维约 2,605。
 

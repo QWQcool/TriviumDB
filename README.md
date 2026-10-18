@@ -47,7 +47,7 @@ TriviumDB 是一个用纯 Rust 编写的**嵌入式三模数据库引擎**，将
 - 🧠 **为 AI 而生** —— 可选启用“AC自动机+BM25稀疏文本”与“Dense Vector稠密向量”的**多路召回**来触发图谱扩散检索，并内置多层认知管线（FISTA / DPP / PPR）
 - 🛡️ **四层数据安全保障** —— 原子替换 + WAL日志 + 事务干跑验证（Dry-Run）+ Mmap COW 隔离，`.flush_ok` v3 将 `.tdb/.vec/.pld` 的 generation、大小和整文件 CRC 绑定为同一提交，损坏或混代输入 fail-closed
 - 🐍 **Python / Node.js 原生** —— `pip install` 或 `npm install` 后直接使用，类 MongoDB 查询语法
-- ⚡ **高性能检索** —— rayon 并行暴力搜索（小规模 100% 精确）+ 自研 SOTA 级 ANN 索引 **QuIVer**；按约 800 万向量分量工作量动态触发（2,500–10,000 节点），无需手动配置
+- ⚡ **高性能检索** —— rayon 并行暴力搜索（小规模 100% 精确）+ 自研 ANN 索引 **QuIVer**；当前源码默认采用无训练 SM-L2 导航与余弦精排，按向量工作量动态触发（2,500–10,000 节点）
 - 💾 **SSD 友好** —— Append-Only WAL + 后台 Compaction 线程 + QuIVer 索引独立持久化，杜绝随机写入磨损
 - 🔒 **共享只读打开** —— 多进程 Reader 共享锁并发查询已完成代际，Writer 继续保持排他锁与 WAL 安全边界
 - 🧩 **类型化访问能力** —— Rust `DatabaseReader` 在编译期隐藏写 API，`DatabaseWriter` 保留完整嵌入式写能力
@@ -317,7 +317,7 @@ Rust / Python / Node.js 三语言共享同一套 TQL、Prepared、四类属性�
 | 🧠 **认知管线**        | `search_advanced()` 提供组件可开关、顺序固定的官方模板；TQL 提供 FISTA / 参数化 SA-PPR / DPP / NMF 无状态算子的自由编排，疲劳不应期仍仅属有状态 API |
 | 🔌 **Hook 扩展系统**   | 6 个管线关键阶段的自定义注入点：查询预处理 / 自定义召回 / 召回后处理 / 图扩散前 / 重排序 / 最终后处理，支持 C/C++ FFI 动态库插件 |
 | 📦 **三位一体 O(1)**   | 自动增量 O(1) FreeList 墓碑空洞复用；删节点 O(1) 反向边哈希表（本项目称 Reverse Hash Net），彻底杜绝盘面膨胀与图谱雪崩           |
-| ⚡ **QuIVer ANN 索引** | 自研 SOTA 级近似最近邻图索引：BQ 签名 + Vamana 图导航，冷热分离架构，增量 Insert/Delete/Update 无需重建                          |
+| ⚡ **QuIVer ANN 索引** | BQ 快速构图 + 默认 SM-L2 导航 + 余弦精排，冷热分离架构，增量维护同步默认 SM 状态 |
 | 💾 **双模式存储**      | Mmap（大模型极速分体冷启动） / Rom（传统 SQLite 级单文件打包携带），无缝热切换                                                   |
 | 🛡️ **四层灾备防御**    | 预写日志(WAL) + 写入原子替换 + 事务预检干跑(Dry-Run) + OS 内存写时复制隔离                                                       |
 | 🔄 **零开销事务**      | `begin_tx()` 验证前置架构，中途报错绝不污染内存，实现真正的零代价原子回滚；QuIVer 索引事务安全（分离时间线架构）                 |
@@ -332,13 +332,13 @@ Rust / Python / Node.js 三语言共享同一套 TQL、Prepared、四类属性�
 
 ## 向量索引策略：QuIVer
 
-**QuIVer**（**Qu**antized **I**ndexed **Ve**ctor **R**etrieval）是 TriviumDB 自研的 SOTA 级近似最近邻（ANN）图索引，融合 **BQ 二进制量化**与 **Vamana 图导航**，在保持极高召回率的同时实现数量级的检索加速。
+**QuIVer**（Quantized Index for Vector Retrieval）是 TriviumDB 自研的近似最近邻（ANN）图索引。当前源码使用 **BQ 快速构图 + 无训练 SM-L2 导航 + 原始向量余弦精排**；导航结合两位编码与每向量幅值信息计算重建平方 L2，召回和吞吐取决于数据、参数与精排预算。
 
-> 📄 **学术论文**: [QuIVer: Rethinking ANN Graph Topology via Training-Free Binary Quantization](https://arxiv.org/abs/2605.02171)
+> 📄 **投稿状态**：重构版本以 **ICDE** 为投稿目标，尚不作录用或发表声明。[旧版 arXiv 预印本](https://arxiv.org/abs/2605.02171)记录历史方法与实验。
 >
-> 🔬 **实验复现**: 完整的数据集准备、基准测试和复现指南请参阅 **[README_QUIVER.md](README_QUIVER.md)**
+> 🔬 **实现与复现**：[当前架构、模式边界及实验口径](docs/quiver.md) · [数据与实验指南](README_QUIVER.md)。默认 SM-L2 描述对应 `0.8.9` 源码（包含 `461855e` / `619dd7b`）；旧 `0.8.8` 发布包不含这些变更。
 >
-> 在 12 个百万级数据集（384-d 至 3072-d）上验证，QuIVer 以 \<1.3 GB 热内存实现 ≥88% Recall@10 @ 13-41K QPS，多线程吞吐量超 DiskANN Rust 2.5-3.3×、hnswlib 3.6-4.7×、FAISS HNSW 3.8-4.9×。
+> 旧预印本的 12 库 Recall/QPS 与热内存数字不直接代表当前重构版本。当前评估按实现、图、度量、预算及数据身份分别报告；SM-L2 余弦任务、显式原生 L2 和历史 BQ 结果不可混标。
 
 > ⚠️ **维度建议：强烈建议数据库向量维度不超过 3072。** TriviumDB 的通用存储与精确 BruteForce 检索允许更高维度，但 QuIVer 的 BQ 签名安全上限是 3072 维。超过该维度时引擎不会自动构建 QuIVer，检索会稳定回退到 BruteForce；手动构建 QuIVer 会返回明确错误。高维数据库仍可使用，但无法获得 QuIVer ANN 加速，内存和计算开销也会显著增加。
 
@@ -347,13 +347,13 @@ TriviumDB 采用**智能自适应双引擎**向量索引。自动 QuIVer 阈值�
 | 阶段 | 引擎 | 激活条件 | 特点 |
 |---|---|---|---|
 | **小规模热区** | BruteForce | 节点数低于当前维度的动态阈值，或 QuIVer 未就绪 | 100% 精确召回，rayon 多核 |
-| **大规模冷区** | **QuIVer** | 维度 ≤ 3072 且达到动态阈值（2,500–10,000 节点） | BQ 签名 + Vamana 图导航 + f32 精排，独立持久化 |
+| **大规模冷区** | **QuIVer** | 维度 ≤ 3072 且达到动态阈值（2,500–10,000 节点） | BQ 构图 + SM-L2 导航 + 原始向量余弦精排 |
 
 例如 384/768 维仍在 10,000 节点触发，1024 维约 7,813，1536 维约 5,209，3072 维约 2,605。
 
-### QuIVer 的核心创新
+### QuIVer 的核心设计
 
-**冷热分离架构**：QuIVer 内部仅存储 BQ 签名（hot）和图拓扑，f32 原始向量留在 MemTable 中（cold），精排时按需读取，**内存占用减半**。
+**冷热分离架构**：原始向量留在向量池的冷层，精排时按预算读取。热内存需计入仍保留的 BQ、SM 位码与幅值、图、ID/slot 映射及线程工作区；内存收益须以具体配置测量，不能沿用旧版固定比例。
 
 > Mmap 消除的是全量载入和重复拷贝，并不会消除磁盘 I/O。冷向量页未驻留时仍会产生 Major Page Fault；当随机查询工作集超过物理内存时，吞吐和尾延迟取决于 PageCache 命中率、存储设备随机读能力及系统回收压力。QuIVer 热索引位于匿名堆内存，并非文件 PageCache；当前内存预算统计也不包含 OS PageCache。
 
@@ -364,7 +364,7 @@ TriviumDB 采用**智能自适应双引擎**向量索引。自动 QuIVer 阈值�
 - ✅ **增量 Update**：soft_delete + incremental_insert，原子替换
 - ✅ **事务安全**：分离时间线架构，事务 commit 不可失败，QuIVer 同步无需回滚
 
-**独立持久化**：QuIVer 索引以 `.tdb.quiver` 独立文件存储，POD 数据 memcpy 极速序列化，重启后零开销恢复。
+**独立持久化**：QuIVer 图以 `.tdb.quiver` 独立文件存储。数据库加载旧 BQ 文件后，会从实际向量池流式恢复默认 SM 状态；不重建图、不常驻第二份全库 FP32，但需要读取冷向量并计入启动成本。
 
 ---
 
@@ -444,7 +444,7 @@ TriviumDB/
 │   ├── index/
 │   │   ├── brute_force.rs  # rayon 并行暴力精确搜索
 │   │   ├── bq.rs           # BQ 二进制量化签名（QuIVer 基础层）
-│   │   ├── quiver.rs       # 🚀 QuIVer ANN 索引（BQ + Vamana 图导航 + 冷热分离）
+│   │   ├── quiver.rs       # 🚀 QuIVer ANN 索引（BQ 构图 + 默认 SM-L2 导航）
 │   │   ├── property.rs     # 📊 四类属性索引（Hash / Ordered ART / Composite ART / Roaring Bitmap）
 │   │   ├── text.rs         # 📝 TextIndex（Aho-Corasick + BM25 2-Gram 持久化）
 │   │   └── graph_blocks.rs # 🔗 业务图块索引 .gidx（出边块 / 入边目录 / Label 目录）
@@ -558,7 +558,7 @@ TriviumDB/
 | ---------------- | ------------ | ----------- | ----------- | ----------- | ----------- | ------------ | ----------- | ------------------------------- |
 | 并发多写模型     | ⚠️ 单写多读（WAL） | ✅ MVCC 多写 | ⚠️ 单进程单写 | ✅ 服务端并发写 | ✅ 并发事务写 | ✅ 分布式多写节点 | ✅ MVCC+OCC 并发写 | ⚠️ 单写多读 + 共享只读/不可换代际 |
 | 文档型数据       | ✅ SQL       | ✅ SQL+JSONB | ⚠️ 需预定义表 Schema | ❌ 仅过滤 | ⚠️ 属性键值 | ✅ SurrealQL | ✅ Arrow Schema | ✅ 自由 JSON + `$op` 全家桶 |
-| 向量检索         | ⚠️ 需外挂    | ✅ HNSW/IVFFlat | ✅ HNSW 扩展 | ✅ HNSW | ✅ 原生 HNSW | ✅ MTree/HNSW | ✅ IVF+量化 | ✅ 自研 QuIVer (BQ+Vamana) |
+| 向量检索         | ⚠️ 需外挂    | ✅ HNSW/IVFFlat | ✅ HNSW 扩展 | ✅ HNSW | ✅ 原生 HNSW | ✅ MTree/HNSW | ✅ IVF+量化 | ✅ 自研 QuIVer (BQ 构图 + SM-L2) |
 | 图谱遍历         | ⚠️ JOIN 模拟 | ⚠️ 递归 CTE | ✅ Cypher   | ❌ 无图原语 | ✅ Cypher   | ✅ 图查询    | ❌ 无图原语 | ✅ 原生邻接表 + `.gidx`         |
 | 嵌入式便携存储 | ✅ 单文件    | ❌ PG 服务  | ✅ 单文件    | ⚠️ 内存/目录嵌入式 | ❌ JVM 服务 | ✅ 可切换    | ⚠️ 目录嵌入式 | ✅ Rom 单 `.tdb` / Mmap 同代文件集 |
 | 混合查询自由度   | ❌           | ⚠️ SQL JOIN 组合 | ⚠️ 过滤式向量搜索 | ❌ 单模向量 | ⚠️ SEARCH 过滤式 | ⚠️ 手动实现 | ⚠️ 向量+FTS+SQL | ✅ WITH 管线自由编排 |
@@ -616,7 +616,7 @@ TriviumDB 的认知检索管线借鉴并实现了以下学术成果（均为本�
 
 以下为本项目自研的数据结构与算法命名：
 
-- **QuIVer**（Quantized Indexed Vector Retrieval）：自研 SOTA 级 ANN 图索引，融合 BQ 二进制量化与 Vamana 图导航，冷热分离架构
+- **QuIVer**（Quantized Index for Vector Retrieval）：自研 ANN 图索引，当前源码采用 BQ 快速构图、无训练 SM-L2 导航与余弦精排；重构版本目标为 ICDE
 - **TSNG**（Tri-Signal Navigation Graph）：三信号（向量 / 属性 / 图）联合导航的混合检索研究线，提供多 AccessPath 执行策略与 exact ground truth 评测
 - **Parallel Bit-Tag Array**（行级布隆特征阵列）：基于布隆过滤器思想的 JSON 快速过滤机制
 - **Reverse Hash Net**（双向哈希边表）：O(1) 反向边查找的哈希索引结构
