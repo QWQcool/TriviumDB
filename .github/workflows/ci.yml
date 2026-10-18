@@ -126,8 +126,33 @@ jobs:
         shell: bash
         run: cargo test --target ${{ matrix.target }} --lib --tests -- --test-threads=1
 
+      - name: 运行规划器物化回归测试
+        run: cargo test --target ${{ matrix.target }} --test query --features test-hooks tql_planner -- --test-threads=1
+
       - name: 运行文档测试
         run: cargo test --target ${{ matrix.target }} --doc
+
+  # ═══════════════════════════════════════════
+  #  控制台浏览器回归：禁止外网请求，不依赖真实数据库或 CDN
+  # ═══════════════════════════════════════════
+  webui:
+    name: Web Console (Chromium)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 安装浏览器测试工具
+        run: npm install --no-save --ignore-scripts playwright@1.62.1
+
+      - name: 安装 Chromium 及系统依赖
+        run: npx playwright install --with-deps chromium
+
+      - name: 运行离线控制台自检
+        run: node scripts/test_webui.cjs
 
   # ═══════════════════════════════════════════
   #  Job 2a: CLI/TUI 工具测试

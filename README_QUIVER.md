@@ -1,17 +1,51 @@
-# QuIVer — Artifact Documentation
+# QuIVer — Implementation and Experiment Guide
 
-> **Paper**: [QuIVer: Rethinking ANN Graph Topology via Training-Free Binary Quantization](https://arxiv.org/abs/2605.02171)
-
-> **Dimension limit**: QuIVer supports 1–3072 dimensions. Keeping TriviumDB databases at or below 3072 dimensions is strongly recommended when ANN acceleration is required. Higher-dimensional databases safely fall back to exact BruteForce search and cannot build or load QuIVer indexes.
+> **Updated**: 2026-10-18. Current implementation means `0.8.9` source containing `461855e` and `619dd7b`; earlier `0.8.8` packages do not include these changes. Record the evaluated version, Git revision, and build identity.
 >
-> **Venue**: PVLDB Vol. 20, 2027
+> **Submission target**: **ICDE** for the rebuilt version. This is not an acceptance, proceedings, or publication claim.
+>
+> **Historical preprint**: [QuIVer: Rethinking ANN Graph Topology via Training-Free Binary Quantization](https://arxiv.org/abs/2605.02171). Its method, table numbers, dataset protocol, and performance figures describe the earlier research version.
+>
+> **Dimension limit**: QuIVer supports `1..=3072`, including partial tail blocks. Higher-dimensional databases use exact BruteForce. Dimension compatibility does not imply metric or distribution-independent recall.
 
-This document provides the entry points and instructions for reproducing the main experiments reported in the paper.
+## Current implementation
+
+The database defaults to **fast BQ graph construction → training-free SM-L2 navigation → budgeted original-vector cosine reranking**. Navigation combines sign/strong bits with per-vector magnitudes and reconstruction norms; it is not pure Hamming search. Default preparation is automatic, including after database reload. The legacy graph format remains unchanged, so reload streams original vectors to restore SM state and has a measurable startup cost.
+
+Default SM-L2 does not use query-sample fitting or a calibration anchor. Explicit corrected SM, explicit native L2, custom navigation scorers, and standalone legacy BQ loading have separate semantics. Native L2 retains original magnitudes and zero vectors and returns negative squared distance; ordinary database searches remain cosine. See [current architecture, lifecycle, memory, and mode boundaries](docs/quiver.md).
+
+Current-code checks without an external dataset:
+
+```bash
+cargo test --lib index::quiver::corrected_sm::production_tests
+cargo test --lib index::quiver::corrected_sm::native_l2_tests
+cargo test --lib index::quiver::tests::test_quiver_中等规模搜索 -- --exact
+```
+
+These checks establish implementation contracts, not million-scale performance.
+
+## ICDE evaluation protocol and evidence
+
+- The current evaluation scope contains 19 cosine tasks and two native-L2 boundary controls, SIFT and GIST. Preserve their metric and data identities; normalized-cosine historical results are not substitutes for native-L2 results.
+- The main protocol uses separate tuning/evaluation queries, frozen graph and query parameters, top-10 results, an explicit FP32 budget, independent throughput and request-latency measurements, and thread/result consistency checks. Record actual effective budgets, not only requested values.
+- Some earlier low-`ef` positions ran BQ after SM installation rejected the requested budget. Keep those points labeled BQ and retain their original records. Later fixed-position SM measurements need their own source/binary/data hashes and overlay identity; they do not retroactively change the original tuning method.
+- Current source clamps the default effective reranking budget to candidate width, raises it to cover `top_k` when necessary, and keeps default SM active at low widths. Older frozen executables do not acquire this behavior automatically.
+- Bind Recall/QPS/latency and memory to the same graph, mode, parameters, revision, hardware, and input manifest. Include retained BQ, SM metadata, graph/mappings, thread workspace, cold-vector dependencies, preparation/load cost, and temporary peaks. Do not reuse the old preprint's fixed memory or speedup claims.
+- Local `research/QuIVer/` protocols and archives are ignored by Git and are not automatically included in a public clone. A publishable ICDE artifact must deliver its frozen manifests, executable entry points, raw measurements, and independent verification records together.
+
+## Historical benchmark recipes
+
+The remaining sections retain the earlier preprint's dataset and benchmark recipes. All paper section/table references below are **historical**. To reproduce that version, pin its corresponding source snapshot; the public `v0.8.8` snapshot `f4bdfe35e9a3b7c0587da798886ce29380976cfe` is an old BQ reference, not proof that it matches the submitted-paper artifact. Running these entry points on current source can exercise new SM defaults and requires a new result identity.
+
+The dataset recipes below are not a complete frozen ICDE pipeline. In particular, RedCaps base selection, query set, self-match policy, and exact GT definition must come from a verified manifest; output file dimensions alone are insufficient.
 
 ---
 
 ## Table of Contents
 
+- [Current implementation](#current-implementation)
+- [ICDE evaluation protocol and evidence](#icde-evaluation-protocol-and-evidence)
+- [Historical benchmark recipes](#historical-benchmark-recipes)
 - [Repository Layout](#repository-layout)
 - [Quick Start](#quick-start)
 - [Prerequisites](#prerequisites)
@@ -172,7 +206,7 @@ Each dataset produces 3 files in the project root:
 
 ## Step 2: Reproduce Main Results
 
-**Paper section**: §5.2, Table 4 (QuIVer on embedding datasets, 384–3072 dimensions)
+**Legacy preprint section**: §5.2, Table 4 (QuIVer on embedding datasets, 384–3072 dimensions)
 
 ```powershell
 # Default: Cohere-1M (768-d), m=32, ef_c=128, α=1.2
@@ -210,7 +244,7 @@ TRIVIUM_ANN_NAME=msmarco-1m TRIVIUM_RESULT_PATH=results/msmarco1m.json cargo ben
 
 ## Step 3: Reproduce Baseline Comparisons
 
-**Paper section**: §5.3, Table 5 (matched-recall throughput on Cohere-1M) & Figure 3 (Pareto curves)
+**Legacy preprint section**: §5.3, Table 5 (matched-recall throughput on Cohere-1M) & Figure 3 (Pareto curves)
 
 All baselines are evaluated on Cohere-1M (768-d) with M=32, ef_c=128 (or DiskANN R=64, L_b=128, α=1.2).
 
@@ -240,7 +274,7 @@ python scripts/convert_to_fbin.py   # converts cohere → DiskANN fbin format
 
 ## Step 4: Reproduce Sensitivity Analysis
 
-**Paper section**: §5.4, Tables 6–8 (m, ef_c, α sensitivity on Cohere-1M)
+**Legacy preprint section**: §5.4, Tables 6–8 (m, ef_c, α sensitivity on Cohere-1M)
 
 ```powershell
 # Full sensitivity analysis on Cohere-1M (all sub-experiments)
@@ -267,7 +301,7 @@ Sub-experiments:
 
 ## Step 5: Reproduce Encoding Ablation
 
-**Paper section**: §5.5, Table 9 (1-bit sign vs 2-bit SM vs 2-bit SQ on Cohere-100K)
+**Legacy preprint section**: §5.5, Table 9 (1-bit sign vs 2-bit SM vs 2-bit SQ on Cohere-100K)
 
 ```bash
 cargo bench --bench bench_encoding_ablation --features ablation
@@ -281,7 +315,7 @@ This runs two phases:
 
 ## Step 6: Reproduce Cross-Dataset Boundary
 
-**Paper section**: §5.6, Table 10 & Figure 4 (applicability boundary across 12 datasets)
+**Legacy preprint section**: §5.6, Table 10 & Figure 4 (applicability boundary across 12 datasets)
 
 The main 12-dataset comparison uses `bench_sensitivity` with sub-experiment 1d (ef_search Recall-QPS curve at default m=32, ef_c=128, α=1.2).
 
@@ -317,7 +351,7 @@ The converter requires `train`, `test`, and `neighbors` datasets, verifies finit
 
 ## Step 7: Reproduce Scalability
 
-**Paper section**: §5.7, Table 11 (MSMARCO Cohere-v3 at 1M and 5M vectors)
+**Legacy preprint section**: §5.7, Table 11 (MSMARCO Cohere-v3 at 1M and 5M vectors)
 
 > Note: The 5M scalability experiment in the paper was conducted on a separate cloud server (AMD EPYC 9T24, 64 GB DDR5, Debian Linux).
 
@@ -333,7 +367,7 @@ TRIVIUM_ANN_NAME=msmarco-5m RAYON_NUM_THREADS=16 cargo bench --bench bench_coher
 
 ## Step 8: Reproduce SSD Cold/Hot Experiment
 
-**Paper section**: §4, Tables 2–3 (hot/cold memory breakdown, cold-path storage tolerance)
+**Legacy preprint section**: §4, Tables 2–3 (hot/cold memory breakdown, cold-path storage tolerance)
 
 ```bash
 # Requires administrator privileges (for page cache clearing)
@@ -350,7 +384,7 @@ cargo bench --bench bench_ssd_cold_hot --features ablation
 
 ## Step 9: Reproduce BQ2 vs RaBitQ Precision
 
-**Paper section**: Supplemental material (top-K overlap: BQ2 vs RaBitQ-sym vs RaBitQ-asym)
+**Legacy preprint section**: Supplemental material (top-K overlap: BQ2 vs RaBitQ-sym vs RaBitQ-asym)
 
 ```bash
 cargo bench --bench bench_rbq2_precision
@@ -365,7 +399,7 @@ Compares three quantization approaches on 100K Cohere vectors:
 
 ## Step 10: Reproduce Build Variance & Tail Latency
 
-**Paper section**: Supplemental material (construction variance RSD, P50/P95/P99 latency)
+**Legacy preprint section**: Supplemental material (construction variance RSD, P50/P95/P99 latency)
 
 ```bash
 cargo bench --bench bench_variance --features ablation
@@ -392,7 +426,7 @@ Runs three phases:
 | `TRIVIUM_ANN_ALPHA` | `1.2` | Main | Pruning factor |
 | `TRIVIUM_ANN_EF` | `64,128,256,512,1024` | Main | Search ef values (comma-separated) |
 | `TRIVIUM_ANN_TRAIN_LIMIT` | `full` | Main | Limit training set size and recompute exact GT |
-| `TRIVIUM_ANN_RERANK` | full ef | Main | Comma-separated rerank candidate limits |
+| `TRIVIUM_ANN_RERANK` | version-dependent | Main | Explicit candidate budgets; current SM defaults to 64, clamped to effective width and raised to cover top_k; legacy BQ used full ef |
 | `TRIVIUM_ANN_INCREMENTAL` | `100` | Main | Percentage batch-built before incremental insertion |
 | `TRIVIUM_RESULT_PATH` | unset | Main | Write build, exact-search, Recall, QPS, and latency results as JSON |
 | `TRIVIUM_EAGER_PRUNE` | unset | QuIVer construction | Set to `1` for the eager-pruning A/B path |

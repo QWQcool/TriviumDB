@@ -6,7 +6,7 @@
 //! 核心架构：
 //!   - 2-bit Sign-Magnitude 量化 (pos + strong)
 //!   - Vamana α-diversity 剪枝构图
-//!   - Symmetric 寻路 (XOR+Popcount) + f32 精排
+//!   - 默认无训练SM-L2位运算导航 + 原始向量余弦精排
 //!
 //! 设计要点：
 //!   - Bitset visited: 可复用位向量，2.5KB/20K 节点
@@ -24,6 +24,10 @@ use std::collections::BinaryHeap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
+
+/// 默认SM-L2查询内核，以及可显式选择的校正与原生欧氏模式。
+#[path = "quiver/corrected_sm.rs"]
+pub mod corrected_sm;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct NonNanF32(pub f32);
@@ -923,6 +927,10 @@ pub struct QuIVer {
 
     // Hot（常驻内存）
     bq_store: Bq2Store,
+    // 显式安装的查询校正；复用layer0，结构或向量变化后失效。
+    corrected_sm: Option<corrected_sm::CorrectedSmIndex>,
+    // 默认无训练SM-L2；增量插入追加位码，删除仅屏蔽精排，旧文件由向量池恢复。
+    default_sm: Option<corrected_sm::CorrectedSmIndex>,
     layer0: FlatAdj,
     upper_layers: Vec<Vec<Vec<u32>>>,
     node_max_layer: Vec<u8>,
@@ -1007,6 +1015,12 @@ impl QuIVer {
             ml: 1.0 / (m as f64).ln(),
             alpha: config.alpha,
             bq_store: Bq2Store::new(dim),
+            corrected_sm: None,
+            default_sm: if dim == 0 {
+                None
+            } else {
+                Some(corrected_sm::CorrectedSmIndex::empty_routing(dim).expect("合法SM维度"))
+            },
             layer0: FlatAdj::new(m0 * 2 + 1),
             upper_layers: Vec::new(),
             node_max_layer: Vec::new(),
@@ -1031,6 +1045,7 @@ impl QuIVer {
     }
 
     pub fn insert(&mut self, vector: &[f32], id: u64, slot_index: usize, lcg: &mut u64) {
+        self.corrected_sm = None;
         assert_eq!(vector.len(), self.dim);
         let idx = self.n as u32;
 
@@ -1057,6 +1072,12 @@ impl QuIVer {
         }
 
         self.n += 1;
+
+        if let Some(model) = &mut self.default_sm {
+            model
+                .push_routing_vector(vector, id)
+                .expect("插入向量必须合法");
+        }
 
         // 确保 visited bitset 够大
         self.visited.grow(self.n);
@@ -1207,6 +1228,9 @@ impl QuIVer {
         if level > self.max_level {
             self.entry_point = idx;
             self.max_level = level;
+        }
+        if let Some(model) = &mut self.default_sm {
+            model.set_routing_entry(self.entry_point);
         }
     }
 
@@ -1670,26 +1694,79 @@ impl QuIVer {
         selected
     }
 
-    /// 两阶段搜索：Symmetric BQ 寻路 + f32 按需精排（真正的冷热分离）
+    /// 两阶段搜索：默认无训练SM-L2导航 + 原始向量按需余弦精排。
     ///
     /// # 冷热分离
-    /// - **Hot（Stage 1）**：beam search 全程仅访问常驻内存的 2-bit BQ 签名与图拓扑，
-    ///   不触碰任何 f32 原始向量。
-    /// - **Cold（Stage 2）**：仅对 beam search 召回的 ~ef 个候选，通过 `get_vec_f32`
-    ///   回调按 MemTable slot 索引**按需**取回单条 f32 向量做精排。
+    /// - **Hot（Stage 1）**：默认导航访问紧凑SM位码、幅值、重建范数和图拓扑。
+    /// - **Cold（Stage 2）**：按有效精排预算通过 `get_vec_f32` 回调读取原始向量。
+    ///   未指定预算时默认为64，受候选宽度限制，并至少覆盖top_k。
+    /// - 显式校正模式可以读取锚点；显式原生L2返回负平方距离。
+    ///   尚未绑定原始向量的独立旧索引保留BQ兼容路径，数据库加载会恢复默认SM状态。
     ///
     /// `get_vec_f32(slot, buf)`：把 `slot` 对应节点的向量以 f32 写入 `buf`，
-    /// 成功返回 `true`。冷数据由调用方按需从 mmap 零拷贝读取，
-    /// 不再要求传入全量 f32 数组——这是 QuIVer 冷热分离设计的最后一块拼图。
+    /// 成功返回 `true`。调用方按需从向量池或mmap冷层读取，
+    /// 默认查询无需传入或常驻第二份全量f32数组。
     pub fn search<F>(
         &self,
         query: &[f32],
-        get_vec_f32: F,
+        mut get_vec_f32: F,
         config: &QuIVerSearchConfig,
     ) -> Vec<(u64, f32)>
     where
         F: FnMut(usize, &mut Vec<f32>) -> bool,
     {
+        if query.len() != self.dim
+            || query.iter().any(|x| !x.is_finite())
+            || self.n == 0
+            || config.top_k == 0
+        {
+            return Vec::new();
+        }
+        if let Some(model) = self.corrected_sm.as_ref().or(self.default_sm.as_ref()) {
+            let native_l2 = self.sm_native_l2_enabled();
+            let norm = query.iter().map(|&x| (x as f64).powi(2)).sum::<f64>();
+            let normalized;
+            let sm_query = if !native_l2 && norm > 0. && (norm - 1.).abs() > 1e-5 {
+                let scale = 1. / norm.sqrt();
+                normalized = query
+                    .iter()
+                    .map(|&x| (x as f64 * scale) as f32)
+                    .collect::<Vec<_>>();
+                &normalized[..]
+            } else {
+                query
+            };
+            let top_k = config.top_k.min(self.n);
+            let ef = config.ef_search.max(top_k).min(self.n);
+            // 精排预算为上限；低宽度及top_k大于64时仍使用SM，不静默回退BQ。
+            let budget = config.rerank_limit.unwrap_or(64).max(top_k).min(ef);
+            let sm_config = QuIVerSearchConfig {
+                top_k,
+                ef_search: ef,
+                rerank_limit: Some(budget),
+            };
+            let mut fill = |internal: usize, buffer: &mut Vec<f32>| {
+                !self.tombstones[internal] && get_vec_f32(self.slot_indices[internal], buffer)
+            };
+            let mut output = model.search_routed(sm_query, &self.layer0, &sm_config, &mut fill);
+            if output
+                .as_ref()
+                .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+                && self.corrected_sm_enabled()
+                && let Some(default) = &self.default_sm
+            {
+                // 属性过滤屏蔽显式校正锚点时，使用无锚点默认SM，仍保持余弦精排。
+                output = default.search_routed(sm_query, &self.layer0, &sm_config, &mut fill);
+            }
+            return match output {
+                Ok(output) => output.neighbors,
+                Err(error) => {
+                    tracing::warn!(%error, "SM查询失败，拒绝切换评分或精排度量");
+                    Vec::new()
+                }
+            };
+        }
+        // 仅缺少原始向量的独立旧sidecar仍使用BQ；数据库加载时会流式补齐SM。
         let mut scorer = BqNavigationScorer;
         self.search_with_scorer(query, get_vec_f32, config, &mut scorer)
     }
@@ -2138,6 +2215,7 @@ impl QuIVer {
     ///   - 动态扩容开销（一次性预分配）
     ///   - Visited bitset 重复分配（复用）
     pub fn batch_build(&mut self, vectors: &[f32], ids: &[u64], slot_idxs: &[usize]) {
+        self.corrected_sm = None;
         let n = ids.len();
         let dim = self.dim;
         assert_eq!(vectors.len(), n * dim);
@@ -2302,6 +2380,7 @@ impl QuIVer {
                 self.max_level = level;
             }
         }
+        self.rebuild_default_sm(vectors);
     }
 
     pub fn batch_build_experimental_v2_checked(
@@ -2329,6 +2408,8 @@ impl QuIVer {
         slot_idxs: &[usize],
         store: Bq2Store,
     ) {
+        self.corrected_sm = None;
+        self.default_sm = None;
         let n = ids.len();
         let dim = self.dim;
         assert_eq!(slot_idxs.len(), n);
@@ -2438,6 +2519,8 @@ impl QuIVer {
         slot_idxs: &[usize],
         checked: bool,
     ) {
+        self.corrected_sm = None;
+        self.default_sm = None;
         let n = ids.len();
         let dim = self.dim;
         assert_eq!(vectors.len(), n * dim);
@@ -2528,9 +2611,11 @@ impl QuIVer {
         {
             self.validate_layer0();
         }
+        self.rebuild_default_sm(vectors);
     }
 
     pub fn batch_build_experimental(&mut self, vectors: &[f32], ids: &[u64], slot_idxs: &[usize]) {
+        self.corrected_sm = None;
         let n = ids.len();
         let dim = self.dim;
         assert_eq!(vectors.len(), n * dim);
@@ -2686,6 +2771,7 @@ impl QuIVer {
                 self.max_level = level;
             }
         }
+        self.rebuild_default_sm(vectors);
     }
 
     fn validate_layer0(&self) {
@@ -2749,7 +2835,17 @@ impl QuIVer {
         QuIVerStats {
             n: self.n,
             max_level: self.max_level,
-            hot_bytes: hot_bq + hot_l0 + hot_upper,
+            hot_bytes: hot_bq
+                + hot_l0
+                + hot_upper
+                + self
+                    .corrected_sm
+                    .as_ref()
+                    .map_or(0, |model| model.routing_owned_bytes())
+                + self
+                    .default_sm
+                    .as_ref()
+                    .map_or(0, |model| model.routing_owned_bytes()),
             tombstone_count,
             dirty_count: self.dirty_count,
             avg_degree_l0: if self.n > 0 {
@@ -2821,6 +2917,7 @@ impl QuIVer {
     pub fn soft_delete(&mut self, id: u64) -> bool {
         if let Some(&idx) = self.id_to_internal.get(&id) {
             if !self.tombstones[idx as usize] {
+                self.corrected_sm = None;
                 self.tombstones[idx as usize] = true;
                 self.dirty_count += 1;
                 self.prefilter_slot_cache
@@ -3283,6 +3380,8 @@ impl QuIVer {
             ml: 1.0 / (m as f64).ln(),
             alpha,
             bq_store,
+            corrected_sm: None,
+            default_sm: None,
             layer0: FlatAdj {
                 data: l0_data,
                 stride,
@@ -3581,7 +3680,7 @@ mod tests {
     }
 
     #[test]
-    fn c1a_公开纯向量搜索与_bq_scorer_路径逐项一致() {
+    fn c1a_公开纯向量搜索使用默认_sm_l2() {
         for dim in [64, 384, 768, 1536, 3072] {
             let n = 128;
             let vectors = make_random_vectors(n, dim, 0xC1A1_0000 + dim as u64);
@@ -3607,10 +3706,24 @@ mod tests {
                 buffer.extend_from_slice(&vectors[slot * dim..(slot + 1) * dim]);
                 true
             };
-            let legacy = index.search(query, get_vector, &config);
-            let mut scorer = BqNavigationScorer;
-            let scored = index.search_with_scorer(query, get_vector, &config, &mut scorer);
-            assert_eq!(scored, legacy, "维度 {dim}");
+            assert!(index.default_sm_l2_enabled());
+            let actual = index.search(query, get_vector, &config);
+            let norm = query
+                .iter()
+                .map(|&x| (x as f64).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            let normalized = query
+                .iter()
+                .map(|&x| (x as f64 / norm) as f32)
+                .collect::<Vec<_>>();
+            let reference = index
+                .default_sm
+                .as_ref()
+                .unwrap()
+                .search_routed(&normalized, &index.layer0, &config, get_vector)
+                .unwrap();
+            assert_eq!(actual, reference.neighbors, "维度 {dim}");
         }
     }
 

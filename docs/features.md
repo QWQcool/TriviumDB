@@ -1,6 +1,6 @@
 # TriviumDB 支持特性详解
 
-> 深入剖析 TriviumDB 的架构设计、核心能力与技术实现细节。本文以 v0.8.7 当前源码和正式公共 API 为准。
+> 深入剖析 TriviumDB 的架构设计、核心能力与技术实现细节。本文以 v0.8.9 当前源码和正式公共 API 为准。
 
 ## 当前能力快照
 
@@ -144,7 +144,7 @@ TriviumDB 提供两种互斥的存储模式（`StorageMode`），且**系统支�
 
 Mmap 的能力边界必须明确：它降低启动和复制成本，但不把 SSD 变成内存。非驻留页首次访问仍需要磁盘 fault-in；当随机访问工作集超过可用 PageCache 时，可能出现持续回收、Major Fault 和尾延迟上升。`Config.memory_limit` 只约束 TDB 可估算的堆分配，不包含 mmap 映射的驻留页、OS PageCache、pagefile/swap 和其他进程占用。
 
-QuIVer 的 BQ 签名与图拓扑位于匿名堆内存，原始向量位于 mmap 冷层。前者不会作为文件 PageCache 页被直接丢弃，但在启用 swap/pagefile 的系统上仍可能被换出。TDB 不承诺超内存随机工作集下的固定 QPS；应结合查询上下文中的阶段耗时、候选数和进程/系统缺页指标持续观测。
+QuIVer 的 BQ、SM 位码与幅值、图拓扑和工作区位于匿名堆内存，原始向量位于 mmap 冷层。前者不会作为文件 PageCache 页被直接丢弃，但在启用 swap/pagefile 的系统上仍可能被换出。TDB 不承诺超内存随机工作集下的固定 QPS；应结合查询上下文中的阶段耗时、候选数和进程/系统缺页指标持续观测。
 
 ### VecPool 混合 Flush 策略
 
@@ -175,7 +175,7 @@ QuIVer 的 BQ 签名与图拓扑位于匿名堆内存，原始向量位于 mmap 
 
 持久化路径只准备磁盘格式需要的 BQ 元数据和向量块，不会隐式构建 QuIVer。自动 QuIVer 只在查询准备阶段触发，显式构建则由 `build_quiver_index()` 发起。这避免了大规模导入在定期 flush 时突然进入 CPU 密集构图。
 
-QuIVer 快照按 slot 流式读取 FP16/FP32/mmap 向量并直接编码为紧凑 `Bq2Store`，不再保留全库 `Vec<f32>`。构建前还会保守估算签名、双邻接表、ID/slot 映射和 worker bitset 峰值；设置内存预算后，超限构建会在大分配前拒绝。
+QuIVer 按 slot 流式读取 FP16/FP32/mmap 向量，准备 BQ 编码与默认 SM 状态，不常驻第二份全库 `Vec<f32>`。构建前还会保守估算 BQ/SM 状态、双邻接表、ID/slot 映射和 worker bitset 峰值；设置内存预算后，超限构建会在大分配前拒绝。
 
 ### 核心容器容量规划
 
@@ -210,7 +210,7 @@ Rom 模式仍将完整 Payload 写入单个 `.tdb`。Mmap 模式的 `.tdb` v9 �
 
 > **边持久化格式** 从 v7 起保存任意 JSON `metadata`，唯一键为 `(src, dst, label)`，重复 Upsert 原地覆盖权重与元数据。加载器继续兼容 v5/v6，旧边的元数据恢复为 `null`。BQ 元数据块仍采用从 v6 开始的自描述固定小端序布局。
 >
-> 此外，QuIVer 图索引以独立的 `.tdb.quiver` 文件存储，采用 POD memcpy 极速序列化，重启后零开销恢复。
+> QuIVer 图索引以独立的 `.tdb.quiver` 文件存储。数据库重载后从原始向量池流式恢复默认 SM 状态，无需重建图，但冷向量读取与准备时间必须计入启动成本。
 
 ### 安全写入流程
 
@@ -267,28 +267,24 @@ flat_vectors
 
 ### QuIVer ANN 图索引（冷区加速引擎，自动激活）
 
-**QuIVer**（**Qu**antized **I**ndexed **Ve**ctor **R**etrieval）是 TriviumDB 自研的 SOTA 级近似最近邻（ANN）图索引，融合 **BQ 二进制量化**与 **Vamana 图导航**，冷热分离架构：
+**QuIVer**（Quantized Index for Vector Retrieval）是自研 ANN 图索引。当前源码默认采用 **BQ 快速构图 + 无训练 SM-L2 导航 + 原始向量余弦精排**。重构版本以 **ICDE** 为投稿目标；旧预印本的纯 BQ 描述与性能数字按历史版本引用，不构成录用或当前版本性能保证。
 
-- **精确度**：近似搜索，实测 Recall@10 在 20 万规模下达 99%+
-- **激活条件**：维度不超过 3072，且节点数达到动态阈值时自动构建
-- **搜索流程**：
-  1. **BQ 签名比对**：利用 CPU 原生 `Popcount` 硬件指令，在 Vamana 图导航过程中快速计算 Hamming 距离
-  2. **Vamana 图导航**：沿着贪心最近邻路径在图中跳转，快速收敛到目标区域
-  3. **f32 余弦精排 (Re-rank)**：仅对候选集从 MemTable 按需读取 f32 原始向量做精准打分
-
-**核心优势**：
+- **激活条件**：维度在 `1..=3072` 且达到动态阈值；包含非完整尾块维度。
+- **构图与表示**：原 BQ 批量并行构图路径保留，默认查询另保存紧凑 SM 位码、幅值和重建范数。
+- **导航**：利用位计数、每向量幅值及重建范数计算平方 L2 评分，并沿图扩展；评分不是纯 Hamming 距离。
+- **精排**：普通查询仍按原始向量余弦相似度排序，按有效预算读取冷向量，最后按需 hydrate Payload。
+- **执行与维护**：SIMD/标量与尾部处理、线程工作区、增量追加和墓碑屏蔽共同维护；数据库重载时自动恢复默认 SM。
 
 | 对比 | BruteForce | QuIVer |
 |------|-----------|------|
-| 召回率 | 100% | 97%~99%+ |
-| 延迟 | 随节点数线性增长 | 图导航 O(log N)，大规模下数量级加速 |
-| 增量 Insert | 零开销 | ✅ 实时增量插入，无需重建 |
-| 增量 Delete | 零开销 | ✅ Tombstone 软删除，25% 退化自动重建 |
-| 增量 Update | 零开销 | ✅ soft_delete + incremental_insert |
-| 事务安全 | — | ✅ 分离时间线架构，零回滚开销 |
-| 持久化 | — | ✅ `.tdb.quiver` 独立文件，POD memcpy |
-| 内存布局 | 连续 f32 数组 | 冷热分离：BQ 签名(hot) + f32 向量(cold) |
-| 激活方式 | 默认 | 自动（达到 2,500–10,000 节点的维度相关阈值时构建）|
+| 召回 | 精确 Top-K | 近似，依赖数据分布、搜索宽度与精排预算 |
+| 查询工作 | 全量向量评分 | 图导航与有界精排，性能按具体工作负载测量 |
+| 增量维护 | 向量池直接更新 | Insert / Tombstone Delete / Update，并同步默认 SM 状态 |
+| 持久化 | 主数据与向量池 | `.tdb.quiver` 图文件及一致性元数据；默认 SM 重载后流式恢复 |
+| 热组件 | 扫描所需工作区 | 保留的 BQ、SM 位码/幅值、图、ID/slot 映射及线程工作区 |
+| 激活方式 | 小规模默认 | 达到 2,500–10,000 节点的维度相关阈值时构建 |
+
+默认 `QuIVerSearchConfig` 的精排预算为 64，实际受候选宽度约束，并至少覆盖 `top_k`；显式预算继续生效。低 `ef` 不会令普通默认查询静默回退 BQ。校正/锚点模式、显式原生 L2 与自定义 TSNG scorer 各有独立语义，见 [QuIVer 当前架构与实验边界](quiver.md)。该说明对应 `0.8.9` 源码（包含 `461855e` / `619dd7b`），旧发布制品须核对构建提交。
 
 ---
 
@@ -710,7 +706,7 @@ for stage, ms in ctx.timings.items():
 | `execute_pipeline()` | 管线总控 + 6 个 Hook 调用入口 |
 | `recall_text()` | L1: AC 自动机 + BM25 文本召回 |
 | `recall_vector()` | L2+L3: 向量稠密召回 + 自适应引擎路由 |
-| `quiver_pipeline()` | QuIVer ANN 图索引搜索（BQ + Vamana 图导航 + f32 精排） |
+| `quiver_pipeline()` | QuIVer ANN 图索引搜索（BQ 构图 + 默认 SM-L2 导航 + 余弦精排） |
 | `brute_force_pipeline()` | 暴力全扫管线 |
 | `recall_residual()` | L4+L5: FISTA 残差 + 影子查询 |
 | `aggregate_seeds()` | seed_map 聚合 + 排序 |

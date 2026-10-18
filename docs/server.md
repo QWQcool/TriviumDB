@@ -1,6 +1,6 @@
 # TriviumDB Server（HTTP 服务端版）
 
-> **版本**: v0.8.7 开发分支（nightly 预览）
+> **版本**: v0.8.9 源码（nightly 预览）
 > **语言**: Rust（Axum + Tokio，仅服务端 crate，嵌入式核心零依赖侵入）
 > **许可**: Apache-2.0
 
@@ -109,6 +109,7 @@ RUST_LOG=triviumdb_server=info,triviumdb=warn ./triviumdb-server
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
+| GET | `/` 或 `/ui` | 内置 Web Console 前端视窗（Navicat 风格三模管理与可视化教程） |
 | GET | `/health/live` | 纯事件循环存活探针，不获取 Database 锁 |
 | GET | `/health/ready` | Writer/read capacity 就绪状态；不可服务时返回 503 |
 | GET | `/health/details` | 脱敏运行状态、队列、读写等待和 QuIVer 预热状态 |
@@ -255,6 +256,7 @@ Writer Actor 由 supervisor 监管。异常退出会设置失败状态、关闭�
 
 ## 边界与已知限制
 
+- 内置控制台的查询、表格、JSON 与 Canvas 图视图可离线使用；WebGL、社区检测和动画按需加载 CDN，断网时回退基础显示；
 - Server 仍是 nightly，不提供协议兼容承诺；
 - 当前没有认证和 TLS；
 - NDJSON 导入是有界整请求原子导入，并非无限流式、逐批提交协议；
@@ -263,3 +265,15 @@ Writer Actor 由 supervisor 监管。异常退出会设置失败状态、关闭�
 - QuIVer 手工构建仍遵守 Core 的自动构建资格，数据量不足、已就绪或配置禁用时返回 `published: false`；
 - JSON 响应受 16 MiB 上限约束；NDJSON 只流式编码 HTTP 输出，Core 算子仍受自己的内存与查询预算约束；
 - 安装方式和跨平台二进制以 GitHub Release 的 nightly 说明为准。
+
+## 控制台浏览器回归测试
+
+安装测试工具后运行页内自检。测试启动临时本地静态服务并禁止外网请求，不连接真实数据库，也不会写入用户数据。
+
+```bash
+npm install --no-save playwright@1.62.1
+npx playwright install chromium
+node scripts/test_webui.cjs
+```
+
+已有 Chromium 时可通过 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` 指定可执行文件。测试覆盖查询交互、流式响应、虚拟表格、HTML 注入防护，以及真实边的方向、去重和并行标签。

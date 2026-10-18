@@ -1,6 +1,6 @@
 # TriviumDB 安全特性详解
 
-> 基于 v0.8.7 当前源码的完整文档，覆盖并发安全、数据完整性、格式版本门禁、预算、ReadOnly/Immutable 零写、输入验证与跨平台 I/O 加固。
+> 基于 v0.8.9 当前源码的完整文档，覆盖并发安全、数据完整性、格式版本门禁、预算、ReadOnly/Immutable 零写、输入验证与跨平台 I/O 加固。
 
 ---
 
@@ -322,7 +322,7 @@ if offset + dim <= vectors.len() {
 
 逻辑原子性保证节点、ID、generation 和 WAL 在失败后不变。Rust 容器在后续容器失败前已经成功取得的空 capacity 可能保留，但不形成可见数据。内存预算不包含 Python/NumPy、V8、其他线程和 OS Page Cache，因此不是进程 RSS 的硬上限。
 
-QuIVer 构建有独立峰值预算，并采用流式 BQ2 编码，避免 FP16 全库临时展开为 FP32。纯 `flush()` 和 compaction 不会隐式触发 ANN 构建。
+QuIVer 构建有独立峰值预算，流式准备 BQ2 与默认 SM 状态，避免 FP16 全库临时展开为 FP32。默认查询的紧凑状态与显式模式安装的临时峰值应分别核算，详见 [QuIVer 内存与重载说明](quiver.md#增量维护重载与内存)。纯 `flush()` 和 compaction 不会隐式触发 ANN 构建。
 
 查询统一受四类预算约束：QueryMemoryBudget（候选/union/精排向量/页读取字节）、TraversalBudget（visited/edges/frontier/depth）、PipelineBudget（NodeSet 节点与字节）和 QueryParallelismBudget（线程与并行阈值）。分配前检查、按阶段切片；Error 模式 fail-closed，只有显式 Partial 策略才允许带 truncated 标记返回。GraphFirst、路径、集合、图算法和聚合不得偷偷退化为无界全库执行。
 
