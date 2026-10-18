@@ -1429,6 +1429,18 @@ impl TqlParser {
     // ═══════════════════════════════════════════════════════════════
 
     fn parse_expr(&mut self) -> Result<TqlExpr, String> {
+        // 括号和 coalesce 共用递归预算，避免表达式绕过谓词等外层的深度限制。
+        self.depth += 1;
+        if self.depth > 128 {
+            self.depth -= 1;
+            return Err("解析器递归深度超过限制（表达式嵌套最多 128 层）".into());
+        }
+        let result = self.parse_expr_inner();
+        self.depth -= 1;
+        result
+    }
+
+    fn parse_expr_inner(&mut self) -> Result<TqlExpr, String> {
         let expr = self.parse_additive_expr()?;
         if !self.at(&TqlToken::Is) {
             return Ok(expr);
