@@ -126,6 +126,9 @@ jobs:
         shell: bash
         run: cargo test --target ${{ matrix.target }} --lib --tests -- --test-threads=1
 
+      - name: 运行规划器物化回归测试
+        run: cargo test --target ${{ matrix.target }} --test query --features test-hooks tql_planner -- --test-threads=1
+
       - name: 运行文档测试
         run: cargo test --target ${{ matrix.target }} --doc
 

@@ -378,6 +378,9 @@ pub struct MemTable<T: VectorType> {
 
     // 活跃 NodeId 的压缩有序集合：FullNodeScan 可惰性遍历并按 LIMIT 早停。
     active_ids: roaring::RoaringTreemap,
+    // 仅测试构建记录全库物化，生产构建没有原子计数开销。
+    #[cfg(any(test, feature = "test-hooks"))]
+    id_materializations: std::sync::atomic::AtomicU64,
 
     // 映射表：内部索引 (0, 1, 2...) 到 NodeId
     // 用于在 vectors 数组里定位数据位置
@@ -445,6 +448,8 @@ impl<T: VectorType> MemTable<T> {
             property_indexes: PropertyIndexRegistry::default(),
             fatigue_map: std::sync::RwLock::new(HashMap::new()),
             active_ids: roaring::RoaringTreemap::new(),
+            #[cfg(any(test, feature = "test-hooks"))]
+            id_materializations: std::sync::atomic::AtomicU64::new(0),
             indices_to_ids: Vec::new(),
             ids_to_indices: HashMap::new(),
             fast_tags: Vec::new(),
@@ -487,6 +492,8 @@ impl<T: VectorType> MemTable<T> {
             property_indexes: PropertyIndexRegistry::default(),
             fatigue_map: std::sync::RwLock::new(HashMap::new()),
             active_ids: roaring::RoaringTreemap::new(),
+            #[cfg(any(test, feature = "test-hooks"))]
+            id_materializations: std::sync::atomic::AtomicU64::new(0),
             indices_to_ids: Vec::new(),
             ids_to_indices: HashMap::new(),
             fast_tags: Vec::new(),
@@ -2706,7 +2713,17 @@ impl<T: VectorType> MemTable<T> {
 
     /// 返回所有活跃节点 ID，按 ID 升序。
     pub fn all_node_ids(&self) -> Vec<NodeId> {
+        #[cfg(any(test, feature = "test-hooks"))]
+        self.id_materializations
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.active_node_ids().collect()
+    }
+
+    /// 测试专用：读取全库 NodeId 物化次数。
+    #[cfg(feature = "test-hooks")]
+    pub fn id_materializations(&self) -> u64 {
+        self.id_materializations
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// 返回包含逻辑删除（tombstones）在内的完整内部 ID 阵列，

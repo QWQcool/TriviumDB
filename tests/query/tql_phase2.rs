@@ -379,7 +379,7 @@ fn 测试_EXPLAIN_优化提示() {
     let path = tmp_db("explain_opts");
     let db = build_test_db(&path);
 
-    // 聚合 + LIMIT → 应显示 aggregation + LIMIT early termination
+    // 聚合需要消费完整输入，LIMIT 只限制聚合输出，不能宣称入口提前停止。
     let results = db
         .tql_nodes("EXPLAIN MATCH (a)-[:knows]->(b) RETURN count(b) AS cnt LIMIT 10")
         .unwrap();
@@ -389,8 +389,8 @@ fn 测试_EXPLAIN_优化提示() {
     let opt_strs: Vec<&str> = opts.iter().map(|v| v.as_str().unwrap()).collect();
     assert!(opt_strs.contains(&"aggregation"), "应包含 aggregation 优化");
     assert!(
-        opt_strs.contains(&"LIMIT early termination"),
-        "应包含 LIMIT 优化"
+        !opt_strs.contains(&"LIMIT early termination"),
+        "聚合查询不应宣称 LIMIT 提前停止"
     );
     assert!(
         opt_strs.contains(&"label index pushdown"),
@@ -414,7 +414,7 @@ fn 测试_EXPLAIN_FIND入口() {
     assert_eq!(plan.get("entry").unwrap().as_str().unwrap(), "FIND");
     assert_eq!(
         plan.get("candidate_strategy").unwrap().as_str().unwrap(),
-        "cold_payload_scan"
+        "full_scan"
     );
 
     drop(db);

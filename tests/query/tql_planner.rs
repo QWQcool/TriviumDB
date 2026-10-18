@@ -304,6 +304,147 @@ fn planner_有无索引执行结果差分一致() {
     cleanup(&path);
 }
 
+#[cfg(feature = "test-hooks")]
+#[test]
+fn planner_限流与_explain_不物化无索引全集() {
+    use triviumdb::query::tql_executor::execute_tql;
+    use triviumdb::query::tql_parser::parse_tql;
+
+    let mut mt = MemTable::<f32>::new(DIM);
+    for sequence in 0..200usize {
+        mt.insert(
+            &[1.0, 0.0, 0.0, 0.0],
+            json!({"sequence": sequence, "group": sequence % 10}),
+        )
+        .unwrap();
+    }
+    let queries = [
+        "FIND {group: 1} RETURN * LIMIT 10",
+        "FIND {sequence: {$gte: 10}} RETURN * LIMIT 10",
+        "FIND {group: 1, sequence: {$gte: 10}} RETURN * LIMIT 10",
+        "FIND {$or: [{group: 1}, {group: 3}]} RETURN * LIMIT 10",
+    ];
+    for query in queries {
+        let before = mt.id_materializations();
+        assert_eq!(
+            execute_tql(&parse_tql(query).unwrap(), &mt).unwrap().len(),
+            10
+        );
+        let explained = execute_tql(&parse_tql(&format!("EXPLAIN {query}")).unwrap(), &mt).unwrap();
+        assert_eq!(
+            explained[0]["plan"].payload["access_path"]["kind"],
+            "full_node_scan"
+        );
+        assert_eq!(explained[0]["plan"].payload["total_nodes"], 200);
+        assert_eq!(
+            mt.id_materializations(),
+            before,
+            "限流与解释计划不得物化全集：{query}"
+        );
+    }
+
+    // 对照组保留公开规划器的完整候选契约，证明计数能够观测到物化。
+    let before = mt.id_materializations();
+    let full = plan_filter_with_limit(&Filter::Eq("group".into(), json!(1)), None, &mt);
+    assert_eq!(full.candidates.len(), 200);
+    assert_eq!(mt.id_materializations(), before + 1);
+
+    mt.register_bitmap_property_index("group");
+    let before = mt.id_materializations();
+    let indexed = plan_filter_with_limit(&Filter::Eq("group".into(), json!(1)), Some(10), &mt);
+    assert!(matches!(
+        indexed.access_path,
+        AccessPath::BitmapPropertyIndex { .. }
+    ));
+    assert_eq!(
+        mt.id_materializations(),
+        before,
+        "bitmap 等值查询不需要全集"
+    );
+    let complement = plan_filter_with_limit(&Filter::Ne("group".into(), json!(1)), Some(10), &mt);
+    assert_eq!(complement.candidates.len(), 180);
+    assert_eq!(
+        mt.id_materializations(),
+        before + 1,
+        "bitmap 补集只按需物化一次"
+    );
+}
+
+#[test]
+fn planner_limit_保留复合_bitmap_和_ngram_索引() {
+    let mut mt = MemTable::<f32>::new(DIM);
+    for sequence in 0..20usize {
+        mt.insert(
+            &[1.0, 0.0, 0.0, 0.0],
+            json!({"sequence": sequence, "group": sequence % 2, "text": "向量数据库测试"}),
+        )
+        .unwrap();
+    }
+    mt.register_composite_property_index(&["group".into(), "sequence".into()]);
+    let composite = plan_filter_with_limit(
+        &Filter::And(vec![
+            Filter::Eq("group".into(), json!(1)),
+            Filter::Eq("sequence".into(), json!(19)),
+        ]),
+        Some(1),
+        &mt,
+    );
+    assert!(matches!(
+        composite.access_path,
+        AccessPath::CompositePropertyIndex { .. }
+    ));
+    assert_eq!(composite.candidates.len(), 1);
+
+    mt.register_bitmap_property_index("group");
+    let bitmap = plan_filter_with_limit(&Filter::In("group".into(), vec![json!(1)]), Some(1), &mt);
+    assert!(matches!(
+        bitmap.access_path,
+        AccessPath::BitmapPropertyIndex { .. }
+    ));
+    assert_eq!(bitmap.candidates.len(), 10);
+
+    mt.register_ngram_property_index("text").unwrap();
+    let ngram = plan_filter_with_limit(
+        &Filter::Contains("text".into(), "数据库".into()),
+        Some(1),
+        &mt,
+    );
+    assert!(matches!(
+        ngram.access_path,
+        AccessPath::NgramPropertyIndex { .. }
+    ));
+    assert_eq!(ngram.candidates.len(), 20);
+}
+
+#[test]
+fn explain_limit_只对允许提前停止的查询标注优化() {
+    let (path, mut db) = build("explain_limit");
+    let scan = plan(&db, "EXPLAIN FIND {sequence: {$gte: 0}} RETURN * LIMIT 10");
+    assert_eq!(scan["access_path"]["kind"], "full_node_scan");
+    assert!(
+        scan["optimizations"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("LIMIT early termination"))
+    );
+    let sorted = plan(
+        &db,
+        "EXPLAIN FIND {sequence: {$gte: 0}} RETURN * ORDER BY _.sequence DESC LIMIT 10",
+    );
+    assert!(
+        !sorted["optimizations"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("LIMIT early termination"))
+    );
+    db.create_ordered_index("sequence").unwrap();
+    let ordered = plan(&db, "EXPLAIN FIND {sequence: {$gte: 0}} RETURN * LIMIT 10");
+    assert_eq!(ordered["access_path"]["kind"], "ordered_property_index");
+    assert_eq!(ordered["estimated_rows"], 11);
+    drop(db);
+    cleanup(&path);
+}
+
 fn canonical(
     rows: &[std::collections::HashMap<String, triviumdb::node::Node<f32>>],
 ) -> Vec<Vec<u64>> {
