@@ -1373,6 +1373,80 @@ impl<T: VectorType> MemTable<T> {
         self.quiver_index.as_ref()
     }
 
+    /// 给已构建的快速QuIVer图显式安装查询校正，系数按外部节点ID绑定。
+    /// 安装过程中只临时收集FP32向量，查询继续通过原VecPool按slot读取。
+    pub fn enable_quiver_corrected_sm(
+        &mut self,
+        coefficients: &[(NodeId, f32)],
+    ) -> std::io::Result<()> {
+        let index = self.quiver_index.as_mut().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "请先构建QuIVer快速图")
+        })?;
+        let pool = &self.vec_pool;
+        index.enable_corrected_sm_with_vectors(coefficients, |slot, buffer| {
+            if let Some(vector) = pool.get(slot) {
+                buffer.clear();
+                buffer.extend(vector.iter().map(|v| v.to_f32()));
+                true
+            } else {
+                false
+            }
+        })
+    }
+
+    /// 查询校正状态可被CRUD失效，调用方可据此决定是否重新校准。
+    pub fn quiver_corrected_sm_enabled(&self) -> bool {
+        self.quiver_index
+            .as_ref()
+            .is_some_and(QuIVer::corrected_sm_enabled)
+    }
+
+    /// 在当前快速图上安装无训练重建L2；查询只在末尾精排读取原始向量。
+    pub fn enable_quiver_sm_l2(&mut self) -> std::io::Result<()> {
+        let index = self.quiver_index.as_mut().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "请先构建QuIVer快速图")
+        })?;
+        let pool = &self.vec_pool;
+        index.enable_sm_l2_with_vectors(|slot, buffer| {
+            if let Some(vector) = pool.get(slot) {
+                buffer.clear();
+                buffer.extend(vector.iter().map(|v| v.to_f32()));
+                true
+            } else {
+                false
+            }
+        })
+    }
+
+    pub fn quiver_sm_l2_enabled(&self) -> bool {
+        self.quiver_index
+            .as_ref()
+            .is_some_and(QuIVer::sm_l2_enabled)
+    }
+
+    /// 显式原生欧氏安装；保留实际VecPool向量幅值及零向量。
+    pub fn enable_quiver_sm_native_l2(&mut self) -> std::io::Result<()> {
+        let index = self.quiver_index.as_mut().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "请先构建QuIVer快速图")
+        })?;
+        let pool = &self.vec_pool;
+        index.enable_sm_native_l2_with_vectors(|slot, buffer| {
+            if let Some(vector) = pool.get(slot) {
+                buffer.clear();
+                buffer.extend(vector.iter().map(|v| v.to_f32()));
+                true
+            } else {
+                false
+            }
+        })
+    }
+
+    pub fn quiver_sm_native_l2_enabled(&self) -> bool {
+        self.quiver_index
+            .as_ref()
+            .is_some_and(QuIVer::sm_native_l2_enabled)
+    }
+
     /// 手动构建 QuIVer BQ-native Vamana 索引
     ///
     /// 通常不需要手动调用——`ensure_vectors_cache()` 会在 N >= 10,000 时自动构建。

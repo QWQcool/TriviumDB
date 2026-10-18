@@ -25,6 +25,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+/// 显式启用的校正2-bit SM平图查询内核，默认BQ路径继续使用原实现。
+#[path = "quiver/corrected_sm.rs"]
+pub mod corrected_sm;
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct NonNanF32(pub f32);
 
@@ -923,6 +927,8 @@ pub struct QuIVer {
 
     // Hot（常驻内存）
     bq_store: Bq2Store,
+    // 显式安装的查询校正；复用layer0，结构或向量变化后失效。
+    corrected_sm: Option<corrected_sm::CorrectedSmIndex>,
     layer0: FlatAdj,
     upper_layers: Vec<Vec<Vec<u32>>>,
     node_max_layer: Vec<u8>,
@@ -1007,6 +1013,7 @@ impl QuIVer {
             ml: 1.0 / (m as f64).ln(),
             alpha: config.alpha,
             bq_store: Bq2Store::new(dim),
+            corrected_sm: None,
             layer0: FlatAdj::new(m0 * 2 + 1),
             upper_layers: Vec::new(),
             node_max_layer: Vec::new(),
@@ -1031,6 +1038,7 @@ impl QuIVer {
     }
 
     pub fn insert(&mut self, vector: &[f32], id: u64, slot_index: usize, lcg: &mut u64) {
+        self.corrected_sm = None;
         assert_eq!(vector.len(), self.dim);
         let idx = self.n as u32;
 
@@ -1684,12 +1692,43 @@ impl QuIVer {
     pub fn search<F>(
         &self,
         query: &[f32],
-        get_vec_f32: F,
+        mut get_vec_f32: F,
         config: &QuIVerSearchConfig,
     ) -> Vec<(u64, f32)>
     where
         F: FnMut(usize, &mut Vec<f32>) -> bool,
     {
+        if let Some(model) = &self.corrected_sm {
+            let native_l2 = self.sm_native_l2_enabled();
+            let norm = query.iter().map(|&x| (x as f64).powi(2)).sum::<f64>();
+            let normalized;
+            let sm_query =
+                if !native_l2 && norm.is_finite() && norm > 0. && (norm - 1.).abs() > 1e-5 {
+                    let scale = (1. / norm.sqrt()) as f32;
+                    normalized = query.iter().map(|&x| x * scale).collect::<Vec<_>>();
+                    &normalized[..]
+                } else {
+                    query
+                };
+            // 沿用原入口的精排名额语义，默认预算仍由ef与top_k决定。
+            let sm_config = QuIVerSearchConfig {
+                top_k: config.top_k.min(self.n),
+                ef_search: config.ef_search,
+                rerank_limit: Some(config.rerank_limit().min(self.n)),
+            };
+            if let Ok(output) =
+                model.search_routed(sm_query, &self.layer0, &sm_config, |internal, buffer| {
+                    get_vec_f32(self.slot_indices[internal], buffer)
+                })
+            {
+                return output.neighbors;
+            }
+            if native_l2 {
+                // 原生欧氏失败不得悄悄退回余弦精排；非法配置或向量返回空结果。
+                return Vec::new();
+            }
+            // 锚点不可读取（例如被属性过滤）或配置不适用时保留原查询语义。
+        }
         let mut scorer = BqNavigationScorer;
         self.search_with_scorer(query, get_vec_f32, config, &mut scorer)
     }
@@ -2138,6 +2177,7 @@ impl QuIVer {
     ///   - 动态扩容开销（一次性预分配）
     ///   - Visited bitset 重复分配（复用）
     pub fn batch_build(&mut self, vectors: &[f32], ids: &[u64], slot_idxs: &[usize]) {
+        self.corrected_sm = None;
         let n = ids.len();
         let dim = self.dim;
         assert_eq!(vectors.len(), n * dim);
@@ -2329,6 +2369,7 @@ impl QuIVer {
         slot_idxs: &[usize],
         store: Bq2Store,
     ) {
+        self.corrected_sm = None;
         let n = ids.len();
         let dim = self.dim;
         assert_eq!(slot_idxs.len(), n);
@@ -2438,6 +2479,7 @@ impl QuIVer {
         slot_idxs: &[usize],
         checked: bool,
     ) {
+        self.corrected_sm = None;
         let n = ids.len();
         let dim = self.dim;
         assert_eq!(vectors.len(), n * dim);
@@ -2531,6 +2573,7 @@ impl QuIVer {
     }
 
     pub fn batch_build_experimental(&mut self, vectors: &[f32], ids: &[u64], slot_idxs: &[usize]) {
+        self.corrected_sm = None;
         let n = ids.len();
         let dim = self.dim;
         assert_eq!(vectors.len(), n * dim);
@@ -2749,7 +2792,13 @@ impl QuIVer {
         QuIVerStats {
             n: self.n,
             max_level: self.max_level,
-            hot_bytes: hot_bq + hot_l0 + hot_upper,
+            hot_bytes: hot_bq
+                + hot_l0
+                + hot_upper
+                + self
+                    .corrected_sm
+                    .as_ref()
+                    .map_or(0, |model| model.routing_owned_bytes()),
             tombstone_count,
             dirty_count: self.dirty_count,
             avg_degree_l0: if self.n > 0 {
@@ -2821,6 +2870,7 @@ impl QuIVer {
     pub fn soft_delete(&mut self, id: u64) -> bool {
         if let Some(&idx) = self.id_to_internal.get(&id) {
             if !self.tombstones[idx as usize] {
+                self.corrected_sm = None;
                 self.tombstones[idx as usize] = true;
                 self.dirty_count += 1;
                 self.prefilter_slot_cache
@@ -3283,6 +3333,7 @@ impl QuIVer {
             ml: 1.0 / (m as f64).ln(),
             alpha,
             bq_store,
+            corrected_sm: None,
             layer0: FlatAdj {
                 data: l0_data,
                 stride,

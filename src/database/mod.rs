@@ -873,6 +873,80 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         Ok(())
     }
 
+    /// 在当前快速QuIVer图上安装按节点ID绑定的校正系数，不重新构图。
+    /// 校正为运行期派生状态；增删、重建和重载后需重新安装，不改变旧BQ存储格式。
+    pub fn enable_quiver_corrected_sm(&self, coefficients: &[(NodeId, f32)]) -> Result<()> {
+        self.require_write_access("enable_quiver_corrected_sm")?;
+        reject_hook_reentrant_write()?;
+        let _operation = self.enter_operation()?;
+        let mut mt = write_or_recover(&self.memtable);
+        let extra = mt
+            .quiver()
+            .map_or(0, |index| index.sm_install_peak_extra_bytes());
+        if self.memory_limit > 0
+            && mt.estimated_memory_bytes().saturating_add(extra) > self.memory_limit
+        {
+            return Err(TriviumError::InvalidInput(
+                "QuIVer校正安装预计峰值超过内核内存预算".into(),
+            ));
+        }
+        mt.enable_quiver_corrected_sm(coefficients)
+            .map_err(|error| TriviumError::InvalidInput(format!("安装QuIVer校正失败：{error}")))
+    }
+
+    /// 返回校正是否仍与当前QuIVer图匹配。
+    pub fn quiver_corrected_sm_enabled(&self) -> bool {
+        read_or_recover(&self.memtable).quiver_corrected_sm_enabled()
+    }
+
+    /// 显式安装无训练重建L2评分；运行期派生状态在写入或重载后需重新安装。
+    pub fn enable_quiver_sm_l2(&self) -> Result<()> {
+        self.require_write_access("enable_quiver_sm_l2")?;
+        reject_hook_reentrant_write()?;
+        let _operation = self.enter_operation()?;
+        let mut mt = write_or_recover(&self.memtable);
+        let extra = mt
+            .quiver()
+            .map_or(0, |index| index.sm_install_peak_extra_bytes());
+        if self.memory_limit > 0
+            && mt.estimated_memory_bytes().saturating_add(extra) > self.memory_limit
+        {
+            return Err(TriviumError::InvalidInput(
+                "QuIVer重建L2安装预计峰值超过内核内存预算".into(),
+            ));
+        }
+        mt.enable_quiver_sm_l2()
+            .map_err(|error| TriviumError::InvalidInput(format!("安装QuIVer重建L2失败：{error}")))
+    }
+
+    pub fn quiver_sm_l2_enabled(&self) -> bool {
+        read_or_recover(&self.memtable).quiver_sm_l2_enabled()
+    }
+
+    /// 显式选择原生欧氏查询，返回负平方距离；运行期模式在修改或重载后需重新安装。
+    pub fn enable_quiver_sm_native_l2(&self) -> Result<()> {
+        self.require_write_access("enable_quiver_sm_native_l2")?;
+        reject_hook_reentrant_write()?;
+        let _operation = self.enter_operation()?;
+        let mut mt = write_or_recover(&self.memtable);
+        let extra = mt
+            .quiver()
+            .map_or(0, |index| index.sm_install_peak_extra_bytes());
+        if self.memory_limit > 0
+            && mt.estimated_memory_bytes().saturating_add(extra) > self.memory_limit
+        {
+            return Err(TriviumError::InvalidInput(
+                "QuIVer原生欧氏安装预计峰值超过内核内存预算".into(),
+            ));
+        }
+        mt.enable_quiver_sm_native_l2()
+            .map_err(|error| TriviumError::InvalidInput(format!("安装QuIVer原生欧氏失败：{error}")))
+    }
+
+    pub fn quiver_sm_native_l2_enabled(&self) -> bool {
+        read_or_recover(&self.memtable).quiver_sm_native_l2_enabled()
+    }
+
     // ════════════════════════════════════════════════════════
     //  内存管理
     // ════════════════════════════════════════════════════════
