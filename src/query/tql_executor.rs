@@ -981,7 +981,7 @@ fn execute_pipeline_set<T: VectorType>(
                     Some(crate::query::cascades::PhysicalOperator::RankAlreadyOrdered)
                 ) && (disable_fusion
                     || !matches!(
-                        stage_index.checked_sub(1).and_then(&physical_stage),
+                        stage_index.checked_sub(1).and_then(physical_stage),
                         Some(crate::query::cascades::PhysicalOperator::ExpandExactRerank)
                     ))
                 {
