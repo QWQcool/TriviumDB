@@ -1,6 +1,6 @@
 # QuIVer 当前架构、研究版本与投稿状态
 
-> 更新：2026-10-18。本文描述包含 `461855e`、`619dd7b` 的源码实现。现有发布包即使也标为 `0.8.8`，也不代表包含这些尚未进入正式发布的变更；复现时必须记录 Git commit 和构建来源。
+> 更新：2026-10-18。本文描述 `0.8.9` 源码，包含 `461855e`、`619dd7b` 的 SM-L2 重构。旧 `0.8.8` 发布包不包含这些变更；复现时必须记录版本、Git commit 和构建来源。
 
 QuIVer 重构版本当前以 **ICDE 为投稿目标**。目标会议不代表已经投稿、录用或发表；不得将历史 VLDB 投稿稿件、旧 arXiv 预印本或模板中的卷期占位符写成正式发表记录。[旧预印本](https://arxiv.org/abs/2605.02171)继续作为历史方法与实验的引用，不能替代当前实现的版本说明。
 
@@ -60,7 +60,7 @@ QuIVer 重构版本当前以 **ICDE 为投稿目标**。目标会议不代表已
 
 ## 检查与复现入口
 
-源码入口：[QuIVer 构图与查询路由](../src/index/quiver.rs)、[SM 查询内核](../src/index/quiver/corrected_sm.rs)、[数据库生命周期](../src/database.rs)。
+源码入口：[QuIVer 构图与查询路由](../src/index/quiver.rs)、[SM 查询内核](../src/index/quiver/corrected_sm.rs)、[数据库生命周期](../src/database/mod.rs)。
 
 ```bash
 cargo test --lib index::quiver::corrected_sm::production_tests

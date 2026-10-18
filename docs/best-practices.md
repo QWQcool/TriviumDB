@@ -65,7 +65,7 @@ cargo add triviumdb
 
 ```toml
 [dependencies]
-triviumdb = "0.8.7"
+triviumdb = "0.8.9"
 ```
 
 ### 30 秒入门模板
@@ -741,7 +741,7 @@ with triviumdb.TriviumDB("knowledge_v2.tdb", dim=NEW_DIM) as new_db:
 
 TriviumDB 使用自研的 **QuIVer**（Quantized Index for Vector Retrieval）ANN 图索引。常规查询会按配置和数据规模自动选择、构建与维护索引；Rust Core 也提供显式 `build_quiver_index()`，nightly Server 提供 `/v1/indexes/quiver` 管理入口。显式构建仍受访问模式、维度、generation 和内存预算约束。
 
-本节描述包含 `461855e` / `619dd7b` 的当前源码；现有发布包即使同为 `0.8.8` 也须核对构建提交。QuIVer 重构以 **ICDE** 为投稿目标，旧预印本的数字不直接代表新内核。架构、模式和复现边界统一见 [QuIVer 说明](quiver.md)。
+本节描述 `0.8.9` 源码（包含 `461855e` / `619dd7b`）；旧 `0.8.8` 发布包不含这些变更。QuIVer 重构以 **ICDE** 为投稿目标，旧预印本的数字不直接代表新内核。架构、模式和复现边界统一见 [QuIVer 说明](quiver.md)。
 
 普通 QuIVer 向量查询默认使用无训练 **SM-L2**：以两位重建向量的平方L2评分导航，最终从原始向量计算余弦相似度。支持1–3072维及非完整尾块，无需调用 `enable_quiver_sm_l2()`。构图仍使用原BQ规则，搜索召回取决于数据和预算。
 

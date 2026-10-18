@@ -1,6 +1,6 @@
 # QuIVer — Implementation and Experiment Guide
 
-> **Updated**: 2026-10-18. Current implementation means source containing `461855e` and `619dd7b`; existing `0.8.8` binaries may predate these commits. Record the evaluated Git revision and build identity.
+> **Updated**: 2026-10-18. Current implementation means `0.8.9` source containing `461855e` and `619dd7b`; earlier `0.8.8` packages do not include these changes. Record the evaluated version, Git revision, and build identity.
 >
 > **Submission target**: **ICDE** for the rebuilt version. This is not an acceptance, proceedings, or publication claim.
 >
