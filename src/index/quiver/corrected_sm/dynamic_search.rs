@@ -42,7 +42,7 @@ impl CorrectedSmIndex {
         let query_norm =
             (self.dimension() as f32 - sq.count) * sq.weak * sq.weak + sq.count * high * high;
         let first = 1.
-            - self.dynamic_navigation_score(&sq, self.entry as usize, error, query_norm, optimized);
+            - self.dynamic_navigation_score(sq, self.entry as usize, error, query_norm, optimized);
         if !first.is_finite() || !anchor.is_finite() {
             return Err(invalid("SM查询分数溢出"));
         }
@@ -77,107 +77,109 @@ impl CorrectedSmIndex {
                 }
                 let neighbors = graph.neighbors(u);
                 counts[3] += neighbors.len();
-                let mut ids = [0u32; MAX_DEGREE];
-                let mut values = [0f32; MAX_DEGREE];
-                let mut len = 0;
-                if optimized {
-                    for &v in neighbors {
-                        if visited.test(v as usize) {
-                            continue;
-                        }
-                        visited.set(v as usize);
-                        ids[len] = v;
-                        len += 1;
-                        self.dynamic_prefetch(v as usize);
-                        if TRACE {
-                            trace.scored.push(v);
-                        }
-                    }
-                    // 保留已验证组合的四候选评分顺序，整批预取后再访问模型。
-                    let mut j = 0;
-                    while j + 4 <= len {
-                        values[j] = self.dynamic_navigation_score(
-                            &sq,
-                            ids[j] as usize,
-                            error,
-                            query_norm,
-                            true,
-                        );
-                        values[j + 1] = self.dynamic_navigation_score(
-                            &sq,
-                            ids[j + 1] as usize,
-                            error,
-                            query_norm,
-                            true,
-                        );
-                        values[j + 2] = self.dynamic_navigation_score(
-                            &sq,
-                            ids[j + 2] as usize,
-                            error,
-                            query_norm,
-                            true,
-                        );
-                        values[j + 3] = self.dynamic_navigation_score(
-                            &sq,
-                            ids[j + 3] as usize,
-                            error,
-                            query_norm,
-                            true,
-                        );
-                        j += 4;
-                    }
-                    while j < len {
-                        values[j] = self.dynamic_navigation_score(
-                            &sq,
-                            ids[j] as usize,
-                            error,
-                            query_norm,
-                            true,
-                        );
-                        j += 1;
-                    }
-                    counts[1] += len;
-                    // 检查整批分数，所有候选仍执行有限值校验。
-                    let invalid_score = values[..len]
-                        .iter()
-                        .fold(false, |invalid, value| invalid | !value.is_finite());
-                    if invalid_score {
-                        return Err(invalid("SM候选分数溢出"));
-                    }
-                } else {
-                    for &v in neighbors {
-                        if !visited.test(v as usize) {
+                for neighbors in neighbors.chunks(MAX_DEGREE) {
+                    let mut ids = [0u32; MAX_DEGREE];
+                    let mut values = [0f32; MAX_DEGREE];
+                    let mut len = 0;
+                    if optimized {
+                        for &v in neighbors {
+                            if visited.test(v as usize) {
+                                continue;
+                            }
+                            visited.set(v as usize);
+                            ids[len] = v;
+                            len += 1;
                             self.dynamic_prefetch(v as usize);
+                            if TRACE {
+                                trace.scored.push(v);
+                            }
                         }
-                    }
-                }
-                let iteration = if optimized { &ids[..len] } else { neighbors };
-                for (j, &v) in iteration.iter().enumerate() {
-                    let value = if optimized {
-                        values[j]
+                        // 保留已验证组合的四候选评分顺序，整批预取后再访问模型。
+                        let mut j = 0;
+                        while j + 4 <= len {
+                            values[j] = self.dynamic_navigation_score(
+                                sq,
+                                ids[j] as usize,
+                                error,
+                                query_norm,
+                                true,
+                            );
+                            values[j + 1] = self.dynamic_navigation_score(
+                                sq,
+                                ids[j + 1] as usize,
+                                error,
+                                query_norm,
+                                true,
+                            );
+                            values[j + 2] = self.dynamic_navigation_score(
+                                sq,
+                                ids[j + 2] as usize,
+                                error,
+                                query_norm,
+                                true,
+                            );
+                            values[j + 3] = self.dynamic_navigation_score(
+                                sq,
+                                ids[j + 3] as usize,
+                                error,
+                                query_norm,
+                                true,
+                            );
+                            j += 4;
+                        }
+                        while j < len {
+                            values[j] = self.dynamic_navigation_score(
+                                sq,
+                                ids[j] as usize,
+                                error,
+                                query_norm,
+                                true,
+                            );
+                            j += 1;
+                        }
+                        counts[1] += len;
+                        // 检查整批分数，所有候选仍执行有限值校验。
+                        let invalid_score = values[..len]
+                            .iter()
+                            .fold(false, |invalid, value| invalid | !value.is_finite());
+                        if invalid_score {
+                            return Err(invalid("SM候选分数溢出"));
+                        }
                     } else {
-                        if visited.test(v as usize) {
-                            continue;
+                        for &v in neighbors {
+                            if !visited.test(v as usize) {
+                                self.dynamic_prefetch(v as usize);
+                            }
                         }
-                        visited.set(v as usize);
-                        counts[1] += 1;
-                        if TRACE {
-                            trace.scored.push(v);
-                        }
-                        self.dynamic_navigation_score(&sq, v as usize, error, query_norm, false)
-                    };
-                    if !optimized && !value.is_finite() {
-                        return Err(invalid("SM候选分数溢出"));
                     }
-                    let next = NonNanF32(1. - value);
-                    if st.results.len() < ef || next < st.results.peek().unwrap().0 {
-                        st.queue.push(Reverse((next, v)));
-                        if optimized && st.results.len() == ef {
-                            *st.results.peek_mut().unwrap() = (next, v);
+                    let iteration = if optimized { &ids[..len] } else { neighbors };
+                    for (j, &v) in iteration.iter().enumerate() {
+                        let value = if optimized {
+                            values[j]
                         } else {
-                            st.results.push((next, v));
-                            if st.results.len() > ef {
-                                st.results.pop();
+                            if visited.test(v as usize) {
+                                continue;
+                            }
+                            visited.set(v as usize);
+                            counts[1] += 1;
+                            if TRACE {
+                                trace.scored.push(v);
+                            }
+                            self.dynamic_navigation_score(sq, v as usize, error, query_norm, false)
+                        };
+                        if !optimized && !value.is_finite() {
+                            return Err(invalid("SM候选分数溢出"));
+                        }
+                        let next = NonNanF32(1. - value);
+                        if st.results.len() < ef || next < st.results.peek().unwrap().0 {
+                            st.queue.push(Reverse((next, v)));
+                            if optimized && st.results.len() == ef {
+                                *st.results.peek_mut().unwrap() = (next, v);
+                            } else {
+                                st.results.push((next, v));
+                                if st.results.len() > ef {
+                                    st.results.pop();
+                                }
                             }
                         }
                     }
@@ -185,6 +187,8 @@ impl CorrectedSmIndex {
             }
             st.candidates.extend(st.results.drain());
             st.candidates.sort_unstable();
+            #[cfg(feature = "test-hooks")]
+            crate::test_hooks::hit(crate::test_hooks::ConcurrencyPoint::QuiverCandidateProduced);
             if TRACE {
                 trace.candidates.extend(st.candidates.iter().map(|x| x.1));
             }
@@ -192,17 +196,20 @@ impl CorrectedSmIndex {
                 st.exact.push((self.anchor, anchor));
             }
             for &(_, v) in &st.candidates {
-                if st.exact_ids.len() >= budget - usize::from(uses_anchor) {
-                    break;
-                }
                 if !uses_anchor || v != self.anchor {
                     st.exact_ids.push(v);
                 }
             }
+            #[cfg(feature = "test-hooks")]
+            crate::test_hooks::hit(crate::test_hooks::ConcurrencyPoint::BeforeVectorRerank);
             let mut j = 0;
             let count = st.exact_ids.len();
-            while j < count {
-                if optimized && j + 4 <= count && dot_simd_available() {
+            while j < count && st.exact.len() < budget {
+                if optimized
+                    && j + 4 <= count
+                    && budget - st.exact.len() >= 4
+                    && dot_simd_available()
+                {
                     let values =
                         source.four(q, std::array::from_fn(|k| st.exact_ids[j + k] as usize))?;
                     for k in 0..4 {

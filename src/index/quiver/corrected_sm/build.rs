@@ -86,7 +86,7 @@ impl CorrectedSmIndex {
             || config.seed == 0
             || (!coefficients.is_empty() && coefficients.len() != n)
             || !coefficients.iter().all(|x| x.is_finite())
-            || base.chunks_exact(DIM).any(|row| {
+            || base.as_chunks::<DIM>().0.iter().any(|row| {
                 row.iter().any(|x| !x.is_finite())
                     || row.iter().map(|&x| x as f64 * x as f64).sum::<f64>() > 1.01
             })
@@ -180,7 +180,9 @@ struct GcMetric {
 impl GcMetric {
     fn new(base: &[f32], bits: usize) -> Self {
         let codes = base
-            .chunks_exact(768)
+            .as_chunks::<768>()
+            .0
+            .iter()
             .map(|x| {
                 let signature = Bq2Signature::from_vector(x);
                 let mut means = [0.; 2];

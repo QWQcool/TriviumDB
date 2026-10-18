@@ -6,7 +6,7 @@
 //! 核心架构：
 //!   - 2-bit Sign-Magnitude 量化 (pos + strong)
 //!   - Vamana α-diversity 剪枝构图
-//!   - Symmetric 寻路 (XOR+Popcount) + f32 精排
+//!   - 默认无训练SM-L2位运算导航 + 原始向量余弦精排
 //!
 //! 设计要点：
 //!   - Bitset visited: 可复用位向量，2.5KB/20K 节点
@@ -25,7 +25,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-/// 显式启用的校正2-bit SM平图查询内核，默认BQ路径继续使用原实现。
+/// 默认SM-L2查询内核，以及可显式选择的校正与原生欧氏模式。
 #[path = "quiver/corrected_sm.rs"]
 pub mod corrected_sm;
 
@@ -929,6 +929,8 @@ pub struct QuIVer {
     bq_store: Bq2Store,
     // 显式安装的查询校正；复用layer0，结构或向量变化后失效。
     corrected_sm: Option<corrected_sm::CorrectedSmIndex>,
+    // 默认无训练SM-L2；增量插入追加位码，删除仅屏蔽精排，旧文件由向量池恢复。
+    default_sm: Option<corrected_sm::CorrectedSmIndex>,
     layer0: FlatAdj,
     upper_layers: Vec<Vec<Vec<u32>>>,
     node_max_layer: Vec<u8>,
@@ -1014,6 +1016,11 @@ impl QuIVer {
             alpha: config.alpha,
             bq_store: Bq2Store::new(dim),
             corrected_sm: None,
+            default_sm: if dim == 0 {
+                None
+            } else {
+                Some(corrected_sm::CorrectedSmIndex::empty_routing(dim).expect("合法SM维度"))
+            },
             layer0: FlatAdj::new(m0 * 2 + 1),
             upper_layers: Vec::new(),
             node_max_layer: Vec::new(),
@@ -1065,6 +1072,12 @@ impl QuIVer {
         }
 
         self.n += 1;
+
+        if let Some(model) = &mut self.default_sm {
+            model
+                .push_routing_vector(vector, id)
+                .expect("插入向量必须合法");
+        }
 
         // 确保 visited bitset 够大
         self.visited.grow(self.n);
@@ -1215,6 +1228,9 @@ impl QuIVer {
         if level > self.max_level {
             self.entry_point = idx;
             self.max_level = level;
+        }
+        if let Some(model) = &mut self.default_sm {
+            model.set_routing_entry(self.entry_point);
         }
     }
 
@@ -1698,37 +1714,58 @@ impl QuIVer {
     where
         F: FnMut(usize, &mut Vec<f32>) -> bool,
     {
-        if let Some(model) = &self.corrected_sm {
+        if query.len() != self.dim
+            || query.iter().any(|x| !x.is_finite())
+            || self.n == 0
+            || config.top_k == 0
+        {
+            return Vec::new();
+        }
+        if let Some(model) = self.corrected_sm.as_ref().or(self.default_sm.as_ref()) {
             let native_l2 = self.sm_native_l2_enabled();
             let norm = query.iter().map(|&x| (x as f64).powi(2)).sum::<f64>();
             let normalized;
-            let sm_query =
-                if !native_l2 && norm.is_finite() && norm > 0. && (norm - 1.).abs() > 1e-5 {
-                    let scale = (1. / norm.sqrt()) as f32;
-                    normalized = query.iter().map(|&x| x * scale).collect::<Vec<_>>();
-                    &normalized[..]
-                } else {
-                    query
-                };
-            // 沿用原入口的精排名额语义，默认预算仍由ef与top_k决定。
-            let sm_config = QuIVerSearchConfig {
-                top_k: config.top_k.min(self.n),
-                ef_search: config.ef_search,
-                rerank_limit: Some(config.rerank_limit().min(self.n)),
+            let sm_query = if !native_l2 && norm > 0. && (norm - 1.).abs() > 1e-5 {
+                let scale = 1. / norm.sqrt();
+                normalized = query
+                    .iter()
+                    .map(|&x| (x as f64 * scale) as f32)
+                    .collect::<Vec<_>>();
+                &normalized[..]
+            } else {
+                query
             };
-            if let Ok(output) =
-                model.search_routed(sm_query, &self.layer0, &sm_config, |internal, buffer| {
-                    get_vec_f32(self.slot_indices[internal], buffer)
-                })
+            let top_k = config.top_k.min(self.n);
+            let ef = config.ef_search.max(top_k).min(self.n);
+            // 精排预算为上限；低宽度及top_k大于64时仍使用SM，不静默回退BQ。
+            let budget = config.rerank_limit.unwrap_or(64).max(top_k).min(ef);
+            let sm_config = QuIVerSearchConfig {
+                top_k,
+                ef_search: ef,
+                rerank_limit: Some(budget),
+            };
+            let mut fill = |internal: usize, buffer: &mut Vec<f32>| {
+                !self.tombstones[internal] && get_vec_f32(self.slot_indices[internal], buffer)
+            };
+            let mut output = model.search_routed(sm_query, &self.layer0, &sm_config, &mut fill);
+            if output
+                .as_ref()
+                .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+                && self.corrected_sm_enabled()
+                && let Some(default) = &self.default_sm
             {
-                return output.neighbors;
+                // 属性过滤屏蔽显式校正锚点时，使用无锚点默认SM，仍保持余弦精排。
+                output = default.search_routed(sm_query, &self.layer0, &sm_config, &mut fill);
             }
-            if native_l2 {
-                // 原生欧氏失败不得悄悄退回余弦精排；非法配置或向量返回空结果。
-                return Vec::new();
-            }
-            // 锚点不可读取（例如被属性过滤）或配置不适用时保留原查询语义。
+            return match output {
+                Ok(output) => output.neighbors,
+                Err(error) => {
+                    tracing::warn!(%error, "SM查询失败，拒绝切换评分或精排度量");
+                    Vec::new()
+                }
+            };
         }
+        // 仅缺少原始向量的独立旧sidecar仍使用BQ；数据库加载时会流式补齐SM。
         let mut scorer = BqNavigationScorer;
         self.search_with_scorer(query, get_vec_f32, config, &mut scorer)
     }
@@ -2342,6 +2379,7 @@ impl QuIVer {
                 self.max_level = level;
             }
         }
+        self.rebuild_default_sm(vectors);
     }
 
     pub fn batch_build_experimental_v2_checked(
@@ -2370,6 +2408,7 @@ impl QuIVer {
         store: Bq2Store,
     ) {
         self.corrected_sm = None;
+        self.default_sm = None;
         let n = ids.len();
         let dim = self.dim;
         assert_eq!(slot_idxs.len(), n);
@@ -2480,6 +2519,7 @@ impl QuIVer {
         checked: bool,
     ) {
         self.corrected_sm = None;
+        self.default_sm = None;
         let n = ids.len();
         let dim = self.dim;
         assert_eq!(vectors.len(), n * dim);
@@ -2570,6 +2610,7 @@ impl QuIVer {
         {
             self.validate_layer0();
         }
+        self.rebuild_default_sm(vectors);
     }
 
     pub fn batch_build_experimental(&mut self, vectors: &[f32], ids: &[u64], slot_idxs: &[usize]) {
@@ -2729,6 +2770,7 @@ impl QuIVer {
                 self.max_level = level;
             }
         }
+        self.rebuild_default_sm(vectors);
     }
 
     fn validate_layer0(&self) {
@@ -2797,6 +2839,10 @@ impl QuIVer {
                 + hot_upper
                 + self
                     .corrected_sm
+                    .as_ref()
+                    .map_or(0, |model| model.routing_owned_bytes())
+                + self
+                    .default_sm
                     .as_ref()
                     .map_or(0, |model| model.routing_owned_bytes()),
             tombstone_count,
@@ -3334,6 +3380,7 @@ impl QuIVer {
             alpha,
             bq_store,
             corrected_sm: None,
+            default_sm: None,
             layer0: FlatAdj {
                 data: l0_data,
                 stride,
@@ -3632,7 +3679,7 @@ mod tests {
     }
 
     #[test]
-    fn c1a_公开纯向量搜索与_bq_scorer_路径逐项一致() {
+    fn c1a_公开纯向量搜索使用默认_sm_l2() {
         for dim in [64, 384, 768, 1536, 3072] {
             let n = 128;
             let vectors = make_random_vectors(n, dim, 0xC1A1_0000 + dim as u64);
@@ -3658,10 +3705,24 @@ mod tests {
                 buffer.extend_from_slice(&vectors[slot * dim..(slot + 1) * dim]);
                 true
             };
-            let legacy = index.search(query, get_vector, &config);
-            let mut scorer = BqNavigationScorer;
-            let scored = index.search_with_scorer(query, get_vector, &config, &mut scorer);
-            assert_eq!(scored, legacy, "维度 {dim}");
+            assert!(index.default_sm_l2_enabled());
+            let actual = index.search(query, get_vector, &config);
+            let norm = query
+                .iter()
+                .map(|&x| (x as f64).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            let normalized = query
+                .iter()
+                .map(|&x| (x as f64 / norm) as f32)
+                .collect::<Vec<_>>();
+            let reference = index
+                .default_sm
+                .as_ref()
+                .unwrap()
+                .search_routed(&normalized, &index.layer0, &config, get_vector)
+                .unwrap();
+            assert_eq!(actual, reference.neighbors, "维度 {dim}");
         }
     }
 

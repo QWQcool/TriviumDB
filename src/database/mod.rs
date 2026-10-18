@@ -899,15 +899,19 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         read_or_recover(&self.memtable).quiver_corrected_sm_enabled()
     }
 
-    /// 显式安装无训练重建L2评分；运行期派生状态在写入或重载后需重新安装。
+    /// 恢复默认无训练SM-L2；新构图、增量写入及数据库重载均自动维护默认状态。
     pub fn enable_quiver_sm_l2(&self) -> Result<()> {
         self.require_write_access("enable_quiver_sm_l2")?;
         reject_hook_reentrant_write()?;
         let _operation = self.enter_operation()?;
         let mut mt = write_or_recover(&self.memtable);
-        let extra = mt
-            .quiver()
-            .map_or(0, |index| index.sm_install_peak_extra_bytes());
+        let extra = mt.quiver().map_or(0, |index| {
+            if index.default_sm_ready() {
+                0
+            } else {
+                index.sm_install_peak_extra_bytes()
+            }
+        });
         if self.memory_limit > 0
             && mt.estimated_memory_bytes().saturating_add(extra) > self.memory_limit
         {

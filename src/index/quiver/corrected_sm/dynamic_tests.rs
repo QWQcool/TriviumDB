@@ -206,7 +206,7 @@ fn dynamic_trace_budget_callback_and_workspace_reuse_are_exact() {
                     true
                 })
                 .unwrap();
-            assert_eq!(missing.counts[4], budget - 1);
+            assert_eq!(missing.counts[4], budget.min(cfg.ef_search - 1));
             assert!(
                 m.search_with_vectors(q, &cfg, SmSearchMode::Combined, |_, out| {
                     out.push(1.);
@@ -314,7 +314,7 @@ fn real_database_routes_generic_dimensions_and_invalidates_after_mutation() {
         assert_eq!(hits[0].id, 24);
         assert!((hits[0].score - 1.).abs() < 1e-5);
         db.insert(&base[..dim], serde_json::json!({})).unwrap();
-        assert!(!db.quiver_sm_l2_enabled());
+        assert!(db.quiver_sm_l2_enabled(), "写入后继续使用默认SM-L2");
         drop(db);
         std::fs::remove_dir_all(dir).unwrap();
     }

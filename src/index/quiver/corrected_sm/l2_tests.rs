@@ -5,7 +5,7 @@ fn fixture(n: usize) -> Vec<f32> {
     let mut x = (0..n * DIM)
         .map(|j| ((j.wrapping_mul(7919) % 997) as f32 - 498.) / 16000.)
         .collect::<Vec<_>>();
-    for row in x.chunks_exact_mut(DIM) {
+    for row in x.as_chunks_mut::<DIM>().0.iter_mut() {
         let norm = row.iter().map(|&v| (v as f64).powi(2)).sum::<f64>().sqrt();
         for v in row {
             *v = (*v as f64 / norm) as f32;
@@ -93,7 +93,9 @@ fn l2_threads_reproduce_single_thread_outputs() {
         rerank_limit: Some(32),
     };
     let expected = base
-        .chunks_exact(DIM)
+        .as_chunks::<DIM>()
+        .0
+        .iter()
         .take(32)
         .map(|q| {
             model
@@ -126,7 +128,7 @@ fn l2_memtable_slot_mapping_normalization_and_invalidation() {
     let base = fixture(128);
     let mut mt = crate::storage::memtable::MemTable::<f32>::new(DIM);
     mt.set_auto_build_quiver(false);
-    for row in base.chunks_exact(DIM) {
+    for row in base.as_chunks::<DIM>().0.iter() {
         mt.insert(
             &row.iter().map(|v| v * 3.).collect::<Vec<_>>(),
             serde_json::json!({}),
@@ -165,7 +167,7 @@ fn l2_memtable_slot_mapping_normalization_and_invalidation() {
     assert_eq!(hits[0].0, 48);
     assert!((hits[0].1 - 1.).abs() < 1e-5);
     mt.insert(&base[..DIM], serde_json::json!({})).unwrap();
-    assert!(!mt.quiver_sm_l2_enabled());
+    assert!(mt.quiver_sm_l2_enabled(), "写入后继续使用默认SM-L2");
 }
 #[test]
 fn l2_database_public_api_is_runtime_only_and_reload_does_not_guess_mode() {
@@ -188,7 +190,7 @@ fn l2_database_public_api_is_runtime_only_and_reload_does_not_guess_mode() {
         },
     )
     .unwrap();
-    for row in base.chunks_exact(DIM) {
+    for row in base.as_chunks::<DIM>().0.iter() {
         db.insert(row, serde_json::json!({})).unwrap();
     }
     db.build_quiver_index(Some(super::super::QuIVerConfig {
@@ -242,7 +244,7 @@ fn l2_inline_norm_preserves_legacy_scores_and_owned_memory() {
         assert_eq!(row.reconstructed_norm.to_bits(), legacy_norms[i].to_bits());
         assert_eq!(row.coefficient.to_bits(), coefficients[i].to_bits());
     }
-    for query in base.chunks_exact(DIM).step_by(13) {
+    for query in base.as_chunks::<DIM>().0.iter().step_by(13) {
         let q = query_scalar(query);
         let high = q.weak + q.delta;
         let norm = (DIM as f32 - q.count) * q.weak * q.weak + q.count * high * high;

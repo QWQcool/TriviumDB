@@ -313,6 +313,7 @@ pub(crate) struct QuiverBuildSnapshot {
     pub signatures: Bq2Store,
     pub ids: Vec<u64>,
     pub slots: Vec<usize>,
+    pub sm: crate::index::quiver::corrected_sm::CorrectedSmIndex,
 }
 
 type CrossModalCacheKey = (String, Vec<u8>);
@@ -1253,10 +1254,16 @@ impl<T: VectorType> MemTable<T> {
                 + 24,
         );
         let worker_bitsets = nodes.div_ceil(8).saturating_mul(64);
+        // SM位码按64字节行对齐，包含外部ID与精排归一化比例；不保存FP32副本。
+        let sm_stride = (chunks.saturating_mul(2).saturating_add(3))
+            .div_ceil(8)
+            .saturating_mul(64);
+        let sm_rows = nodes.saturating_mul(sm_stride.saturating_add(12));
         signatures
             .saturating_add(adjacency)
             .saturating_add(mappings)
             .saturating_add(worker_bitsets)
+            .saturating_add(sm_rows)
     }
 
     /// 仅准备持久化需要的 BQ 与连续向量缓存，不触发 ANN 构建。
@@ -1355,8 +1362,19 @@ impl<T: VectorType> MemTable<T> {
     }
 
     /// 从持久化文件恢复 QuIVer 索引（跳过重建）
-    pub fn set_quiver_index(&mut self, quiver: QuIVer) {
+    pub fn set_quiver_index(&mut self, mut quiver: QuIVer) {
         if self.dim <= crate::index::bq::MAX_BQ_DIM {
+            if let Err(error) = quiver.prepare_default_sm(|slot, buffer| {
+                if let Some(vector) = self.vec_pool.get(slot) {
+                    buffer.extend(vector.iter().map(|v| v.to_f32()));
+                    true
+                } else {
+                    false
+                }
+            }) {
+                tracing::warn!(%error, "旧QuIVer索引SM恢复失败，拒绝发布失配索引");
+                return;
+            }
             self.quiver_index = Some(quiver);
         }
     }
@@ -1401,7 +1419,7 @@ impl<T: VectorType> MemTable<T> {
             .is_some_and(QuIVer::corrected_sm_enabled)
     }
 
-    /// 在当前快速图上安装无训练重建L2；查询只在末尾精排读取原始向量。
+    /// 恢复当前图的默认无训练重建L2；查询只在末尾精排读取原始向量。
     pub fn enable_quiver_sm_l2(&mut self) -> std::io::Result<()> {
         let index = self.quiver_index.as_mut().ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::InvalidInput, "请先构建QuIVer快速图")
@@ -1487,11 +1505,18 @@ impl<T: VectorType> MemTable<T> {
         signatures.reserve(self.payloads.len());
         let mut ids = Vec::with_capacity(self.payloads.len());
         let mut slots = Vec::with_capacity(self.payloads.len());
+        let mut sm =
+            crate::index::quiver::corrected_sm::CorrectedSmIndex::empty_routing(self.dim).ok()?;
+        sm.reserve_routing(self.payloads.len());
+        let mut buffer = Vec::with_capacity(self.dim);
         for (slot, &node_id) in self.indices_to_ids.iter().enumerate() {
             if node_id == 0 || !self.payloads.contains_key(&node_id) {
                 continue;
             }
             if let Some(vector) = self.vec_pool.get(slot) {
+                buffer.clear();
+                buffer.extend(vector.iter().map(|v| v.to_f32()));
+                sm.push_routing_vector(&buffer, node_id).ok()?;
                 signatures.push_from_vector(vector);
                 ids.push(node_id);
                 slots.push(slot);
@@ -1503,6 +1528,7 @@ impl<T: VectorType> MemTable<T> {
             signatures,
             ids,
             slots,
+            sm,
         })
     }
 
@@ -1514,6 +1540,7 @@ impl<T: VectorType> MemTable<T> {
         crate::test_hooks::hit(crate::test_hooks::ConcurrencyPoint::QuiverBuildStarted);
         let mut index = QuIVer::new(snapshot.dim, config);
         index.batch_build_from_store(&snapshot.ids, &snapshot.slots, snapshot.signatures);
+        index.set_default_sm(snapshot.sm);
         index
     }
 

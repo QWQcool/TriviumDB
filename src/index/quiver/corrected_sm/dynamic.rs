@@ -24,7 +24,7 @@ pub(super) struct DynamicSm {
 }
 
 impl DynamicSm {
-    fn empty(dim: usize, n: usize) -> io::Result<Self> {
+    pub(super) fn empty(dim: usize, n: usize) -> io::Result<Self> {
         check_dimension(dim)?;
         let words = dim.div_ceil(64);
         let blocks_per_row = (words * 2 + 3).div_ceil(8);
@@ -54,6 +54,48 @@ impl DynamicSm {
     }
     pub(super) fn owned_bytes(&self) -> usize {
         self.data.capacity() * 64
+    }
+
+    pub(super) fn reserve_rows(&mut self, n: usize) {
+        self.data.reserve(n * self.blocks_per_row);
+    }
+
+    pub(super) fn push_vector(&mut self, x: &[f32]) -> io::Result<()> {
+        let code = Bq2Signature::from_vector(x);
+        let mut sums = [0f64; 2];
+        let mut counts = [0usize; 2];
+        for (j, &v) in x.iter().enumerate() {
+            let group = ((code.strong[j / 64] >> (j % 64)) & 1) as usize;
+            sums[group] += v.abs() as f64;
+            counts[group] += 1;
+        }
+        let weak = if counts[0] == 0 {
+            0.
+        } else {
+            (sums[0] / counts[0] as f64) as f32
+        };
+        let high = if counts[1] == 0 {
+            0.
+        } else {
+            (sums[1] / counts[1] as f64) as f32
+        };
+        let delta = high - weak;
+        if !weak.is_finite() || !delta.is_finite() {
+            return Err(invalid("默认SM幅值溢出"));
+        }
+        let id = self.n;
+        self.data
+            .resize(self.data.len() + self.blocks_per_row, Block([0; 8]));
+        self.n += 1;
+        let words = self.words;
+        let row = self.row_mut(id);
+        row[..words].copy_from_slice(&code.pos[..words]);
+        row[words..words * 2].copy_from_slice(&code.strong[..words]);
+        let reconstructed_high = weak + delta;
+        let norm = counts[0] as f32 * weak * weak
+            + counts[1] as f32 * reconstructed_high * reconstructed_high;
+        self.write_metadata(id, weak, delta, 0., norm, counts[1] as u32);
+        Ok(())
     }
     fn row(&self, id: usize) -> &[u64] {
         assert!(id < self.n);
@@ -368,6 +410,12 @@ impl<F: FnMut(usize, &mut Vec<f32>) -> bool> DynamicCallback<'_, F> {
         if self.buffers[slot].len() != self.dim {
             return Err(corrupt("冷向量维度不匹配"));
         }
+        if !self.native_l2 {
+            production::prepare_exact_buffer(
+                &mut self.buffers[slot],
+                self.scales.get(id).copied().unwrap_or(1.),
+            );
+        }
         Ok(true)
     }
 }
@@ -376,7 +424,7 @@ impl<F: FnMut(usize, &mut Vec<f32>) -> bool> ExactSource for DynamicCallback<'_,
         Ok(if self.fill(id, 0)? {
             Some(
                 exact_score(q, &self.buffers[0], self.native_l2)
-                    * self.scales.get(id).copied().unwrap_or(1.),
+                    * production::exact_scale(self.scales.get(id).copied().unwrap_or(1.)),
             )
         } else {
             None
@@ -394,13 +442,16 @@ impl<F: FnMut(usize, &mut Vec<f32>) -> bool> ExactSource for DynamicCallback<'_,
                 self.native_l2,
             );
             Ok(std::array::from_fn(|k| {
-                Some(values[k] * self.scales.get(ids[k]).copied().unwrap_or(1.))
+                Some(
+                    values[k]
+                        * production::exact_scale(self.scales.get(ids[k]).copied().unwrap_or(1.)),
+                )
             }))
         } else {
             Ok(std::array::from_fn(|k| {
                 present[k].then(|| {
                     exact_score(q, &self.buffers[k], self.native_l2)
-                        * self.scales.get(ids[k]).copied().unwrap_or(1.)
+                        * production::exact_scale(self.scales.get(ids[k]).copied().unwrap_or(1.))
                 })
             }))
         }
@@ -843,7 +894,7 @@ impl CorrectedSmIndex {
             let delta = f32::from_bits(read_u32(&mut input)?);
             let coefficient = f32::from_bits(read_u32(&mut input)?);
             let count = read_u32(&mut input)?;
-            let mask = if dim % 64 == 0 {
+            let mask = if dim.is_multiple_of(64) {
                 u64::MAX
             } else {
                 (1u64 << (dim % 64)) - 1

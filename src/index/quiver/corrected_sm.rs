@@ -2,7 +2,7 @@
 //!
 //! 从已验证的FLAGS95研究实现迁移。数据库编码沿用BQ的f32阈值及严格比较，
 //! 查询编码沿用研究实现的f64阈值及非严格比较，两者不能混用。
-//! 校正模式使用固定锚点和末尾精排；无训练重建L2模式仅在末尾精排读取FP32。
+//! 默认无训练重建L2模式仅在末尾精排读取FP32；显式校正模式额外读取固定锚点。
 //! 调用方提供按内部节点顺序排列的同一向量库。
 
 use super::{Bitset, FlatAdj, NonNanF32, QuIVer, QuIVerSearchConfig};
@@ -23,6 +23,13 @@ mod build;
 #[path = "corrected_sm/dynamic.rs"]
 mod dynamic;
 use dynamic::DynamicSm;
+
+#[path = "corrected_sm/production.rs"]
+mod production;
+
+#[cfg(test)]
+#[path = "corrected_sm/production_tests.rs"]
+mod production_tests;
 
 pub use build::SmBuildConfig;
 
@@ -164,13 +171,20 @@ impl<F: FnMut(usize, &mut Vec<f32>) -> bool> CallbackSource<'_, F> {
         if self.buffers[slot].len() != DIM {
             return Err(corrupt("冷向量维度不匹配"));
         }
+        production::prepare_exact_buffer(
+            &mut self.buffers[slot],
+            self.scales.get(id).copied().unwrap_or(1.),
+        );
         Ok(true)
     }
 }
 impl<F: FnMut(usize, &mut Vec<f32>) -> bool> ExactSource for CallbackSource<'_, F> {
     fn one(&mut self, q: &[f32], id: usize) -> io::Result<Option<f32>> {
         Ok(if self.fill(id, 0)? {
-            Some(dot(q, &self.buffers[0]) * self.scales.get(id).copied().unwrap_or(1.))
+            Some(
+                dot(q, &self.buffers[0])
+                    * production::exact_scale(self.scales.get(id).copied().unwrap_or(1.)),
+            )
         } else {
             None
         })
@@ -183,18 +197,23 @@ impl<F: FnMut(usize, &mut Vec<f32>) -> bool> ExactSource for CallbackSource<'_, 
         if present.iter().all(|&v| v) {
             let values = dot4(q, std::array::from_fn(|k| self.buffers[k].as_slice()));
             return Ok(std::array::from_fn(|k| {
-                Some(values[k] * self.scales.get(ids[k]).copied().unwrap_or(1.))
+                Some(
+                    values[k]
+                        * production::exact_scale(self.scales.get(ids[k]).copied().unwrap_or(1.)),
+                )
             }));
         }
         Ok(std::array::from_fn(|k| {
-            present[k]
-                .then(|| dot(q, &self.buffers[k]) * self.scales.get(ids[k]).copied().unwrap_or(1.))
+            present[k].then(|| {
+                dot(q, &self.buffers[k])
+                    * production::exact_scale(self.scales.get(ids[k]).copied().unwrap_or(1.))
+            })
         }))
     }
 }
 
 /// 不可变的SM模型与平图快照，可在线程间共享；搜索工作区为线程局部。
-/// 支持TDB的全部合法BQ维度；768维保留专用内核，出度不超过64。
+/// 支持TDB的全部合法BQ维度；768维保留专用内核，导航按至多64条边分批评分。
 pub struct CorrectedSmIndex {
     rows: Vec<SmRow>,
     graph: FlatAdj,
@@ -332,11 +351,15 @@ impl QuIVer {
         Ok(())
     }
 
-    /// 从实际slot读取安装数据；安装后不保留完整FP32副本。
+    /// 默认状态已就绪时取消显式覆盖；否则按slot安装，不保留完整FP32副本。
     pub fn enable_sm_l2_with_vectors<F>(&mut self, fill: F) -> io::Result<()>
     where
         F: FnMut(usize, &mut Vec<f32>) -> bool,
     {
+        if self.default_sm.as_ref().is_some_and(|m| m.len() == self.n) {
+            self.corrected_sm = None;
+            return Ok(());
+        }
         self.enable_corrected_sm_with_vectors(&[], fill)?;
         self.corrected_sm.as_mut().unwrap().use_reconstructed_l2();
         Ok(())
@@ -345,6 +368,7 @@ impl QuIVer {
     pub fn sm_l2_enabled(&self) -> bool {
         self.corrected_sm
             .as_ref()
+            .or(self.default_sm.as_ref())
             .is_some_and(|m| matches!(m.scoring, SmScoring::ReconstructedL2 | SmScoring::NativeL2))
     }
 
@@ -400,16 +424,18 @@ impl QuIVer {
             .is_some_and(|m| m.scoring == SmScoring::NativeL2)
     }
 
-    /// 关闭校正查询，继续使用原BQ导航；图的边及入口不变。
+    /// 关闭显式覆盖，恢复默认无训练SM-L2；图的边及入口不变。
     pub fn disable_corrected_sm(&mut self) {
         self.corrected_sm = None;
     }
 
     /// 校正路由的拥有数组与共享图分项，原BQ签名仍保留以支持回退和后续更新。
     pub fn corrected_sm_memory_components(&self) -> Option<serde_json::Value> {
-        self.corrected_sm.as_ref().map(|model| {
+        self.corrected_sm.as_ref().or(self.default_sm.as_ref()).map(|model| {
             serde_json::json!({
-                "sm_owned_bytes": model.routing_owned_bytes(),
+                "sm_owned_bytes": self.corrected_sm.as_ref().map_or(0, |m| m.routing_owned_bytes()) + self.default_sm.as_ref().map_or(0, |m| m.routing_owned_bytes()),
+                "default_sm_owned_bytes": self.default_sm.as_ref().map_or(0, |m| m.routing_owned_bytes()),
+                "explicit_sm_owned_bytes": self.corrected_sm.as_ref().map_or(0, |m| m.routing_owned_bytes()),
                 "shared_graph_bytes": self.layer0.data.capacity() * 4,
                 "raw_bq_signature_bytes": self.bq_store.hot_bytes(),
                 "external_ids_bytes": self.ids.capacity() * 8,
@@ -513,7 +539,9 @@ impl CorrectedSmIndex {
             return Err(invalid("SM图出度超过64或邻居编号越界"));
         }
         let rows = base
-            .chunks_exact(DIM)
+            .as_chunks::<DIM>()
+            .0
+            .iter()
             .enumerate()
             .map(|(id, x)| {
                 let sig = Bq2Signature::from_vector(x);
@@ -823,97 +851,109 @@ impl CorrectedSmIndex {
                 }
                 let neighbors = graph.neighbors(u);
                 counts[3] += neighbors.len();
-                let mut ids = [0u32; MAX_DEGREE];
-                let mut values = [0f32; MAX_DEGREE];
-                let mut len = 0;
-                if optimized {
-                    for &v in neighbors {
-                        if visited.test(v as usize) {
-                            continue;
-                        }
-                        visited.set(v as usize);
-                        ids[len] = v;
-                        len += 1;
-                        self.prefetch(v as usize);
-                        if TRACE {
-                            trace.scored.push(v);
-                        }
-                    }
-                    // 保留已验证组合的四候选评分顺序，整批预取后再访问模型。
-                    let mut j = 0;
-                    while j + 4 <= len {
-                        values[j] =
-                            self.navigation_score(&sq, ids[j] as usize, error, query_norm, true);
-                        values[j + 1] = self.navigation_score(
-                            &sq,
-                            ids[j + 1] as usize,
-                            error,
-                            query_norm,
-                            true,
-                        );
-                        values[j + 2] = self.navigation_score(
-                            &sq,
-                            ids[j + 2] as usize,
-                            error,
-                            query_norm,
-                            true,
-                        );
-                        values[j + 3] = self.navigation_score(
-                            &sq,
-                            ids[j + 3] as usize,
-                            error,
-                            query_norm,
-                            true,
-                        );
-                        j += 4;
-                    }
-                    while j < len {
-                        values[j] =
-                            self.navigation_score(&sq, ids[j] as usize, error, query_norm, true);
-                        j += 1;
-                    }
-                    counts[1] += len;
-                    // 检查整批分数，所有候选仍执行有限值校验。
-                    let invalid_score = values[..len]
-                        .iter()
-                        .fold(false, |invalid, value| invalid | !value.is_finite());
-                    if invalid_score {
-                        return Err(invalid("SM候选分数溢出"));
-                    }
-                } else {
-                    for &v in neighbors {
-                        if !visited.test(v as usize) {
+                for neighbors in neighbors.chunks(MAX_DEGREE) {
+                    let mut ids = [0u32; MAX_DEGREE];
+                    let mut values = [0f32; MAX_DEGREE];
+                    let mut len = 0;
+                    if optimized {
+                        for &v in neighbors {
+                            if visited.test(v as usize) {
+                                continue;
+                            }
+                            visited.set(v as usize);
+                            ids[len] = v;
+                            len += 1;
                             self.prefetch(v as usize);
+                            if TRACE {
+                                trace.scored.push(v);
+                            }
                         }
-                    }
-                }
-                let iteration = if optimized { &ids[..len] } else { neighbors };
-                for (j, &v) in iteration.iter().enumerate() {
-                    let value = if optimized {
-                        values[j]
+                        // 保留已验证组合的四候选评分顺序，整批预取后再访问模型。
+                        let mut j = 0;
+                        while j + 4 <= len {
+                            values[j] = self.navigation_score(
+                                &sq,
+                                ids[j] as usize,
+                                error,
+                                query_norm,
+                                true,
+                            );
+                            values[j + 1] = self.navigation_score(
+                                &sq,
+                                ids[j + 1] as usize,
+                                error,
+                                query_norm,
+                                true,
+                            );
+                            values[j + 2] = self.navigation_score(
+                                &sq,
+                                ids[j + 2] as usize,
+                                error,
+                                query_norm,
+                                true,
+                            );
+                            values[j + 3] = self.navigation_score(
+                                &sq,
+                                ids[j + 3] as usize,
+                                error,
+                                query_norm,
+                                true,
+                            );
+                            j += 4;
+                        }
+                        while j < len {
+                            values[j] = self.navigation_score(
+                                &sq,
+                                ids[j] as usize,
+                                error,
+                                query_norm,
+                                true,
+                            );
+                            j += 1;
+                        }
+                        counts[1] += len;
+                        // 检查整批分数，所有候选仍执行有限值校验。
+                        let invalid_score = values[..len]
+                            .iter()
+                            .fold(false, |invalid, value| invalid | !value.is_finite());
+                        if invalid_score {
+                            return Err(invalid("SM候选分数溢出"));
+                        }
                     } else {
-                        if visited.test(v as usize) {
-                            continue;
+                        for &v in neighbors {
+                            if !visited.test(v as usize) {
+                                self.prefetch(v as usize);
+                            }
                         }
-                        visited.set(v as usize);
-                        counts[1] += 1;
-                        if TRACE {
-                            trace.scored.push(v);
-                        }
-                        self.navigation_score(&sq, v as usize, error, query_norm, false)
-                    };
-                    if !optimized && !value.is_finite() {
-                        return Err(invalid("SM候选分数溢出"));
                     }
-                    let next = NonNanF32(1. - value);
-                    if st.results.len() < ef || next < st.results.peek().unwrap().0 {
-                        st.queue.push(Reverse((next, v)));
-                        if optimized && st.results.len() == ef {
-                            *st.results.peek_mut().unwrap() = (next, v);
+                    let iteration = if optimized { &ids[..len] } else { neighbors };
+                    for (j, &v) in iteration.iter().enumerate() {
+                        let value = if optimized {
+                            values[j]
                         } else {
-                            st.results.push((next, v));
-                            if st.results.len() > ef {
-                                st.results.pop();
+                            if visited.test(v as usize) {
+                                continue;
+                            }
+                            visited.set(v as usize);
+                            counts[1] += 1;
+                            if TRACE {
+                                trace.scored.push(v);
+                            }
+                            self.navigation_score(&sq, v as usize, error, query_norm, false)
+                        };
+                        if !optimized && !value.is_finite() {
+                            return Err(invalid("SM候选分数溢出"));
+                        }
+                        let next = NonNanF32(1. - value);
+                        if st.results.len() < ef || next < st.results.peek().unwrap().0 {
+                            st.queue.push(Reverse((next, v)));
+                            if optimized && st.results.len() == ef {
+                                *st.results.peek_mut().unwrap() = (next, v);
+                            } else {
+                                st.results.push((next, v));
+                                if st.results.len() > ef {
+                                    st.results.pop();
+                                }
                             }
                         }
                     }
@@ -921,6 +961,8 @@ impl CorrectedSmIndex {
             }
             st.candidates.extend(st.results.drain());
             st.candidates.sort_unstable();
+            #[cfg(feature = "test-hooks")]
+            crate::test_hooks::hit(crate::test_hooks::ConcurrencyPoint::QuiverCandidateProduced);
             if TRACE {
                 trace.candidates.extend(st.candidates.iter().map(|x| x.1));
             }
@@ -928,17 +970,20 @@ impl CorrectedSmIndex {
                 st.exact.push((self.anchor, anchor));
             }
             for &(_, v) in &st.candidates {
-                if st.exact_ids.len() >= budget - usize::from(uses_anchor) {
-                    break;
-                }
                 if !uses_anchor || v != self.anchor {
                     st.exact_ids.push(v);
                 }
             }
+            #[cfg(feature = "test-hooks")]
+            crate::test_hooks::hit(crate::test_hooks::ConcurrencyPoint::BeforeVectorRerank);
             let mut j = 0;
             let count = st.exact_ids.len();
-            while j < count {
-                if optimized && j + 4 <= count && dot_simd_available() {
+            while j < count && st.exact.len() < budget {
+                if optimized
+                    && j + 4 <= count
+                    && budget - st.exact.len() >= 4
+                    && dot_simd_available()
+                {
                     let values =
                         source.four(q, std::array::from_fn(|k| st.exact_ids[j + k] as usize))?;
                     for k in 0..4 {
@@ -1430,7 +1475,7 @@ unsafe fn dot_avx512(q: &[f32], x: &[f32]) -> f32 {
 fn dot4(q: &[f32], x: [&[f32]; 4]) -> [f32; 4] {
     #[cfg(target_arch = "x86_64")]
     unsafe {
-        return dot4_avx512(q, x);
+        dot4_avx512(q, x)
     }
     #[cfg(not(target_arch = "x86_64"))]
     x.map(|v| dot(q, v))
@@ -1724,7 +1769,7 @@ mod tests {
     #[test]
     fn fast_routing_preserves_graph_slots_and_invalidates_on_write() {
         let (mut base, _) = fixture(128);
-        for row in base.chunks_exact_mut(DIM) {
+        for row in base.as_chunks_mut::<DIM>().0.iter_mut() {
             let norm = row.iter().map(|&v| (v as f64).powi(2)).sum::<f64>().sqrt();
             for v in row {
                 *v = (*v as f64 / norm) as f32;
@@ -1803,14 +1848,17 @@ mod tests {
             buffer.extend_from_slice(&base[u * DIM..(u + 1) * DIM]);
             true
         };
-        let expected = raw.search_with_scorer(
-            &base[..DIM],
-            filtered,
-            &cfg,
-            &mut super::super::BqNavigationScorer,
-        );
+        let expected = raw
+            .default_sm
+            .as_ref()
+            .unwrap()
+            .search_routed(&base[..DIM], &raw.layer0, &cfg, |internal, buffer| {
+                filtered(raw.slot_indices[internal], buffer)
+            })
+            .unwrap()
+            .neighbors;
         let actual = raw.search(&base[..DIM], filtered, &cfg);
-        assert_eq!(actual, expected, "锚点被过滤时应正确回退原BQ路径");
+        assert_eq!(actual, expected, "锚点被过滤时应使用默认无锚点SM");
         assert!(raw.soft_delete(ids[7]));
         assert!(!raw.corrected_sm_enabled());
         assert!(raw.enable_corrected_sm(&base, &coeff).is_err());
@@ -1830,7 +1878,7 @@ mod tests {
     fn memtable_routing_handles_reused_slots_and_nonunit_vectors() {
         use crate::storage::memtable::MemTable;
         let (mut base, _) = fixture(128);
-        for row in base.chunks_exact_mut(DIM) {
+        for row in base.as_chunks_mut::<DIM>().0.iter_mut() {
             let norm = row.iter().map(|&v| (v as f64).powi(2)).sum::<f64>().sqrt();
             for v in row {
                 *v = (*v as f64 / norm * 3.) as f32;
@@ -1839,7 +1887,9 @@ mod tests {
         let mut mt = MemTable::<f32>::new(DIM);
         mt.set_auto_build_quiver(false);
         let mut ids = base
-            .chunks_exact(DIM)
+            .as_chunks::<DIM>()
+            .0
+            .iter()
             .map(|row| mt.insert(row, serde_json::json!({})).unwrap())
             .collect::<Vec<_>>();
         let deleted = ids[16];
@@ -1903,7 +1953,7 @@ mod tests {
         .unwrap();
         let (base, _) = fixture(128);
         let mut ids = Vec::new();
-        for row in base.chunks_exact(DIM) {
+        for row in base.as_chunks::<DIM>().0.iter() {
             ids.push(db.insert(row, serde_json::json!({})).unwrap());
         }
         db.build_quiver_index(Some(super::super::QuIVerConfig {
