@@ -4419,10 +4419,10 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
             rowHadRealEdge = true;
           }
           if (value.id !== undefined && Array.isArray(value.edges)) {
-            value.edges.forEach(edge => {
-              addEdge(value.id, edge.targetId, edge);
-              rowHadRealEdge = true;
-            });
+            // edges 存在即视为服务端提供了权威边信息：空数组表示"确认无出边"，
+            // 此时不能再按投影顺序推断。
+            rowHadRealEdge = true;
+            value.edges.forEach(edge => addEdge(value.id, edge.targetId, edge));
           }
           if (value.id !== undefined && nodeMap.has(String(value.id))) {
             rowNodeIds.push(String(value.id));
@@ -6674,9 +6674,11 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         }
         const data = await res.json();
         if (seq !== __drawerFetchSeq) return;
-        const page = (data.edges || []).map(e => ({
-          source: String(e.source),
-          target: String(e.target),
+        // 0.8.8 /edges 返回 source/target；旧 /v1/nodes/{id} 的 edgeVersions 只有 targetId。
+        // 两种形状都接受，避免离线自检（以及旧服务端）渲染为空。
+        const page = (data.edges || data.edgeVersions || []).map(e => ({
+          source: String(e.source ?? nodeId),
+          target: String(e.target ?? e.targetId),
           label: e.label || 'LINK',
           weight: e.weight
         }));
@@ -9669,7 +9671,11 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       });
 
       addAssert('图 v2：边 label 过滤（含行内推断边计数）', '图探索器 v2', async () => {
-        renderGraph([{ a: NODE_ALICE, b: NODE_BOB }]);
+        // 无 edges 字段 = 该行没有服务端边信息，允许按行内顺序推断
+        renderGraph([{
+          a: { ...NODE_ALICE, edges: undefined },
+          b: { ...NODE_BOB, edges: undefined }
+        }]);
         mergeRowsIntoGraph([{ link: { source: '2', target: '3', label: 'KNOWS' } }]);
         const agg = graphLabelAggregation();
         assert((agg.get('KNOWS') || 0) === 1, 'KNOWS 应计数 1');
