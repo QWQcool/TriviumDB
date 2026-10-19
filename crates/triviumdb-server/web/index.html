@@ -4409,15 +4409,33 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         seenEdges.add(key);
         graphEdges.push({ source, target, label, weight: edge.weight, metadata: edge.metadata });
       };
-      rows.forEach(row => Object.values(row).forEach(value => {
-        if (!value || typeof value !== 'object') return;
-        if (value.source !== undefined && value.target !== undefined) {
-          addEdge(value.source, value.target, value);
+      rows.forEach(row => {
+        const rowNodeIds = [];
+        let rowHadRealEdge = false;
+        Object.values(row).forEach(value => {
+          if (!value || typeof value !== 'object') return;
+          if (value.source !== undefined && value.target !== undefined) {
+            addEdge(value.source, value.target, value);
+            rowHadRealEdge = true;
+          }
+          if (value.id !== undefined && Array.isArray(value.edges)) {
+            value.edges.forEach(edge => {
+              addEdge(value.id, edge.targetId, edge);
+              rowHadRealEdge = true;
+            });
+          }
+          if (value.id !== undefined && nodeMap.has(String(value.id))) {
+            rowNodeIds.push(String(value.id));
+          }
+        });
+        // 真实边优先；TQL MATCH 无法投影边时退回行内节点顺序推断（0.8.8 行为），
+        // 仅在整行没有任何真实边时启用，避免方向/标签被投影顺序污染。
+        if (!rowHadRealEdge) {
+          for (let i = 1; i < rowNodeIds.length; i++) {
+            addEdge(rowNodeIds[i - 1], rowNodeIds[i], { label: '' });
+          }
         }
-        if (value.id !== undefined && Array.isArray(value.edges)) {
-          value.edges.forEach(edge => addEdge(value.id, edge.targetId, edge));
-        }
-      }));
+      });
 
       recomputeDegrees(); // PR-17：全量重建后重算度数（节点半径 / Sigma size 依赖）
       applyGraphPhysicsPolicy();
