@@ -1,6 +1,6 @@
 # QuIVer — Implementation and Experiment Guide
 
-> **Updated**: 2026-10-21. Current implementation means `0.8.10` source, pending CI and not tagged or published. It adds graph connectivity protection to the SM-L2 implementation introduced in `0.8.9`; earlier `0.8.8` packages do not include those SM changes. Record the evaluated version, Git revision, and build identity. See [changes and validation scope](docs/changes-0.8.10.md).
+> **Updated**: 2026-10-21. Current implementation means `0.8.10` source; release artifact status is tracked by the release workflows and package registries. It adds graph connectivity protection to the SM-L2 implementation introduced in `0.8.9`; earlier `0.8.8` packages do not include those SM changes. Record the evaluated version, Git revision, and build identity. See [changes and validation scope](docs/changes-0.8.10.md).
 >
 > **Submission target**: **ICDE** for the rebuilt version. This is not an acceptance, proceedings, or publication claim.
 >
