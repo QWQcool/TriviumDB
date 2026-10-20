@@ -557,6 +557,26 @@ fn QuIVer构建峰值预算_显式构建应在分配前拒绝() {
 }
 
 #[test]
+fn QuIVer导航树及遍历工作区必须提前计入构图预算() {
+    let path = tmp_db("quiver_connectivity_memory_gate");
+    cleanup(&path);
+    let mut db = Database::<f32>::open(&path, DIM).unwrap();
+    for id in 1..=128u64 {
+        db.insert_with_id(id, &[id as f32, 1.0, -1.0, 0.5], json!({"id": id}))
+            .unwrap();
+    }
+    // a363bc8 对 128 个四维节点、默认参数的旧峰值估算为 85,120 字节。
+    // 旧估算恰好能通过的上限，必须因新增父节点和遍历工作区而提前拒绝。
+    db.set_memory_limit(db.estimated_memory() + 85_120);
+    let error = db.build_quiver_index(None).unwrap_err().to_string();
+    assert!(error.contains("预计峰值"));
+    assert!(error.contains("内存上限"));
+    assert_eq!(db.node_count(), 128, "预算拒绝不得修改已有节点");
+    drop(db);
+    cleanup(&path);
+}
+
+#[test]
 fn QuIVer构建峰值预算_自动构建应返回明确错误() {
     let path = tmp_db("quiver_auto_memory_gate");
     cleanup(&path);

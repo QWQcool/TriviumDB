@@ -1,6 +1,8 @@
 # TriviumDB 测试实践
 
 > 从单元测试到属性测试、从覆盖率度量到变异测试：TriviumDB 的多层防御测试体系详解。
+>
+> 当前对应 `0.8.10` 待 CI 验收源码，尚未打 tag 或发布；见[变更与验收范围](changes-0.8.10.md)。
 
 ---
 
@@ -14,6 +16,7 @@
 - [属性测试 (Property-Based Testing)](#属性测试-property-based-testing)
 - [模糊测试 (Fuzz Testing)](#模糊测试-fuzz-testing)
 - [AddressSanitizer 内存安全检测](#addresssanitizer-内存安全检测)
+- [ThreadSanitizer 与 Miri](#threadsanitizer-与-miri)
 - [变异测试 (Mutation Testing)](#变异测试-mutation-testing)
 - [覆盖率度量](#覆盖率度量)
 - [编写新测试的指南](#编写新测试的指南)
@@ -54,8 +57,11 @@ cargo test --test query proptest         # tests/query/proptest_query.rs
 cargo test --test storage ordered        # storage 领域中的 ordered 用例
 cargo test --test pipeline cascades      # Cascades 优化器用例
 
-# 运行确定性交错、并发不变量和容量安全测试
-cargo test --test concurrency --features test-hooks
+# 运行确定性交错、物理策略差分、定点 I/O 故障和真实发布阶段强杀测试
+cargo test --features test-hooks --test concurrency --test differential --test fault_io --test fault_power -- --test-threads=1
+
+# 本地快捷入口，包含以上四个套件与全部 query 测试
+cargo test-critical
 
 # 运行差分测试与磁盘格式规格测试
 cargo test --test differential --features test-hooks
@@ -81,6 +87,8 @@ cargo mutants --file src/filter.rs --timeout 60
 ## 测试分层架构
 
 `tests/` 按领域 harness 组织：每个顶层目录是一个独立 integration target，通过各自 `main.rs` 汇聚同领域的测试文件。
+
+默认 `cargo test` 包含 `storage::publication_recovery`：使用独立构造的 `TPUB` v1 日志验证旧事实 + WAL 完整恢复、Rom/Mmap 旧基础、二次持久化、损坏日志/备份拒绝、提交后不回滚和只读字节级零写。开启 `test-hooks` 后，发布强杀另覆盖 3 种写入场景 × 6 个中断阶段；其中更新/删除/compaction 使用 2048 节点、65 维，验证全部已同步数据与更新边。打开失败不能计为恢复通过。该规模跨越多个 mmap 页，但不代表超内存、真实断电或 PageCache 压力验收。
 
 ```
 tests/
@@ -236,11 +244,11 @@ fn from_json_嵌套and_or() {
 | `fault_crash/`    | 硬件崩溃   | 使用真实内联汇编触发 CPU 异常（`ud2`、`div/0`、`int3`、内存违例），验证操作系统杀进程后的 WAL 恢复能力 |
 | `fault_hardware/` | 硬件侵入   | 使用真实内联汇编（`bts` 翻转 bit、`movnti` 绕过缓存）直接篡改 mmap 页，验证容错能力；EMI 脉冲突发多比特错误 |
 | `fault_io/wal_midwrite.rs` | 断写安全   | WAL 写入中途中断、逐字节截断、CRC 校验拦截损坏记录 |
-| `fault_power/`    | 真实断电   | 子进程到达 `.vec`/`.tdb` 落盘与 `.flush_ok` 替换前后指定发布阶段后由父进程强杀，重开只允许旧完整代或新完整代 |
+| `fault_power/`    | 进程强杀   | 首次 flush、追加、2048×65 更新/删除/compaction；备份发布后、`.vec`/`.tdb` 落盘后、marker 前后与恢复途中强杀，必须完整恢复 `Full` 模式已同步事务 |
 | `fault_io/deterministic_failpoint.rs` | I/O 故障 | Create/Write/Sync/Rename 定点确定性失败，验证临时文件清理与错误传播 |
 | `format_spec/`    | 格式规格   | 独立字段规格 + 字段边界/截断/位翻转/追加/CRC 修复 mutation，验证损坏输入 fail-closed 与 ReadOnly 零写 |
 | `fault_allocator/`| OOM 拦截   | 目标 failpoint 后拒绝分配，验证 `try_reserve` 结构化错误与零部分提交（不耗尽真实内存） |
-| `unsafe_audit.rs` | 安全审计   | 针对全代码 28 处 unsafe (SIMD、mmap、FFI) 提供专门的安全契约边界验证 (GJB-5000B 条款 6.3.2) |
+| `unsafe_audit.rs` | 安全边界回归 | 覆盖向量数值/尾部边界、VecPool 文件变更和畸形文件加载；不代表全部 unsafe 均已审计或证明安全 |
 | `core/transaction.rs`  | 事务原子性 | 多操作原子提交、NaN/维度拦截、跨事务依赖 |
 | `concurrency/`    | 线程安全   | 多线程并发读写、无数据竞争、确定性交错、generation/singleflight/fatigue、容量预算与 WAL 原子性 |
 | `hardening/security.rs`     | 安全防御   | NaN 注入、超大 payload(10MB)、幽灵事务截断 |
@@ -316,15 +324,44 @@ cargo fuzz run fuzz_wal_parse
 
 ## AddressSanitizer 内存安全检测
 
-所有涉及 `unsafe` 的代码（如 `mmap`、AVX2 SIMD 指令等）都在 CI 中通过 nightly Rust 的 AddressSanitizer (ASan) 进行了严格验证。
+CI 使用 nightly Rust 的 AddressSanitizer (ASan) 检查测试实际执行到的内存访问。它不是所有 unsafe 的完整审计：平台、CPU 指令集、feature 和测试输入都会限制执行路径，ASan 也不负责检测数据竞争。
 
 运行本地 ASan 测试（需要 Linux/macOS nightly 环境）：
 
 ```bash
-RUSTFLAGS="-Zsanitizer=address" cargo +nightly test --target x86_64-unknown-linux-gnu -Zbuild-std
+RUSTFLAGS="-Zsanitizer=address" cargo +nightly test --lib --tests --target x86_64-unknown-linux-gnu -Zbuild-std -- --test-threads=1
 ```
 
 ASan 能有效检测：堆栈溢出 (Buffer Overflow)、内存泄漏 (Memory Leak)、使用后释放 (Use After Free)。
+
+## ThreadSanitizer 与 Miri
+
+`ci.yml` 为普通 PR/push 配置了独立的 TSan 和 Miri 任务，错误会使任务失败；是否通过以对应提交的 CI 结果为准。它们补充现有多平台测试和 ASan，不替代人工审核。
+
+| 检查 | 当前执行范围 | 边界 |
+|---|---|---|
+| 默认测试 | 默认 feature 下的库与集成测试 | 不会隐式启用 `test-hooks` |
+| 确定性交错与故障注入 | 多平台显式启用 `test-hooks`，运行 concurrency、differential、fault_io、fault_power；规划器回归另行执行 | 覆盖预设交错，不穷举所有调度；强杀模拟进程中断，不等于真实物理断电 |
+| TSan | Linux x86_64 下启用 `test-hooks` 的 concurrency，以及 `memory_safety_` 库测试子集 | 数据竞争检测；标准库一起插桩，未覆盖其他平台、FFI 或全部图构建路径 |
+| Miri | `memory_safety_` 库测试子集，随机种子 `0..4` | BQ 精确分配长度、尾部掩码、扩容后行偏移，以及并发邻接表锁保护、容量边界和冻结；不执行 mmap、FFI 或完整 SIMD 路径 |
+
+TSan 本地命令（Linux x86_64，nightly 与 rust-src）：
+
+```bash
+RUSTFLAGS="-Zsanitizer=thread" TSAN_OPTIONS="halt_on_error=1" cargo +nightly test --locked -Zbuild-std --target x86_64-unknown-linux-gnu --features test-hooks --test concurrency -- --test-threads=1
+RUSTFLAGS="-Zsanitizer=thread" TSAN_OPTIONS="halt_on_error=1" cargo +nightly test --locked -Zbuild-std --target x86_64-unknown-linux-gnu --lib memory_safety_ -- --test-threads=1
+```
+
+Miri 本地命令：
+
+```bash
+rustup component add --toolchain nightly miri rust-src
+MIRIFLAGS="-Zmiri-strict-provenance -Zmiri-many-seeds=0..4" cargo +nightly miri test --locked --lib memory_safety_ -- --test-threads=1
+```
+
+Windows 可加 `--target x86_64-unknown-linux-gnu` 进行 Miri 跨目标解释执行；这不等于验证 Windows 特有的文件映射或锁语义。保留 Miri 默认的别名、数据竞争与泄漏检查，不使用关闭这些检查的参数来绕过失败。项目尚未接入 loom；当前 Miri 多种子运行也不等于 loom 的模型探索。
+
+unsafe 审核按文件与安全契约记录范围，不使用固定总数作为完成指标。`bq.rs`、`vector.rs` 和 SM 相关模块包含标量裸指针或 SIMD 路径；`quiver.rs` 包含并发邻接表及其他构图路径；存储与属性索引包含 mmap；`hook.rs` 和 Python/Node 绑定包含外部调用或手工 Send/Sync。现有测试没有证明这些模块的所有长度、对齐、生命周期及并发契约均成立，后续扩展需要逐项验证实际执行范围。[Rust Sanitizer 说明](https://doc.rust-lang.org/unstable-book/compiler-flags/sanitizer.html)、[Miri 说明](https://github.com/rust-lang/miri)列出了工具能力与限制。
 
 ### 运行属性测试
 
@@ -490,15 +527,17 @@ proptest! {
 
 ## CI/CD 管线
 
-TriviumDB 通过 GitHub Actions 构建了由三条独立工作流组成的完整自动化链路。
+TriviumDB 通过多条独立 GitHub Actions 工作流执行测试、故障注入、基准观测和发布。
 
 ### 1. 核心 CI 管线 (`ci.yml`)
-每次 Push 或 PR 会运行多平台 Rust 测试、CLI/TUI、Python/Node 生命周期、短时 fuzz、ASan、覆盖率、类型存根和 Clippy 等门禁；另有内存压力观测，以及手动 mutation/benchmark Job。平台矩阵和 Job 数会随工具链演进，具体以 workflow 为准。
+面向 master/dev 的 Push 或 PR 会运行多平台 Rust 测试、CLI/TUI、Python/Node 生命周期、短时 fuzz、ASan、TSan、Miri、覆盖率、类型存根和 Clippy 等门禁；另有内存压力观测，以及手动 mutation/benchmark Job。平台矩阵和 Job 数会随工具链演进，具体以 workflow 为准。
 
 - **Compile Check**：默认、Python、Node 和 aarch64 编译检查
 - **Rust Test**：Linux/Windows/macOS x86_64、macOS ARM64，并以 QEMU 补充 Linux ARM64
+- **Test Hooks**：多平台补跑确定性交错、物理策略差分、定点 I/O 故障和发布阶段强杀；发布质量门禁同样执行这些套件
 - **Binding Lifecycle**：Python wheel + mypy/pyright；Node 原生绑定 + 生命周期测试
 - **Short Fuzz / ASan / Coverage**：解析器、WAL、QuIVer fuzz，unsafe 路径检测与行覆盖率 80% 门禁
+- **TSan / Miri**：独立的数据竞争与内存安全子集检查；覆盖率任务同时启用 `test-hooks`
 - **Python Stubs / Lint**：存根生成漂移、stubtest、类型断言和 `clippy -D warnings`
 - **Manual Mutation / Benchmark**：benchmark 先编译全部目标，再运行无外部数据依赖的稳定套件并上传 `target/criterion/` 与 `target/bench-reports/`
 

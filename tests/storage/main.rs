@@ -7,5 +7,6 @@ mod graph_block_persistence;
 mod immutable;
 mod ordered_property_index;
 mod property_index_persistence;
+mod publication_recovery;
 mod read_only;
 mod recovery;

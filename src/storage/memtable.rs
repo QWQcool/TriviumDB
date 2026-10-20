@@ -1261,6 +1261,10 @@ impl<T: VectorType> MemTable<T> {
                 + 24,
         );
         let worker_bitsets = nodes.div_ceil(8).saturating_mul(64);
+        // 导航树父节点、串行遍历栈和访问位图也必须在分配前纳入峰值预算。
+        let connectivity = nodes
+            .saturating_mul(std::mem::size_of::<u32>() * 2)
+            .saturating_add(nodes.div_ceil(8));
         // SM位码按64字节行对齐，包含外部ID与精排归一化比例；不保存FP32副本。
         let sm_stride = (chunks.saturating_mul(2).saturating_add(3))
             .div_ceil(8)
@@ -1270,6 +1274,7 @@ impl<T: VectorType> MemTable<T> {
             .saturating_add(adjacency)
             .saturating_add(mappings)
             .saturating_add(worker_bitsets)
+            .saturating_add(connectivity)
             .saturating_add(sm_rows)
     }
 

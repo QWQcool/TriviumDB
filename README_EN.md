@@ -45,7 +45,7 @@ Our goal: **SQLite for AI applications.**
 - ❄️ **Tiered Payload storage** — Published raw JSON stays in an mmap cold base, writes/updates enter an in-memory delta, and parsed values use a byte-bounded LRU cache; ANN/BQ/Exact candidate generation performs zero Payload parsing
 - 🔗 **Node = everything** — Each node natively holds a dense vector, sparse text index, JSON metadata, and graph edges under one globally unique ID
 - 🧠 **AI-native** — Optional hybrid recall (AC-automaton BM25 + dense vector) triggers graph spreading activation, with built-in cognitive pipelines (FISTA / DPP / PPR)
-- 🛡️ **4-layer data safety** — Atomic replacement + WAL + dry-run transaction validation + mmap COW isolation; `.flush_ok` v3 binds `.tdb/.vec/.pld` generation, sizes, and whole-file CRCs into one fail-closed commit
+- 🛡️ **4-layer data safety** — Atomic replacement + WAL + dry-run transaction validation + mmap COW isolation; `.flush_ok` v3 binds `.tdb/.vec/.pld`, while prior-generation backups and an undo journal recover interrupted publication. Backups add disk I/O and temporary space; corrupted inputs still fail closed. See the [recovery protocol](docs/security.md#8-mmap-三文件一致性标记flush_ok-v3).
 - 🐍 **Python / Node.js native** — `pip install` or `npm install`, MongoDB-style query syntax
 - ⚡ **High-performance search** — rayon parallel brute-force (100% exact at small scale) + in-house ANN index **QuIVer**; current source uses training-free SM-L2 navigation and cosine reranking, activated at 2,500–10,000 nodes by vector workload
 - 💾 **SSD-friendly** — Append-only WAL + background compaction + independent QuIVer persistence
@@ -145,7 +145,7 @@ Suppose you're building an **AI conversation memory system** and the user says "
 
 > 📄 **Submission status**: The rebuilt version targets **ICDE**; this is not an acceptance or publication claim. The [earlier arXiv preprint](https://arxiv.org/abs/2605.02171) describes the historical method and experiments.
 >
-> 🔬 **Implementation and experiments**: [Current architecture, modes, and evidence boundaries](docs/quiver.md) · [Experiment guide](README_QUIVER.md). Default SM-L2 describes `0.8.9` source containing `461855e` / `619dd7b`; earlier `0.8.8` packages do not include these changes.
+> 🔬 **Implementation and experiments**: [Current architecture, modes, and evidence boundaries](docs/quiver.md) · [Experiment guide](README_QUIVER.md). Current source is `0.8.10`, pending CI with no release tag or publication; see [changes and validation scope](docs/changes-0.8.10.md). It adds graph connectivity protection. Default SM-L2 was introduced in `0.8.9`; earlier `0.8.8` packages do not include those SM changes.
 >
 > The earlier preprint's 12-dataset Recall/QPS and hot-memory figures do not directly describe the rebuilt version. Bind results to their implementation, graph, metric, budget, and data identity; distinguish cosine SM-L2, explicit native L2, and historical BQ measurements.
 
@@ -173,7 +173,7 @@ For example, 384/768 dimensions trigger at 10,000 nodes, 1024 at about 7,813, 15
 - ✅ **Incremental Update**: soft_delete + incremental_insert, atomic replacement
 - ✅ **Transaction-safe**: Separated timeline architecture — transaction commit cannot fail, QuIVer sync needs no rollback
 
-**Independent persistence**: The graph is stored in `.tdb.quiver`. After loading an older BQ file, the database streams original vectors to restore default SM state. This avoids rebuilding the graph and retaining a second full FP32 copy, but cold-vector reads contribute to startup cost.
+**Independent persistence**: The graph is stored in `.tdb.quiver`. Loading a valid graph streams original vectors to restore default SM state without retaining a second full FP32 copy; cold-vector reads contribute to startup cost. Rebuild older indexes to adopt the current construction rules. Disconnected indexes follow the existing rebuild/reject policy; loading does not add repair edges.
 
 ---
 
@@ -543,7 +543,7 @@ TriviumDB/
 - [x] Parallel Bit-Tag Array hardware-accelerated bloom filtering + Zero-Ghost tombstone reuse
 - [x] O(1) Reverse Hash Net reverse edge lookup
 - [x] 6-stage pipeline hook injection + FFI dynamic library plugins
-- [x] CI/CD pipeline + ASan + LibFuzzer
+- [x] CI/CD pipeline + ASan / TSan / Miri + LibFuzzer; see [test scope and limitations](docs/testing.md)
 
 ### v0.6 — TQL Query Language + Cross-Arch ✅
 
@@ -581,7 +581,7 @@ TriviumDB/
 3. **Auto performance routing** — Uses an approximately 8M-component workload to select a dynamic threshold between 2,500 and 10,000 nodes; exact BruteForce runs below it and QuIVer builds automatically once reached.
 4. **Predictable performance** — Sequential I/O only (WAL append + compaction sequential rewrite). SSD-safe.
 5. **Index as acceleration layer** — QuIVer is disposable derived data (`.tdb.quiver` file); auto-rebuilds on first query if missing.
-6. **Rust safety boundary** — All public APIs are safe code. Minimal audited `unsafe` only in mmap and SIMD paths.
+6. **Rust safety boundary** — Internal unsafe paths include mmap, SIMD, raw pointers, and manual `Send/Sync`. Their length, alignment, lifetime, and concurrency contracts require review. ASan, TSan, and Miri check exercised paths and do not prove every unsafe contract; see [security boundaries](docs/security.md) and [testing scope](docs/testing.md).
 7. **Zero-panic policy** — No `panic!` / `unreachable!()` in the engine. Thousands of test cases (unit / property / fuzz / mutation / three-language public API alignment), with an enforced 80% line-coverage CI gate (see coverage artifacts for measured values).
 
 ---
