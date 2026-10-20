@@ -2131,7 +2131,7 @@
       <span id="statusHealth" class="status-pill" title="引擎整体就绪状态 (来自 /health/details 的 status)"></span>
       <span id="statusQueue">写队列: 0</span>
       <span id="statusReads">并发读: 0</span>
-      <span id="statusVersion">TriviumDB Server v0.8.6</span>
+      <span id="statusVersion">TriviumDB Server v0.8.10</span>
     </div>
   </footer>
 
@@ -2327,7 +2327,7 @@
     // ==========================================
     const graphFilters = { hiddenTypes: new Set(), hiddenLabels: new Set() };
     const UNKNOWN_TYPE_LABEL = '(unknown)';
-    const INFERRED_EDGE_LABEL = '(推断)';
+    const UNLABELED_EDGE_LABEL = '(无标签)';
 
     function graphTypeAggregation() {
       const counts = new Map();
@@ -2340,7 +2340,7 @@
     function graphLabelAggregation() {
       const counts = new Map();
       graphEdges.forEach(e => {
-        const l = e.label || INFERRED_EDGE_LABEL;
+        const l = e.label || UNLABELED_EDGE_LABEL;
         counts.set(l, (counts.get(l) || 0) + 1);
       });
       return counts;
@@ -2349,7 +2349,7 @@
       return !graphFilters.hiddenTypes.has(n.typeKey || UNKNOWN_TYPE_LABEL);
     }
     function isEdgeVisible(e) {
-      if (graphFilters.hiddenLabels.has(e.label || INFERRED_EDGE_LABEL)) return false;
+      if (graphFilters.hiddenLabels.has(e.label || UNLABELED_EDGE_LABEL)) return false;
       const s = nodeMap.get(e.source);
       const t = nodeMap.get(e.target);
       return (!s || isNodeVisible(s)) && (!t || isNodeVisible(t));
@@ -2966,7 +2966,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           const data = await res.json();
           connBadge.className = 'status-badge live';
           connText.textContent = `在线 (${data.status})`;
-          document.getElementById('statusVersion').textContent = `TriviumDB Server v${data.version || '0.8.6'}`;
+          document.getElementById('statusVersion').textContent = `TriviumDB Server v${data.version || '0.8.10'}`;
         } else {
           connBadge.className = 'status-badge dead';
           connText.textContent = `就绪异常 (${res.status})`;
@@ -4262,44 +4262,77 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       };
     }
 
-    // 混合搜索种子：把任意查询/检索结果行并入当前图（增量 merge，不重建已有布局）。
-    // 行形状与 renderGraph 相同：{ 别名: 节点对象 } / 混合值 / {source,target} 边；
-    // 同行内先后节点按顺序推断连线；节点与边均去重（幂等，可重复并入）
-    function mergeRowsIntoGraph(rows) {
+    // 所有图入口共用真实边解析；节点的投影顺序不能证明关系、方向或标签。
+    function graphEdgeKey(source, target, label) {
+      return JSON.stringify([String(source), String(target), String(label ?? '')]);
+    }
+
+    function appendGraphRows(rows) {
       let addedNodes = 0;
-      const seenEdges = new Set(graphEdges.map(e => e.source + '|' + e.target));
+      let addedEdges = 0;
+      let changedEdges = 0;
+      let truncated = false;
+      const observedIds = new Set(nodeMap.keys());
+      // 先收齐节点，再读取边，允许邻接边指向其他行返回的节点。
       rows.forEach(row => {
-        const rowNodeIds = [];
-        Object.entries(row).forEach(([key, val]) => {
-          if (!val || typeof val !== 'object') return;
-          if (val.id !== undefined) {
-            const id = String(val.id);
-            if (!nodeMap.has(id)) {
-              const node = createGraphNode(id, val, key);
-              nodeMap.set(id, node);
-              graphNodes.push(node);
-              addedNodes++;
+        Object.entries(row).forEach(([key, value]) => {
+          if (!value || typeof value !== 'object' || value.id === undefined) return;
+          const id = String(value.id);
+          observedIds.add(id);
+          if (nodeMap.has(id)) return;
+          if (!nebulaActive && graphNodes.length >= GRAPH_RENDER_MAX_NODES) {
+            truncated = true;
+            return;
+          }
+          const node = createGraphNode(id, value, key);
+          nodeMap.set(id, node);
+          graphNodes.push(node);
+          addedNodes++;
+        });
+      });
+      graphTotalNodeCount = Math.max(graphTotalNodeCount, observedIds.size);
+      const edgesByKey = new Map(graphEdges.map(edge => [graphEdgeKey(edge.source, edge.target, edge.label), edge]));
+      const addEdge = (source, target, edge) => {
+        if (source === undefined || target === undefined) return;
+        source = String(source);
+        target = String(target);
+        // 被渲染上限排除的端点不能产生悬挂边。
+        if (!nodeMap.has(source) || !nodeMap.has(target)) return;
+        const label = String(edge.label ?? '');
+        const key = graphEdgeKey(source, target, label);
+        const existing = edgesByKey.get(key);
+        if (existing) {
+          for (const field of ['weight', 'metadata']) {
+            if (Object.prototype.hasOwnProperty.call(edge, field)
+              && JSON.stringify(existing[field]) !== JSON.stringify(edge[field])) {
+              existing[field] = edge[field];
+              changedEdges++;
             }
-            rowNodeIds.push(id);
-          } else if (val.source !== undefined && val.target !== undefined) {
-            const k = val.source + '|' + val.target;
-            if (!seenEdges.has(k)) {
-              seenEdges.add(k);
-              graphEdges.push({ source: String(val.source), target: String(val.target), label: val.label || 'LINK' });
-            }
+          }
+          return;
+        }
+        const value = { source, target, label, weight: edge.weight, metadata: edge.metadata };
+        edgesByKey.set(key, value);
+        graphEdges.push(value);
+        addedEdges++;
+      };
+      rows.forEach(row => {
+        Object.values(row).forEach(value => {
+          if (!value || typeof value !== 'object') return;
+          if (value.source !== undefined && value.target !== undefined) addEdge(value.source, value.target, value);
+          if (value.id !== undefined && Array.isArray(value.edges)) {
+            value.edges.forEach(edge => addEdge(value.id, edge.targetId, edge));
           }
         });
-        for (let i = 1; i < rowNodeIds.length; i++) {
-          const k = rowNodeIds[i - 1] + '|' + rowNodeIds[i];
-          if (!seenEdges.has(k)) {
-            seenEdges.add(k);
-            graphEdges.push({ source: rowNodeIds[i - 1], target: rowNodeIds[i], label: '' });
-          }
-        }
       });
-      if (addedNodes > 0) {
-        graphTotalNodeCount = Math.max(graphTotalNodeCount, graphNodes.length);
-        recomputeDegrees(); // PR-17：新节点入图后重算度数（Sigma size 同步依赖）
+      return { addedNodes, addedEdges, changedEdges, truncated };
+    }
+
+    // 增量并入保持已有坐标；新增边或更新边属性也必须刷新渲染器与度数。
+    function mergeRowsIntoGraph(rows) {
+      const result = appendGraphRows(rows);
+      if (result.addedNodes || result.addedEdges || result.changedEdges) {
+        recomputeDegrees();
         applyGraphPhysicsPolicy();
         if (graphBackend === 'sigma') {
           if (graphColorMode === 'community') applyCommunityColors();
@@ -4307,7 +4340,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         }
       }
       renderGraphFilterPanels();
-      return addedNodes;
+      return result.addedNodes;
     }
 
     // k-hop 邻域扩展（0.8.8 起）：单请求 GET /v1/nodes/{id}/neighbors
@@ -4325,40 +4358,22 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         throw new Error(`${err.title || '邻域查询失败'} — ${err.detail || ''}`);
       }
       const data = await res.json();
-      let addedNodes = 0;
-      (data.nodes || []).forEach(node => {
-        const sid = String(node.id);
-        if (nodeMap.has(sid)) return;
-        const gn = createGraphNode(sid, node, node.payload?.type);
-        nodeMap.set(sid, gn);
-        graphNodes.push(gn);
-        addedNodes++;
-      });
-      let addedEdges = 0;
-      const seenEdges = new Set(graphEdges.map(e => e.source + '|' + e.target));
-      (data.edges || []).forEach(e => {
-        const source = String(e.source);
-        const target = String(e.target);
-        const key = source + '|' + target;
-        // 服务端返回真实边：两端节点本次均已并入，直接落图（无需悬挂边过滤）
-        if (!nodeMap.has(source) || !nodeMap.has(target) || seenEdges.has(key)) return;
-        seenEdges.add(key);
-        graphEdges.push({ source, target, label: e.label || 'LINK', weight: e.weight });
-        addedEdges++;
-      });
-      if (addedNodes > 0 || addedEdges > 0) {
-        graphTotalNodeCount = Math.max(graphTotalNodeCount, graphNodes.length);
-        recomputeDegrees(); // PR-17：k-hop 扩展后重算度数
+      const rows = (data.nodes || []).map(node => ({ node }));
+      (data.edges || []).forEach(edge => rows.push({ edge }));
+      const result = appendGraphRows(rows);
+      if (result.addedNodes || result.addedEdges || result.changedEdges) {
+        recomputeDegrees();
         applyGraphPhysicsPolicy();
         if (graphBackend === 'sigma') {
           if (graphColorMode === 'community') applyCommunityColors();
           else rebuildSigmaInstances();
         }
       }
+      renderGraphFilterPanels();
       return {
-        addedNodes,
-        addedEdges,
-        truncated: !!data.truncated,
+        addedNodes: result.addedNodes,
+        addedEdges: result.addedEdges,
+        truncated: !!data.truncated || result.truncated,
         visitedNodes: data.visitedNodes || 0,
         traversedEdges: data.traversedEdges || 0
       };
@@ -4369,73 +4384,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       graphEdges = [];
       nodeMap = new Map();
       graphTotalNodeCount = 0;
-      const seenIds = new Set(); // 全量节点计数去重（含被截断未渲染的节点）
-
-      // 先收集节点，再读取真实边，投影列顺序不能决定图关系或方向。
-      rows.forEach((row) => {
-        Object.entries(row).forEach(([key, val]) => {
-          if (val && typeof val === 'object') {
-            if (val.id !== undefined) {
-              // 节点：先无差别计数（真实总节点数），再按渲染上限截断
-              const id = String(val.id);
-              if (!seenIds.has(id)) {
-                seenIds.add(id);
-                graphTotalNodeCount++;
-              }
-              // 星云模式（显式 opt-in）绕过 1500 渲染截断；默认护栏语义不变
-              if (nodeMap.has(id) || (graphNodes.length >= GRAPH_RENDER_MAX_NODES && !nebulaActive)) {
-                // 已渲染过、或达到渲染上限：只参与计数，不再创建；
-                // 连线只连接最终可见的节点
-                return;
-              }
-              // 黄金角螺旋初始位置：相比纯随机可显著减少初始重叠
-              const node = createGraphNode(id, val, key);
-              nodeMap.set(id, node);
-              graphNodes.push(node);
-            }
-          }
-        });
-      });
-
-      const seenEdges = new Set();
-      const addEdge = (source, target, edge) => {
-        if (source === undefined || target === undefined) return;
-        source = String(source);
-        target = String(target);
-        if (!nodeMap.has(source) || !nodeMap.has(target)) return;
-        const label = String(edge.label ?? '');
-        const key = JSON.stringify([source, target, label]);
-        if (seenEdges.has(key)) return;
-        seenEdges.add(key);
-        graphEdges.push({ source, target, label, weight: edge.weight, metadata: edge.metadata });
-      };
-      rows.forEach(row => {
-        const rowNodeIds = [];
-        let rowHadRealEdge = false;
-        Object.values(row).forEach(value => {
-          if (!value || typeof value !== 'object') return;
-          if (value.source !== undefined && value.target !== undefined) {
-            addEdge(value.source, value.target, value);
-            rowHadRealEdge = true;
-          }
-          if (value.id !== undefined && Array.isArray(value.edges)) {
-            // edges 存在即视为服务端提供了权威边信息：空数组表示"确认无出边"，
-            // 此时不能再按投影顺序推断。
-            rowHadRealEdge = true;
-            value.edges.forEach(edge => addEdge(value.id, edge.targetId, edge));
-          }
-          if (value.id !== undefined && nodeMap.has(String(value.id))) {
-            rowNodeIds.push(String(value.id));
-          }
-        });
-        // 真实边优先；TQL MATCH 无法投影边时退回行内节点顺序推断（0.8.8 行为），
-        // 仅在整行没有任何真实边时启用，避免方向/标签被投影顺序污染。
-        if (!rowHadRealEdge) {
-          for (let i = 1; i < rowNodeIds.length; i++) {
-            addEdge(rowNodeIds[i - 1], rowNodeIds[i], { label: '' });
-          }
-        }
-      });
+      appendGraphRows(rows);
 
       recomputeDegrees(); // PR-17：全量重建后重算度数（节点半径 / Sigma size 依赖）
       applyGraphPhysicsPolicy();
@@ -4495,7 +4444,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       if (nebulaActive) { notice.hidden = true; return; }
       let msg = '';
       if (graphNodes.length >= GRAPH_RENDER_MAX_NODES && graphTotalNodeCount > graphNodes.length) {
-        msg = `共 ${graphTotalNodeCount} 个节点，仅渲染前 ${GRAPH_RENDER_MAX_NODES}（已暂停力学模拟以保持流畅）`;
+        msg = `至少发现 ${graphTotalNodeCount} 个节点，仅渲染前 ${GRAPH_RENDER_MAX_NODES}（已暂停力学模拟以保持流畅）`;
       } else if (physicsLockedByScale) {
         msg = `节点数 ${graphNodes.length} 超过 ${GRAPH_PHYSICS_MAX_NODES}，已暂停力学模拟以保持流畅`;
       }
@@ -5512,7 +5461,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         nebulaSnapshot = {
           nodes: graphNodes.map(n => Object.assign({}, n)),
           edges: graphEdges.map(e => Object.assign({}, e)),
-          layout: graphLayoutMode
+          layout: graphLayoutMode,
+          totalNodeCount: graphTotalNodeCount
         };
         nebulaActive = true;
         btn.textContent = '退出星云';
@@ -5556,7 +5506,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         graphNodes = snap.nodes;
         graphEdges = snap.edges;
         nodeMap = new Map(graphNodes.map(n => [n.id, n]));
-        graphTotalNodeCount = graphNodes.length;
+        graphTotalNodeCount = snap.totalNodeCount ?? graphNodes.length;
         nodeCommunities = new Map();
         graphColorMode = 'type';
         graphNodes.forEach(n => { n.color = getNodeColor(n.typeKey); });
@@ -5801,8 +5751,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         ctx.moveTo(s.x, s.y);
         ctx.quadraticCurveTo(cx, cy, t.x, t.y);
         // 路径追踪高亮（0.8.8）：命中路径的边用琥珀色加粗（双主题下均可辨识）
-        const onPath = pathHighlightEdges.has(edge.source + '|' + edge.target)
-          || pathHighlightEdges.has(edge.target + '|' + edge.source);
+        const onPath = pathHighlightEdges.has(graphEdgeKey(edge.source, edge.target, edge.label));
         ctx.strokeStyle = onPath ? 'rgba(245, 158, 11, 0.95)' : 'rgba(' + edgeBase + ', ' + edgeAlpha + ')';
         ctx.lineWidth = onPath ? 3 : 1.2;
         ctx.stroke();
@@ -5974,7 +5923,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       if (!container) return;
       destroySigmaInstance(viewId);
       const mapFn = sigmaMapFactory();
-      const graph = new sigmaLibs.Graph();
+      const graph = new sigmaLibs.Graph({ type: 'directed', multi: true });
       const dark = document.documentElement.getAttribute('data-theme') === 'dark';
       graphNodes.forEach(n => {
         const p = mapFn(n);
@@ -5990,8 +5939,9 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       // 统一走 sigmaEdgeBaseColor()（路径高亮还原时复用同一公式）
       const sigmaEdgeColor = sigmaEdgeBaseColor();
       graphEdges.forEach(e => {
-        if (graph.hasNode(e.source) && graph.hasNode(e.target) && !graph.hasEdge(e.source, e.target)) {
-          graph.addEdge(e.source, e.target, {
+        const key = graphEdgeKey(e.source, e.target, e.label);
+        if (graph.hasNode(e.source) && graph.hasNode(e.target) && !graph.hasEdge(key)) {
+          graph.addEdgeWithKey(key, e.source, e.target, {
             size: 1,
             color: sigmaEdgeColor,
             label: e.label || '',
@@ -6734,7 +6684,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     // 现由服务端做有界搜索，返回节点序列 + 逐跳真实边，客户端
     // 用 POST /v1/nodes/batch-get（Gap 5）补齐节点 payload 后并入图并高亮。
     // ==========================================
-    let pathHighlightEdges = new Set(); // "source|target" 键集合
+    let pathHighlightEdges = new Set(); // 方向与标签共同确定路径边
     let __pathTraceSeq = 0;
 
     // Sigma 边基色（与 buildSigmaForView 同公式；高亮还原时复用）
@@ -6776,7 +6726,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           const inst = sigmaInstances[viewId];
           if (!inst || inst.sigma.killed) continue;
           inst.graph.forEachEdge((edge, attrs, source, target) => {
-            const on = pathHighlightEdges.has(source + '|' + target) || pathHighlightEdges.has(target + '|' + source);
+            const on = pathHighlightEdges.has(graphEdgeKey(source, target, attrs.label));
             inst.graph.setEdgeAttribute(edge, 'color', on ? '#f59e0b' : base);
             inst.graph.setEdgeAttribute(edge, 'size', on ? 3 : 1);
           });
@@ -6812,54 +6762,39 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         }
         const p = paths[0];
         const pathNodeIds = (p.nodes || []).map(s => String(s));
-        // 批量补齐路径节点 payload（0.8.8 batch-get；失败则仅并入边与高亮）
-        let addedNodes = 0;
-        try {
-          const ids = pathNodeIds.map(s => Number(s)).filter(n => Number.isFinite(n));
-          if (ids.length) {
-            const bres = await fetch(`${API_BASE}/v1/nodes/batch-get`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ ids })
-            });
-            if (seq !== __pathTraceSeq) return;
-            if (bres.ok) {
-              const bdata = await bres.json();
-              (bdata.nodes || []).forEach(node => {
-                const sid = String(node.id);
-                if (nodeMap.has(sid)) return;
-                const gn = createGraphNode(sid, node, node.payload?.type);
-                nodeMap.set(sid, gn);
-                graphNodes.push(gn);
-                addedNodes++;
-              });
-            }
-          }
-        } catch (_) { /* 节点补齐失败不阻断路径并入 */ }
-        // 并入路径边（真实边对象，带 label）
-        const keys = [];
-        const seen = new Set(graphEdges.map(e => e.source + '|' + e.target));
-        (p.edges || []).forEach(e => {
-          const source = String(e.source);
-          const target = String(e.target);
-          const key = source + '|' + target;
-          keys.push(key);
-          if (nodeMap.has(source) && nodeMap.has(target) && !seen.has(key)) {
-            seen.add(key);
-            graphEdges.push({ source, target, label: e.label || 'LINK', weight: e.weight });
-          }
-        });
-        if (addedNodes > 0) {
-          graphTotalNodeCount = Math.max(graphTotalNodeCount, graphNodes.length);
-          recomputeDegrees();
+        // 保留 u64 的原始十进制数值；Number 无法精确表示全部合法节点 ID。
+        const ids = pathNodeIds;
+        if (ids.some(id => !/^(0|[1-9][0-9]{0,19})$/.test(id)
+          || (id.length === 20 && id > '18446744073709551615'))) {
+          throw new Error('路径返回了无效的节点 ID');
         }
+        const rows = [];
+        if (ids.length) {
+          const bres = await fetch(`${API_BASE}/v1/nodes/batch-get`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            // 严格验证后的十进制数字可直接组成 JSON 数值，服务端按 u64 精确解析。
+            body: '{"ids":[' + ids.join(',') + ']}'
+          });
+          if (seq !== __pathTraceSeq) return;
+          if (!bres.ok) throw new Error('路径节点补齐失败，未更新图');
+          const bdata = await bres.json();
+          (bdata.nodes || []).forEach(node => rows.push({ node }));
+        }
+        (p.edges || []).forEach(edge => rows.push({ edge }));
+        appendGraphRows(rows);
+        const keys = (p.edges || []).filter(edge => nodeMap.has(String(edge.source)) && nodeMap.has(String(edge.target)))
+          .map(edge => graphEdgeKey(edge.source, edge.target, edge.label));
+        const incomplete = pathNodeIds.some(id => !nodeMap.has(id));
+        recomputeDegrees();
         applyGraphPhysicsPolicy();
         if (graphBackend === 'sigma') rebuildSigmaInstances(); // 新节点/边入图需重建
         applyPathHighlight(keys);
         hint.textContent = `路径 ${Math.max(pathNodeIds.length - 1, 0)} 跳：${pathNodeIds.map(i => '#' + i).join(' → ')}`
+          + (incomplete ? '（部分节点未载入或达到渲染上限，未完整高亮）' : '')
           + (data.truncated ? '（服务端结果已截断）' : '')
           + (paths.length > 1 ? `（共 ${paths.length} 条，已高亮首条）` : '');
-        showToast(`路径追踪：已并入并高亮 ${keys.length} 跳路径`);
+        showToast(incomplete ? '路径已找到，但未完整载入图中' : `路径追踪：已并入并高亮 ${keys.length} 跳路径`);
       } catch (err) {
         if (seq === __pathTraceSeq) hint.textContent = '网络请求失败: ' + err.message;
       }
@@ -8173,7 +8108,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
             const nebulaPayload = (i) => ({ name: 'Nebula' + i, type: i % 3 === 0 ? 'paper' : 'person', path: 'ns' + (i % 7) + '/leaf' + i });
             rows = Array.from({ length: 1200 }, (_, i) => ({
               a: { type: 'node', id: 'nb' + i, payload: nebulaPayload(i), vector: [] },
-              b: { type: 'node', id: 'nb' + ((i + 1) % 1200), payload: nebulaPayload((i + 1) % 1200), vector: [] }
+              b: { type: 'node', id: 'nb' + ((i + 1) % 1200), payload: nebulaPayload((i + 1) % 1200), vector: [] },
+              edge: { source: 'nb' + i, target: 'nb' + ((i + 1) % 1200), label: 'NEXT', weight: 1, metadata: null }
             }));
           } else if (q.indexOf('MATCH') === 0) rows = MATCH_ROWS;
           else if (q.indexOf('SEARCH') === 0) rows = [{ hit: NODE_ALICE, score: { type: 'float', value: 0.98 } }];
@@ -8930,7 +8866,15 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           if (!this._edgeKeys.has(k)) { this._edgeKeys.add(k); this._edges.push({ s: String(s), t: String(t), attrs: attrs || {} }); }
         }
         hasNode(id) { return this._nodes.has(String(id)); }
-        hasEdge(s, t) { return this._edgeKeys.has(String(s) + '|' + String(t)); }
+        addEdgeWithKey(key, s, t, attrs) {
+          if (!this._edgeKeys.has(key)) { this._edgeKeys.add(key); this._edges.push({ key, s: String(s), t: String(t), attrs: attrs || {} }); }
+        }
+        hasEdge(s, t) { return this._edgeKeys.has(t === undefined ? s : String(s) + '|' + String(t)); }
+        forEachEdge(cb) { this._edges.forEach((edge, index) => cb(edge.key || String(index), edge.attrs, edge.s, edge.t)); }
+        setEdgeAttribute(key, field, value) {
+          const edge = this._edges.find((edge, index) => (edge.key || String(index)) === key);
+          if (edge) edge.attrs[field] = value;
+        }
         setNodeAttribute(id, key, val) { if (this._nodes.has(String(id))) this._nodes.get(String(id))[key] = val; }
         forEachNode(cb) { this._nodes.forEach((a, id) => cb(id, a)); }
         order() { return this._nodes.size; }
@@ -9062,14 +9006,14 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         assert(graphNodes.length === 4, '合并后应 4 节点，实际 ' + graphNodes.length);
         assert(mergeRowsIntoGraph([kSeedRow]) === 0, '重复并入应幂等（0 新增）');
         assert(graphNodes.length === 4, '幂等后仍 4 节点');
-        // 双节点行：同行节点按顺序推断连线
+        // 双节点行没有真实边时不能推断连线
         const pairRow = { node: kSeedRow.node, node2: { type: 'node', id: '98', payload: { name: 'KPeer' }, vector: [] } };
         assert(mergeRowsIntoGraph([pairRow]) === 1, '双节点行应新增 1 节点');
-        assert(graphEdges.some(e => e.source === '99' && e.target === '98'), '同行节点应推断连线 99→98');
+        assert(!graphEdges.some(e => e.source === '99' && e.target === '98'), '同行节点不能证明存在 99→98 边');
       });
 
       addAssert('k-hop 邻域扩展：抽屉按钮以当前节点为种子拉取邻居入图', '搜索驱动探索', async () => {
-        // 重建干净图（test 1 的 pairRow 已推断过 99→98 空标签边，会触发边去重）
+        // 重建干净图，验证邻域端点与真实边一起并入
         renderGraph(MATCH_ROWS);
         mergeRowsIntoGraph([{ node: { type: 'node', id: '99', payload: { name: 'KSeed', type: 'person' }, vector: [] } }]);
         openNodeDrawer({ id: '99', label: 'KSeed', payload: { name: 'KSeed' }, vector: [] });
@@ -9670,21 +9614,17 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         document.getElementById('graphFilterPanel').hidden = true;
       });
 
-      addAssert('图 v2：边 label 过滤（含行内推断边计数）', '图探索器 v2', async () => {
-        // 无 edges 字段 = 该行没有服务端边信息，允许按行内顺序推断
-        renderGraph([{
-          a: { ...NODE_ALICE, edges: undefined },
-          b: { ...NODE_BOB, edges: undefined }
-        }]);
-        mergeRowsIntoGraph([{ link: { source: '2', target: '3', label: 'KNOWS' } }]);
+      addAssert('图 v2：边标签过滤保留真实无标签边', '图探索器 v2', async () => {
+        renderGraph([{ a: NODE_ALICE, b: NODE_BOB, c: NODE_PAPER,
+          edge: { source: '1', target: '2', label: '' },
+          other: { source: '2', target: '3', label: 'KNOWS' } }]);
         const agg = graphLabelAggregation();
         assert((agg.get('KNOWS') || 0) === 1, 'KNOWS 应计数 1');
-        assert((agg.get(INFERRED_EDGE_LABEL) || 0) === 1, '行内推断边应计入 (推断)');
-        assert(visibleEdgeCount() === 2, '前置：2 边可见');
+        assert((agg.get(UNLABELED_EDGE_LABEL) || 0) === 1, '真实空标签边应计入无标签');
+        assert(visibleEdgeCount() === 2, '前置：两条真实边可见');
         graphFilters.hiddenLabels.add('KNOWS');
-        assert(visibleEdgeCount() === 1, '隐藏 KNOWS 后应剩 1 边（推断边）');
+        assert(visibleEdgeCount() === 1, '隐藏 KNOWS 后保留真实无标签边');
         graphFilters.hiddenLabels.clear();
-        assert(visibleEdgeCount() === 2, '清除后恢复 2 边');
         renderGraph([]);
       });
 
@@ -10516,7 +10456,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         await waitFor(() => document.getElementById('pathHint').textContent.indexOf('2 跳') !== -1,
           3000, '路径提示应显示 2 跳');
         assert(nodeMap.has('98') && nodeMap.has('97'), '路径节点应经 batch-get 并入图');
-        assert(pathHighlightEdges.has('99|98') && pathHighlightEdges.has('98|97'),
+        assert(pathHighlightEdges.has('["99","98","KNOWS"]') && pathHighlightEdges.has('["98","97","KNOWS"]'),
           '路径边应进入高亮集合，实际 ' + JSON.stringify(Array.from(pathHighlightEdges)));
         assert(!document.getElementById('clearPathBtn').hidden, '清除高亮按钮应显示');
         assert(graphEdges.some(e => e.source === '98' && e.target === '97' && e.label === 'KNOWS'),
@@ -10531,6 +10471,97 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         assert(pathHighlightEdges.size === 0, '清除后高亮集合应为空');
         assert(document.getElementById('clearPathBtn').hidden, '清除后按钮应隐藏');
         assert(document.getElementById('pathHint').textContent === '', '清除后提示应清空');
+      });
+
+      // ---------- PR #63 审查反例：独立验证事实关系、规模保护与 u64 请求 ----------
+      addAssert('增量图：方向与标签来自真实边，空邻接与缺失邻接均不推断', '图数据契约', async () => {
+        const rows = [{ a: { id: '2', payload: {}, edges: [] }, b: {
+          id: '1', payload: {}, edges: [{ targetId: '2', label: 'KNOWS', weight: 0.5, metadata: { source: '事实' } }]
+        } }];
+        renderGraph(rows);
+        const expected = JSON.stringify(graphEdges);
+        assert(mergeRowsIntoGraph(rows) === 0, '已有节点重复并入不得新增节点');
+        assert(JSON.stringify(graphEdges) === expected, '重复并入不得伪造反向边或改写事实');
+        assert(graphEdges.length === 1 && graphEdges[0].source === '1' && graphEdges[0].target === '2', '反向投影不能制造 2→1');
+        renderGraph([]);
+        mergeRowsIntoGraph([{ a: { id: '2', payload: {} }, b: { id: '1', payload: {} } }]);
+        assert(graphEdges.length === 0, '缺失邻接信息也不能根据同一行推断边');
+        mergeRowsIntoGraph(rows);
+        mergeRowsIntoGraph([{ edge: { source: '1', target: '2', label: 'LIKES', weight: 2, metadata: { source: '平行边' } } }]);
+        assert(graphEdges.length === 2, '同一对端点的不同标签必须作为两条边保留');
+        assert(graphEdges.some(edge => edge.label === 'LIKES' && edge.weight === 2 && edge.metadata.source === '平行边'), '权重和元数据不得丢失');
+        assert(nodeMap.get('1').degree === 2, '仅增加边时也必须更新度数');
+        const savedLibs = sigmaLibs;
+        try {
+          sigmaLibs = { Graph: FakeGraph, Sigma: FakeSigma };
+          graphBackend = 'sigma';
+          buildSigmaForView('query');
+          assert(sigmaInstances.query.graph._edges.length === 2, 'WebGL 也必须保留不同标签的平行边');
+          applyPathHighlight(['["1","2","LIKES"]']);
+          const edges = sigmaInstances.query.graph._edges;
+          assert(edges.find(edge => edge.attrs.label === 'LIKES').attrs.size === 3, '选中的真实边必须高亮');
+          assert(edges.find(edge => edge.attrs.label === 'KNOWS').attrs.size === 1, '未选中的平行边不得跟随高亮');
+        } finally {
+          destroySigmaInstances();
+          graphBackend = 'canvas';
+          sigmaLibs = savedLibs;
+          clearPathHighlight();
+          renderGraph([]);
+        }
+      });
+
+      addAssert('增量图：查询并图与邻域扩展均遵守默认节点上限', '图数据契约', async () => {
+        const rows = Array.from({ length: 2000 }, (_, index) => ({ node: { id: String(index + 1), payload: {}, edges: [] } }));
+        const savedFetch = window.fetch;
+        renderGraph([]);
+        assert(!nebulaActive, '默认模式不能隐式进入星云');
+        assert(mergeRowsIntoGraph(rows) === 1500 && graphNodes.length === 1500, '2000 个节点只能渲染 1500 个');
+        assert(graphTotalNodeCount === 2000, '提示仍应记录本次发现的节点规模');
+        assert(mergeRowsIntoGraph(rows) === 0 && graphNodes.length === 1500, '重复并入不能突破上限');
+        try {
+          window.fetch = async () => jsonRes({ nodes: rows.map(row => row.node), edges: [
+            { source: '1', target: '2', label: 'KNOWS', weight: 1, metadata: { kind: '邻域' } },
+            { source: '1', target: '2', label: 'LIKES', weight: 2, metadata: null },
+            { source: '1500', target: '1501', label: 'NEXT' }
+          ], truncated: false });
+          const result = await expandNeighborhoodIntoGraph('1', 1);
+          assert(result.truncated && graphNodes.length === 1500, '本地渲染截断必须反馈到结果');
+          assert(graphEdges.length === 2, '保留真实平行边，同时排除不可见端点的悬挂边');
+          assert(graphEdges[0].metadata.kind === '邻域', '邻域边元数据必须保留');
+        } finally {
+          window.fetch = savedFetch;
+          renderGraph([]);
+        }
+      });
+
+      addAssert('路径：u64 ID 原样发送，节点补齐失败不能报告已完整高亮', '图数据契约', async () => {
+        const savedFetch = window.fetch;
+        const big = '9007199254740993';
+        let requestBody = '';
+        let failBatch = false;
+        renderGraph([{ node: { id: '1', payload: {}, edges: [] } }]);
+        currentDrawerNodeId = '1';
+        try {
+          window.fetch = async (url, init) => {
+            if (url.includes('/paths/to/')) return jsonRes({ paths: [{ nodes: ['1', big], edges: [
+              { source: '1', target: big, label: 'LINK', weight: 3, metadata: { verified: true } }
+            ] }] });
+            requestBody = init.body;
+            return failBatch ? jsonRes({ title: '失败' }, 500) : jsonRes({ nodes: [{ id: big, payload: {}, edges: [] }] });
+          };
+          await tracePathTo(big, 2);
+          assert(requestBody === '{"ids":[1,9007199254740993]}', '请求体必须保留 u64 数值而非舍入后的 Number');
+          assert(nodeMap.has(big) && !nodeMap.has('9007199254740992'), '不得载入舍入后的错误节点');
+          assert(graphEdges.length === 1 && graphEdges[0].metadata.verified, '完整路径与边元数据必须可见');
+          renderGraph([{ node: { id: '1', payload: {}, edges: [] } }]);
+          failBatch = true;
+          await tracePathTo(big, 2);
+          assert(graphEdges.length === 0 && document.getElementById('pathHint').textContent.includes('节点补齐失败'), '补齐失败不得伪装路径已完整载入');
+        } finally {
+          window.fetch = savedFetch;
+          currentDrawerNodeId = null;
+          renderGraph([]);
+        }
       });
 
       // ---------- 执行器（支持运行中动态追加的断言） ----------

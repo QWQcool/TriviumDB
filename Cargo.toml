@@ -8,7 +8,7 @@ resolver = "2"
 
 [package]
 name = "triviumdb"
-version = "0.8.9"
+version = "0.8.10"
 edition = "2024"
 authors = ["YoKONCy <2752026184@qq.com>"]
 description = "A high-performance memory-mmap hybrid search engine built for AI, combining dense vector, sparse text, graph relations, and JSON metadata."
@@ -149,6 +149,11 @@ harness = false
 [[bench]]
 name = "bench_quiver_ablation"
 harness = false
+
+[[bench]]
+name = "bench_quiver_connectivity"
+harness = false
+required-features = ["ablation"]
 
 # ─────────────────────────────────────────────────────────────
 # E. 研究与硬件消融：不会进入默认日常 benchmark

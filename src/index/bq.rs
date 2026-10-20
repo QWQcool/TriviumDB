@@ -1113,6 +1113,14 @@ impl Bq2Store {
         )
     }
 
+    /// 比较完整签名，包含非 64 倍数维度的尾部，不复制固定上限的大数组。
+    pub(crate) fn same_signature(&self, i: usize, j: usize) -> bool {
+        let left = i * self.chunks;
+        let right = j * self.chunks;
+        self.pos[left..left + self.chunks] == self.pos[right..right + self.chunks]
+            && self.strong[left..left + self.chunks] == self.strong[right..right + self.chunks]
+    }
+
     /// 紧凑 hot 内存占用（字节）
     pub fn hot_bytes(&self) -> usize {
         (self.pos.len() + self.strong.len()) * 8
@@ -1142,6 +1150,78 @@ impl Bq2Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // 按维解码后直接计算内积，独立于生产实现的分组位计数公式。
+    fn reference_distance(left: &Bq2Signature, right: &Bq2Signature, dim: usize) -> u32 {
+        let value = |signature: &Bq2Signature, column: usize| {
+            let mask = 1u64 << (column % 64);
+            let sign = if signature.pos[column / 64] & mask == 0 {
+                -1
+            } else {
+                1
+            };
+            let magnitude = if signature.strong[column / 64] & mask == 0 {
+                1
+            } else {
+                2
+            };
+            sign * magnitude
+        };
+        let dot: i32 = (0..dim)
+            .map(|column| value(left, column) * value(right, column))
+            .sum();
+        (4 * dim as i32 - dot) as u32
+    }
+
+    #[test]
+    fn memory_safety_scalar_reads_exact_chunks_and_masks_tail() {
+        for dim in [0usize, 1, 3, 63, 64, 65, 383, 384, 385, 767, 768, 769, 3072] {
+            let chunks = dim.div_ceil(64);
+            let mut left = Bq2Signature::empty();
+            let mut right = Bq2Signature::empty();
+            for chunk in 0..chunks {
+                left.pos[chunk] = 0xa5a5_a5a5_a5a5_a5a5u64.rotate_left(chunk as u32);
+                left.strong[chunk] = 0xcccc_cccc_cccc_cccc;
+                right.pos[chunk] = !left.pos[chunk];
+                right.strong[chunk] = 0x5555_5555_5555_5555;
+            }
+            // 精确长度的独立堆分配，使最后一块越界无法被固定大数组掩盖。
+            let pos_left = left.pos[..chunks].to_vec();
+            let strong_left = left.strong[..chunks].to_vec();
+            let pos_right = right.pos[..chunks].to_vec();
+            let strong_right = right.strong[..chunks].to_vec();
+            let actual = bq2_distance_raw_scalar(
+                pos_left.as_ptr(),
+                strong_left.as_ptr(),
+                pos_right.as_ptr(),
+                strong_right.as_ptr(),
+                dim,
+            );
+            assert_eq!(actual, reference_distance(&left, &right, dim), "维度={dim}");
+        }
+    }
+
+    #[test]
+    fn memory_safety_store_growth_keeps_row_pointer_offsets_valid() {
+        for dim in [3, 65, 3071] {
+            let mut store = Bq2Store::new(dim);
+            let mut signatures = Vec::new();
+            for row in 0..9 {
+                let vector = (0..dim)
+                    .map(|column| [-2.0f32, -0.5, 0.5, 2.0][(row + column) % 4])
+                    .collect::<Vec<_>>();
+                signatures.push(Bq2Signature::from_vector(&vector));
+                store.push_from_vector(&vector);
+            }
+            for (row, signature) in signatures.iter().enumerate() {
+                assert_eq!(store.get_sig(row), *signature);
+                let last = signatures.last().unwrap();
+                let expected = reference_distance(signature, last, dim);
+                assert_eq!(store.distance(row, signatures.len() - 1, dim), expected);
+                assert_eq!(store.distance_to_sig(row, last, dim), expected);
+            }
+        }
+    }
 
     #[cfg(target_arch = "x86_64")]
     fn next_u64(state: &mut u64) -> u64 {

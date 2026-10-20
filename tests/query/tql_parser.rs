@@ -9,7 +9,76 @@
 
 use triviumdb::filter::Filter;
 use triviumdb::query::tql_ast::*;
-use triviumdb::query::tql_parser::{parse_tql, parse_tql_statement};
+use triviumdb::query::tql_parser::{
+    parse_tql, parse_tql_statement, parse_tql_statement_with_pos, parse_tql_with_pos,
+};
+
+#[test]
+fn 表达式递归预算_历史fuzz崩溃样本安全拒绝() {
+    // 保留原始样本，让常规测试固定回放历史崩溃，无需依赖随机 fuzz 再次命中。
+    let input = include_str!("fixtures/fuzz_query_parse_stack_overflow.tql");
+    assert_eq!(input.len(), 5490, "应保留完整的原始崩溃样本");
+    for error in [
+        parse_tql(input).unwrap_err(),
+        parse_tql_statement(input).unwrap_err(),
+        parse_tql_with_pos(input).unwrap_err().to_string(),
+        parse_tql_statement_with_pos(input).unwrap_err().to_string(),
+    ] {
+        assert!(
+            error.contains("表达式嵌套"),
+            "应由表达式预算安全拒绝：{error}"
+        );
+    }
+}
+
+#[test]
+fn 表达式递归预算_括号与coalesce遵守深度边界() {
+    for (open, close) in [("(", ")"), ("coalesce(", ", 0)")] {
+        for depth in [127, 128, 256] {
+            let input = format!(
+                "MATCH (n) RETURN {}n.value{}",
+                open.repeat(depth),
+                close.repeat(depth)
+            );
+            let result = parse_tql(&input);
+            if depth == 127 {
+                assert!(result.is_ok(), "预算内的 {open} 嵌套应成功：{result:?}");
+            } else {
+                let error = result.expect_err("超过预算的表达式必须安全拒绝");
+                assert!(error.contains("表达式嵌套"), "应由表达式预算拒绝：{error}");
+            }
+        }
+    }
+}
+
+#[test]
+fn 表达式递归预算_与外层谓词共享限制() {
+    let expression = format!("{}n.value{}", "coalesce(".repeat(40), ", 0)".repeat(40));
+    parse_tql(&format!("MATCH (n) RETURN {expression}")).expect("独立表达式应在预算内");
+    parse_tql(&format!(
+        "MATCH (n) WHERE {}n.value == 1{} RETURN n",
+        "(".repeat(100),
+        ")".repeat(100)
+    ))
+    .expect("独立谓词应在预算内");
+
+    let input = format!(
+        "MATCH (n) WHERE {}n.value == {expression}{} RETURN n",
+        "(".repeat(100),
+        ")".repeat(100)
+    );
+    let error = parse_tql(&input).expect_err("谓词与表达式的合计递归深度必须受限");
+    assert!(error.contains("表达式嵌套"), "应由共享预算拒绝：{error}");
+}
+
+#[test]
+fn 表达式递归预算_同级表达式不累计深度() {
+    let expressions = vec!["coalesce((n.value), 0)"; 256].join(", ");
+    parse_tql(&format!(
+        "MATCH (n) RETURN {expressions} ORDER BY coalesce((n.value), 0)"
+    ))
+    .expect("每个表达式结束后应归还递归预算");
+}
 
 #[test]
 fn MATCH支持单跳边变量() {

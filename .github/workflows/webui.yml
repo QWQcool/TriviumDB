@@ -9,12 +9,11 @@
 #   3. 视觉基线比对（scripts/visual-baseline.mjs，pixelmatch）
 #
 # 视觉基线的平台策略：基线按 platform 分目录存放（tests/visual/baseline/<platform>）。
-# 若当前平台无基线，脚本自动降级为"记录模式"（不判定失败）并把截图上传为产物；
-# 用 workflow_dispatch 的 update_baseline=true 可在 CI（linux）上生成基线产物，
-# 提交后该平台即开始强制比对。
+# CI 使用已有 win32 基线的平台进行强制比对；缺失基线或依赖时失败。
+# 显式更新基线后必须审阅并提交，所有截图与差异图均作为产物上传。
 #
 # 本地复现：
-#   npm i --no-save playwright pixelmatch pngjs && npx playwright install chromium
+#   npm i --no-save --ignore-scripts playwright@1.64.1 pixelmatch@8.0.0 pngjs@7.0.0 && npx playwright install chromium
 #   node scripts/ui-smoke.mjs            # SMOKE_BROWSER=webkit 跑第二引擎
 #   node scripts/visual-baseline.mjs     # --update 更新基线
 
@@ -46,13 +45,18 @@ on:
           - 'false'
           - 'true'
 
+defaults:
+  run:
+    shell: bash
+
 env:
   CARGO_TERM_COLOR: always
+  CARGO_TARGET_DIR: ${{ github.workspace }}/target/webui-tests
 
 jobs:
   webui:
     name: WebUI E2E + Visual
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     timeout-minutes: 40
 
     steps:
@@ -63,6 +67,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: webui
+          workspaces: . -> target/webui-tests
 
       - uses: actions/setup-node@v4
         with:
@@ -70,7 +75,7 @@ jobs:
 
       - name: 安装 WebUI 测试依赖（不写入 package.json）
         run: |
-          npm i --no-save playwright pixelmatch pngjs
+          npm i --no-save --ignore-scripts playwright@1.64.1 pixelmatch@8.0.0 pngjs@7.0.0
           npx playwright install --with-deps chromium webkit
 
       - name: 构建 server（HTML 经 include_str! 内嵌，必须先构建）
@@ -100,8 +105,8 @@ jobs:
           path: tests/visual/baseline/
           if-no-files-found: warn
 
-      - name: 上传截图与差异图（失败时）
-        if: failure()
+      - name: 上传截图与差异图
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: webui-visual-artifacts

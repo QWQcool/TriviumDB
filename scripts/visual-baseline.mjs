@@ -7,9 +7,9 @@
 // 侧栏高亮不切换），本脚本把这些回归钉在截图上。
 //
 // 用法：
-//   node scripts/visual-baseline.mjs              # 校验（无基线时降级为记录模式）
+//   node scripts/visual-baseline.mjs              # 校验（缺失基线或依赖时失败）
 //   node scripts/visual-baseline.mjs --update     # 生成/更新本平台基线
-//   node scripts/visual-baseline.mjs --record-only# 只截图不比对（CI 首轮用）
+//   node scripts/visual-baseline.mjs --record-only # 显式只截图，不作为 CI 验收
 //   node scripts/visual-baseline.mjs --with-sigma # 额外拍 Sigma(WebGL) 图（本机专用）
 //
 // 设计要点：
@@ -17,16 +17,15 @@
 //     隐藏光标、清空 toast、只用确定性布局（radial —— 纯函数；force 因物理
 //     帧数依赖而排除，Sigma 因 GPU/驱动差异默认排除）
 //   * 平台隔离：基线按 process.platform 分目录存放，跨平台字体/抗锯齿差异
-//     不会造成误报；某平台无基线时自动降级为记录模式（不失败），
-//     CI 可用 workflow_dispatch 生成 linux 基线后提交
-//   * 依赖缺失时优雅跳过（退出码 0），与 ui-smoke.mjs 同约定：
-//     npm i --no-save playwright pixelmatch pngjs && npx playwright install chromium
+//     不会造成误报；缺少当前平台基线时失败，更新必须显式使用 --update。
+//   * 依赖缺失时返回失败，与 ui-smoke.mjs 同约定：
+//     npm i --no-save --ignore-scripts playwright@1.64.1 pixelmatch@8.0.0 pngjs@7.0.0 && npx playwright install chromium
 //
-// 退出码：0 = 通过/跳过；1 = 比对失败（差异图写入 .tmp/visual-diff/）
+// 退出码：0 = 通过或显式生成；1 = 检查失败（差异图写入 .tmp/visual-diff/）
 
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
@@ -40,11 +39,12 @@ const DIFF_DIR = path.join(TMP_DIR, 'visual-diff');
 const BASELINE_ROOT = path.join(ROOT, 'tests', 'visual', 'baseline');
 const PLATFORM = process.platform; // win32 / linux / darwin
 const BASELINE_DIR = path.join(BASELINE_ROOT, PLATFORM);
-const DB_PATH = path.join(TMP_DIR, `visual-${process.pid}-${Date.now()}.tdb`);
+const DB_DIR = path.join(TMP_DIR, `visual-${process.pid}-${Date.now()}`);
+const DB_PATH = path.join(DB_DIR, 'data.tdb');
 const PORT_CANDIDATES = [8086, 8087, 8088, 8089, 8090];
-const EXE = process.platform === 'win32'
-  ? path.join(ROOT, 'target', 'debug', 'triviumdb-server.exe')
-  : path.join(ROOT, 'target', 'debug', 'triviumdb-server');
+// 独立构建目录不会替换其他开发服务正在使用的可执行文件。
+const BUILD_TARGET = path.resolve(process.env.CARGO_TARGET_DIR || path.join(ROOT, 'target', 'webui-tests'));
+const EXE = path.join(BUILD_TARGET, 'debug', process.platform === 'win32' ? 'triviumdb-server.exe' : 'triviumdb-server');
 
 const ARGS = new Set(process.argv.slice(2));
 const MODE_UPDATE = ARGS.has('--update');
@@ -58,7 +58,7 @@ const MAX_DIFF_RATIO = 0.015;     // 允许差异像素占比 1.5%
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (msg) => console.log(`[visual] ${msg}`);
 
-// ---------- 依赖探测（缺失即优雅跳过） ----------
+// ---------- 依赖探测（缺失即失败） ----------
 function loadPlaywright() {
   const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
   const probe = spawnSync(npmCmd, ['root', '-g'], { encoding: 'utf8', shell: process.platform === 'win32' });
@@ -136,6 +136,14 @@ async function waitForReady(timeoutMs) {
 let serverProc = null;
 let browser = null;
 let cleaned = false;
+process.on('SIGINT', () => cleanup(1));
+process.on('SIGTERM', () => cleanup(1));
+for (const event of ['uncaughtException', 'unhandledRejection']) {
+  process.on(event, error => {
+    console.error('[visual] 执行失败：' + (error?.message || String(error)));
+    cleanup(1);
+  });
+}
 async function cleanup(exitCode) {
   if (cleaned) return;
   cleaned = true;
@@ -149,7 +157,10 @@ async function cleanup(exitCode) {
   }
   for (let attempt = 0; attempt < 20; attempt++) {
     try {
-      for (const suffix of ['', '-wal', '-shm', '-lock']) rmSync(DB_PATH + suffix, { force: true });
+      if (existsSync(DB_DIR)) {
+        for (const file of readdirSync(DB_DIR)) rmSync(path.join(DB_DIR, file), { force: true });
+        rmdirSync(DB_DIR);
+      }
       break;
     } catch (_) { await sleep(500); }
   }
@@ -248,13 +259,19 @@ if (WITH_SIGMA) {
 // ---------- 主流程 ----------
 const pwInfo = loadPlaywright();
 if (!pwInfo) {
-  log('playwright 不可用，跳过视觉基线。安装：npm i --no-save playwright pixelmatch pngjs && npx playwright install chromium');
-  process.exit(0);
+  log('playwright 不可用，无法执行视觉检查。请安装文档指定版本的测试依赖。');
+  process.exit(1);
 }
 const { pw, base: pwBase } = pwInfo;
 const diffLibs = loadDiffLibs(pwBase);
 if (!diffLibs && !MODE_UPDATE && !MODE_RECORD_ONLY) {
-  log('pixelmatch/pngjs 不可用，无法比对（降级为记录模式）。安装：npm i --no-save pixelmatch pngjs');
+  log('pixelmatch/pngjs 不可用，无法比对，检查失败。');
+  process.exit(1);
+}
+
+if (!MODE_UPDATE && !MODE_RECORD_ONLY && !existsSync(BASELINE_DIR)) {
+  console.error(`[visual] 缺少 ${PLATFORM} 基线，检查失败；请显式使用 --update 生成并审阅基线。`);
+  process.exit(1);
 }
 
 if (!existsSync(EXE)) {
@@ -269,9 +286,7 @@ if (!PORT) {
 mkdirSync(TMP_DIR, { recursive: true });
 mkdirSync(SHOT_DIR, { recursive: true });
 mkdirSync(DIFF_DIR, { recursive: true });
-for (const f of readdirSync(TMP_DIR)) {
-  if (/^visual-\d+-\d+\.tdb/.test(f)) { try { rmSync(path.join(TMP_DIR, f), { force: true }); } catch (_) {} }
-}
+mkdirSync(DB_DIR);
 log(`启动临时 server: 127.0.0.1:${PORT}`);
 serverProc = spawn(EXE, ['--dim', '4', '--database', DB_PATH, '--listen', `127.0.0.1:${PORT}`], {
   cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'],
@@ -333,7 +348,6 @@ for (const shot of SHOTS) {
 }
 
 // ---------- 更新 / 记录 / 比对 三种模式 ----------
-const baselineExists = existsSync(BASELINE_DIR);
 if (MODE_UPDATE) {
   mkdirSync(BASELINE_DIR, { recursive: true });
   for (const r of results) {
@@ -342,13 +356,8 @@ if (MODE_UPDATE) {
   log(`基线已写入 ${path.relative(ROOT, BASELINE_DIR)}（${results.length} 张，platform=${PLATFORM}）`);
   await cleanup(0);
 }
-if (MODE_RECORD_ONLY || !diffLibs || !baselineExists) {
-  if (!baselineExists) {
-    log(`本平台（${PLATFORM}）暂无基线，本次为记录模式（不判定失败）。`);
-    log('如需启用该平台门禁：node scripts/visual-baseline.mjs --update 生成基线并提交，或从 CI 产物取回。');
-  } else {
-    log('记录模式：仅截图，不比对。');
-  }
+if (MODE_RECORD_ONLY) {
+  log('显式记录模式：仅截图，不计为视觉比对通过。');
   await cleanup(0);
 }
 

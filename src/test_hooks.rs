@@ -32,6 +32,8 @@ pub enum ConcurrencyPoint {
     AfterTdbPersisted,
     BeforeFlushMarkerRename,
     AfterFlushMarkerRename,
+    AfterPublicationPrepared,
+    AfterPublicationRestore,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,6 +43,10 @@ pub enum IoPoint {
     MarkerSync,
     MarkerRename,
     MarkerMetadata,
+    PublicationBackupCopy,
+    PublicationJournalSync,
+    PublicationJournalRename,
+    PublicationRestoreCopy,
     WalFlush,
     WalSync,
     WalMigrationCreate,

@@ -2,24 +2,22 @@
 // TriviumDB WebUI 冒烟脚本 (ui-smoke)
 //
 // 目的：为内置 Web Console (crates/triviumdb-server/web/index.html) 提供一条
-// 可重复执行的端到端冒烟路径。脚本不属于 CI —— 依赖本机 cargo 与 playwright，
-// 两者任一缺失时打印提示并以退出码 0 跳过，保证 `node scripts/ui-smoke.mjs`
-// 在任何开发机上都不会误报失败。
+// 可重复执行的端到端冒烟路径。依赖缺失必须返回失败，不能把未执行的检查算作通过。
 //
 // 流程：
 //   1. cargo build -p triviumdb-server（HTML 经 include_str! 编译内嵌，必须先构建）
-//   2. 启动临时 server（独立端口 8081+ 探测空闲，--database .tmp/smoke-<pid>-<ts>.tdb 唯一临时库）
+//   2. 启动临时 server（探测独立空闲端口，每轮数据库位于独占临时目录）
 //   3. 通过 /v1/tql 注入少量种子数据（默认 FIND {type:"person"} 查询才有结果行）
 //   4. Playwright 打开 /ui：运行默认查询出结果 → 打开节点抽屉 → 依次切三个标签
 //   5. 打开 /ui?selftest=1：断言页内自检套件 0 failed
-//   6. 清理：关闭浏览器、杀掉 server 进程、删除本轮临时库（删除失败的残留由下轮启动前清扫）
+//   6. 清理：关闭浏览器、杀掉 server 进程、删除本轮独占临时目录中的数据库文件
 //
 // 用法：node scripts/ui-smoke.mjs
 // 环境变量：SMOKE_BROWSER=chromium|firefox|webkit（默认 chromium）
 
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmdirSync, rmSync } from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
@@ -28,14 +26,14 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TMP_DIR = path.join(ROOT, '.tmp');
-// 每轮使用唯一库名：即使上轮进程句柄释放延迟导致删除失败，残留脏库也不会污染本轮
-// （数据在 WAL 中，同名库会被重放）；历史残留由启动前的清扫兜底删除
-const DB_PATH = path.join(TMP_DIR, `smoke-${process.pid}-${Date.now()}.tdb`);
+// 每轮独占一个临时目录，不扫描或删除其他轮次的数据库。
+const DB_DIR = path.join(TMP_DIR, `smoke-${process.pid}-${Date.now()}`);
+const DB_PATH = path.join(DB_DIR, 'data.tdb');
 const BROWSER = process.env.SMOKE_BROWSER || 'chromium';
 const PORT_CANDIDATES = [8081, 8082, 8083, 8084, 8085];
-const EXE = process.platform === 'win32'
-  ? path.join(ROOT, 'target', 'debug', 'triviumdb-server.exe')
-  : path.join(ROOT, 'target', 'debug', 'triviumdb-server');
+// 独立构建目录不会替换其他开发服务正在使用的可执行文件。
+const BUILD_TARGET = path.resolve(process.env.CARGO_TARGET_DIR || path.join(ROOT, 'target', 'webui-tests'));
+const EXE = path.join(BUILD_TARGET, 'debug', process.platform === 'win32' ? 'triviumdb-server.exe' : 'triviumdb-server');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -45,14 +43,14 @@ function log(msg) { console.log(`[ui-smoke] ${msg}`); }
 function resolveCargo() {
   const isWin = process.platform === 'win32';
   const exeName = isWin ? 'cargo.exe' : 'cargo';
-  const probe = (cmd) => spawnSync(cmd, ['--version'], { encoding: 'utf8', shell: isWin });
+  const probe = (cmd) => spawnSync(cmd, ['--version'], { encoding: 'utf8', shell: false });
   if (probe(exeName).status === 0) return exeName;
   const full = path.join(os.homedir(), '.cargo', 'bin', exeName);
-  if (existsSync(full) && probe(`"${full}"`).status === 0) return full;
+  if (existsSync(full) && probe(full).status === 0) return full;
   return null;
 }
 
-// ---------- playwright 可用性探测（缺失则跳过，exit 0） ----------
+// ---------- playwright 可用性探测（缺失则失败） ----------
 async function loadPlaywright() {
   // 1) 项目本地 node_modules
   try {
@@ -156,8 +154,10 @@ async function cleanup(exitCode) {
   let lastRmError = null;
   for (let attempt = 0; attempt < 30; attempt++) {
     try {
-      for (const suffix of ['', '-wal', '-shm', '-lock']) {
-        rmSync(DB_PATH + suffix, { force: true });
+      // 只删除本轮独占目录中的直接子文件，覆盖 WAL、Payload 与所有 sidecar。
+      if (existsSync(DB_DIR)) {
+        for (const file of readdirSync(DB_DIR)) rmSync(path.join(DB_DIR, file), { force: true });
+        rmdirSync(DB_DIR);
       }
       lastRmError = null;
       break;
@@ -167,7 +167,7 @@ async function cleanup(exitCode) {
     }
   }
   if (lastRmError) {
-    console.error(`[ui-smoke] 警告：临时库删除失败 (${lastRmError.code || lastRmError.message})，残留文件将由下一轮启动前清扫`);
+    console.error(`[ui-smoke] 警告：临时库删除失败 (${lastRmError.code || lastRmError.message})，本轮独占目录仍保留，需人工检查`);
   }
   process.exit(exitCode);
 }
@@ -175,29 +175,20 @@ async function cleanup(exitCode) {
 // ---------- 主流程 ----------
 const playwright = await loadPlaywright();
 if (!playwright) {
-  log('playwright 不可用（未安装本地/全局包）。跳过冒烟测试 —— 这不是失败。');
+  log('playwright 不可用，无法执行冒烟测试。');
   log('如需启用：npm i -D playwright && npx playwright install chromium');
-  process.exit(0);
+  process.exit(1);
 }
 
 log(`1/6 cargo build -p triviumdb-server (browser=${BROWSER})`);
-// 构建前停掉运行中的 triviumdb-server：exe 被进程占用会导致链接器报 os error 5。
-// 注意：这会连带停掉本机其它端口上的 dev server，属冒烟脚本的既定行为。
-const killCmd = process.platform === 'win32' ? 'taskkill' : 'pkill';
-const killArgs = process.platform === 'win32' ? ['/F', '/IM', 'triviumdb-server.exe'] : ['triviumdb-server'];
-const killed = spawnSync(killCmd, killArgs, { stdio: 'ignore', shell: process.platform === 'win32' });
-if (killed.status === 0) {
-  log('  已停掉运行中的 triviumdb-server 进程 (释放 exe 锁)');
-  await sleep(500);
-}
 const cargoCmd = resolveCargo();
 if (!cargoCmd) {
   console.error('[ui-smoke] 未找到 cargo（PATH 与 ~/.cargo/bin 均无）。请先安装 Rust 工具链。');
   process.exit(1);
 }
-const build = spawnSync(cargoCmd, ['build', '-p', 'triviumdb-server'], {
+const build = spawnSync(cargoCmd, ['build', '-p', 'triviumdb-server', '--target-dir', BUILD_TARGET], {
   cwd: ROOT, stdio: 'inherit',
-  shell: process.platform === 'win32',
+  shell: false,
 });
 if (build.status !== 0) {
   console.error('[ui-smoke] cargo build 失败');
@@ -217,14 +208,7 @@ const BASE = `http://127.0.0.1:${PORT}`;
 
 log(`2/6 启动临时 server: 127.0.0.1:${PORT}, db=${DB_PATH}`);
 mkdirSync(TMP_DIR, { recursive: true });
-// 清扫历史残留的 smoke-*.tdb*（上轮删除失败遗留；当前轮文件名唯一，互不影响）
-try {
-  for (const f of readdirSync(TMP_DIR)) {
-    if (/^smoke-\d+-\d+\.tdb/.test(f)) {
-      try { rmSync(path.join(TMP_DIR, f), { force: true }); } catch (_) { /* 被占用则留给下轮 */ }
-    }
-  }
-} catch (_) { /* .tmp 可能尚不存在 */ }
+mkdirSync(DB_DIR);
 serverProc = spawn(EXE, ['--dim', '4', '--database', DB_PATH, '--listen', `127.0.0.1:${PORT}`], {
   cwd: ROOT,
   // stdout/stderr 均需持续消费：管道缓冲区 (64KB) 一旦写满，server 会阻塞在日志写入上

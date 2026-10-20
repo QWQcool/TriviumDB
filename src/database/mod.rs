@@ -554,6 +554,8 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
             )));
         }
 
+        file_format::recover_publication(path, config.access_mode == AccessMode::ReadWrite)?;
+
         if config.access_mode == AccessMode::Immutable {
             crate::storage::snapshot::validate_manifest(path, std::any::type_name::<T>(), dim)?;
         }
