@@ -74,6 +74,8 @@ git diff --check
 
 默认测试不会编译 `test-hooks` 专用用例，不能省略上述补充命令。涉及裸指针或并发安全的改动还应检查 `ci.yml` 中 TSan/Miri 对应任务的结果与实际覆盖范围；本地复现命令和工具限制见 [测试实践](docs/testing.md#threadsanitizer-与-miri)。
 
+本地可用 `cargo test-critical` 一次运行四个关键 hook 套件及全部 query 测试。默认 `cargo test` 也执行发布恢复的独立日志 oracle，但不包含 hook 专用的强杀与交错矩阵。
+
 ### 关于 Vibe Coding / AI 辅助开发
 
 本项目允许使用 Codex、Claude Code、Copilot 或其他 AI 辅助工具编写代码、文档和测试。
@@ -277,6 +279,8 @@ Please run these commands locally before committing. Key testing requirements:
 - Performance benchmarks are not a CI gate during rapid iteration — do not introduce benchmark gates in PRs.
 
 Default tests do not compile the `test-hooks` suites; the additional commands above are required. For changes involving raw pointers or concurrency safety, review the TSan/Miri jobs in `ci.yml` and their actual execution scope. See [testing practices](docs/testing.md#threadsanitizer-与-miri) for reproduction commands and tool limitations.
+
+Locally, `cargo test-critical` runs the four critical hook suites and all query tests. Default `cargo test` also checks publication recovery against an independent journal oracle, but excludes hook-only kill and interleaving matrices.
 
 ### Vibe Coding / AI-Assisted Development
 

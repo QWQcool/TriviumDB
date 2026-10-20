@@ -327,6 +327,10 @@ impl<T: VectorType> VecPool<T> {
         }
     }
 
+    pub(crate) fn require_full_rewrite(&mut self) {
+        self.has_dirty_base = true;
+    }
+
     /// 持久化向量数据到 .vec 文件
     ///
     /// 根据 `has_dirty_base` 标志自动选择 flush 策略：
@@ -374,8 +378,8 @@ impl<T: VectorType> VecPool<T> {
     /// 追加路径：仅将 delta 层写入 .vec 文件末尾
     ///
     /// 崩溃安全性分析：
-    ///   - 追加成功、.tdb 未更新前崩溃 → .flush_ok 校验失败（vec_size 变大）→
-    ///     降级为安全模式加载（忽略 .vec）→ WAL 回放恢复新节点到 delta 层 → 正确
+    ///   - 数据库发布前先保留独立的旧代文件；追加中断时恢复旧代，再回放 WAL。
+    ///   - 单独使用 VecPool 不提供跨文件恢复，调用方必须负责发布协议。
     fn flush_append(&mut self, vec_path: &Path) -> Result<usize> {
         let append_count = self.delta_count();
         let elem_size = std::mem::size_of::<T>();

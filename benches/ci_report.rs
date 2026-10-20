@@ -540,7 +540,7 @@ fn main() {
     measure(
         &mut state,
         "TQL写入",
-        "create_set_detach_delete_read_fallback",
+        "create_set_read_detach_delete",
         20,
         path,
         db.estimated_memory(),
@@ -551,15 +551,16 @@ fn main() {
             let set = db
                 .tql_mut(r#"MATCH (a {type: "temp"}) SET a.type == "temp_updated""#)
                 .unwrap();
-            let fallback = db
-                .tql_mut(r#"FIND {type: "event"} RETURN * LIMIT 1"#)
-                .unwrap();
+            let rows = db.tql(r#"FIND {type: "event"} RETURN * LIMIT 1"#).unwrap();
             let delete = db
                 .tql_mut(r#"MATCH (a {type: "temp_updated"}) DETACH DELETE a"#)
                 .unwrap();
             format!(
-                "created={},set={},fallback={},deleted={}",
-                create.affected, set.affected, fallback.affected, delete.affected
+                "创建={},修改={},读取={},删除={}",
+                create.affected,
+                set.affected,
+                rows.len(),
+                delete.affected
             )
         },
     );

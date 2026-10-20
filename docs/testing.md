@@ -60,6 +60,9 @@ cargo test --test pipeline cascades      # Cascades 优化器用例
 # 运行确定性交错、物理策略差分、定点 I/O 故障和真实发布阶段强杀测试
 cargo test --features test-hooks --test concurrency --test differential --test fault_io --test fault_power -- --test-threads=1
 
+# 本地快捷入口，包含以上四个套件与全部 query 测试
+cargo test-critical
+
 # 运行差分测试与磁盘格式规格测试
 cargo test --test differential --features test-hooks
 cargo test --test format_spec -- --test-threads=1
@@ -84,6 +87,8 @@ cargo mutants --file src/filter.rs --timeout 60
 ## 测试分层架构
 
 `tests/` 按领域 harness 组织：每个顶层目录是一个独立 integration target，通过各自 `main.rs` 汇聚同领域的测试文件。
+
+默认 `cargo test` 包含 `storage::publication_recovery`：使用独立构造的 `TPUB` v1 日志验证旧事实 + WAL 完整恢复、Rom/Mmap 旧基础、二次持久化、损坏日志/备份拒绝、提交后不回滚和只读字节级零写。开启 `test-hooks` 后，发布强杀另覆盖 3 种写入场景 × 6 个中断阶段；其中更新/删除/compaction 使用 2048 节点、65 维，验证全部已同步数据与更新边。打开失败不能计为恢复通过。该规模跨越多个 mmap 页，但不代表超内存、真实断电或 PageCache 压力验收。
 
 ```
 tests/
@@ -239,7 +244,7 @@ fn from_json_嵌套and_or() {
 | `fault_crash/`    | 硬件崩溃   | 使用真实内联汇编触发 CPU 异常（`ud2`、`div/0`、`int3`、内存违例），验证操作系统杀进程后的 WAL 恢复能力 |
 | `fault_hardware/` | 硬件侵入   | 使用真实内联汇编（`bts` 翻转 bit、`movnti` 绕过缓存）直接篡改 mmap 页，验证容错能力；EMI 脉冲突发多比特错误 |
 | `fault_io/wal_midwrite.rs` | 断写安全   | WAL 写入中途中断、逐字节截断、CRC 校验拦截损坏记录 |
-| `fault_power/`    | 真实断电   | 子进程到达 `.vec`/`.tdb` 落盘与 `.flush_ok` 替换前后指定发布阶段后由父进程强杀，重开只允许旧完整代或新完整代 |
+| `fault_power/`    | 进程强杀   | 首次 flush、追加、2048×65 更新/删除/compaction；备份发布后、`.vec`/`.tdb` 落盘后、marker 前后与恢复途中强杀，必须完整恢复 `Full` 模式已同步事务 |
 | `fault_io/deterministic_failpoint.rs` | I/O 故障 | Create/Write/Sync/Rename 定点确定性失败，验证临时文件清理与错误传播 |
 | `format_spec/`    | 格式规格   | 独立字段规格 + 字段边界/截断/位翻转/追加/CRC 修复 mutation，验证损坏输入 fail-closed 与 ReadOnly 零写 |
 | `fault_allocator/`| OOM 拦截   | 目标 failpoint 后拒绝分配，验证 `try_reserve` 结构化错误与零部分提交（不耗尽真实内存） |

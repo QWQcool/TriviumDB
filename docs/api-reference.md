@@ -98,6 +98,7 @@ Rust 可使用 `Database::<f32>::open_read_only(path, dim)`，或在 `Config` �
 
 - 不创建数据库、WAL、sidecar 或一致性标记；
 - 不截断、回放或清理 WAL；检测到待恢复 WAL 时返回 `RecoveryRequired`；
+- 不恢复或清理 `.publish` 撤销日志；未提交的发布须先由 ReadWrite 恢复，返回 `RecoveryRequired`；
 - 不删除损坏或错配的 TextIndex/QuIVer sidecar；
 - `.tdb/.vec/.pld.<generation>/.flush_ok` 代际不完整时拒绝打开，不执行 metadata-only 降级；
 - 禁止 CRUD、事务提交、TQL mutation、索引修改、QuIVer 构建、flush 和 compact；
@@ -231,6 +232,8 @@ db.set_sync_mode(SyncMode::Off);
 ```
 
 `close()` 会先进入 `Closing`，拒绝新操作并等待已经进入的操作结束，再执行最终 flush。只有 flush 成功后才释放文件锁并进入 `Closed`；flush 失败会恢复为 `Open` 且继续持有文件锁。关闭后的旧对象不能再次用于查询、写入或 flush。
+
+Mmap `flush()` 在发布新事实前流式备份旧 `.tdb/.vec/.flush_ok` 并发布 `.publish` 撤销日志，因此额外磁盘读写与临时空间随旧主文件和向量文件大小增长。ReadWrite `open()` 在加载前恢复未完成发布，再回放 WAL；已提交的新 marker 不会回滚。主文件 v9、marker v3 保持不变；损坏日志或备份返回 `CorruptedFile`。详见[恢复协议](security.md#8-mmap-三文件一致性标记flush_ok-v3)。
 
 **泛型类型参数 `T`：**
 

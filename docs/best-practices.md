@@ -111,6 +111,8 @@ TriviumDB v0.4 引入了 **Rom / Mmap 双存储引擎**，在打开数据库时�
 | **Rom（单文件）** | O(N) 全量加载 | = 数据体积 | 单一 `.tdb` | 知识库 < 50 万节点、需要一键打包转移 |
 | **Mmap（分离，默认）** | ~O(1) 映射 | ≈ 目录 + delta + 有界缓存 + 工作集 | `.tdb` + `.vec` + `.pld.<generation>` + `.flush_ok` | 超大规模数据、追求冷启动与 Payload 堆占用可控 |
 
+Mmap 发布前会流式备份旧主文件、向量与 marker，再写 `.publish` 撤销日志；临时空间和额外磁盘读写随旧主文件与向量文件大小增长。中断后先由 ReadWrite 打开恢复，再执行 flush/close 后迁移或复制完整提交代。保存崩溃现场时须保留 `.publish`、`.publish.0/1/2`、WAL 与相关 Payload 文件；不要手动删除恢复日志或只复制半发布的正式文件。ReadOnly/Immutable 只返回待恢复错误，不修复现场。
+
 > 表中的“工作集”由 OS PageCache 管理，不受 `memory_limit` 直接控制。数据文件大于 RAM 并不等于不可用，但均匀随机访问可能形成 Major Fault 和 SSD 队列压力。生产容量评估应同时观察 p99/p999、主缺页速率、RSS/RssFile、swap/pagefile 和磁盘 `await`，不能只看平均 QPS。
 
 ```rust

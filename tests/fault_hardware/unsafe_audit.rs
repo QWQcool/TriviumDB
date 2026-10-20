@@ -27,31 +27,19 @@ fn cleanup(path: &str) {
     }
 }
 
-fn assert_open_result_has_no_dirty_data(
-    result: std::thread::Result<triviumdb::Result<Database<f32>>>,
-    max_nodes: usize,
-    payload_key: &str,
-) {
+fn assert_corruption_rejected(result: std::thread::Result<triviumdb::Result<Database<f32>>>) {
     assert!(result.is_ok(), "损坏文件不应触发 panic 或段错误");
-    match result.unwrap() {
-        Ok(db) => {
-            assert!(
-                db.node_count() <= max_nodes,
-                "降级加载不能产生超过原始规模的脏节点"
-            );
-            for id in db.all_node_ids() {
-                let payload = db.get_payload(id).expect("恢复节点必须有 payload");
-                assert!(
-                    payload.get(payload_key).is_some() || payload == serde_json::json!({}),
-                    "恢复节点 payload 必须来自已知写入形态: {payload}"
-                );
-            }
-        }
-        Err(e) => assert!(!e.to_string().is_empty(), "安全拒绝必须返回可诊断错误"),
-    }
+    assert!(
+        matches!(
+            result.unwrap(),
+            Err(triviumdb::TriviumError::CorruptedFile(_))
+        ),
+        "无可验证的恢复基础时，必须返回结构化损坏错误，不能以空库或部分数据伪装成功"
+    );
 }
 
-fn assert_clean_reopen_after_reject(path: &str) {
+fn assert_empty_database_after_explicit_removal(path: &str) {
+    // 这里只验证显式删除后新建数据库，不能将它计入原数据恢复证据。
     cleanup(path);
     let db = Database::<f32>::open(path, DIM).unwrap();
     assert_eq!(db.node_count(), 0, "清理后同路径重建不能携带脏状态");
@@ -191,20 +179,7 @@ fn UNSAFE_04_VecPool_文件外部截断后读取不崩溃() {
         result.is_ok(),
         ".vec 文件被截断后引擎触发了 panic / segfault"
     );
-    match result.unwrap() {
-        Ok(db) => {
-            assert!(db.node_count() <= 100, ".vec 截断降级加载不能产生额外节点");
-            for id in db.all_node_ids() {
-                let payload = db.get_payload(id).expect("恢复节点必须有 payload");
-                let idx = payload
-                    .get("idx")
-                    .and_then(|value| value.as_u64())
-                    .expect("恢复节点必须携带原始 idx 字段");
-                assert!(idx < 100, ".vec 截断恢复不能产生越界 payload: {payload}");
-            }
-        }
-        Err(e) => assert!(!e.to_string().is_empty(), ".vec 截断拒绝必须返回可诊断错误"),
-    }
+    assert_corruption_rejected(result);
 
     cleanup(&path);
 }
@@ -229,7 +204,7 @@ fn UNSAFE_05_VecPool_文件被删除后读取不崩溃() {
     std::fs::remove_file(format!("{}.flush_ok", path)).ok();
 
     let result = std::panic::catch_unwind(|| Database::<f32>::open(&path, DIM));
-    assert_open_result_has_no_dirty_data(result, 50, "idx");
+    assert_corruption_rejected(result);
 
     cleanup(&path);
 }
@@ -267,14 +242,8 @@ fn UNSAFE_06_畸形Header偏移量越界_不panic() {
     let result = std::panic::catch_unwind(|| Database::<f32>::open(&path, DIM));
     assert!(result.is_ok(), "畸形偏移量不应触发 panic");
 
-    match result.unwrap() {
-        Ok(_) => panic!("畸形偏移量应被拒绝，不应成功加载"),
-        Err(e) => assert!(
-            !e.to_string().is_empty(),
-            "畸形偏移量拒绝必须返回可诊断错误"
-        ),
-    }
-    assert_clean_reopen_after_reject(&path);
+    assert_corruption_rejected(result);
+    assert_empty_database_after_explicit_removal(&path);
 
     cleanup(&path);
 }
@@ -320,14 +289,8 @@ fn UNSAFE_08_node_count溢出_声明百万实际为空() {
 
     let result = std::panic::catch_unwind(|| Database::<f32>::open(&path, DIM));
     assert!(result.is_ok(), "node_count 溢出不应 panic");
-    let opened = result.unwrap();
-    assert!(opened.is_err(), "node_count 溢出文件应被拒绝");
-    let err = opened.err().unwrap();
-    assert!(
-        !err.to_string().is_empty(),
-        "node_count 溢出拒绝必须返回可诊断错误"
-    );
-    assert_clean_reopen_after_reject(&path);
+    assert_corruption_rejected(result);
+    assert_empty_database_after_explicit_removal(&path);
 
     cleanup(&path);
 }
@@ -361,11 +324,8 @@ fn UNSAFE_10_单字节文件_不panic() {
 
     let result = std::panic::catch_unwind(|| Database::<f32>::open(&path, DIM));
     assert!(result.is_ok(), "单字节文件不应 panic");
-    let opened = result.unwrap();
-    assert!(opened.is_err(), "单字节文件应被拒绝");
-    let err = opened.err().unwrap();
-    assert!(!err.to_string().is_empty(), "单字节拒绝应有错误信息");
-    assert_clean_reopen_after_reject(&path);
+    assert_corruption_rejected(result);
+    assert_empty_database_after_explicit_removal(&path);
 
     cleanup(&path);
 }

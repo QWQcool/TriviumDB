@@ -43,10 +43,12 @@ fn child_command() -> Command {
 #[cfg(feature = "test-hooks")]
 fn publication_point(name: &str) -> ConcurrencyPoint {
     match name {
+        "after_backup" => ConcurrencyPoint::AfterPublicationPrepared,
         "after_vec" => ConcurrencyPoint::AfterVecPersisted,
         "after_tdb" => ConcurrencyPoint::AfterTdbPersisted,
         "before_marker" => ConcurrencyPoint::BeforeFlushMarkerRename,
         "after_marker" => ConcurrencyPoint::AfterFlushMarkerRename,
+        "during_restore" => ConcurrencyPoint::AfterPublicationRestore,
         other => panic!("未知发布阶段: {other}"),
     }
 }
@@ -59,20 +61,45 @@ fn __publication_power_loss_child_entry() {
     };
     let phase = std::env::var("TRIVIUM_PUBLICATION_CHILD_PHASE").unwrap();
     let ready = std::env::var("TRIVIUM_PUBLICATION_CHILD_READY").unwrap();
+    let case = std::env::var("TRIVIUM_PUBLICATION_CHILD_CASE").unwrap();
+    let (dim, base) = publication_shape(&case);
     let waiter = pause_at(publication_point(&phase));
-    let mut database = Database::<f32>::open(&path, DIM).unwrap();
-    for id in 5..=7u64 {
-        database
-            .insert_with_id(
-                id,
-                &[id as f32, 1.0, 2.0, 3.0],
-                serde_json::json!({"generation": "new", "id": id}),
-            )
-            .unwrap();
-    }
-    let worker = std::thread::spawn(move || database.flush().unwrap());
+    let worker = std::thread::spawn(move || {
+        let mut database = Database::<f32>::open_with_config(
+            &path,
+            triviumdb::database::Config {
+                dim,
+                sync_mode: triviumdb::storage::wal::SyncMode::Full,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        if phase == "during_restore" {
+            panic!("恢复断点未阻塞可写打开");
+        }
+        for id in base + 1..=base + 3 {
+            database
+                .insert_with_id(
+                    id,
+                    &publication_vector(id, dim),
+                    serde_json::json!({"generation": "new", "id": id}),
+                )
+                .unwrap();
+        }
+        if case == "rewrite" {
+            database.update_vector(1, &vec![-1.0; dim]).unwrap();
+            database
+                .update_payload(1, serde_json::json!({"generation": "new", "id": 1}))
+                .unwrap();
+            database.delete(2).unwrap();
+            database.link(1, 3, "更新后的边", 2.0).unwrap();
+            database.compact().unwrap();
+        } else {
+            database.flush().unwrap();
+        }
+    });
     waiter.wait_until_arrived();
-    std::fs::write(&ready, phase.as_bytes()).unwrap();
+    std::fs::write(&ready, "已到达断点".as_bytes()).unwrap();
     std::mem::forget(waiter);
     std::mem::forget(worker);
     loop {
@@ -81,79 +108,179 @@ fn __publication_power_loss_child_entry() {
 }
 
 #[cfg(feature = "test-hooks")]
-fn assert_exact_generation_or_fail_closed(path: &str) {
-    let Ok(database) = Database::<f32>::open(path, DIM) else {
-        return;
-    };
-    let count = database.node_count();
-    assert!(
-        count == 4 || count == 7,
-        "只能恢复完整旧代或完整新代，实际节点数={count}"
+fn publication_shape(case: &str) -> (usize, u64) {
+    match case {
+        "first" => (DIM, 0),
+        "append" => (DIM, 4),
+        "rewrite" => (65, 2048),
+        _ => panic!("未知发布场景: {case}"),
+    }
+}
+
+#[cfg(feature = "test-hooks")]
+fn publication_vector(id: u64, dim: usize) -> Vec<f32> {
+    (0..dim)
+        .map(|axis| id as f32 + axis as f32 * 0.125)
+        .collect()
+}
+
+#[cfg(feature = "test-hooks")]
+fn assert_exact_recovered_data(database: &Database<f32>, case: &str) {
+    let (dim, base) = publication_shape(case);
+    let expected: Vec<u64> = (1..=base + 3)
+        .filter(|id| case != "rewrite" || *id != 2)
+        .collect();
+    let mut actual = database.all_node_ids();
+    actual.sort_unstable();
+    assert_eq!(
+        actual, expected,
+        "必须恢复所有已同步事务，不能用空库或旧代代替"
     );
-    for id in 1..=count as u64 {
+    for id in expected {
         let node = database
             .get(id)
             .unwrap_or_else(|| panic!("恢复状态缺少节点 {id}"));
         assert_eq!(
             node.vector,
-            vec![id as f32, 1.0, 2.0, 3.0],
+            if case == "rewrite" && id == 1 {
+                vec![-1.0; dim]
+            } else {
+                publication_vector(id, dim)
+            },
             "节点 {id} 的向量来自混合代际"
         );
         let payload = database.get_payload(id).unwrap();
         assert_eq!(payload["id"], id);
+        assert_eq!(
+            payload["generation"],
+            if id > base || (case == "rewrite" && id == 1) {
+                "new"
+            } else {
+                "old"
+            }
+        );
+    }
+    if case == "rewrite" {
+        let edges = database.get_edges(1);
+        assert!(
+            edges.iter().any(|edge| edge.target_id == 3
+                && edge.label == "更新后的边"
+                && edge.weight == 2.0)
+        );
     }
 }
 
 #[cfg(feature = "test-hooks")]
 #[test]
-fn PWR_00A_发布阶段真实强杀只允许完整旧代_完整新代或fail_closed() {
-    for phase in ["after_vec", "after_tdb", "before_marker", "after_marker"] {
-        let path = tmp_db(&format!("publication_{phase}"));
-        cleanup(&path);
-        {
-            let mut database = Database::<f32>::open(&path, DIM).unwrap();
-            for id in 1..=4u64 {
-                database
-                    .insert_with_id(
-                        id,
-                        &[id as f32, 1.0, 2.0, 3.0],
-                        serde_json::json!({"generation": "old", "id": id}),
-                    )
-                    .unwrap();
+fn PWR_00A_发布阶段强杀必须恢复全部已同步事务() {
+    for case in ["first", "append", "rewrite"] {
+        for phase in [
+            "after_backup",
+            "after_vec",
+            "after_tdb",
+            "before_marker",
+            "after_marker",
+            "during_restore",
+        ] {
+            let path = tmp_db(&format!(
+                "publication_{case}_{phase}_{}",
+                std::process::id()
+            ));
+            let (dim, base) = publication_shape(case);
+            cleanup(&path);
+            if base > 0 {
+                let mut database = Database::<f32>::open(&path, dim).unwrap();
+                for id in 1..=base {
+                    database
+                        .insert_with_id(
+                            id,
+                            &publication_vector(id, dim),
+                            serde_json::json!({"generation": "old", "id": id}),
+                        )
+                        .unwrap();
+                }
+                database.flush().unwrap();
             }
-            database.flush().unwrap();
-        }
 
-        let ready = format!("{path}.{phase}.ready");
-        let mut child = child_command()
-            .env("TRIVIUM_PUBLICATION_CHILD_PATH", &path)
-            .env("TRIVIUM_PUBLICATION_CHILD_PHASE", phase)
-            .env("TRIVIUM_PUBLICATION_CHILD_READY", &ready)
-            .arg("__publication_power_loss_child_entry")
-            .arg("--exact")
-            .arg("--nocapture")
-            .spawn()
-            .unwrap();
-        for _ in 0..400 {
-            if std::path::Path::new(&ready).exists() {
-                break;
-            }
-            assert!(
-                child.try_wait().unwrap().is_none(),
-                "发布阶段子进程提前退出: {phase}"
+            kill_publication_child(
+                &path,
+                if phase == "during_restore" {
+                    "after_tdb"
+                } else {
+                    phase
+                },
+                case,
             );
-            std::thread::sleep(std::time::Duration::from_millis(5));
+            if phase == "during_restore" {
+                kill_publication_child(&path, phase, case);
+            }
+            let before = publication_files(&path);
+            assert!(
+                Database::<f32>::open_read_only(&path, dim).is_err(),
+                "待恢复的 WAL/发布日志必须阻止只读打开"
+            );
+            assert!(Database::<f32>::open_immutable(&path, dim).is_err());
+            assert_eq!(
+                publication_files(&path),
+                before,
+                "只读与不可变打开失败不得改变任何文件"
+            );
+
+            let mut database = Database::<f32>::open(&path, dim).unwrap();
+            assert_exact_recovered_data(&database, case);
+            database.flush().unwrap();
+            drop(database);
+            let reader = Database::<f32>::open_read_only(&path, dim).unwrap();
+            assert_exact_recovered_data(&reader, case);
+            drop(reader);
+            cleanup(&path);
         }
-        assert!(
-            std::path::Path::new(&ready).exists(),
-            "子进程未到达发布阶段: {phase}"
-        );
-        child.kill().unwrap();
-        child.wait().unwrap();
-        assert_exact_generation_or_fail_closed(&path);
-        std::fs::remove_file(&ready).ok();
-        cleanup(&path);
     }
+}
+
+#[cfg(feature = "test-hooks")]
+fn kill_publication_child(path: &str, phase: &str, case: &str) {
+    let ready = format!("{path}.{phase}.ready");
+    std::fs::remove_file(&ready).ok();
+    let mut child = child_command()
+        .env("TRIVIUM_PUBLICATION_CHILD_PATH", path)
+        .env("TRIVIUM_PUBLICATION_CHILD_PHASE", phase)
+        .env("TRIVIUM_PUBLICATION_CHILD_READY", &ready)
+        .env("TRIVIUM_PUBLICATION_CHILD_CASE", case)
+        .arg("__publication_power_loss_child_entry")
+        .arg("--exact")
+        .arg("--nocapture")
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !std::path::Path::new(&ready).exists() && std::time::Instant::now() < deadline {
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "发布阶段子进程提前退出: {phase}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    // 无论是否到达断点都回收子进程，避免测试失败后残留锁或后台线程。
+    let arrived = std::path::Path::new(&ready).exists();
+    child.kill().ok();
+    child.wait().unwrap();
+    assert!(arrived, "子进程未到达发布阶段: {phase}");
+    std::fs::remove_file(ready).ok();
+}
+
+#[cfg(feature = "test-hooks")]
+fn publication_files(path: &str) -> std::collections::BTreeMap<String, Vec<u8>> {
+    let path = std::path::Path::new(path);
+    let prefix = path.file_name().unwrap().to_str().unwrap();
+    std::fs::read_dir(path.parent().unwrap())
+        .unwrap()
+        .filter_map(|entry| {
+            let entry = entry.unwrap();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            (name == prefix || name.starts_with(&format!("{prefix}.")))
+                .then(|| (name, std::fs::read(entry.path()).unwrap()))
+        })
+        .collect()
 }
 
 #[test]

@@ -45,7 +45,7 @@ Our goal: **SQLite for AI applications.**
 - ❄️ **Tiered Payload storage** — Published raw JSON stays in an mmap cold base, writes/updates enter an in-memory delta, and parsed values use a byte-bounded LRU cache; ANN/BQ/Exact candidate generation performs zero Payload parsing
 - 🔗 **Node = everything** — Each node natively holds a dense vector, sparse text index, JSON metadata, and graph edges under one globally unique ID
 - 🧠 **AI-native** — Optional hybrid recall (AC-automaton BM25 + dense vector) triggers graph spreading activation, with built-in cognitive pipelines (FISTA / DPP / PPR)
-- 🛡️ **4-layer data safety** — Atomic replacement + WAL + dry-run transaction validation + mmap COW isolation; `.flush_ok` v3 binds `.tdb/.vec/.pld` generation, sizes, and whole-file CRCs into one fail-closed commit
+- 🛡️ **4-layer data safety** — Atomic replacement + WAL + dry-run transaction validation + mmap COW isolation; `.flush_ok` v3 binds `.tdb/.vec/.pld`, while prior-generation backups and an undo journal recover interrupted publication. Backups add disk I/O and temporary space; corrupted inputs still fail closed. See the [recovery protocol](docs/security.md#8-mmap-三文件一致性标记flush_ok-v3).
 - 🐍 **Python / Node.js native** — `pip install` or `npm install`, MongoDB-style query syntax
 - ⚡ **High-performance search** — rayon parallel brute-force (100% exact at small scale) + in-house ANN index **QuIVer**; current source uses training-free SM-L2 navigation and cosine reranking, activated at 2,500–10,000 nodes by vector workload
 - 💾 **SSD-friendly** — Append-only WAL + background compaction + independent QuIVer persistence

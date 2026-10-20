@@ -45,7 +45,7 @@ TriviumDB 是一个用纯 Rust 编写的**嵌入式三模数据库引擎**，将
 - ❄️ **Payload 冷热分层** —— 已发布 raw JSON 留在 mmap 冷基础层，新写入/更新进入内存 delta，解析结果进入有硬字节上限的 LRU Cache；ANN/BQ/Exact 候选阶段零 Payload 解析
 - 🔗 **节点即一切** —— 每个节点天然同时拥有限定长度的稠密向量、稀疏文本倒排词频、元数据和图关系，ID 全局唯一，绝不错位
 - 🧠 **为 AI 而生** —— 可选启用“AC自动机+BM25稀疏文本”与“Dense Vector稠密向量”的**多路召回**来触发图谱扩散检索，并内置多层认知管线（FISTA / DPP / PPR）
-- 🛡️ **四层数据安全保障** —— 原子替换 + WAL日志 + 事务干跑验证（Dry-Run）+ Mmap COW 隔离，`.flush_ok` v3 将 `.tdb/.vec/.pld` 的 generation、大小和整文件 CRC 绑定为同一提交，损坏或混代输入 fail-closed
+- 🛡️ **四层数据安全保障** —— 原子替换 + WAL日志 + 事务干跑验证（Dry-Run）+ Mmap COW 隔离，`.flush_ok` v3 绑定 `.tdb/.vec/.pld`，发布前旧代备份与撤销日志支持中断恢复；备份增加磁盘读写与临时空间，损坏输入仍 fail-closed，详见[恢复协议](docs/security.md#8-mmap-三文件一致性标记flush_ok-v3)
 - 🐍 **Python / Node.js 原生** —— `pip install` 或 `npm install` 后直接使用，类 MongoDB 查询语法
 - ⚡ **高性能检索** —— rayon 并行暴力搜索（小规模 100% 精确）+ 自研 ANN 索引 **QuIVer**；当前源码默认采用无训练 SM-L2 导航与余弦精排，按向量工作量动态触发（2,500–10,000 节点）
 - 💾 **SSD 友好** —— Append-Only WAL + 后台 Compaction 线程 + QuIVer 索引独立持久化，杜绝随机写入磨损

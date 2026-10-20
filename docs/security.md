@@ -171,8 +171,11 @@ magic(4) + version(1) + generation(8)
 - 只有 v3 marker 明确声明的 Payload generation 才允许加载；v1/v2 marker 旁的游离 `.pld` 不参与旧快照。
 - v1（29 字节）与 v2（41 字节）保持只读兼容；ReadWrite 在下一次显式 flush 时升级为 v3，打开时不隐式迁移。
 - generation 化 Payload 文件避免 Windows 上替换仍被 Reader mmap 的同名文件；marker 提交后旧 generation 才失去可见性，并在引用释放后 best-effort 回收。
-- 校验失败时 fail-closed：ReadOnly/Immutable 字节级零写并拒绝打开；ReadWrite 不构造缺向量或缺 Payload 的伪恢复状态。
-- 发布路径由格式变异和子进程强杀测试覆盖，重开只允许读取完整提交 generation。
+- 发布新文件前，流式复制旧 `.tdb/.vec/.flush_ok` 到 `.publish.0/1/2`，fsync 后最后发布 `.publish` 撤销日志。日志采用 `TPUB` v1 固定 56 字节，包含目标 generation、三个文件的存在位/长度/CRC 和日志自身 CRC；首次 flush 明确记录旧文件不存在。
+- ReadWrite 持有排他锁后先检查日志：marker 尚未提交则校验备份、恢复旧事实文件，再回放 WAL；marker 已提交则验证新代，保留新代并清理日志。恢复复制不消耗备份，恢复完成并持久化删除日志后才回收备份，支持恢复途中再次断电。
+- ReadOnly/Immutable 不执行恢复或清理；有待恢复日志/WAL 时返回 `RecoveryRequired`，保持字节级零写。无有效恢复基础的文件损坏返回 `CorruptedFile`，不构造缺向量、缺 Payload 或空库的伪恢复状态；已提交新代损坏不能回滚旧代。
+- 正常 Mmap flush 的旧代备份增加 O(旧 `.tdb` + `.vec`) 磁盘读写和临时空间，复制不把全库读入堆。同一句柄失败重试保留最初备份，向量从现有 COW 映射和 delta 完整重写。主文件 v9、marker v3 保持不变；旧内核不识别新的恢复日志，未完成发布须用当前内核恢复后再迁移。
+- 默认 `storage::publication_recovery` 用独立日志字节 oracle 验证恢复、损坏拒绝、提交点与只读零写；`test-hooks` 强杀矩阵要求完整恢复所有 `Full` 模式已同步事务，打开失败不能算通过。
 
 ---
 
@@ -516,7 +519,7 @@ Python/Node 绑定应通过中央转换器保留核心错误类别；控制流�
 
 故障注入均使用小型 fixture 与隔离子进程，不会耗尽测试机的物理内存或磁盘：
 
-- **发布阶段强杀矩阵**：启用 `test-hooks` 后，子进程在 `.vec` 落盘 / `.tdb` 落盘 / marker 替换前后到达指定阶段，由父进程强杀；重开仅允许完整旧代、完整新代或安全拒绝，不允许跨文件混代或半事务。这是进程中断模拟，不等同于真实物理断电；
+- **发布阶段强杀矩阵**：启用 `test-hooks` 后，首次 flush、追加与 2048×65 更新/删除/compaction 在备份、向量、主文件、marker 和恢复途中由父进程强杀；必须重开并逐项验证全部已同步事务，再 flush/reopen 验证持久化，不能以拒绝打开通过验收。这是进程中断模拟，不等同于真实物理断电；
 - **确定性 I/O failpoint**：在 Create/Write/Sync/Rename 等定点注入失败，验证临时文件清理与错误传播；
 - **allocator failure**：仅在目标 failpoint 后拒绝分配，验证 `try_reserve` 路径的结构化错误与零部分提交；
 - **格式规格测试**：独立于生产解析器的字段规格 + 结构化 mutation（字段边界/截断/位翻转/CRC 修复），并验证 ReadOnly 对任何损坏输入字节级零写。
