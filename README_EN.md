@@ -145,7 +145,7 @@ Suppose you're building an **AI conversation memory system** and the user says "
 
 > 📄 **Submission status**: The rebuilt version targets **ICDE**; this is not an acceptance or publication claim. The [earlier arXiv preprint](https://arxiv.org/abs/2605.02171) describes the historical method and experiments.
 >
-> 🔬 **Implementation and experiments**: [Current architecture, modes, and evidence boundaries](docs/quiver.md) · [Experiment guide](README_QUIVER.md). Current source is `0.8.10`, pending CI with no release tag or publication; see [changes and validation scope](docs/changes-0.8.10.md). It adds graph connectivity protection. Default SM-L2 was introduced in `0.8.9`; earlier `0.8.8` packages do not include those SM changes.
+> 🔬 **Implementation and experiments**: [Current architecture, modes, and evidence boundaries](docs/quiver.md) · [Experiment guide](README_QUIVER.md). Current source is `0.8.10`, with release artifacts tracked by the release workflows and package registries; see [changes and validation scope](docs/changes-0.8.10.md). It adds graph connectivity protection. Default SM-L2 was introduced in `0.8.9`; earlier `0.8.8` packages do not include those SM changes.
 >
 > The earlier preprint's 12-dataset Recall/QPS and hot-memory figures do not directly describe the rebuilt version. Bind results to their implementation, graph, metric, budget, and data identity; distinguish cosine SM-L2, explicit native L2, and historical BQ measurements.
 

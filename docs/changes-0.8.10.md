@@ -1,6 +1,6 @@
 # TriviumDB 0.8.10：变更与验收范围
 
-> 更新：2026-10-21。当前为待 CI 验收源码；仅提交与推送，不创建版本 tag，不发布 crates.io、PyPI、NPM 或 Server 制品。版本元数据统一为 `0.8.10` 不表示正式版本已发布。
+> 更新：2026-10-21。本文对应 `0.8.10` 版本源码。发布按功能分支 → dev → master 的验收流程进行，再在通过验收的 master 发布提交上创建 `v0.8.10`，触发 PyPI、NPM 与 Server CD。crates.io 仍按项目规则单独发布；制品是否已发布以流水线和各包仓库为准。
 
 ## 本次变更
 
@@ -11,6 +11,8 @@
 - **发布中断恢复**：Mmap 写新事实前持久化旧代独立备份与 `TPUB` v1 撤销日志；可写打开先恢复未提交发布，再回放 WAL，已提交的新 marker 不回滚。支持首次 flush、追加、更新/删除/compaction 与恢复途中再次中断；同一句柄失败重试保留原始备份。主文件 v9、marker v3 不变；备份增加旧主文件与向量文件大小对应的磁盘读写和临时空间。
 - **恢复断言与默认入口**：发布强杀不能再以打开失败通过；18 组强杀场景覆盖 2048×65 数据，逐项验证已同步节点、向量、Payload 和更新边，再次持久化重开。默认测试增加独立日志 oracle、损坏备份/提交点/只读零写验证；unsafe 损坏输入断言要求结构化错误。本地 `cargo test-critical` 包含关键 hook 套件与全部 query 测试。
 - **CI 基准修复**：`ci_report` 的读取查询使用 `tql()`，修复旧 `tql_mut(read query)` 被拒绝导致的手动基准任务失败。变异测试与覆盖率门禁策略维持原状。
+- **WebUI 探索与 AI 辅助**：合入 [PR #63](https://github.com/YoKONCy/TriviumDB/pull/63) 的邻域扩展、路径探索、星云模式与 AI Copilot。图边只采用服务端明确返回的边，按方向与标签保留平行边、权重和元数据；增量扩展沿用默认 1500 节点渲染上限，路径取回保留完整 `u64` ID，失败与截断明确提示。
+- **WebUI 验收修复**：自检增至 124 项；Chromium/WebKit 使用真实 Server 与独立临时库，测试脚本只清理自己创建的进程和文件。Windows CI 对已有七张 Win32 基线执行实际比较，缺失基线或依赖时报错，截图与差异图始终上传；详见 [WebUI 测试指南](webui-testing.md)。
 - **文档与元数据**：同步 Rust Core、CLI、Server、Python、Node、锁文件及控制台版本显示，更新架构、迁移、预算和 unsafe 验证边界。
 
 ## 使用与评估边界
@@ -24,3 +26,7 @@
 提交前执行贡献指南规定的格式、Clippy、全工作区、`test-hooks` 补充套件及 Python/Node 编译检查，并检查 workflow 语法和版本一致性。Miri 的裸指针/并发邻接表子集使用四个随机种子；TSan 的实际运行结果需由 Linux CI 确认。不能把目标编译检查写成 TSan 运行通过，也不能把专项测试写成所有 unsafe 已证明安全。
 
 CI 的各项结果绑定本次提交；尚未完成的远程任务不得写成通过。测试命令、执行范围和工具限制见[测试实践](testing.md#threadsanitizer-与-miri)。
+
+## 集成验收记录
+
+Core 候选 `fca845b62618a8bdb6e61c550c79ab3f59742d4b` 已通过[完整 CI](https://github.com/YoKONCy/TriviumDB/actions/runs/39507014417)，包括 TSan、Miri、ASan 与多平台测试。集成候选的本地工作区 1473 项测试与关键 hook/query 套件 308 项测试通过；格式、两组 Clippy、Python/Node 编译和 TypeScript 检查通过。WebUI 双引擎端到端与各 124 项自检通过，七张现有视觉基线比较差异为 0.00%–0.15%，未更新基线。最终集成提交与 master 发布提交仍分别接受其对应 CI，既有候选的通过记录不能代替后续提交验收。
