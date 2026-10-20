@@ -110,6 +110,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: webui-visual-artifacts
+          include-hidden-files: true
           path: |
             .tmp/visual-shots/
             .tmp/visual-diff/
