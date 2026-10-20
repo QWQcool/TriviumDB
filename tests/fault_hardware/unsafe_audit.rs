@@ -1,14 +1,12 @@
 #![allow(non_snake_case)]
 //! GJB-5000B 条款 6.3.2: unsafe 代码路径专项安全验证
 //!
-//! 当前源码中的 28 处 unsafe 分布在 4 个模块：
-//!   - vector.rs:    AVX2 / NEON SIMD 算子 (6 处)
-//!   - vec_pool.rs:  mmap MAP_PRIVATE + from_raw_parts (6 处)
-//!   - hook.rs:      FFI 外部函数调用 + Send/Sync impl (6 处)
-//!   - pipeline.rs:  ARM prefetch 指令 (4 处)
-//!   - file_format.rs: Mmap::map + from_raw_parts (2 处)
+//! 本文件覆盖向量算子的数值/尾部边界、VecPool 文件变更和畸形文件加载。
+//! unsafe 清单随源码演进，不以固定数量代表审计完成；平台与 feature 决定实际执行路径。
 //!
-//! 本文件为每一类 unsafe 路径提供专项测试，证明其安全契约成立。
+//! BQ 裸指针与并发邻接表另由 memory_safety_ 子集及 TSan/Miri 检查。
+//! 这些都是特定输入和执行路径的回归验证，不构成所有 unsafe 安全契约的证明，
+//! 也不覆盖全部 SIMD 指令、FFI 回调、手工 Send/Sync 或所有线程交错。
 
 use triviumdb::VectorType;
 use triviumdb::database::Database;

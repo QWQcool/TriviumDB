@@ -336,7 +336,7 @@ Rust / Python / Node.js 三语言共享同一套 TQL、Prepared、四类属性�
 
 > 📄 **投稿状态**：重构版本以 **ICDE** 为投稿目标，尚不作录用或发表声明。[旧版 arXiv 预印本](https://arxiv.org/abs/2605.02171)记录历史方法与实验。
 >
-> 🔬 **实现与复现**：[当前架构、模式边界及实验口径](docs/quiver.md) · [数据与实验指南](README_QUIVER.md)。默认 SM-L2 描述对应 `0.8.9` 源码（包含 `461855e` / `619dd7b`）；旧 `0.8.8` 发布包不含这些变更。
+> 🔬 **实现与复现**：[当前架构、模式边界及实验口径](docs/quiver.md) · [数据与实验指南](README_QUIVER.md)。当前源码版本为 `0.8.10`，包含构图连通性保护，尚待 CI 验收、未打 tag 或发布；[变更说明](docs/changes-0.8.10.md)。默认 SM-L2 已在 `0.8.9` 中引入；旧 `0.8.8` 发布包不含这些变更。
 >
 > 旧预印本的 12 库 Recall/QPS 与热内存数字不直接代表当前重构版本。当前评估按实现、图、度量、预算及数据身份分别报告；SM-L2 余弦任务、显式原生 L2 和历史 BQ 结果不可混标。
 
@@ -364,7 +364,7 @@ TriviumDB 采用**智能自适应双引擎**向量索引。自动 QuIVer 阈值�
 - ✅ **增量 Update**：soft_delete + incremental_insert，原子替换
 - ✅ **事务安全**：分离时间线架构，事务 commit 不可失败，QuIVer 同步无需回滚
 
-**独立持久化**：QuIVer 图以 `.tdb.quiver` 独立文件存储。数据库加载旧 BQ 文件后，会从实际向量池流式恢复默认 SM 状态；不重建图、不常驻第二份全库 FP32，但需要读取冷向量并计入启动成本。
+**独立持久化**：QuIVer 图以 `.tdb.quiver` 独立文件存储。加载有效图时，从实际向量池流式恢复默认 SM 状态，不常驻第二份全库 FP32，但需要读取冷向量并计入启动成本。旧索引需要重建才能应用新的构图保护；检测到断连索引时走现有重建/拒绝流程，不在加载时补边。
 
 ---
 
@@ -521,7 +521,7 @@ TriviumDB/
 - [x] Parallel Bit-Tag Array 硬件级布隆过滤 + Zero-Ghost 墓碑复用
 - [x] O(1) Reverse Hash Net 反向边查找
 - [x] 检索管线 6 阶段 Hook 注入 + FFI 动态库插件
-- [x] CI/CD 管线 + ASan + LibFuzzer 模糊测试
+- [x] CI/CD 管线 + ASan / TSan / Miri + LibFuzzer 模糊测试；执行范围与限制见[测试实践](docs/testing.md)
 
 ### v0.6 — TQL 查询语言 + 跨架构适配 ✅
 
@@ -581,7 +581,7 @@ TriviumDB/
 3. **全自动性能路由**：按约 800 万向量分量工作量在 2,500–10,000 节点间动态选择阈值；低于阈值使用精确 BruteForce，达到阈值后自动构建并切换 QuIVer。
 4. **可预测的性能**：顺序 I/O only（WAL 追加写 + Compaction 顺序重写），SSD 寿命安全。
 5. **索引即加速层**：QuIVer 是可丢弃的派生数据（`.tdb.quiver` 独立文件），丢失后首次查询时自动重建，不依赖也不污染 WAL 真相源。
-6. **Rust 安全边界**：所有公开 API 均为安全代码。内部仅存在少量经过严格审计的 `unsafe`（主要分布在 mmap 零拷贝与 SIMD 硬件加速），且附有明确的 SAFETY 安全契约注释。
+6. **Rust 安全边界**：内部包含 mmap、SIMD、裸指针和手工 `Send/Sync` 等 unsafe 路径，需要逐项审核长度、对齐、生命周期和并发契约。ASan、TSan 与 Miri 检查实际执行到的路径，不构成全部 unsafe 已被证明安全的保证；范围见[安全文档](docs/security.md)与[测试实践](docs/testing.md)。
 7. **安全至上**：全引擎零 `panic!` / 零 `unreachable!()` 策略。数千个测试用例（单元 / 属性 / 模糊 / 变异 / 三语言公共 API 对齐），CI 强制 80% 行覆盖率门禁（实测值以 coverage artifact 为准），涵盖 EMI 比特翻转、WAL 截断恢复、事务预检失败等极端场景，确保在断网、断电、内存污染等恶劣条件下数据库引擎绝不崩溃。
 
 ---

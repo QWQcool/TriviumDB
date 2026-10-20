@@ -59,6 +59,8 @@ nightly < alpha < beta < rc < stable（无后缀） < hotfix
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+cargo test --features test-hooks --test concurrency --test differential --test fault_io --test fault_power -- --test-threads=1
+cargo test --features test-hooks --test query tql_planner -- --test-threads=1
 cargo check --features python
 cargo check --features nodejs
 git diff --check
@@ -69,6 +71,8 @@ git diff --check
 - 新功能与修复必须附带测试；关键算法应有独立 reference 实现作为 oracle；
 - 故障注入测试（OOM、power-loss、I/O 失败等）不得真实耗尽测试机的内存、磁盘、线程或文件句柄；
 - 快速迭代阶段不将性能 benchmark 作为 CI 门禁，请不要在 PR 中引入 benchmark gate。
+
+默认测试不会编译 `test-hooks` 专用用例，不能省略上述补充命令。涉及裸指针或并发安全的改动还应检查 `ci.yml` 中 TSan/Miri 对应任务的结果与实际覆盖范围；本地复现命令和工具限制见 [测试实践](docs/testing.md#threadsanitizer-与-miri)。
 
 ### 关于 Vibe Coding / AI 辅助开发
 
@@ -259,6 +263,8 @@ Every PR must pass the following gates:
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+cargo test --features test-hooks --test concurrency --test differential --test fault_io --test fault_power -- --test-threads=1
+cargo test --features test-hooks --test query tql_planner -- --test-threads=1
 cargo check --features python
 cargo check --features nodejs
 git diff --check
@@ -269,6 +275,8 @@ Please run these commands locally before committing. Key testing requirements:
 - New features and fixes must come with tests; critical algorithms should have an independent reference implementation as an oracle;
 - Fault-injection tests (OOM, power loss, I/O failures) must never actually exhaust the machine's memory, disk, threads, or file handles;
 - Performance benchmarks are not a CI gate during rapid iteration — do not introduce benchmark gates in PRs.
+
+Default tests do not compile the `test-hooks` suites; the additional commands above are required. For changes involving raw pointers or concurrency safety, review the TSan/Miri jobs in `ci.yml` and their actual execution scope. See [testing practices](docs/testing.md#threadsanitizer-与-miri) for reproduction commands and tool limitations.
 
 ### Vibe Coding / AI-Assisted Development
 

@@ -127,6 +127,8 @@ jobs:
           cargo check --lib --features python
           cargo check --lib --features nodejs
           cargo test --workspace -- --test-threads=1
+          cargo test --features test-hooks --test concurrency --test differential --test fault_io --test fault_power -- --test-threads=1
+          cargo test --features test-hooks --test query tql_planner -- --test-threads=1
           cargo clippy --workspace --all-targets -- -D warnings
           npm install --no-audit --no-fund
           npx --yes --package typescript tsc --noEmit --skipLibCheck triviumdb.d.ts

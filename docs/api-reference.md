@@ -1,6 +1,6 @@
 # TriviumDB API 完整参考
 
-> **版本**: v0.8.9
+> **版本**: v0.8.10 待 CI 验收源码，尚未打 tag 或发布；见[变更说明](changes-0.8.10.md)。
 > **语言**: Rust 核心 + Python 绑定 (PyO3) + Node.js 绑定 (napi-rs)  
 > **许可**: Apache-2.0
 
@@ -1420,7 +1420,7 @@ let ids = db.all_node_ids();     // Vec<NodeId>
 
 ### QuIVer 自动索引说明
 
-QuIVer 是自研 ANN 图索引，常规查询自动选择与维护索引。当前源码默认采用 BQ 构图、无训练 SM-L2 导航和原始向量余弦精排，无需调用 `enable_quiver_sm_l2()`；本节对应 `0.8.9` 源码（包含 `461855e` / `619dd7b`），旧发布包须核对构建提交：
+QuIVer 是自研 ANN 图索引，常规查询自动选择与维护索引。当前源码默认采用 BQ 构图、无训练 SM-L2 导航和原始向量余弦精排，无需调用 `enable_quiver_sm_l2()`；本节对应 `0.8.10` 源码（包含 `461855e` / `619dd7b`），旧发布包须核对构建提交：
 
 | 条件 | 检索引擎 | 召回行为 |
 |------|----------|----------|
@@ -1433,7 +1433,7 @@ QuIVer 是自研 ANN 图索引，常规查询自动选择与维护索引。当�
 
 自动阈值按 `ceil(8,000,000 / dim)` 计算并限制在 2,500–10,000 节点；384/768 维为 10,000，1024 维约 7,813，1536 维约 5,209，3072 维约 2,605。
 
-QuIVer 索引支持增量 Insert/Delete/Update，无需全量重建。索引以 `.tdb.quiver` 持久化，并通过 `.tdb.quiver.meta` 的主数据代际、文件尺寸、节点数、维度与 CRC 校验后 mmap 加载。数据库重载旧 BQ 图后从原始向量池流式恢复默认 SM 状态，不重建图，但需要冷向量读取；显式评分覆盖不由旧文件自动恢复。TextIndex 对应 `.tdb.text` 和 `.tdb.text.meta`。
+QuIVer 支持增量 Insert/Delete/Update，并保护入口导航树，入口升层时连接旧树。旧索引需要重新构建才能应用 `0.8.10` 的签名多样性和连通性规则；全图可达不等于有限预算下的精确召回。索引以 `.tdb.quiver` 持久化，并通过 `.tdb.quiver.meta` 的主数据代际、文件尺寸、节点数、维度与 CRC 校验后 mmap 加载。有效图加载时不改邻接表，默认 SM 状态从原始向量池流式恢复，需要冷向量读取；断连图返回需要重建的错误，数据库按既有缺失索引策略重建或拒绝。显式评分覆盖不由旧文件自动恢复。TextIndex 对应 `.tdb.text` 和 `.tdb.text.meta`。
 
 批量导入可在构造时设置 `auto_build_quiver=False`，或运行时调用 `set_auto_build_quiver(False)`，避免导入中途因查询触发索引构建；导入完成后重新开启并执行一次查询，或显式调用 Rust `build_quiver_index()`。`flush()` 只负责持久化，不会隐式构建 QuIVer。无状态评测或独立查询之间可调用 `clear_search_state()` 清空疲劳状态。
 
@@ -1443,7 +1443,7 @@ QuIVer 索引支持增量 Insert/Delete/Update，无需全量重建。索引以 
 
 ## 维度迁移
 
-> 文件格式兼容边界：当前 `.tdb` 为 v7，可读取 v5–v7；可写句柄在下次 flush/close 原子升级到当前格式。早于 v5 的主文件必须通过旧内核导出迁移；未来版本明确拒绝。sidecar 独立版本化：`.pidx v4`、`.gidx v2`、`.text v2`、`.quiver v1`。
+> 文件格式兼容边界：当前 `.tdb` 为 v9，可读取 v5–v9；可写句柄在后续持久化时按当前格式发布。Mmap v9 的 raw Payload 位于 generation 绑定的 `.pld`，详见[持久化布局](features.md)。ReadOnly/Immutable 不升级、不写制品。早于 v5 的主文件必须通过旧内核导出迁移；未来版本明确拒绝。sidecar 独立版本化：`.pidx v6`、`.gidx v2`、`.text v2`、`.quiver v1`。
 
 当需要更换 Embedding 模型（维度发生变化）时，使用 `migrate` 将旧库的结构迁移到新维度。
 
