@@ -574,3 +574,13 @@ TriviumDB 通过多条独立 GitHub Actions 工作流执行测试、故障注入
 | `proptest 1.11`  | 属性测试   | `Cargo.toml` dev-dependencies（已内置） |
 | `cargo-llvm-cov` | 覆盖率度量 | `cargo install cargo-llvm-cov`          |
 | `cargo-mutants`  | 变异测试   | `cargo install cargo-mutants`           |
+
+## 向量存储开销回归
+
+`tests/storage/vector_memory.rs` 验证旧 BQ 默认零常驻、显式视图按容量计量和写入失效、两种持久化模式的合法空 BQ 块、mmap 单层零拷贝、混合层 COW/墓碑复用及过滤查询与 Rom 对照。`brute_force` 的独立串行 reference 覆盖 FP32/FP16/u64、尾维、同分、过滤、空段与混合分段；`test-hooks` 保留显式合并视图发布前的独占交错验证。历史 v5 fixture 使用独立的 32/48-chunk 位布局。
+
+```bash
+cargo test --test storage vector_memory
+cargo test --lib 分段精确扫描
+cargo test --features test-hooks --test concurrency 显式连续视图交错
+```
