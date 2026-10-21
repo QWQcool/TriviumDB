@@ -10,3 +10,4 @@ mod property_index_persistence;
 mod publication_recovery;
 mod read_only;
 mod recovery;
+mod vector_memory;

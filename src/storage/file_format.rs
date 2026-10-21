@@ -540,8 +540,7 @@ fn save_mmap<T: VectorType>(memtable: &mut MemTable<T>, path: &str) -> Result<()
 
 /// Rom 模式保存：把向量合并，写单文件，抛弃 .vec
 fn save_rom<T: VectorType>(memtable: &mut MemTable<T>, path: &str) -> Result<()> {
-    // 1. Rom 单文件持久化必须物化完整 flat，但不得隐式构建 ANN。
-    memtable.prepare_persistence_cache(true);
+    // 1. 分段写入向量，不创建旧签名或合并数组，也不隐式构建 ANN。
     let total_vectors = memtable.internal_indices().len();
 
     // 2. 将数据合并写入单文件
@@ -574,9 +573,7 @@ fn save_tdb<T: VectorType>(
     vec_count: usize,
     is_mmap_mode: bool,
 ) -> Result<()> {
-    // 持久化只准备磁盘格式需要的数据，禁止隐式触发 ANN 构建。
-    // Mmap 分离模式下向量已在 .vec 文件，无需把整库复制入堆。
-    memtable.prepare_persistence_cache(!is_mmap_mode);
+    // 两种模式都直接读取已有向量段，不创建全库临时数组或隐式构建 ANN。
 
     let tmp_path = format!("{}.tmp", path);
     let file = File::create(&tmp_path)?;
@@ -683,8 +680,9 @@ fn save_tdb<T: VectorType>(
 
     // 3. Vector Block (Rom 用)
     if !is_mmap_mode {
-        let flat = memtable.flat_vectors();
-        w.write_all(bytemuck::cast_slice(flat))?;
+        let (base, delta) = memtable.vec_pool().vector_segments();
+        w.write_all(bytemuck::cast_slice(base))?;
+        w.write_all(bytemuck::cast_slice(delta))?;
     }
 
     // 4. Edge Block
@@ -705,18 +703,12 @@ fn save_tdb<T: VectorType>(
         w.write_all(metadata.as_bytes())?;
     }
 
-    // 5. BQ Metadata Block
-    let bq_sigs = memtable.bq_signatures_slice();
-    let bq_count = bq_sigs.len() as u64;
+    // 5. 旧 1-bit BQ 已不参与查询；合法空缓存块保留既有格式的可读性。
     w.write_all(BQ_BLOCK_MAGIC)?;
     w.write_all(&BQ_BLOCK_VERSION.to_le_bytes())?;
     w.write_all(&(BqSignature::MAX_CHUNKS as u16).to_le_bytes())?;
+    let bq_count = 0u64;
     w.write_all(&bq_count.to_le_bytes())?;
-    for signature in bq_sigs {
-        for chunk in signature.data {
-            w.write_all(&chunk.to_le_bytes())?;
-        }
-    }
 
     // 6. Unique Constraint 权威定义块。Posting 仍在可重建的 .pidx，约束定义属于主数据。
     let unique_definitions = memtable.unique_index_definitions();
@@ -884,8 +876,7 @@ pub fn load<T: VectorType>(
                 .filter(|marker| marker.payload_size.is_some())
                 .map(|marker| marker.generation);
             install_payload_sidecar_if_present(&mut mt, path, payload_generation)?;
-            // Payload 已就绪后再恢复依赖它的派生索引和约束。
-            load_bq_block(&mut mt, bytes, bq_layout)?;
+            // 旧 BQ 块仅校验格式几何，不物化；Payload 就绪后恢复现用索引和约束。
             load_property_indexes(
                 &mut mt,
                 path,
@@ -921,8 +912,7 @@ pub fn load<T: VectorType>(
             version,
             &mmap,
         )?;
-        // 尝试从 BQ Block 恢复签名
-        load_bq_block(&mut mt, bytes, bq_layout)?;
+        // 旧 BQ 块已校验，无需恢复未被当前查询使用的数组。
         load_property_indexes(
             &mut mt,
             path,
@@ -1221,9 +1211,6 @@ fn load_edges<T: VectorType>(
 
 #[derive(Clone, Copy)]
 struct BqDiskLayout {
-    count: usize,
-    chunks_per_signature: usize,
-    data_start: usize,
     end_offset: usize,
 }
 
@@ -1280,9 +1267,6 @@ fn parse_bq_layout(
             )));
         }
         return Ok(Some(BqDiskLayout {
-            count,
-            chunks_per_signature,
-            data_start: count_end,
             end_offset: file_len,
         }));
     }
@@ -1331,9 +1315,6 @@ fn parse_bq_layout(
         return Ok(None);
     }
     Ok(Some(BqDiskLayout {
-        count,
-        chunks_per_signature,
-        data_start: header_end,
         end_offset: expected_end,
     }))
 }
@@ -1426,41 +1407,6 @@ fn load_unique_constraints<T: VectorType>(
         ));
     }
     memtable.restore_unique_index_definitions(&definitions)
-}
-
-fn load_bq_block<T: VectorType>(
-    memtable: &mut MemTable<T>,
-    bytes: &[u8],
-    layout: Option<BqDiskLayout>,
-) -> Result<()> {
-    let Some(layout) = layout else {
-        return Ok(());
-    };
-    let mut sigs = Vec::new();
-    sigs.try_reserve_exact(layout.count).map_err(|error| {
-        TriviumError::CapacityAllocationFailed {
-            reason: format!("恢复 BQ 签名时分配失败: {error}"),
-        }
-    })?;
-    let signature_bytes = layout.chunks_per_signature * 8;
-    for index in 0..layout.count {
-        let mut signature = BqSignature::empty();
-        let start = layout.data_start + index * signature_bytes;
-        for chunk in 0..layout.chunks_per_signature {
-            signature.data[chunk] = read_u64_le(bytes, start + chunk * 8, "BQ chunk")?;
-        }
-        sigs.push(signature);
-    }
-
-    memtable.set_bq_signatures(sigs);
-    tracing::info!(
-        "从 .tdb 恢复了 {} 个 BQ 签名，每个 {} chunks (Restored {} BQ signatures with {} chunks each)",
-        layout.count,
-        layout.chunks_per_signature,
-        layout.count,
-        layout.chunks_per_signature
-    );
-    Ok(())
 }
 
 fn load_mapped_graph<T: VectorType>(memtable: &mut MemTable<T>, db_path: &str) -> Result<()> {

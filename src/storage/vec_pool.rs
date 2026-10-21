@@ -19,9 +19,8 @@ use std::path::{Path, PathBuf};
 ///   修改（逻辑删除置零、就地更新）仅影响进程私有副本，不改变磁盘文件。
 /// - **增量层（Vec）**：自上次 flush 以来新插入的向量，纯内存存储。
 ///
-/// 对外暴露的 `flat_vectors()` 接口保持不变（返回连续 `&[T]`），
-/// 通过内部的合并缓存实现透明兼容。合并缓存采用 COW 策略：
-/// 仅在首次调用时构建，后续读操作复用，直到下次写操作使缓存失效。
+/// 查询直接借用基础层和增量层。`flat_vectors()` 在单层时零拷贝，混合两层时
+/// 由显式的 `ensure_cache()` 物化连续视图；写操作释放失效副本。
 pub struct VecPool<T: VectorType> {
     dim: usize,
 
@@ -123,9 +122,14 @@ impl<T: VectorType> VecPool<T> {
 
         if vec_path.exists() && expected_count > 0 {
             let file = std::fs::File::open(vec_path)?;
-            let file_len = file.metadata()?.len() as usize;
+            let file_len = usize::try_from(file.metadata()?.len())
+                .map_err(|_| TriviumError::CorruptedFile("向量文件大小超出平台寻址范围".into()))?;
             let elem_size = std::mem::size_of::<T>();
-            let expected_size = expected_count * dim * elem_size;
+            let expected_size = expected_count
+                .checked_mul(dim)
+                .and_then(|size| size.checked_mul(elem_size))
+                .filter(|size| *size > 0)
+                .ok_or_else(|| TriviumError::CorruptedFile("向量映射几何无效或溢出".into()))?;
 
             if file_len < expected_size {
                 return Err(TriviumError::CorruptedFile(format!(
@@ -146,6 +150,7 @@ impl<T: VectorType> VecPool<T> {
                         .map_err(TriviumError::Io)?
                 };
 
+                Self::validate_mapping(&mmap)?;
                 pool.mmap = Some(mmap);
                 pool.mmap_count = expected_count;
 
@@ -263,8 +268,27 @@ impl<T: VectorType> VecPool<T> {
         }
     }
 
+    fn validate_mapping(mmap: &memmap2::MmapMut) -> Result<()> {
+        bytemuck::try_cast_slice::<u8, T>(mmap).map_err(|error| {
+            TriviumError::CorruptedFile(format!("向量映射的长度或对齐无效: {error}"))
+        })?;
+        Ok(())
+    }
+
+    /// 基础层在创建映射时已验证长度与类型对齐，且仅通过独占借用重映射。
+    fn base_vectors(&self) -> &[T] {
+        self.mmap
+            .as_ref()
+            .map_or(&[], |mmap| bytemuck::cast_slice(mmap))
+    }
+
+    /// 两段共享同一套 slot 顺序；读取无需全库堆副本。
+    pub fn vector_segments(&self) -> (&[T], &[T]) {
+        (self.base_vectors(), &self.delta)
+    }
+
     pub fn cache_needs_rebuild(&self) -> bool {
-        self.mmap.is_some() && self.mmap_count > 0 && !self.merged_valid
+        self.mmap.is_some() && self.mmap_count > 0 && !self.delta.is_empty() && !self.merged_valid
     }
 
     /// 确保合并缓存已构建（需要 &mut self）
@@ -272,7 +296,11 @@ impl<T: VectorType> VecPool<T> {
     /// 在需要同时使用 flat_vectors() 和其他 &self 方法时，
     /// 先调用此方法触发缓存重建，再调用 flat_vectors() 获取切片。
     pub fn ensure_cache(&mut self) {
-        if self.mmap.is_some() && self.mmap_count > 0 && !self.merged_valid {
+        if self.mmap.is_some()
+            && self.mmap_count > 0
+            && !self.delta.is_empty()
+            && !self.merged_valid
+        {
             self.rebuild_merged_cache();
         }
     }
@@ -291,8 +319,10 @@ impl<T: VectorType> VecPool<T> {
             return &self.delta;
         }
 
-        // 返回缓存（如果缓存无效但未调用 ensure_cache，返回可能过时的数据）
-        // 在正确的使用流程中，调用方应先调用 ensure_cache()
+        if self.delta.is_empty() {
+            return self.base_vectors();
+        }
+        // 混合两层的连续视图仍需调用方显式准备，正式扫描使用 vector_segments。
         &self.merged
     }
 
@@ -309,20 +339,22 @@ impl<T: VectorType> VecPool<T> {
     /// 为转换为 Rom 模式后能够安全删除 .vec 文件提供保障。
     pub fn detach_mmap(&mut self) {
         if self.mmap.is_some() {
-            self.ensure_cache(); // 触发全量读取并合并
-
-            // 剥离：深度全量复制给 delta
-            let mut new_delta = Vec::with_capacity(self.merged.len());
-            new_delta.extend_from_slice(&self.merged);
+            // 已有有效合并结果时转移所有权；否则只复制一次形成 Rom 所需的拥有型向量。
+            let new_delta = if self.merged_valid {
+                std::mem::take(&mut self.merged)
+            } else {
+                let (base, delta) = self.vector_segments();
+                let mut vectors = Vec::with_capacity(base.len() + delta.len());
+                vectors.extend_from_slice(base);
+                vectors.extend_from_slice(delta);
+                vectors
+            };
             self.delta = new_delta;
-
-            // 剥离内核映射句柄（释放文件锁）
             self.mmap = None;
             self.vec_path = None;
             self.mmap_count = 0;
-            self.merged.clear();
+            self.merged = Vec::new();
             self.merged_valid = false;
-            // 基础层已不存在，清除脏页标志
             self.has_dirty_base = false;
         }
     }
@@ -409,6 +441,7 @@ impl<T: VectorType> VecPool<T> {
                 .map_copy(&file)
                 .map_err(TriviumError::Io)?
         };
+        Self::validate_mapping(&new_mmap)?;
         self.mmap = Some(new_mmap);
         self.mmap_count = new_total;
 
@@ -478,6 +511,7 @@ impl<T: VectorType> VecPool<T> {
                 .map_copy(&file)
                 .map_err(TriviumError::Io)?
         };
+        Self::validate_mapping(&new_mmap)?;
         self.mmap = Some(new_mmap);
         self.mmap_count = total;
 
@@ -557,6 +591,7 @@ impl<T: VectorType> VecPool<T> {
     /// 使合并缓存失效
     #[inline]
     fn invalidate_cache(&mut self) {
+        self.merged = Vec::new();
         self.merged_valid = false;
     }
 
@@ -600,8 +635,8 @@ impl<T: VectorType> VecPool<T> {
 
     /// 估算实际占用的堆内存字节数（不含 mmap 页，因为那由 OS 管理）
     pub fn heap_memory_bytes(&self) -> usize {
-        let delta_bytes = self.delta.len() * std::mem::size_of::<T>();
-        let merged_bytes = self.merged.len() * std::mem::size_of::<T>();
+        let delta_bytes = self.delta.capacity() * std::mem::size_of::<T>();
+        let merged_bytes = self.merged.capacity() * std::mem::size_of::<T>();
         delta_bytes + merged_bytes
     }
 

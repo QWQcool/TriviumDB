@@ -145,8 +145,6 @@ pub(crate) fn execute_pipeline_with_limit<T: VectorType>(
     config: &SearchConfig,
     ctx: &mut HookContext,
 ) -> Result<PipelineOutput> {
-    // Payload 过滤可能在 QuIVer 候选不足时回退精确扫描，因此准备阶段必须预先物化 flat。
-    let materialize_flat = config.force_brute_force || config.payload_filter.is_some();
     let quiver_config = crate::index::quiver::QuIVerConfig::default();
     let auto_build_snapshot = {
         let mt = read_or_recover(memtable);
@@ -174,17 +172,6 @@ pub(crate) fn execute_pipeline_with_limit<T: VectorType>(
         #[cfg(feature = "test-hooks")]
         crate::test_hooks::hit(crate::test_hooks::ConcurrencyPoint::BeforeQuiverPublish);
         let _ = write_or_recover(memtable).publish_quiver_if_current(source_generation, index);
-    }
-
-    let cache_needs_prepare = {
-        let mt = read_or_recover(memtable);
-        mt.search_cache_needs_prepare(materialize_flat)
-    };
-    if cache_needs_prepare {
-        let mut mt = write_or_recover(memtable);
-        if mt.search_cache_needs_prepare(materialize_flat) {
-            mt.prepare_search_cache(materialize_flat);
-        }
     }
 
     let mt = read_or_recover(memtable);
@@ -282,7 +269,7 @@ pub(crate) fn execute_pipeline_with_limit<T: VectorType>(
             *seed_map.entry(hit.id).or_insert(0.0) += hit.score;
         }
     } else {
-        // 准备期已保证 QuIVer、BQ 与可能的精确回退 flat cache 全部就绪。
+        // QuIVer 构建已完成；精确回退直接读取基础层和增量层。
         recall_text_ranked(&mt, config, query_text, &mut sparse_ranking);
         let vector_recall_started = std::time::Instant::now();
         let route = if !config.force_brute_force && mt.quiver().is_some() {
@@ -555,7 +542,7 @@ fn recall_vector_ranked<T: VectorType>(
     // 1. QuIVer Vamana 图搜索（N >= 10,000 时由 ensure_vectors_cache 自动构建）
     //    —— 冷热分离：f32 向量按需从 mmap 读取，无需物化全量 flat 数组
     // 2. 暴力全扫（N < 10,000 或 force_brute_force）
-    //    —— 需要连续 flat 数组，由 ensure_vectors_cache 在该路径下构建 merged 缓存
+    //    —— 直接扫描基础层和增量层，无需构建合并缓存
     // ═══════════════════════════════════════════════════════
     let vector_hits: Vec<SearchHit> = if !config.force_brute_force && mt.quiver().is_some() {
         let approximate_hits = quiver_pipeline(mt, config, query_vector);
@@ -565,13 +552,13 @@ fn recall_vector_ranked<T: VectorType>(
                 requested = config.top_k,
                 "QuIVer 过滤结果不足，回退精确扫描 (Insufficient filtered QuIVer results, falling back to exact scan)"
             );
-            brute_force_pipeline(mt, config, query_vector, mt.flat_vectors(), dim)
+            brute_force_pipeline(mt, config, query_vector, dim)
         } else {
             approximate_hits
         }
     } else {
-        // ensure_vectors_cache() 已在 execute_pipeline 中按需构建好 merged 缓存
-        brute_force_pipeline(mt, config, query_vector, mt.flat_vectors(), dim)
+        // 分段精确扫描保持全局 slot 顺序，不创建全库连续副本。
+        brute_force_pipeline(mt, config, query_vector, dim)
     };
 
     ranking.extend(vector_hits.into_iter().map(|hit| (hit.id, hit.score)));
@@ -582,7 +569,6 @@ fn brute_force_pipeline<T: VectorType + Sync>(
     mt: &MemTable<T>,
     config: &SearchConfig,
     query_vector: &[T],
-    vectors: &[T],
     dim: usize,
 ) -> Vec<SearchHit> {
     let bloom_mask = config
@@ -590,14 +576,28 @@ fn brute_force_pipeline<T: VectorType + Sync>(
         .as_ref()
         .map(|f| f.extract_must_have_mask())
         .unwrap_or(0);
-    brute_force::search_filter_map(
-        query_vector,
-        vectors,
-        dim,
-        effective_recall_k(config),
-        config.min_score,
-        |idx| eligible_node_id(mt, config.payload_filter.as_ref(), bloom_mask, idx),
-    )
+    let (base, delta) = mt.vec_pool().vector_segments();
+    let id_filter_map = |idx| eligible_node_id(mt, config.payload_filter.as_ref(), bloom_mask, idx);
+    if delta.is_empty() {
+        brute_force::search_filter_map(
+            query_vector,
+            base,
+            dim,
+            effective_recall_k(config),
+            config.min_score,
+            id_filter_map,
+        )
+    } else {
+        brute_force::search_filter_map_segments(
+            query_vector,
+            base,
+            delta,
+            dim,
+            effective_recall_k(config),
+            config.min_score,
+            id_filter_map,
+        )
+    }
 }
 
 /// QuIVer 管线：BQ-native Vamana 图搜索（替代三级火箭）

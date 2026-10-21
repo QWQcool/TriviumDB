@@ -1081,13 +1081,7 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         reject_hook_reentrant_write()?;
         {
             let mut mt = write_or_recover(&self.memtable);
-            tracing::info!("手动压实开始 (Manual compaction started): {}", self.db_path);
-            // 压实只准备持久化需要的 BQ；ANN 构建由查询或显式 API 负责。
-            mt.prepare_persistence_cache(false);
-        }
-
-        {
-            let mut mt = write_or_recover(&self.memtable);
+            tracing::info!("手动压实开始: {}", self.db_path);
             #[cfg(feature = "test-hooks")]
             crate::test_hooks::hit(crate::test_hooks::ConcurrencyPoint::BeforeCompactionSave);
             file_format::save(&mut mt, &self.db_path, self.storage_mode)?;
