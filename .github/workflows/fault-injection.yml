@@ -60,7 +60,8 @@ jobs:
         run: |
           cargo test --test fault_io wal_midwrite -- --test-threads=1
           cargo test --test fault_io sector_tearing -- --test-threads=1 --ignored
-          cargo test --test fault_power -- --test-threads=1
+          cargo test --test fault_power --features test-hooks -- --test-threads=1
+          cargo test --test fault_io --features test-hooks deterministic_failpoint -- --test-threads=1
           cargo test --test fault_io io_fault -- --test-threads=1
           cargo test --test storage recovery::P0_2_WAL恢复后_新插入不复用已有ID -- --test-threads=1
           cargo test --test fault_crash -- --test-threads=1
@@ -115,9 +116,11 @@ jobs:
       - name: 运行 Windows 文件锁与 rename 相关测试
         shell: pwsh
         run: |
+          $PSNativeCommandUseErrorActionPreference=$true
           $env:CARGO_INCREMENTAL='0'
           cargo test --test fault_io io_fault::IO_06_文件锁_同一路径不能打开两次 -- --test-threads=1
-          cargo test --test fault_power -- --test-threads=1
+          cargo test --test fault_power --features test-hooks -- --test-threads=1
+          cargo test --test fault_io --features test-hooks deterministic_failpoint -- --test-threads=1
           cargo test --test storage compaction_core -- --test-threads=1
 
   extended-fault-matrix:
@@ -139,7 +142,8 @@ jobs:
           cargo test --test fault_io wal_midwrite -- --test-threads=1
           cargo test --test fault_io io_fault -- --test-threads=1
           cargo test --test storage compaction_core -- --test-threads=1
-          cargo test --test fault_power -- --test-threads=1
+          cargo test --test fault_power --features test-hooks -- --test-threads=1
+          cargo test --test fault_io --features test-hooks deterministic_failpoint -- --test-threads=1
           cargo test --test fault_io sector_tearing -- --test-threads=1 --ignored
           cargo test --test fault_hardware emi_bitflip -- --test-threads=1
           cargo test --test fault_hardware unsafe_audit -- --test-threads=1

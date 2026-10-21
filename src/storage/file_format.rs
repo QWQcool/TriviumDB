@@ -18,6 +18,9 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
+mod publication;
+pub(crate) use publication::recover as recover_publication;
+
 // ══════ 文件头常量 ══════
 const MAGIC: &[u8; 4] = b"TVDB";
 pub const CURRENT_VERSION: u16 = 9;
@@ -395,7 +398,14 @@ pub fn save<T: VectorType>(
 ) -> Result<()> {
     match mode {
         StorageMode::Mmap => save_mmap(memtable, path),
-        StorageMode::Rom => save_rom(memtable, path),
+        StorageMode::Rom => {
+            if publication::pending(path) {
+                // Rom 本来就需要物化向量；先解除映射再恢复上次中断的 Mmap 发布。
+                memtable.vec_pool_mut().detach_mmap();
+                publication::recover(path, true)?;
+            }
+            save_rom(memtable, path)
+        }
     }?;
 
     // 顺便持久化 QuIVer 索引（如果已构建）
@@ -450,6 +460,21 @@ pub fn save<T: VectorType>(
 
 /// Mmap 模式保存：分离向量到 .vec 文件，.tdb 纯元数据
 fn save_mmap<T: VectorType>(memtable: &mut MemTable<T>, path: &str) -> Result<()> {
+    let retry = publication::resume(path)?;
+    let marker_path = flush_ok_path_from_db(path);
+    let previous_generation = read_marker_generation(&marker_path);
+    let generation = match previous_generation {
+        Some(previous) => previous
+            .checked_add(1)
+            .ok_or_else(|| TriviumError::InvalidInput("flush generation 已耗尽".into()))?,
+        None => 1,
+    };
+    if retry {
+        // 保留原来的撤销基础；重写从当前 COW 映射与 delta 读取，不在堆中展开全库。
+        memtable.vec_pool_mut().require_full_rewrite();
+    } else {
+        publication::begin(path, generation)?;
+    }
     let vec_file_path = vec_path_from_db(path);
     let vec_count = memtable.vec_pool_mut().flush(Path::new(&vec_file_path))?;
     #[cfg(feature = "test-hooks")]
@@ -460,22 +485,9 @@ fn save_mmap<T: VectorType>(memtable: &mut MemTable<T>, path: &str) -> Result<()
     crate::test_hooks::hit(crate::test_hooks::ConcurrencyPoint::AfterTdbPersisted);
 
     // ═══ 跨文件一致性标记（提交点） ═══
-    // .vec 和 .tdb 都已原子替换成功后，才写入 .flush_ok 标记。
-    // 加载时校验此标记来检测撕裂写入。
+    // 旧代已由恢复日志保留；新文件全部持久化后才发布 marker。
     #[cfg(feature = "test-hooks")]
     crate::test_hooks::io_result(crate::test_hooks::IoPoint::MarkerMetadata)?;
-    let marker_path = flush_ok_path_from_db(path);
-    let previous_generation = read_marker_generation(&marker_path);
-    let generation = previous_generation
-        .and_then(|value| value.checked_add(1))
-        .ok_or_else(|| TriviumError::InvalidInput("flush generation 已耗尽".into()))
-        .or_else(|error| {
-            if previous_generation.is_none() {
-                Ok(1)
-            } else {
-                Err(error)
-            }
-        })?;
     let payload_path = payload_path_for_generation(path, generation);
     memtable.save_payload_sidecar(Path::new(&payload_path), generation)?;
     let tdb_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
@@ -511,14 +523,17 @@ fn save_mmap<T: VectorType>(memtable: &mut MemTable<T>, path: &str) -> Result<()
 
     robust_rename_and_sync(Path::new(&marker_tmp), Path::new(&marker_path))?;
 
+    #[cfg(feature = "test-hooks")]
+    crate::test_hooks::hit(crate::test_hooks::ConcurrencyPoint::AfterFlushMarkerRename);
+
+    // 提交后的清理失败只留下可验证的恢复日志，不能回滚已提交的新代。
+    publication::cleanup(path).ok();
+
     // marker 已提交后旧 Payload generation 才失去可见性。Windows 上旧 mmap 可能暂时阻止删除，
     // 因此回收必须是 best-effort，绝不能让已提交的新 generation 回滚或报错。
     if let Some(previous) = previous_generation {
         std::fs::remove_file(payload_path_for_generation(path, previous)).ok();
     }
-
-    #[cfg(feature = "test-hooks")]
-    crate::test_hooks::hit(crate::test_hooks::ConcurrencyPoint::AfterFlushMarkerRename);
 
     Ok(())
 }
@@ -832,14 +847,12 @@ pub fn load<T: VectorType>(
 
     let vec_file_path = vec_path_from_db(path);
 
-    // 如果 vector_offset 是 0 说明是分离架构，且存在 .vec 则按 Mmap 加载
-    // 无论目前 config 设置的模式是什么，如果在初始化加载时已经存在可用的 .vec 结构，应当正确恢复它
-    // 由下一次 flush 再按照最新的 StorageMode 决定写出格式
-    if vector_offset == 0 && Path::new(&vec_file_path).exists() {
+    // 分离架构由文件头决定，不能因 .vec 缺失就把元数据误当成 Rom 内嵌向量。
+    // 空库允许不存在 .vec，但仍须由 marker 证明其长度与 CRC。
+    if vector_offset == 0 {
         // ═══ 跨文件一致性校验 ═══
         // 检查 .flush_ok 标记是否存在且 magic/version/大小均吻合，防止撕裂写入。
-        // marker 无效时直接走 metadata-only 路径，依赖 WAL 恢复数据，
-        // 不再尝试加载可能不一致的 .vec 文件。
+        // 未完成发布已在可写打开时通过撤销日志恢复；无日志的事实损坏必须拒绝。
         let marker_path = flush_ok_path_from_db(path);
         let marker = std::fs::read(&marker_path)
             .ok()

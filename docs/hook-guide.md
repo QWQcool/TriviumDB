@@ -1,6 +1,8 @@
 # TriviumDB Hook 开发指南
 
 > 面向深度定制固定检索管线的开发者。Hook 作用于 `search*` 工业检索管线；TQL 的 Cascades/NodeSet 管线通过查询算子和 EXPLAIN 扩展，不经过这些 Hook。
+>
+> 对应 `0.8.10` 版本源码；本次不改变 Hook ABI。见[变更说明](changes-0.8.10.md)。
 
 ---
 
@@ -435,6 +437,8 @@ db.set_hook(composite);
 5. **及时清除**：测试/调试用的 Hook 使用完毕后调用 `clear_hook()` 移除，避免影响后续正常查询性能
 
 > 📖 更多安全细节请查看 **[安全设计说明](security.md)** 中的 "FFI Hook 插件安全" 章节。
+
+FFI 与 Python/Node 回调包装涉及手工 `Send/Sync` 及运行时约束。当前 Miri 子集不执行外部回调，TSan 任务也不验证全部插件路径；测试通过不能代替插件的 ABI、寿命与跨线程契约审核。
 
 ---
 

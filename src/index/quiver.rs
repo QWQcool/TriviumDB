@@ -29,6 +29,14 @@ use std::time::Instant;
 #[path = "quiver/corrected_sm.rs"]
 pub mod corrected_sm;
 
+mod connectivity;
+
+#[cfg(test)]
+mod connectivity_tests;
+
+#[cfg(test)]
+mod memory_safety_tests;
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct NonNanF32(pub f32);
 
@@ -196,14 +204,15 @@ impl SearchVisited for SparseBitset {
 }
 
 // ── Flat neighbor list ──
-// Layer 0: 每节点最多 m0 个邻居，存为 [degree, n0, n1, ..., n_{m0-1}] stride = m0+1
+// Layer 0: 常规近邻按 m0 选择；既有双倍容量还可保留跨签名出口和导航树边。
+// 每行存为 [degree, n0, n1, ...]，stride = 2*m0+1。
 // Upper layers: 用 Vec<Vec<u32>>（节点少，性能不敏感）
 
 const EMPTY_NB: u32 = u32::MAX;
 
 struct FlatAdj {
     data: Vec<u32>, // n * stride 个 u32
-    stride: usize,  // m0 + 1 (第一个元素是度数)
+    stride: usize,  // 每行元素数，第一个元素是度数
 }
 
 struct SpinLockGuard<'a> {
@@ -816,7 +825,7 @@ impl ExperimentalBuildView<'_> {
         self.profile.nodes.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// 构图后 final-prune：把惰性追加导致 deg>m0 的节点并行收敛到 m0。
+    /// 构图后剪至 m0 个常规近邻，并在原容量内保留碰撞簇的跨签名出口。
     /// 每节点最多剪一次，O(n) 单次剪枝，相对原"每边重剪"成本可忽略。
     fn final_prune(&self, node: u32) {
         let deg = self.adj.degree_raw(node);
@@ -832,7 +841,8 @@ impl ExperimentalBuildView<'_> {
         cand.sort_unstable_by_key(|&(_, id)| id);
         cand.dedup_by_key(|&mut (_, id)| id);
         cand.sort_unstable_by_key(|&(d, _)| d);
-        let pruned = QuIVer::vamana_select(self.sigs, node, &cand, self.m0, self.dim, self.alpha);
+        let pruned =
+            QuIVer::select_diverse_layer0(self.sigs, node, &cand, self.m0, self.dim, self.alpha);
         self.adj.set_neighbors_raw(node, &pruned);
     }
 }
@@ -952,6 +962,8 @@ pub struct QuIVer {
     prefilter_slot_cache: PrefilterSlotCache,
 
     visited: Bitset, // 建图期间复用，搜索时每次新建
+    /// 从当前入口覆盖全部节点的导航树；仅保存父节点，不复制邻接表或原始向量。
+    connectivity_parents: Vec<u32>,
 }
 
 pub struct QuIVerConfig {
@@ -1033,6 +1045,7 @@ impl QuIVer {
             dirty_count: 0,
             prefilter_slot_cache: Mutex::new(PrefilterSlotCacheState::default()),
             visited: Bitset::new(0),
+            connectivity_parents: Vec::new(),
         }
     }
 
@@ -1047,6 +1060,7 @@ impl QuIVer {
     pub fn insert(&mut self, vector: &[f32], id: u64, slot_index: usize, lcg: &mut u64) {
         self.corrected_sm = None;
         assert_eq!(vector.len(), self.dim);
+        let previous_entry = self.entry_point;
         let idx = self.n as u32;
 
         let sig = Bq2Signature::from_vector(vector);
@@ -1072,6 +1086,7 @@ impl QuIVer {
         }
 
         self.n += 1;
+        self.connectivity_parents.push(EMPTY_NB);
 
         if let Some(model) = &mut self.default_sm {
             model
@@ -1176,14 +1191,7 @@ impl QuIVer {
 
                     // 按距离排序后做 Vamana 剪枝
                     nb_candidates.sort_unstable_by_key(|&(d, _)| d);
-                    let pruned = Self::vamana_select(
-                        &self.bq_store,
-                        nb,
-                        &nb_candidates,
-                        self.m0,
-                        self.dim,
-                        self.alpha,
-                    );
+                    let pruned = self.select_layer0_neighbors(nb, &nb_candidates);
                     self.layer0.set_neighbors(nb, &pruned);
                 }
             } else {
@@ -1229,6 +1237,7 @@ impl QuIVer {
             self.entry_point = idx;
             self.max_level = level;
         }
+        self.finish_layer0_insertion(idx, previous_entry);
         if let Some(model) = &mut self.default_sm {
             model.set_routing_entry(self.entry_point);
         }
@@ -1236,6 +1245,16 @@ impl QuIVer {
 
     /// Vamana 选边
     fn select_neighbors(&self, target: u32, candidates: &[(u32, u32)], max_k: usize) -> Vec<u32> {
+        if max_k == self.m0 {
+            return Self::select_diverse_layer0(
+                &self.bq_store,
+                target,
+                candidates,
+                max_k,
+                self.dim,
+                self.alpha,
+            );
+        }
         Self::vamana_select(
             &self.bq_store,
             target,
@@ -2249,6 +2268,7 @@ impl QuIVer {
         // 使用预计算的签名，避免重复计算
         let mut visited = Bitset::new(0);
         for i in 0..n {
+            let previous_entry = self.entry_point;
             let _v = &vectors[i * dim..(i + 1) * dim];
             let idx = self.n as u32;
 
@@ -2271,6 +2291,7 @@ impl QuIVer {
             }
 
             self.n += 1;
+            self.connectivity_parents.push(EMPTY_NB);
             visited.grow(self.n);
 
             if self.n == 1 {
@@ -2348,14 +2369,7 @@ impl QuIVer {
                             nb_candidates.push((d, idx));
                         }
                         nb_candidates.sort_unstable_by_key(|&(d, _)| d);
-                        let pruned = Self::vamana_select(
-                            &self.bq_store,
-                            nb,
-                            &nb_candidates,
-                            max_nb,
-                            dim,
-                            self.alpha,
-                        );
+                        let pruned = self.select_layer0_neighbors(nb, &nb_candidates);
                         self.layer0.set_neighbors(nb, &pruned);
                     }
                 } else {
@@ -2379,6 +2393,7 @@ impl QuIVer {
                 self.entry_point = idx;
                 self.max_level = level;
             }
+            self.finish_layer0_insertion(idx, previous_entry);
         }
         self.rebuild_default_sm(vectors);
     }
@@ -2476,7 +2491,7 @@ impl QuIVer {
                 view.connect_node_fast(i as u32, &mut visited);
             });
         }
-        // final-prune：把惰性追加导致 deg>m0 的节点并行收敛到 m0
+        // 最终剪枝保留跨签名出口，避免同码近邻占满名额后封闭入口所在的簇。
         (0..n as u32)
             .into_par_iter()
             .for_each(|node| view.final_prune(node));
@@ -2486,6 +2501,7 @@ impl QuIVer {
         );
 
         concurrent_adj.freeze_into_flat(&mut self.layer0);
+        self.repair_layer0_connectivity();
     }
 
     /// 使用外部预构建签名的实验兼容入口。
@@ -2596,7 +2612,7 @@ impl QuIVer {
                 }
             });
         }
-        // final-prune：fast 路径惰性追加后收敛到 m0；checked 路径 deg≤m0 时为空操作
+        // 最终剪枝保留跨签名出口；checked 路径没有额外候选时为空操作。
         (0..n as u32)
             .into_par_iter()
             .for_each(|node| view.final_prune(node));
@@ -2606,6 +2622,7 @@ impl QuIVer {
         );
 
         concurrent_adj.freeze_into_flat(&mut self.layer0);
+        self.repair_layer0_connectivity();
         if cfg!(debug_assertions)
             || std::env::var("TRIVIUM_BQ_VAMANA_VALIDATE").as_deref() == Ok("1")
         {
@@ -2642,6 +2659,7 @@ impl QuIVer {
 
         let mut visited = Bitset::new(0);
         for i in 0..n {
+            let previous_entry = self.entry_point;
             let _v = &vectors[i * dim..(i + 1) * dim];
             let idx = self.n as u32;
 
@@ -2663,6 +2681,7 @@ impl QuIVer {
             }
 
             self.n += 1;
+            self.connectivity_parents.push(EMPTY_NB);
             visited.grow(self.n);
 
             if self.n == 1 {
@@ -2739,14 +2758,7 @@ impl QuIVer {
                             nb_candidates.push((d, idx));
                         }
                         nb_candidates.sort_unstable_by_key(|&(d, _)| d);
-                        let pruned = Self::vamana_select(
-                            &this.bq_store,
-                            nb,
-                            &nb_candidates,
-                            max_nb,
-                            dim,
-                            this.alpha,
-                        );
+                        let pruned = this.select_layer0_neighbors(nb, &nb_candidates);
                         this.layer0.set_neighbors(nb, &pruned);
                     });
                 } else {
@@ -2770,6 +2782,7 @@ impl QuIVer {
                 self.entry_point = idx;
                 self.max_level = level;
             }
+            self.finish_layer0_insertion(idx, previous_entry);
         }
         self.rebuild_default_sm(vectors);
     }
@@ -2838,6 +2851,7 @@ impl QuIVer {
             hot_bytes: hot_bq
                 + hot_l0
                 + hot_upper
+                + self.connectivity_parents.capacity() * std::mem::size_of::<u32>()
                 + self
                     .corrected_sm
                     .as_ref()
@@ -3363,15 +3377,7 @@ impl QuIVer {
             }
         }
 
-        tracing::info!(
-            "QuIVer 索引从磁盘加载完成 (QuIVer index loaded from disk)：{} 个节点，dim={}，max_level={}，tombstone={}",
-            n,
-            dim,
-            max_level,
-            tombstones.iter().filter(|&&t| t).count()
-        );
-
-        Ok(Self {
+        let mut index = Self {
             dim,
             n,
             m,
@@ -3397,7 +3403,17 @@ impl QuIVer {
             dirty_count,
             prefilter_slot_cache: Mutex::new(PrefilterSlotCacheState::default()),
             visited: Bitset::new(n),
-        })
+            connectivity_parents: Vec::new(),
+        };
+        index.restore_navigation_tree()?;
+        tracing::info!(
+            "QuIVer 索引从磁盘加载完成：{} 个节点，dim={}，max_level={}，tombstone={}",
+            n,
+            dim,
+            max_level,
+            index.tombstones.iter().filter(|&&t| t).count()
+        );
+        Ok(index)
     }
 }
 

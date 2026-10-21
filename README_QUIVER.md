@@ -1,6 +1,6 @@
 # QuIVer — Implementation and Experiment Guide
 
-> **Updated**: 2026-10-18. Current implementation means `0.8.9` source containing `461855e` and `619dd7b`; earlier `0.8.8` packages do not include these changes. Record the evaluated version, Git revision, and build identity.
+> **Updated**: 2026-10-21. Current implementation means `0.8.10` source; release artifact status is tracked by the release workflows and package registries. It adds graph connectivity protection to the SM-L2 implementation introduced in `0.8.9`; earlier `0.8.8` packages do not include those SM changes. Record the evaluated version, Git revision, and build identity. See [changes and validation scope](docs/changes-0.8.10.md).
 >
 > **Submission target**: **ICDE** for the rebuilt version. This is not an acceptance, proceedings, or publication claim.
 >
@@ -10,7 +10,7 @@
 
 ## Current implementation
 
-The database defaults to **fast BQ graph construction → training-free SM-L2 navigation → budgeted original-vector cosine reranking**. Navigation combines sign/strong bits with per-vector magnitudes and reconstruction norms; it is not pure Hamming search. Default preparation is automatic, including after database reload. The legacy graph format remains unchanged, so reload streams original vectors to restore SM state and has a measurable startup cost.
+The database defaults to **fast BQ graph construction → signature diversity and directed connectivity protection → training-free SM-L2 navigation → budgeted original-vector cosine reranking**. Navigation combines sign/strong bits with per-vector magnitudes and reconstruction norms; it is not pure Hamming search. Default preparation is automatic, including after database reload. The graph format remains v1; loading a valid graph restores runtime navigation metadata and streams original vectors to restore SM state, with measurable startup cost. Rebuild older indexes to apply the new construction rules. Disconnected indexes require rebuilding through the existing invalid-index policy; loading does not add topology repair edges.
 
 Default SM-L2 does not use query-sample fitting or a calibration anchor. Explicit corrected SM, explicit native L2, custom navigation scorers, and standalone legacy BQ loading have separate semantics. Native L2 retains original magnitudes and zero vectors and returns negative squared distance; ordinary database searches remain cosine. See [current architecture, lifecycle, memory, and mode boundaries](docs/quiver.md).
 
@@ -20,9 +20,10 @@ Current-code checks without an external dataset:
 cargo test --lib index::quiver::corrected_sm::production_tests
 cargo test --lib index::quiver::corrected_sm::native_l2_tests
 cargo test --lib index::quiver::tests::test_quiver_中等规模搜索 -- --exact
+cargo test --lib index::quiver::connectivity_tests
 ```
 
-These checks establish implementation contracts, not million-scale performance.
+These checks establish implementation contracts, not million-scale performance. Entry reachability does not guarantee exact recall under bounded search budgets. The [synthetic connectivity report](docs/benchmarks/quiver-connectivity-20261021.json) records seven datasets, four search widths, recall, timing and hot-memory costs; it is not the frozen ICDE evaluation.
 
 ## ICDE evaluation protocol and evidence
 

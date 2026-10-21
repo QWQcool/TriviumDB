@@ -1,6 +1,6 @@
 # TriviumDB 安全特性详解
 
-> 基于 v0.8.9 当前源码的完整文档，覆盖并发安全、数据完整性、格式版本门禁、预算、ReadOnly/Immutable 零写、输入验证与跨平台 I/O 加固。
+> 基于 v0.8.10 版本源码，说明并发、数据完整性、格式版本门禁、预算、ReadOnly/Immutable 零写、输入验证与跨平台 I/O 的实现和验证边界；见[变更说明](changes-0.8.10.md)。
 
 ---
 
@@ -59,6 +59,8 @@ QuIVer 构建：不得持有 MemTable guard 等待 singleflight Condvar
 ```
 
 确定性交错测试验证了读读并发、读写隔离、QuIVer stale generation 拒绝、singleflight、fatigue 顺序和 compaction/WAL 边界。
+
+这些用例受 `test-hooks` 控制，CI 和发布验收显式启用该 feature；默认 `cargo test` 不包含它们。当前 TSan 任务检查 Linux 并发路径，Miri 检查无 mmap/FFI 的裸指针与邻接表子集，不等于所有线程交错均已证明安全。命令和范围见[测试实践](testing.md#threadsanitizer-与-miri)。
 
 ---
 
@@ -169,8 +171,11 @@ magic(4) + version(1) + generation(8)
 - 只有 v3 marker 明确声明的 Payload generation 才允许加载；v1/v2 marker 旁的游离 `.pld` 不参与旧快照。
 - v1（29 字节）与 v2（41 字节）保持只读兼容；ReadWrite 在下一次显式 flush 时升级为 v3，打开时不隐式迁移。
 - generation 化 Payload 文件避免 Windows 上替换仍被 Reader mmap 的同名文件；marker 提交后旧 generation 才失去可见性，并在引用释放后 best-effort 回收。
-- 校验失败时 fail-closed：ReadOnly/Immutable 字节级零写并拒绝打开；ReadWrite 不构造缺向量或缺 Payload 的伪恢复状态。
-- 发布路径由格式变异和子进程强杀测试覆盖，重开只允许读取完整提交 generation。
+- 发布新文件前，流式复制旧 `.tdb/.vec/.flush_ok` 到 `.publish.0/1/2`，fsync 后最后发布 `.publish` 撤销日志。日志采用 `TPUB` v1 固定 56 字节，包含目标 generation、三个文件的存在位/长度/CRC 和日志自身 CRC；首次 flush 明确记录旧文件不存在。
+- ReadWrite 持有排他锁后先检查日志：marker 尚未提交则校验备份、恢复旧事实文件，再回放 WAL；marker 已提交则验证新代，保留新代并清理日志。恢复复制不消耗备份，恢复完成并持久化删除日志后才回收备份，支持恢复途中再次断电。
+- ReadOnly/Immutable 不执行恢复或清理；有待恢复日志/WAL 时返回 `RecoveryRequired`，保持字节级零写。无有效恢复基础的文件损坏返回 `CorruptedFile`，不构造缺向量、缺 Payload 或空库的伪恢复状态；已提交新代损坏不能回滚旧代。
+- 正常 Mmap flush 的旧代备份增加 O(旧 `.tdb` + `.vec`) 磁盘读写和临时空间，复制不把全库读入堆。同一句柄失败重试保留最初备份，向量从现有 COW 映射和 delta 完整重写。主文件 v9、marker v3 保持不变；旧内核不识别新的恢复日志，未完成发布须用当前内核恢复后再迁移。
+- 默认 `storage::publication_recovery` 用独立日志字节 oracle 验证恢复、损坏拒绝、提交点与只读零写；`test-hooks` 强杀矩阵要求完整恢复所有 `Full` 模式已同步事务，打开失败不能算通过。
 
 ---
 
@@ -323,6 +328,8 @@ if offset + dim <= vectors.len() {
 逻辑原子性保证节点、ID、generation 和 WAL 在失败后不变。Rust 容器在后续容器失败前已经成功取得的空 capacity 可能保留，但不形成可见数据。内存预算不包含 Python/NumPy、V8、其他线程和 OS Page Cache，因此不是进程 RSS 的硬上限。
 
 QuIVer 构建有独立峰值预算，流式准备 BQ2 与默认 SM 状态，避免 FP16 全库临时展开为 FP32。默认查询的紧凑状态与显式模式安装的临时峰值应分别核算，详见 [QuIVer 内存与重载说明](quiver.md#增量维护重载与内存)。纯 `flush()` 和 compaction 不会隐式触发 ANN 构建。
+
+构图连通性保护的父节点数组、预分配遍历栈和访问位图在分配前纳入峰值预算；父节点数组也计入索引热内存。重载不补拓扑：旧图通过重建应用新规则，断连图按已有缺失索引策略处理。
 
 查询统一受四类预算约束：QueryMemoryBudget（候选/union/精排向量/页读取字节）、TraversalBudget（visited/edges/frontier/depth）、PipelineBudget（NodeSet 节点与字节）和 QueryParallelismBudget（线程与并行阈值）。分配前检查、按阶段切片；Error 模式 fail-closed，只有显式 Partial 策略才允许带 truncated 标记返回。GraphFirst、路径、集合、图算法和聚合不得偷偷退化为无界全库执行。
 
@@ -512,7 +519,7 @@ Python/Node 绑定应通过中央转换器保留核心错误类别；控制流�
 
 故障注入均使用小型 fixture 与隔离子进程，不会耗尽测试机的物理内存或磁盘：
 
-- **真实断电矩阵**：子进程在 `.vec` 落盘 / `.tdb` 落盘 / marker 替换前后到达指定发布阶段后由父进程强杀，重开验证只存在旧完整代或新完整代，不允许跨文件混代或半事务；
+- **发布阶段强杀矩阵**：启用 `test-hooks` 后，首次 flush、追加与 2048×65 更新/删除/compaction 在备份、向量、主文件、marker 和恢复途中由父进程强杀；必须重开并逐项验证全部已同步事务，再 flush/reopen 验证持久化，不能以拒绝打开通过验收。这是进程中断模拟，不等同于真实物理断电；
 - **确定性 I/O failpoint**：在 Create/Write/Sync/Rename 等定点注入失败，验证临时文件清理与错误传播；
 - **allocator failure**：仅在目标 failpoint 后拒绝分配，验证 `try_reserve` 路径的结构化错误与零部分提交；
 - **格式规格测试**：独立于生产解析器的字段规格 + 结构化 mutation（字段边界/截断/位翻转/CRC 修复），并验证 ReadOnly 对任何损坏输入字节级零写。
@@ -591,15 +598,15 @@ db.clear_hook()
 
 | 位置 | unsafe 操作 | 安全契约 |
 |---|---|---|
-| `vec_pool.rs:open()` | `MmapOptions::map_copy()` | T: Pod+Zeroable；MAP_PRIVATE；len ≤ 文件实际大小 |
-| `vec_pool.rs:flush_append()` | `MmapOptions::map_copy()` | 同上；重映射前旧 mmap 已释放 |
-| `vec_pool.rs:get()` | `slice::from_raw_parts()` | 运行时对齐检查；index < mmap_count 守卫 |
-| `vec_pool.rs:rebuild_merged_cache()` | `slice::from_raw_parts()` | 同上 |
-| `file_format.rs:load()` | `Mmap::map()` | 仅读；mmap Drop 前不删文件 |
-| `file_format.rs:load_bq()` | `ptr::copy_nonoverlapping()` | bytemuck Pod 对齐；dst Vec 已预分配足够容量；src 长度精确边界 |
-| `vector.rs:cosine_similarity_avx2()` | AVX2 SIMD 指令 | 运行时 `is_x86_feature_detected!` 检测通过才调用 |
-| `index/bq.rs:popcount_distance()` | CPU 原生 `popcnt` 指令 | 运行时自动检测 CPU 支持；纯数学运算，无内存安全风险 |
+| `storage/vec_pool.rs` | mmap、裸切片与页面建议 | 文件/映射生命周期、长度与对齐、映射访问边界 |
+| `storage/file_format.rs`、`graph_blocks.rs`、`payload_store.rs`、`index/property.rs` | 只读映射或字节转换 | 格式几何与完整性校验、对齐、引用寿命和发布顺序 |
+| `index/bq.rs` | 标量裸指针、SIMD 与预取 | 有效行偏移、完整 chunk/尾块边界、指令集与分配长度 |
+| `vector.rs`、`index/quiver/corrected_sm*` | SIMD 加载及计算 | 指令集分派、长度/尾部、对齐与浮点数值边界 |
+| `index/quiver.rs` | UnsafeCell 邻接表、手工 Sync、其他并行构图代码 | 行锁与访问范围、别名约束、并行阶段结束后的冻结 |
+| `hook.rs` | 外部函数调用与手工 Send/Sync | ABI、动态库与回调寿命、跨线程调用约束 |
+| `bindings/python.rs`、`bindings/nodejs.rs` | 回调包装的手工 Send/Sync | 对象跨线程访问及 Python/Node 运行时约束 |
+| `observability.rs` | Windows 外部系统调用 | API 参数、缓冲区布局与返回值检查 |
 
-所有 `unsafe` 块均附有明确的 `// SAFETY:` 注释。整个代码库没有 `unsafe impl Send/Sync`——`Send + Sync` 由 `Arc<Mutex<T>>` 自动推导，类型系统级别安全。
+上表是审核范围与所需契约，不是逐项完成证明。源码确有手工 `Send/Sync`，不能仅凭外层 `Arc/Mutex/RwLock` 推断其内部访问安全，也不能声称全部 unsafe 已有完备 SAFETY 注释。现有 `unsafe_audit` 是专项边界回归；ASan、TSan、Miri 各有执行范围与限制，实际结果以具体提交和平台的验收记录为准。
 
 
