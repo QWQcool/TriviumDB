@@ -1955,7 +1955,7 @@
         <span data-i18n="header.tutorial">可视化使用教程</span>
       </button>
       <!-- AI 助手切换按钮：未配置 LLM 时整体隐藏（updateAiVisibility 控制） -->
-      <button class="btn" id="aiChatToggleBtn" title="AI 助手 (TQL Copilot)" hidden>
+      <button class="btn" id="aiChatToggleBtn" title="AI 助手" hidden>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l1.9 5.7L19.6 10l-5.7 1.9L12 17.6l-1.9-5.7L4.4 10l5.7-1.3z"/><path d="M19 15l.9 2.6L22.5 18.5l-2.6.9L19 22l-.9-2.6-2.6-.9 2.6-.9z"/></svg>
         <span data-i18n="header.ai">AI 助手</span>
       </button>
@@ -1976,7 +1976,7 @@
     <!-- 左侧对象导航树 (Navicat 风格对象管理器) -->
     <aside class="sidebar">
       <div class="sidebar-header">
-        <span data-i18n="sidebar.title">对象导航 (Explorer)</span>
+        <span data-i18n="sidebar.title">对象导航</span>
         <button class="btn" id="refreshMetaBtn" style="padding: 2px 6px;" title="刷新元数据" data-i18n-title="sidebar.refresh">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
         </button>
@@ -1986,14 +1986,14 @@
         <div class="nav-item active" data-action="quick-find">
           <div class="nav-item-left">
             <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-            <span data-i18n="sidebar.item.documents">文档 (Documents)</span>
+            <span data-i18n="sidebar.item.documents">文档</span>
           </div>
           <span class="badge" id="docCountBadge">FIND</span>
         </div>
         <div class="nav-item" data-action="quick-match">
           <div class="nav-item-left">
             <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
-            <span data-i18n="sidebar.item.graph">图拓扑 (Graph)</span>
+            <span data-i18n="sidebar.item.graph">图拓扑</span>
           </div>
           <span class="badge">MATCH</span>
         </div>
@@ -2005,7 +2005,7 @@
           <span class="badge">SEARCH</span>
         </div>
 
-        <div class="nav-section-title" data-i18n="sidebar.group.snippets">常用代码片段 (Snippets)</div>
+        <div class="nav-section-title" data-i18n="sidebar.group.snippets">常用代码片段</div>
         <div class="nav-item" data-snippet='FIND {type: "person"} RETURN * LIMIT 20'>
           <div class="nav-item-left">
             <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
@@ -2027,7 +2027,7 @@
         <div class="nav-item" data-snippet='CREATE ({name: "Alice", type: "user", level: 5})'>
           <div class="nav-item-left">
             <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            <span data-i18n="sidebar.item.create">创建单节点 (Doc)</span>
+            <span data-i18n="sidebar.item.create">创建单节点</span>
           </div>
         </div>
         <div class="nav-item" data-snippet='EXPLAIN ANALYZE FIND {type: "person"} RETURN *'>
@@ -2037,7 +2037,7 @@
           </div>
         </div>
 
-        <div class="nav-section-title" data-i18n="sidebar.group.history">查询历史 (History)</div>
+        <div class="nav-section-title" data-i18n="sidebar.group.history">查询历史</div>
         <div id="historyList" style="max-height: 160px; overflow-y: auto;">
           <div style="padding: 6px 14px; color: var(--text-light); font-size: 11px;" data-i18n="sidebar.emptyHistory">暂无历史记录</div>
         </div>
@@ -2072,7 +2072,7 @@
           </div>
           <div class="tab" data-tab="vectorLabPane" role="tab" id="tab-vectorLabPane" aria-controls="vectorLabPane" aria-selected="false" tabindex="0">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="20" x2="12" y2="12"/><line x1="12" y1="12" x2="20" y2="4"/><circle cx="4" cy="20" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="20" cy="4" r="2"/></svg>
-            <span data-i18n="tabs.vector">向量检索 (Vector Lab)</span>
+            <span data-i18n="tabs.vector">向量检索</span>
           </div>
         </div>
         <!-- 图内节点搜索：放在 tab 行右侧，避免顶栏出现两段无锚点的浮空控件 -->
@@ -2090,13 +2090,13 @@
           <div class="toolbar-left">
             <button class="btn btn-success" id="runQueryBtn" title="运行查询 (快捷键: Ctrl + Enter)" data-i18n-title="toolbar.runTitle">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-              <span data-i18n="toolbar.run">运行 (Run)</span>
+              <span data-i18n="toolbar.run">运行</span>
             </button>
             <label class="checkbox-label" title="开启写入事务支持 (CREATE / LINK / DELETE 等)" data-i18n-title="toolbar.mutationTitle">
-              <input type="checkbox" id="mutationCheck"> <span data-i18n="toolbar.mutation">写入模式 (Mutation)</span>
+              <input type="checkbox" id="mutationCheck"> <span data-i18n="toolbar.mutation">写入模式</span>
             </label>
             <label class="checkbox-label" title="返回耗时剖析指标" data-i18n-title="toolbar.profileTitle">
-              <input type="checkbox" id="profileCheck" checked> <span data-i18n="toolbar.profile">剖析 (Profile)</span>
+              <input type="checkbox" id="profileCheck" checked> <span data-i18n="toolbar.profile">剖析</span>
             </label>
           </div>
           <div class="toolbar-right">
@@ -2118,10 +2118,10 @@
           <div class="results-container">
             <div class="results-tabs" role="tablist" aria-label="结果视图切换" data-i18n-aria-label="results.tabsAria">
               <div class="res-tab active" data-view="grid" role="tab" aria-controls="viewGrid" aria-selected="true" tabindex="0">
-                <span data-i18n="results.tab.grid">表格视图 (Data Grid)</span>
+                <span data-i18n="results.tab.grid">表格视图</span>
               </div>
               <div class="res-tab" data-view="graph" role="tab" aria-controls="viewGraph" aria-selected="false" tabindex="0">
-                <span data-i18n="results.tab.graph">交互拓扑图 (Graph Canvas)</span>
+                <span data-i18n="results.tab.graph">交互拓扑图</span>
               </div>
               <div class="res-tab" data-view="json" role="tab" aria-controls="viewJson" aria-selected="false" tabindex="0">
                 <span data-i18n="results.tab.json">JSON 视图</span>
@@ -2158,7 +2158,7 @@
                 <div class="graph-controls">
                   <button class="btn" id="centerGraphBtn" title="重置居中">居中视角</button>
                   <button class="btn" id="togglePhysicsBtn" title="固定物理模拟">冻结力学</button>
-                  <button class="btn" id="graphMergeBtn" title="把当前查询/检索结果并入图探索（增量 merge）">并入图探索</button>
+                  <button class="btn" id="graphMergeBtn" title="把当前查询/检索结果并入图探索（增量合并）">并入图探索</button>
                   <button class="btn" id="toggleWebGLBtn" title="切换 WebGL/Canvas 渲染后端（加载失败自动回退 Canvas）">WebGL 渲染</button>
                   <button class="btn active" id="colorModeTypeBtn" title="按节点类型着色">按类型</button>
                   <button class="btn" id="colorModeCommunityBtn" title="Louvain 社区检测着色（按需加载）">按社区</button>
@@ -2199,7 +2199,7 @@
           <div class="toolbar-left">
             <button class="btn btn-primary" id="loadWholeGraphBtn">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>
-              <span data-i18n="graph.loadWhole">加载全图拓扑 (Top 100 边)</span>
+              <span data-i18n="graph.loadWhole">加载全图拓扑（前 100 条边）</span>
             </button>
             <button class="btn" id="graphTqlBtn" title="在探索器内运行只读 TQL，结果增量并入当前图（不离开探索流）">TQL 查询入图</button>
             <span style="color: var(--text-muted); font-size: 12px;" data-i18n="graph.hint.drag">提示：可在画布上自由拖拽节点，滚轮缩放，单击节点查看属性</span>
@@ -2211,7 +2211,7 @@
           <div class="graph-sigma-container" id="standaloneSigmaContainer" hidden></div>
           <div class="graph-controls">
             <button class="btn" id="centerStandaloneBtn" title="重置居中">居中视角</button>
-            <button class="btn" id="graphMergeBtnStandalone" title="把当前查询/检索结果并入图探索（增量 merge）">并入图探索</button>
+            <button class="btn" id="graphMergeBtnStandalone" title="把当前查询/检索结果并入图探索（增量合并）">并入图探索</button>
             <button class="btn" id="toggleWebGLBtnStandalone" title="切换 WebGL/Canvas 渲染后端（加载失败自动回退 Canvas）">WebGL 渲染</button>
             <button class="btn active" id="colorModeTypeBtnStandalone" title="按节点类型着色">按类型</button>
             <button class="btn" id="colorModeCommunityBtnStandalone" title="Louvain 社区检测着色（按需加载）">按社区</button>
@@ -2260,7 +2260,7 @@
               <label class="vl-label" for="vlSelectorQuery" data-i18n="vector.selectorLabel">候选节点筛选 TQL</label>
               <input class="vl-input" id="vlSelectorQuery" value='FIND {type: "person"} RETURN * LIMIT 50' spellcheck="false">
               <button class="btn btn-primary" id="vlLoadCandidatesBtn" data-i18n="vector.load">加载候选节点</button>
-              <label class="vl-label" for="vlNodeSelect" data-i18n="vector.selectLabel">选择节点（取其 vector 作为查询向量）</label>
+              <label class="vl-label" for="vlNodeSelect" data-i18n="vector.selectLabel">选择节点（取其向量作为查询向量）</label>
               <select class="vl-input" id="vlNodeSelect" size="6">
                 <option value="" disabled selected data-i18n="vector.selectPlaceholder">先点击「加载候选节点」</option>
               </select>
@@ -2342,7 +2342,7 @@
         <div class="ai-drawer-header">
           <div style="display: flex; align-items: center; gap: 8px;">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2"><path d="M12 3l1.9 5.7L19.6 10l-5.7 1.9L12 17.6l-1.9-5.7L4.4 10l5.7-1.3z"/><path d="M19 15l.9 2.6L22.5 18.5l-2.6.9L19 22l-.9-2.6-2.6-.9 2.6-.9z"/></svg>
-            <strong data-i18n="ai.title">AI 助手 (TQL Copilot)</strong>
+            <strong data-i18n="ai.title">AI 助手</strong>
           </div>
           <div style="display: flex; gap: 6px;">
             <button class="btn" id="aiSettingsBtn" title="配置 LLM 提供商 / API Key" data-i18n="ai.settings" data-i18n-title="ai.configureTitle">设置</button>
@@ -2424,7 +2424,7 @@
       <div class="graph-filter-panel usp-filter-body" id="graphFilterPanel" hidden>
         <div class="gf-head"><strong data-i18n="filter.title">过滤器</strong><button class="btn" id="gfResetBtn" style="padding: 1px 8px;" data-i18n="filter.reset">重置</button></div>
         <div class="gf-summary" id="gfSummary"></div>
-        <div class="gf-section-title" data-i18n="filter.types">节点类型 (payload.type)</div>
+        <div class="gf-section-title" data-i18n="filter.types">节点类型</div>
         <div id="gfTypeList"></div>
         <div class="gf-section-title" data-i18n="filter.labels">边 label</div>
         <div id="gfLabelList"></div>
@@ -2545,7 +2545,7 @@
         <div class="inspector-hint" id="graphTqlError" hidden></div>
         <div class="ai-ctx-size" id="graphTqlStatus" aria-live="polite"></div>
         <div class="gt-footer">
-          <span class="ai-ctx-size" style="margin-right:auto;" data-i18n="gt.note">仅支持只读查询；写入语句请到查询控制台（mutation 尤其）</span>
+          <span class="ai-ctx-size" style="margin-right:auto;" data-i18n="gt.note">仅支持只读查询；写入语句请到查询控制台（写入模式尤其）</span>
           <button class="btn btn-primary" id="graphTqlRunBtn" data-i18n="gt.run">运行并入图</button>
         </div>
       </div>
@@ -2591,20 +2591,20 @@
         'header.generation': 'Generation',
         'tabs.query': 'TQL 查询控制台',
         'tabs.graph': '独立图拓扑探索',
-        'tabs.vector': '向量检索 (Vector Lab)',
+        'tabs.vector': '向量检索',
         'tabs.aria': '工作台标签页',
-        'sidebar.title': '对象导航 (Explorer)',
+        'sidebar.title': '对象导航',
         'sidebar.refresh': '刷新元数据',
         'sidebar.group.engine': '三模数据引擎',
-        'sidebar.group.snippets': '常用代码片段 (Snippets)',
-        'sidebar.group.history': '查询历史 (History)',
-        'sidebar.item.documents': '文档 (Documents)',
-        'sidebar.item.graph': '图拓扑 (Graph)',
+        'sidebar.group.snippets': '常用代码片段',
+        'sidebar.group.history': '查询历史',
+        'sidebar.item.documents': '文档',
+        'sidebar.item.graph': '图拓扑',
         'sidebar.item.vector': '向量与 QuIVer',
         'sidebar.item.scan': '扫描所有节点',
         'sidebar.item.oneHop': '探索一跳图关系',
         'sidebar.item.multiHop': '多跳可变长路径',
-        'sidebar.item.create': '创建单节点 (Doc)',
+        'sidebar.item.create': '创建单节点',
         'sidebar.item.explain': '剖析执行计划',
         'sidebar.emptyHistory': '暂无历史记录',
         'sidebar.collapse': '收起侧栏',
@@ -2615,12 +2615,12 @@
         'header.searchResultsAria': '节点搜索结果',
         'results.tabsAria': '结果视图切换',
         'panel.collapseTitle': '收起面板 (Esc)',
-        'toolbar.run': '运行 (Run)',
+        'toolbar.run': '运行',
         'toolbar.runTitle': '运行查询 (快捷键: Ctrl + Enter)',
         'toolbar.running': '运行中...',
-        'toolbar.mutation': '写入模式 (Mutation)',
+        'toolbar.mutation': '写入模式',
         'toolbar.mutationTitle': '开启写入事务支持 (CREATE / LINK / DELETE 等)',
-        'toolbar.profile': '剖析 (Profile)',
+        'toolbar.profile': '剖析',
         'toolbar.profileTitle': '返回耗时剖析指标',
         'toolbar.format': '美化 TQL',
         'toolbar.formatTitle': '格式化查询文本',
@@ -2628,8 +2628,8 @@
         'toolbar.clearTitle': '清空编辑器',
         'toolbar.export': '导出 JSON',
         'toolbar.exportTitle': '导出当前结果为 JSON',
-        'results.tab.grid': '表格视图 (Data Grid)',
-        'results.tab.graph': '交互拓扑图 (Graph Canvas)',
+        'results.tab.grid': '表格视图',
+        'results.tab.graph': '交互拓扑图',
         'results.tab.json': 'JSON 视图',
         'results.empty.title': '还没有查询结果',
         'results.empty.action': '运行第一条查询',
@@ -2758,7 +2758,7 @@
     // 与基础字典同键合并；新增键集中在这里，便于审阅覆盖面。
     const I18N_EXT = {
       zh: {
-        'graph.loadWhole': '加载全图拓扑 (Top 100 边)',
+        'graph.loadWhole': '加载全图拓扑（前 100 条边）',
         'graph.tqlMerge': 'TQL 查询入图',
         'graph.tqlMergeTitle': '在探索器内运行只读 TQL，结果增量并入当前图（不离开探索流）',
         'graph.hint.drag': '提示：可在画布上自由拖拽节点，滚轮缩放，单击节点查看属性',
@@ -2768,7 +2768,7 @@
         'graph.physics.resume': '恢复力学',
         'graph.physics.title': '固定物理模拟',
         'graph.merge': '并入图探索',
-        'graph.mergeTitle': '把当前查询/检索结果并入图探索（增量 merge）',
+        'graph.mergeTitle': '把当前查询/检索结果并入图探索（增量合并）',
         'graph.webgl': 'WebGL 渲染',
         'graph.canvas': 'Canvas 渲染',
         'graph.webglTitle': '切换 WebGL/Canvas 渲染后端（加载失败自动回退 Canvas）',
@@ -2839,7 +2839,7 @@
         'filter.title': '过滤器',
         'filter.reset': '重置',
         'filter.summary': '显示 {nodes}/{totalNodes} 节点 · {edges}/{totalEdges} 边',
-        'filter.types': '节点类型 (payload.type)',
+        'filter.types': '节点类型',
         'filter.labels': '边 label',
         'filter.emptyNodes': '图中暂无节点',
         'filter.emptyEdges': '图中暂无边',
@@ -2848,7 +2848,7 @@
         'vector.selectorLabel': '候选节点筛选 TQL',
         'vector.load': '加载候选节点',
         'vector.loading': '加载中...',
-        'vector.selectLabel': '选择节点（取其 vector 作为查询向量）',
+        'vector.selectLabel': '选择节点（取其向量作为查询向量）',
         'vector.selectPlaceholder': '先点击「加载候选节点」',
         'vector.selectEmpty': '查询无结果',
         'vector.dimHint': '维度校验：选中节点后以该节点 vector 维度为准，否则以服务端返回为准',
@@ -2887,7 +2887,7 @@
         'detail.tab': '节点详情',
         'detail.title': '节点详情',
         'detail.node': '节点: #{id} ({label})',
-        'detail.noVector': '无向量 (no vector attached)',
+        'detail.noVector': '无向量',
         'detail.allDims': '全部 {count} 维数值',
         'detail.khop': '{n} 跳',
         'detail.khopAria': '邻域扩展跳数',
@@ -2901,7 +2901,7 @@
         'detail.traceTitle': '在服务端查找从当前节点到目标节点的有界路径，并把路径并入/高亮到图中',
         'detail.clearPath': '清除路径高亮',
         'detail.loading': '加载中...',
-        'detail.noEdges': '无关联边 (no edges in either direction)',
+        'detail.noEdges': '无关联边',
         'detail.loadMore': '加载更多（{loaded}/{total}）',
         'detail.edgeOut': '出边',
         'detail.edgeIn': '入边',
@@ -2923,7 +2923,7 @@
         'detail.path.toast': '路径追踪：已并入并高亮 {hops} 跳路径',
         'ai.tab': 'AI 对话',
         'ai.railTitle': 'AI 对话',
-        'ai.title': 'AI 助手 (TQL Copilot)',
+        'ai.title': 'AI 助手',
         'ai.settings': '设置',
         'ai.notConfigured': '⚠ 未配置 LLM。请先在设置中选择提供商并填写 API Key；密钥默认只存 sessionStorage（关闭标签即清）。',
         'ai.goConfig': '去配置',
@@ -2960,7 +2960,7 @@
         'ai.savedSession': 'AI 助手已配置（密钥仅本次会话有效）',
         'ai.savedLocal': 'AI 助手已配置（已记住于本机）',
         'ai.cleared': 'AI 助手配置已清除',
-        'ai.openTitle': 'AI 助手 (TQL Copilot)',
+        'ai.openTitle': 'AI 助手',
         'ai.configureTitle': '配置 AI 助手（选择提供商并填写 API Key）',
         'ai.chip.summary': '为当前结果写总结',
         'ai.chip.summaryPrompt': '请为当前查询结果写一段简明总结（要点列表，不超过 8 条）。',
@@ -2987,7 +2987,7 @@
         'palette.action.tutorial': '打开可视化教程',
         'palette.action.navQuery': '切换到 TQL 查询控制台',
         'palette.action.navGraph': '切换到独立图拓扑探索',
-        'palette.action.navVector': '切换到向量检索 (Vector Lab)',
+        'palette.action.navVector': '切换到向量检索',
         'palette.action.aiSettings': '打开 AI 助手设置',
         'palette.action.aiDrawer': '切换到 AI 助手抽屉',
         'gt.title': '探索器内 TQL 查询（结果并入当前图）',
@@ -2997,7 +2997,7 @@
         'gt.ex2': '文档过滤',
         'gt.ex3': '多跳可变长路径',
         'gt.placeholder': '输入只读 TQL，例如: MATCH (a)-[]->(b) RETURN a, b LIMIT 100',
-        'gt.note': '仅支持只读查询；写入语句请到查询控制台（mutation 尤其）',
+        'gt.note': '仅支持只读查询；写入语句请到查询控制台（写入模式尤其）',
         'gt.run': '运行并入图',
         'gt.running': '运行中…',
         'gt.err.empty': '请输入 TQL 语句',
@@ -3024,7 +3024,7 @@
         'stream.parse': 'NDJSON 行解析失败: {msg}',
         'stream.rowError': '⚠ 流式行错误: {detail}',
         'stream.unknown': '未知流式错误',
-        'stream.earlyEnd': '流式响应提前结束（未收到 summary），结果可能不完整',
+        'stream.earlyEnd': '流式响应提前结束（未收到汇总事件），结果可能不完整',
         'health.engine': '引擎: {status}',
         'health.abnormal': '引擎整体状态异常: {reason}',
         'health.title': '引擎整体就绪状态 (来自 /health/details 的 status)',
@@ -3779,7 +3779,7 @@
       },
       {
         id: "step2",
-        title: "2. 文档过滤 (FIND 查询)",
+        title: "2. 文档过滤",
         badge: "文档模式",
         desc: `<h3>📄 极简且强大的文档过滤</h3>
         <p style="margin: 8px 0;">TriviumDB 支持原生 MongoDB 风格的丰富操作符，如 <code>$gte</code>、<code>$in</code>、<code>$regex</code> 等，且支持底层属性索引加速：</p>
@@ -3791,7 +3791,7 @@ FIND {type: "person", citations: {$gte: 50}} RETURN *
       },
       {
         id: "step3",
-        title: "3. 图模式匹配 (MATCH)",
+        title: "3. 图模式匹配",
         badge: "图模式",
         desc: `<h3>🕸 关联发现与多跳关系匹配</h3>
         <p style="margin: 8px 0;">使用熟悉的 Cypher 风格语法查询关联拓扑。例如找到 Alice 写过的论文及其涉及的领域：</p>
@@ -3799,12 +3799,12 @@ FIND {type: "person", citations: {$gte: 50}} RETURN *
 MATCH (p {name: "Alice"})-[:AUTHORED]->(paper)-[:COVERS]->(topic)
 RETURN p, paper, topic
         </div>
-        <p>执行后，切换至<strong>“交互拓扑图 (Graph Canvas)”</strong>，你可以直接用鼠标拖动节点，查看三模连接关系！</p>
+        <p>执行后，切换至<strong>“交互拓扑图”</strong>，你可以直接用鼠标拖动节点，查看三模连接关系！</p>
         <button class="btn btn-primary" onclick="runTutorialCode('MATCH (a)-[:AUTHORED]-&gt;(b)-[:COVERS]-&gt;(c) WHERE a.name == &quot;Alice&quot; RETURN a, b, c LIMIT 20', false, 'graph')">▶ 运行并查看图拓扑</button>`
       },
       {
         id: "step4",
-        title: "4. 向量检索 (SEARCH VECTOR)",
+        title: "4. 向量检索",
         badge: "向量模式",
         desc: `<h3>🧬 极速向量近邻检索与 QuIVer 加速</h3>
         <p style="margin: 8px 0;">TriviumDB 内置 QuIVer 向量索引与 BQ 编码加速，支持毫秒级 Top-K 召回：</p>
@@ -3816,7 +3816,7 @@ SEARCH VECTOR [0.12, -0.45, 0.78, 0.33] TOP 3 RETURN *
       },
       {
         id: "step5",
-        title: "5. 自由 DIY 混合管线 (WITH)",
+        title: "5. 自由混合管线",
         badge: "自由编排",
         desc: `<h3>🔥 核心杀手锏：跨模混合管线</h3>
         <p style="margin: 8px 0;">无需在应用程序端来回搬运数据！一条 TQL 即可将图匹配、属性过滤与向量检索自由串联：</p>
@@ -3829,7 +3829,7 @@ RETURN doc, t
       },
       {
         id: "step6",
-        title: "6. OCC 乐观并发与事务",
+        title: "6. 乐观并发与事务",
         badge: "企业级特性",
         desc: `<h3>🛡 无锁高并发与 Generation ETag</h3>
         <p style="margin: 8px 0;">TriviumDB Server 采用 <strong>Writer Actor + Group Commit + OCC (乐观并发控制)</strong> 架构：</p>
