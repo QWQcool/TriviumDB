@@ -265,6 +265,10 @@ try {
   log(`4/6 打开 ${BASE}/ui 执行冒烟路径`);
   browser = await playwright[BROWSER].launch();
   page = await browser.newPage();
+  const tqlRequests = [];
+  page.on('request', (req) => {
+    if (req.method() === 'POST' && req.url().includes('/v1/tql')) tqlRequests.push(req.url());
+  });
   page.on('pageerror', (err) => {
     console.error('[ui-smoke] 页面 JS 异常: ' + err.message);
   });
@@ -308,12 +312,16 @@ try {
   log('  ✓ 查询结果并入图探索 (graphNodes=' + mergedCount + ')');
   await page.evaluate(() => document.querySelector('[data-view="grid"]').click());
 
-  // 冒烟 3：依次切换三个主标签
+  // 冒烟 3：依次切换三个主标签（切换本身不得产生新的查询请求）
+  const tqlBeforeTabs = tqlRequests.length;
   for (const tabId of ['graphExplorePane', 'vectorLabPane', 'queryPane']) {
     await page.click(`[data-tab="${tabId}"]`);
     await page.waitForSelector(`#${tabId}.active`, { timeout: 5000 });
   }
-  log('  ✓ 三个主标签切换');
+  if (tqlRequests.length !== tqlBeforeTabs) {
+    throw new Error(`切换主标签不应执行查询，实际新增 ${tqlRequests.length - tqlBeforeTabs} 次`);
+  }
+  log('  ✓ 三个主标签切换（0 次查询）');
 
   // 冒烟 4：图规模护栏 —— 注入 700 节点，用 LIMIT 500 的 MATCH 出图验证不冻结：
   // >300 节点应自动暂停力学模拟（O(n²) tick 护栏）并显示提示条

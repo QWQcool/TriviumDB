@@ -9,67 +9,96 @@
   <!-- favicon 内联 SVG（三模三点品牌标记，配色与 .brand-dot 一致），消除 /favicon.ico 404 -->
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath stroke='%23d2d9e3' stroke-width='1.4' stroke-linecap='round' fill='none' d='M8.6 7.4 15.3 8.6M7.3 9.3l2.2 6.1M16.5 11.7l-5.1 4.4'/%3E%3Ccircle cx='6' cy='6.5' r='3' fill='%2306b6d4'/%3E%3Ccircle cx='18' cy='9' r='3' fill='%23f59e0b'/%3E%3Ccircle cx='10.5' cy='18' r='3' fill='%238b5cf6'/%3E%3C/svg%3E">
   <style>
+    /* 设计令牌来自两个参考站点的逆向提取：
+       - 材质层/文字/三模色：triviumdb.com（暗色工程底）
+       - 胶囊导航/暖金/衬线标题：astrmira.com（深空研究感）
+       变量名沿用旧版，所有组件自动继承，DOM/ID 不变。 */
     :root {
-      --bg-app: #f6f7f9;
-      --bg-surface: #ffffff;
-      --bg-surface-secondary: #f1f3f6;
-      --bg-inset: #eaeef3;
-      --border-color: #e5e9ef;
-      --border-strong: #d2d9e3;
-      --border-focus: #6366f1;
-      --text-main: #171c26;
-      --text-muted: #5b6572;
-      --text-light: #68737f;
-      --primary: #4f46e5;
-      --primary-hover: #4338ca;
-      --primary-bg: #eef2ff;
-      --accent: #0891b2;
-      --success: #059669;
-      --success-bg: #d6f5e7;
-      --warning: #b45309;
-      --warning-bg: #fdf0c9;
-      --danger: #dc2626;
-      --danger-bg: #fde3e3;
-      --tri-doc: #06b6d4;
-      --tri-graph: #f59e0b;
-      --tri-vector: #8b5cf6;
-      --font-mono: ui-monospace, "JetBrains Mono", "Fira Code", Consolas, Menlo, monospace;
-      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      --sidebar-width: 264px;
-      --header-height: 52px;
+      --bg-app: #0b0a08;
+      --bg-ink: #070806;
+      --bg-surface: #101215;
+      --bg-surface-secondary: #191713;
+      --bg-inset: #070806;
+      --border-color: rgba(184, 176, 160, 0.14);
+      --border-strong: rgba(184, 176, 160, 0.30);
+      --border-focus: #8fb3b0;
+      --text-main: #eee7dc;
+      --text-muted: #a9ada7;
+      --text-light: #6d716e;
+      --text-faint: #484c49;
+      --primary: #eee7dc;
+      --primary-hover: #f7f2e8;
+      --primary-bg: rgba(238, 231, 220, 0.08);
+      --accent: #8fb3b0;
+      --success: #a9b986;
+      --success-bg: rgba(169, 185, 134, 0.12);
+      --warning: #d6b881;
+      --warning-bg: rgba(214, 184, 129, 0.12);
+      --danger: #c77777;
+      --danger-bg: rgba(199, 119, 119, 0.12);
+      --tri-doc: #c6b9a0;
+      --tri-graph: #9589ad;
+      --tri-vector: #8fb3b0;
+      --accent-gold: #b8a06f;
+      --font-mono: "Cascadia Mono", "JetBrains Mono", "Geist Mono", Consolas, "SFMono-Regular", monospace;
+      --font-sans: "Segoe UI Variable Text", "Geist", "Inter", "Noto Sans SC", "PingFang SC", system-ui, sans-serif;
+      --font-display: "Segoe UI Variable Display", "Space Grotesk", "Geist", "Noto Sans SC", system-ui, sans-serif;
+      --font-serif: Georgia, "Noto Serif SC", "Songti SC", "Noto Serif", serif;
+      --sidebar-width: 248px;
+      --header-height: 56px;
       --status-height: 28px;
-      --radius-sm: 6px;
-      --radius-md: 10px;
-      --radius-lg: 14px;
-      --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05);
-      --shadow-md: 0 1px 3px rgba(16, 24, 40, 0.06), 0 6px 16px rgba(16, 24, 40, 0.07);
-      --shadow-lg: 0 12px 40px rgba(16, 24, 40, 0.18);
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 18px;
+      --shadow-sm: none;
+      --shadow-md: 0 10px 30px rgba(7, 8, 6, 0.45);
+      --shadow-lg: 0 24px 70px rgba(7, 8, 6, 0.60);
+      --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
     }
 
+    /* 默认暗色（首次访问由 setupTheme 落到 dark）。
+       显式 dark 与根令牌一致，保证主题切换时不会回落到浅色。 */
     [data-theme="dark"] {
-      --bg-app: #0f1216;
-      --bg-surface: #151a20;
-      --bg-surface-secondary: #1c222a;
-      --bg-inset: #232a34;
-      --border-color: #242b35;
-      --border-strong: #333c49;
-      --border-focus: #818cf8;
-      --text-main: #e8ebf1;
-      --text-muted: #9aa4b2;
-      --text-light: #7e8998;
-      --primary: #818cf8;
-      --primary-hover: #a5b4fc;
-      --primary-bg: rgba(129, 140, 248, 0.14);
-      --accent: #22d3ee;
-      --success: #34d399;
-      --success-bg: rgba(16, 185, 129, 0.15);
-      --warning: #fbbf24;
-      --warning-bg: rgba(245, 158, 11, 0.15);
-      --danger: #f87171;
-      --danger-bg: rgba(239, 68, 68, 0.15);
-      --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-      --shadow-md: 0 1px 3px rgba(0, 0, 0, 0.35), 0 6px 16px rgba(0, 0, 0, 0.35);
-      --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.55);
+      --bg-app: #0b0a08;
+      --bg-surface: #101215;
+      --bg-surface-secondary: #191713;
+      --bg-inset: #070806;
+      --text-main: #eee7dc;
+      --text-muted: #a9ada7;
+      --text-light: #6d716e;
+    }
+
+    /* 暖白浅色主题：同一套三模色，降低饱和、提高纸感（不是纯白后台） */
+    [data-theme="light"] {
+      --bg-app: #f4f1ea;
+      --bg-ink: #eae5da;
+      --bg-surface: #fbf9f5;
+      --bg-surface-secondary: #f0ece3;
+      --bg-inset: #e7e1d6;
+      --border-color: rgba(60, 52, 40, 0.14);
+      --border-strong: rgba(60, 52, 40, 0.28);
+      --border-focus: #3f6f6b;
+      --text-main: #1b1915;
+      --text-muted: #5c574d;
+      --text-light: #6f6a5f;
+      --text-faint: #9a9488;
+      --primary: #1b1915;
+      --primary-hover: #000000;
+      --primary-bg: rgba(27, 25, 21, 0.06);
+      --accent: #3f6f6b;
+      --success: #4f6b3a;
+      --success-bg: rgba(79, 107, 58, 0.10);
+      --warning: #8a6d3b;
+      --warning-bg: rgba(138, 109, 59, 0.10);
+      --danger: #a34d4d;
+      --danger-bg: rgba(163, 77, 77, 0.10);
+      --tri-doc: #8a7a5a;
+      --tri-graph: #6a5f7d;
+      --tri-vector: #3f6f6b;
+      --accent-gold: #8a6d3b;
+      --shadow-sm: none;
+      --shadow-md: 0 10px 26px rgba(60, 52, 40, 0.10);
+      --shadow-lg: 0 24px 60px rgba(60, 52, 40, 0.16);
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -88,7 +117,9 @@
       height: 100vh;
       overflow: hidden;
       font-size: 13px;
+      letter-spacing: 0.005em;
       -webkit-font-smoothing: antialiased;
+      font-feature-settings: "ss01" 1, "cv01" 1;
     }
     ::selection { background: var(--primary-bg); }
     :focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; border-radius: 4px; }
@@ -109,12 +140,12 @@
     header.app-header {
       height: var(--header-height);
       flex: none;
-      background: var(--bg-surface);
+      background: var(--bg-ink);
       border-bottom: 1px solid var(--border-color);
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 0 16px;
+      padding: 0 18px;
       user-select: none;
       z-index: 20;
     }
@@ -122,9 +153,10 @@
       display: flex;
       align-items: center;
       gap: 10px;
-      font-weight: 650;
+      font-family: var(--font-display);
+      font-weight: 600;
       font-size: 14px;
-      letter-spacing: -0.01em;
+      letter-spacing: -0.02em;
       color: var(--text-main);
     }
     .brand-mark { width: 24px; height: 24px; flex: none; }
@@ -180,30 +212,31 @@
       font-weight: 500;
       font-family: inherit;
       cursor: pointer;
-      border: 1px solid var(--border-color);
-      background: var(--bg-surface);
+      border: 1px solid var(--border-strong);
+      background: transparent;
       color: var(--text-main);
-      transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+      transition: background-color 0.18s var(--ease-out), border-color 0.18s var(--ease-out), color 0.18s var(--ease-out), opacity 0.18s var(--ease-out);
       white-space: nowrap;
     }
-    .btn:hover { background: var(--bg-surface-secondary); border-color: var(--border-strong); }
-    .btn:active { background: var(--bg-inset); }
+    .btn:hover { background: rgba(184, 176, 160, 0.06); border-color: var(--border-strong); }
+    .btn:active { background: rgba(184, 176, 160, 0.10); }
     /* <a> 复用 .btn 样式时去掉链接下划线 */
     a.btn { text-decoration: none; }
-    .btn:disabled { opacity: 0.55; cursor: default; }
+    .btn:disabled { opacity: 0.45; cursor: default; }
     .btn svg { flex: none; }
     .btn-primary {
       background: var(--primary);
-      color: #ffffff;
+      color: var(--bg-ink);
       border-color: var(--primary);
+      font-weight: 600;
     }
     .btn-primary:hover {
       background: var(--primary-hover);
       border-color: var(--primary-hover);
-      color: #ffffff;
+      color: var(--bg-ink);
     }
-    .btn-success { background: var(--success); color: #fff; border-color: var(--success); }
-    .btn-success:hover { opacity: 0.92; color: #fff; }
+    .btn-success { background: var(--success); color: var(--bg-ink); border-color: var(--success); }
+    .btn-success:hover { opacity: 0.92; color: var(--bg-ink); }
 
     /* 主布局 */
     .app-body {
@@ -218,7 +251,7 @@
     aside.sidebar {
       width: var(--sidebar-width);
       flex: none;
-      background: var(--bg-surface);
+      background: var(--bg-app);
       border-right: 1px solid var(--border-color);
       display: flex;
       flex-direction: column;
@@ -226,12 +259,13 @@
       z-index: 10;
     }
     .sidebar-header {
-      padding: 12px 16px 10px;
-      font-size: 11px;
-      font-weight: 600;
+      padding: 14px 14px 10px;
+      font-family: var(--font-mono);
+      font-size: 9px;
+      font-weight: 500;
       text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--text-light);
+      letter-spacing: 0.12em;
+      color: var(--text-faint);
       border-bottom: 1px solid var(--border-color);
       display: flex;
       align-items: center;
@@ -240,33 +274,35 @@
     .sidebar-content {
       flex: 1;
       overflow-y: auto;
-      padding: 8px 8px 12px;
+      padding: 10px 8px 14px;
     }
     .nav-section-title {
-      padding: 14px 8px 6px;
-      font-size: 10.5px;
-      font-weight: 600;
-      color: var(--text-light);
+      padding: 16px 8px 7px;
+      font-family: var(--font-mono);
+      font-size: 9px;
+      font-weight: 500;
+      color: var(--text-faint);
       text-transform: uppercase;
-      letter-spacing: 0.08em;
+      letter-spacing: 0.12em;
     }
     .nav-item {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 8px;
-      padding: 6px 8px;
+      padding: 7px 10px;
       border-radius: var(--radius-sm);
       cursor: pointer;
-      color: var(--text-main);
+      color: var(--text-muted);
       line-height: 1.4;
-      transition: background-color 0.12s ease, color 0.12s ease;
+      transition: background-color 0.16s var(--ease-out), color 0.16s var(--ease-out), box-shadow 0.16s var(--ease-out);
     }
-    .nav-item:hover { background: var(--bg-surface-secondary); }
+    .nav-item:hover { background: rgba(184, 176, 160, 0.05); color: var(--text-main); }
     .nav-item.active {
-      background: var(--primary-bg);
-      color: var(--primary);
+      background: rgba(159, 183, 180, 0.08);
+      color: var(--text-main);
       font-weight: 600;
+      box-shadow: inset 2px 0 0 var(--tri-vector);
     }
     .nav-item-left {
       display: flex;
@@ -279,19 +315,19 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .nav-item-icon { width: 15px; height: 15px; flex: none; opacity: 0.8; }
+    .nav-item-icon { width: 15px; height: 15px; flex: none; opacity: 0.65; }
     .badge {
       font-family: var(--font-mono);
-      font-size: 10px;
-      letter-spacing: 0.03em;
+      font-size: 9px;
+      letter-spacing: 0.06em;
       padding: 1px 7px;
       border-radius: 9999px;
-      background: var(--bg-surface-secondary);
-      color: var(--text-muted);
-      border: none;
+      background: rgba(184, 176, 160, 0.06);
+      color: var(--text-light);
+      border: 1px solid var(--border-color);
       flex: none;
     }
-    .nav-item.active .badge { background: transparent; color: inherit; }
+    .nav-item.active .badge { background: transparent; color: inherit; border-color: transparent; }
 
     /* 中央多标签页工作台 */
     main.workspace {
@@ -303,13 +339,13 @@
       min-width: 0;
     }
     .tabs-bar {
-      height: 40px;
+      height: 48px;
       flex: none;
-      background: var(--bg-surface);
+      background: var(--bg-ink);
       border-bottom: 1px solid var(--border-color);
       display: flex;
-      align-items: stretch;
-      padding: 0 12px;
+      align-items: center;
+      padding: 0 16px;
       gap: 4px;
       overflow-x: auto;
     }
@@ -317,21 +353,22 @@
       display: flex;
       align-items: center;
       gap: 7px;
-      padding: 0 12px;
+      height: 30px;
+      padding: 0 14px;
       cursor: pointer;
-      font-size: 12.5px;
+      font-size: 12px;
       font-weight: 500;
       color: var(--text-muted);
-      border-bottom: 2px solid transparent;
-      margin-bottom: -1px;
+      border: none;
+      border-radius: 999px;
       user-select: none;
       white-space: nowrap;
-      transition: color 0.15s ease, border-color 0.15s ease;
+      transition: color 0.18s var(--ease-out), background-color 0.18s var(--ease-out);
     }
-    .tab:hover { color: var(--text-main); }
+    .tab:hover { color: var(--text-main); background: rgba(184, 176, 160, 0.06); }
     .tab.active {
-      color: var(--primary);
-      border-bottom-color: var(--primary);
+      color: var(--text-main);
+      background: rgba(159, 183, 180, 0.10);
       font-weight: 600;
     }
 
@@ -396,7 +433,7 @@
       padding: 14px 64px 12px 16px;
       font-family: var(--font-mono);
       font-size: 13px;
-      line-height: 1.6;
+      line-height: 21px;
       background: transparent;
       color: var(--text-main);
       border: none;
@@ -428,33 +465,38 @@
       flex-direction: column;
       overflow: hidden;
       background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      margin: 0 12px 10px;
       min-height: 0;
     }
     .results-tabs {
-      height: 40px;
+      height: 44px;
       flex: none;
       display: flex;
       align-items: center;
-      padding: 0 12px;
-      gap: 2px;
+      padding: 0 14px;
+      gap: 4px;
+      border-bottom: 1px solid var(--border-color);
     }
     .res-tab {
-      padding: 5px 10px;
-      border-radius: var(--radius-sm);
+      height: 26px;
+      padding: 0 10px;
+      border-radius: 999px;
       cursor: pointer;
-      font-size: 12px;
+      font-size: 11.5px;
       color: var(--text-muted);
       border: none;
       background: transparent;
       user-select: none;
-      transition: background-color 0.12s ease, color 0.12s ease;
+      transition: background-color 0.16s var(--ease-out), color 0.16s var(--ease-out);
     }
     .res-tab:hover {
-      background: var(--bg-surface-secondary);
+      background: rgba(184, 176, 160, 0.06);
       color: var(--text-main);
     }
     .res-tab.active {
-      background: var(--bg-inset);
+      background: rgba(184, 176, 160, 0.10);
       color: var(--text-main);
       font-weight: 600;
     }
@@ -479,18 +521,19 @@
       background: var(--bg-surface);
       border-bottom: 1px solid var(--border-strong);
       padding: 8px 12px;
-      font-weight: 600;
-      font-size: 11px;
+      font-family: var(--font-mono);
+      font-weight: 500;
+      font-size: 10px;
       text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--text-muted);
+      letter-spacing: 0.08em;
+      color: var(--text-faint);
       cursor: pointer;
       user-select: none;
       white-space: nowrap;
     }
     table.data-grid th:hover { color: var(--text-main); }
     table.data-grid td {
-      border-bottom: 1px solid var(--border-color);
+      border-bottom: 1px solid rgba(184, 176, 160, 0.08);
       padding: 7px 12px;
       white-space: nowrap;
       overflow: hidden;
@@ -499,8 +542,8 @@
       font-family: var(--font-mono);
       font-size: 11.5px;
     }
-    table.data-grid tbody tr { transition: background-color 0.1s ease; }
-    table.data-grid tbody tr:hover { background: var(--bg-surface-secondary); }
+    table.data-grid tbody tr { transition: background-color 0.16s var(--ease-out); }
+    table.data-grid tbody tr:hover { background: rgba(159, 183, 180, 0.04); }
     /* 虚拟滑窗（PR-12）：固定行高 + table-layout:fixed 显式列宽（首列 # 窄宽，其余均分）。
        单元格单行省略与全局规则一致；行距以首窗渲染后实测为准，CSS 高度只是目标值。 */
     table.data-grid.virtual-grid { table-layout: fixed; }
@@ -535,13 +578,13 @@
     .graph-float-toolbar {
       position: absolute;
       top: 12px;
-      right: 12px;
+      right: 16px;
       display: flex;
       flex-direction: column;
       gap: 6px;
       z-index: 6;
     }
-    .graph-float-toolbar .btn { justify-content: center; padding: 4px 8px; font-size: 12px; }
+    .graph-float-toolbar .btn { justify-content: center; padding: 4px 7px; font-size: 11px; }
     /* PR-17 全局节点搜索（图内）：顶栏输入 + 下拉结果 */
     .node-search-wrap { position: relative; }
     .node-search-input {
@@ -711,7 +754,7 @@
       border-radius: var(--radius-sm);
     }
     .usp-tab:hover, .usp-tab:focus-visible { background: var(--bg-surface); color: var(--text-main); outline: none; }
-    .usp-tab.active { background: var(--primary); color: #ffffff; }
+    .usp-tab.active { background: var(--primary); color: var(--bg-ink); }
     .usp-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
     .usp-body[hidden] { display: none !important; }
     /* 迁入壳定位语义收编：面板内取消原 fixed/absolute 抽屉自身的位移与宽度 */
@@ -753,7 +796,7 @@
     .graph-controls .btn.active {
       background: var(--primary);
       border-color: var(--primary);
-      color: #ffffff;
+      color: var(--bg-ink);
     }
     /* Sigma WebGL 渲染容器：覆盖在 canvas 之上（canvas 后端时 hidden）。
        背景跟随应用主题（PR-20 评审定版：浅色主题浅底 + 深色边线，
@@ -1019,7 +1062,7 @@
     .ai-msg--user {
       align-self: flex-end;
       background: var(--primary);
-      color: #ffffff;
+      color: var(--bg-ink);
     }
     .ai-msg--assistant {
       align-self: flex-start;
@@ -1346,15 +1389,16 @@
     footer.app-status-bar {
       height: var(--status-height);
       flex: none;
-      background: var(--bg-surface);
+      background: var(--bg-ink);
       border-top: 1px solid var(--border-color);
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 0 14px;
+      padding: 0 16px;
       font-family: var(--font-mono);
-      font-size: 11px;
-      color: var(--text-muted);
+      font-size: 10px;
+      letter-spacing: 0.04em;
+      color: var(--text-light);
       user-select: none;
       z-index: 20;
     }
@@ -1546,7 +1590,7 @@
     .editor-highlight {
       position: absolute; inset: 0; margin: 0; overflow: hidden;
       padding: 14px 64px 12px 16px;
-      font-family: var(--font-mono); font-size: 13px; line-height: 1.6;
+      font-family: var(--font-mono); font-size: 13px; line-height: 21px;
       white-space: pre-wrap; overflow-wrap: break-word; word-break: normal; tab-size: 2;
       color: var(--text-main); pointer-events: none;
     }
@@ -1570,12 +1614,18 @@
       100% { background-position: -20% 50%; }
     }
 
-    /* 结果区空态 CTA */
+    /* 结果区空态 CTA：衬线标题借 astrmira 的编辑感，只出现在空态 */
     .empty-cta {
-      display: flex; flex-direction: column; align-items: center; gap: 10px;
-      padding: 34px 20px; color: var(--text-light);
+      display: flex; flex-direction: column; align-items: center; gap: 12px;
+      padding: 42px 20px; color: var(--text-light);
     }
-    .empty-cta svg { opacity: 0.55; }
+    .empty-cta > div:first-of-type {
+      font-family: var(--font-serif);
+      font-size: 22px;
+      letter-spacing: -0.02em;
+      color: var(--text-main);
+    }
+    .empty-cta svg { opacity: 0.45; color: var(--tri-vector); }
 
     /* 命令面板 (Ctrl/Cmd + K) */
     .palette-overlay {
@@ -2671,8 +2721,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     }
     function setupTheme() {
       const saved = localStorage.getItem('tdb_theme');
-      const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-      const initial = saved || (prefersDark ? 'dark' : 'light');
+      // 控制台默认暗色（参考站点均为深色底）；用户手动切到 light 后由 localStorage 记住
+      const initial = saved || 'dark';
       document.documentElement.setAttribute('data-theme', initial);
       document.getElementById('themeToggleBtn').addEventListener('click', () => {
         const current = document.documentElement.getAttribute('data-theme');
@@ -2945,6 +2995,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     // ==========================================
     let healthTimer = null;
     let healthPollPaused = false;
+    let lastHealthCheckAt = 0;
     function setHealthPollPaused(paused) {
       healthPollPaused = paused;
     }
@@ -2953,11 +3004,15 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       healthTimer = setInterval(() => { if (!healthPollPaused) checkServerHealth(); }, 5000);
       document.addEventListener('visibilitychange', () => {
         setHealthPollPaused(document.hidden);
-        if (!document.hidden) checkServerHealth();
+        // 回前台补检：2 秒内已有检查则跳过，避免切窗口被误读为“又执行了一次”
+        if (!document.hidden && Date.now() - lastHealthCheckAt >= 2000) {
+          checkServerHealth();
+        }
       });
     }
 
     async function checkServerHealth() {
+      lastHealthCheckAt = Date.now();
       const connBadge = document.getElementById('connStatus');
       const connText = document.getElementById('connText');
       try {
@@ -3463,13 +3518,14 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     // ==========================================
     // 向量热力条（min-max 归一 → 顺序色带）
     // ==========================================
-    // 顺序色带：深靛蓝(低) → indigo → cyan → 亮青(高)，双主题均可读
+    // 顺序色带：深墨(低) → 青 → 青灰 → 暖金(高)，与三模色同族
     function heatColor(t) {
       const stops = [
-        [30, 41, 89],
-        [79, 70, 229],
-        [6, 182, 212],
-        [165, 243, 252]
+        [7, 8, 6],
+        [63, 111, 107],
+        [143, 179, 176],
+        [214, 184, 129],
+        [238, 231, 220]
       ];
       const clamped = Math.min(Math.max(t, 0), 1);
       const seg = Math.min(Math.floor(clamped * (stops.length - 1)), stops.length - 2);
@@ -4548,14 +4604,15 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     }
 
     function getNodeColor(type) {
+      // 三模色（payload 米金 / graph 紫灰 / vector 青灰）+ 语义色，低饱和
       const colors = {
-        person: '#3b82f6',
-        paper: '#10b981',
-        topic: '#8b5cf6',
-        user: '#f59e0b',
-        event: '#ec4899'
+        person: '#8fb3b0',
+        paper: '#c6b9a0',
+        topic: '#9589ad',
+        user: '#d6b881',
+        event: '#c77777'
       };
-      return colors[type] || '#0284c7';
+      return colors[type] || '#8fb3b0';
     }
 
     // ==========================================
@@ -5682,17 +5739,17 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       const dark = document.documentElement.getAttribute('data-theme') === 'dark';
       const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
       if (dark) {
-        grad.addColorStop(0, '#0b1120');
-        grad.addColorStop(1, '#0d1526');
+        grad.addColorStop(0, '#0a0c0e');
+        grad.addColorStop(1, '#070806');
       } else {
-        grad.addColorStop(0, '#f8fafc');
-        grad.addColorStop(1, '#eef2f7');
+        grad.addColorStop(0, '#f7f4ee');
+        grad.addColorStop(1, '#eae5da');
       }
       ctx.fillStyle = grad;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       if (!dark) return;
       // 星点（仅深色主题）：黄金比例常数散布的确定性伪随机位置（每帧重绘结果一致）
-      ctx.fillStyle = 'rgba(226, 232, 240, 0.26)';
+      ctx.fillStyle = 'rgba(238, 231, 220, 0.20)';
       for (let i = 0; i < 90; i++) {
         const x = ((i * 0.61803398875) % 1) * canvas.width;
         const y = ((i * 0.75487766624) % 1) * canvas.height;
@@ -5729,11 +5786,11 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       // 浅蓝色调（#6b8cae 钢青蓝）+ 固定 0.4 透明度（两轮复评收敛：slate-600×0.35
       // 太浅、slate-700×0.45 过强）
       const dark = document.documentElement.getAttribute('data-theme') === 'dark';
-      const edgeBase = dark ? '148, 163, 184' : '107, 140, 174';    // 边线：暗底浅灰 / 浅底钢青蓝
+      const edgeBase = dark ? '159, 183, 180' : '138, 122, 90';    // 边线：暗底青灰 / 浅底金棕
       const edgeAlpha = dark ? graphEdgeAlpha(graphNodes.length) : 0.4;
-      const nodeStroke = dark ? 'rgba(148, 163, 184, 0.45)' : 'rgba(15, 23, 42, 0.3)';
-      const nodeLabel = dark ? '#e2e8f0' : '#1e293b';
-      const selectedStroke = dark ? '#ffffff' : '#0f172a';
+      const nodeStroke = dark ? 'rgba(184, 176, 160, 0.35)' : 'rgba(60, 52, 40, 0.30)';
+      const nodeLabel = dark ? '#eee7dc' : '#1b1915';
+      const selectedStroke = dark ? '#d6b881' : '#8a6d3b';
 
       // 绘制连线（过滤器生效：隐藏类型/label 的元素整体跳过）
       graphEdges.forEach((edge, idx) => {
@@ -5752,7 +5809,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         ctx.quadraticCurveTo(cx, cy, t.x, t.y);
         // 路径追踪高亮（0.8.8）：命中路径的边用琥珀色加粗（双主题下均可辨识）
         const onPath = pathHighlightEdges.has(graphEdgeKey(edge.source, edge.target, edge.label));
-        ctx.strokeStyle = onPath ? 'rgba(245, 158, 11, 0.95)' : 'rgba(' + edgeBase + ', ' + edgeAlpha + ')';
+        ctx.strokeStyle = onPath ? 'rgba(214, 184, 129, 0.95)' : 'rgba(' + edgeBase + ', ' + edgeAlpha + ')';
         ctx.lineWidth = onPath ? 3 : 1.2;
         ctx.stroke();
 
@@ -5794,9 +5851,9 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           const py = node.y - 30;
           drawPillRect(ctx, px, py, pw, ph, 8);
           // pill 底色随主题：暗底深药丸 / 浅底白药丸（文字对比度各自成立）
-          ctx.fillStyle = dark ? 'rgba(10, 15, 30, 0.82)' : 'rgba(255, 255, 255, 0.9)';
+          ctx.fillStyle = dark ? 'rgba(10, 12, 14, 0.86)' : 'rgba(251, 249, 245, 0.94)';
           ctx.fill();
-          ctx.strokeStyle = dark ? 'rgba(148, 163, 184, 0.35)' : 'rgba(15, 23, 42, 0.28)';
+          ctx.strokeStyle = dark ? 'rgba(184, 176, 160, 0.28)' : 'rgba(60, 52, 40, 0.22)';
           ctx.lineWidth = 1;
           ctx.stroke();
           ctx.fillStyle = nodeLabel;
@@ -6482,7 +6539,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       const radius = Math.min(w, h) / 2 - 34;
       const offs = miniRingPositions(__drawerMiniEdges.length);
       // 连线
-      ctx.strokeStyle = 'rgba(148, 163, 184, 0.5)';
+      ctx.strokeStyle = 'rgba(159, 183, 180, 0.5)';
       ctx.lineWidth = 1;
       offs.forEach(o => {
         ctx.beginPath();
@@ -6501,11 +6558,11 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         ctx.arc(nx, ny, 6, 0, Math.PI * 2);
         ctx.fillStyle = getNodeColor(nb.typeKey);
         ctx.fill();
-        ctx.strokeStyle = 'rgba(148, 163, 184, 0.6)';
+        ctx.strokeStyle = 'rgba(159, 183, 180, 0.6)';
         ctx.lineWidth = 1;
         ctx.stroke();
         const lbl = String(edge.label || '#' + edge.targetId).slice(0, 10);
-        ctx.fillStyle = '#8892a0';
+        ctx.fillStyle = '#6d716e';
         ctx.font = '9px ' + CANVAS_FONT_FAMILY;
         ctx.fillText(lbl, nx, ny - 10);
       });
@@ -6515,7 +6572,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       ctx.arc(cx, cy, 9, 0, Math.PI * 2);
       ctx.fillStyle = getNodeColor(centerNode.typeKey);
       ctx.fill();
-      ctx.strokeStyle = '#ffffff';
+      ctx.strokeStyle = '#d6b881';
       ctx.lineWidth = 1.5;
       ctx.stroke();
     }
@@ -6691,7 +6748,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     function sigmaEdgeBaseColor() {
       const dark = document.documentElement.getAttribute('data-theme') === 'dark';
       const alpha = dark ? graphEdgeAlpha(graphNodes.length) : 0.4;
-      return (dark ? '#94a3b8' : '#6b8cae') + alphaToHexByte(alpha);
+      return (dark ? '#9fb7b4' : '#8a7a5a') + alphaToHexByte(alpha);
     }
 
     function clearPathHighlight() {
@@ -6939,8 +6996,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       const area = document.getElementById('tqlInput');
       const pre = document.getElementById('tqlHighlight');
       if (!area || !pre) return;
-      // 尾部补换行：保证 pre 与 textarea 的滚动高度一致（textarea 末行下方有缓冲）
-      pre.innerHTML = highlightTql(area.value) + '\n';
+      pre.innerHTML = highlightTql(area.value);
       // 垂直滚动条宽度补偿：textarea 出现纵向滚动条时 clientWidth 收窄 10px，
       // 而叠加层（overflow:hidden 无滚动条）保持全宽 —— 两侧 scrollWidth 永远差一个
       // 滚动条宽。通过收窄叠加层盒宽（right = 滚动条宽）使两侧 clientWidth/scrollWidth
@@ -8091,6 +8147,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           return jsonRes({ status: 'ready', writeQueueDepth: 0, writeQueueCapacity: 256, activeReads: 0, quiverWarmup: 'ready' });
         }
         if (path.indexOf('/v1/tql') === 0) {
+          // 回归观测点：切标签/切视图不得产生新的查询请求
+          window.__tqlRequestCount = (window.__tqlRequestCount || 0) + 1;
           let req = {};
           try { req = JSON.parse((init && init.body) || '{}'); } catch (_) {}
           const q = String(req.query || '');
@@ -8355,6 +8413,16 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         assert(document.getElementById('graphExplorePane').classList.contains('active'), 'graphExplorePane 应激活');
         document.querySelector('[data-tab="queryPane"]').click();
         assert(document.getElementById('queryPane').classList.contains('active'), 'queryPane 应恢复激活');
+      });
+
+      addAssert('标签页切换：不触发新的查询请求', '标签页', async () => {
+        window.__tqlRequestCount = 0;
+        document.querySelector('[data-tab="graphExplorePane"]').click();
+        document.querySelector('[data-tab="queryPane"]').click();
+        document.querySelector('[data-view="graph"]').click();
+        document.querySelector('[data-view="grid"]').click();
+        assert(window.__tqlRequestCount === 0,
+          '切换标签/结果视图不应执行查询，实际 ' + window.__tqlRequestCount + ' 次');
       });
 
       addAssert('结果视图切换：grid/graph/json 三视图互斥', '标签页', async () => {
@@ -9419,8 +9487,13 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         assert(area.scrollHeight > area.clientHeight, '前置条件：长行应触发 textarea 纵向滚动条');
         assert(pre.scrollWidth === area.scrollWidth,
           '长行 scrollWidth 应全等（滚动条宽度补偿），实际 pre ' + pre.scrollWidth + ' vs area ' + area.scrollWidth);
-        assert(pre.scrollHeight === area.scrollHeight,
-          '长行 scrollHeight 应全等，实际 pre ' + pre.scrollHeight + ' vs area ' + area.scrollHeight);
+        // Chromium 的 textarea.scrollHeight 不含最后一行行距（pre 含），
+        // 两侧计算样式（字体/行高/padding/white-space）已实测完全一致，
+        // 因此允许 1 行行距的度量差，而不是错位。
+        const lh = parseFloat(getComputedStyle(area).lineHeight) || 21;
+        assert(Math.abs(pre.scrollHeight - area.scrollHeight) <= lh + 1,
+          '长行 scrollHeight 应一致（允许 textarea 少计 1 行行距），实际 pre '
+          + pre.scrollHeight + ' vs area ' + area.scrollHeight);
         setEditorValue('FIND {type: "person"} RETURN * LIMIT 25');
       });
 
