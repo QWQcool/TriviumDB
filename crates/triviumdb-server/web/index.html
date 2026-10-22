@@ -6195,6 +6195,12 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       return Math.min(0.35, Math.max(0.05, 0.35 * 300 / Math.max(nodeCount, 300)));
     }
 
+    // 浅色主题的边线需要更高的不透明度才能从暖白底上读出来；
+    // 仍随节点密度递减，但下限保持在约 2.9:1 对比度。
+    function lightGraphEdgeAlpha(nodeCount) {
+      return Math.min(0.82, Math.max(0.58, 0.82 * 300 / Math.max(nodeCount, 300)));
+    }
+
     // alpha(0~1) → 两位 hex（8 位色 #rrggbbaa 用；0.35 → '59' 与既有 #94a3b859 一致）
     function alphaToHexByte(alpha) {
       return Math.round(Math.min(1, Math.max(0, alpha)) * 255).toString(16).padStart(2, '0');
@@ -7354,8 +7360,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       // 浅蓝色调（#6b8cae 钢青蓝）+ 固定 0.4 透明度（两轮复评收敛：slate-600×0.35
       // 太浅、slate-700×0.45 过强）
       const dark = document.documentElement.getAttribute('data-theme') === 'dark';
-      const edgeBase = dark ? '159, 183, 180' : '138, 122, 90';    // 边线：暗底青灰 / 浅底金棕
-      const edgeAlpha = dark ? graphEdgeAlpha(graphNodes.length) : 0.4;
+      const edgeBase = dark ? '159, 183, 180' : '95, 82, 59';    // 边线：暗底青灰 / 浅底深金棕
+      const edgeAlpha = dark ? graphEdgeAlpha(graphNodes.length) : lightGraphEdgeAlpha(graphNodes.length);
       const nodeStroke = dark ? 'rgba(184, 176, 160, 0.35)' : 'rgba(60, 52, 40, 0.30)';
       const nodeLabel = dark ? '#eee7dc' : '#1b1915';
       const selectedStroke = dark ? '#d6b881' : '#8a6d3b';
@@ -7378,7 +7384,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         // 路径追踪高亮（0.8.8）：命中路径的边用琥珀色加粗（双主题下均可辨识）
         const onPath = pathHighlightEdges.has(graphEdgeKey(edge.source, edge.target, edge.label));
         ctx.strokeStyle = onPath ? 'rgba(214, 184, 129, 0.95)' : 'rgba(' + edgeBase + ', ' + edgeAlpha + ')';
-        ctx.lineWidth = onPath ? 3 : 1.2;
+        ctx.lineWidth = onPath ? 3 : (dark ? 1.2 : 1.4);
         ctx.stroke();
 
         if (edge.label) {
@@ -8315,8 +8321,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     // Sigma 边基色（与 buildSigmaForView 同公式；高亮还原时复用）
     function sigmaEdgeBaseColor() {
       const dark = document.documentElement.getAttribute('data-theme') === 'dark';
-      const alpha = dark ? graphEdgeAlpha(graphNodes.length) : 0.4;
-      return (dark ? '#9fb7b4' : '#8a7a5a') + alphaToHexByte(alpha);
+      const alpha = dark ? graphEdgeAlpha(graphNodes.length) : lightGraphEdgeAlpha(graphNodes.length);
+      return (dark ? '#9fb7b4' : '#5f523b') + alphaToHexByte(alpha);
     }
 
     function clearPathHighlight() {
@@ -11411,6 +11417,9 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         assert(graphEdgeAlpha(300) === 0.35, '300 节点应为 0.35');
         assert(graphEdgeAlpha(3000) === 0.05, '超密图应 clamp 到 0.05 下限');
         assert(graphEdgeAlpha(600) > graphEdgeAlpha(1200), '节点越多 alpha 应单调不增');
+        assert(lightGraphEdgeAlpha(100) === 0.82, '浅色边线在稀疏图应保持 0.82');
+        assert(lightGraphEdgeAlpha(3000) === 0.58, '浅色边线在超密图应 clamp 到 0.58');
+        assert(lightGraphEdgeAlpha(600) >= lightGraphEdgeAlpha(1200), '浅色边线应随密度单调不增');
         assert(alphaToHexByte(0.35) === '59', '0.35 → hex 59（与既有 #94a3b859 一致）');
         assert(alphaToHexByte(0) === '00' && alphaToHexByte(1) === 'ff', 'alpha 越界值应夹取');
       });
