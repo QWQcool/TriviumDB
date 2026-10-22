@@ -800,13 +800,18 @@
     .graph-float-toolbar {
       position: absolute;
       top: 12px;
-      right: 16px;
+      right: 20px;
       display: flex;
       flex-direction: column;
       gap: 6px;
       z-index: 6;
     }
-    .graph-float-toolbar .btn { justify-content: center; padding: 4px 7px; font-size: 11px; }
+    .graph-float-toolbar .btn { justify-content: center; min-width: 76px; padding: 4px 10px; font-size: 11px; }
+    /* 右侧统一面板打开时，图工具条与底栏左移，避免被 360px 面板盖住 */
+    @media (min-width: 901px) {
+      body.panel-open .graph-controls,
+      body.panel-open .graph-float-toolbar { right: 376px; }
+    }
     /* 图内节点搜索：位于 tab 行右侧，与主标签同一视觉基线 */
     .node-search-wrap { position: relative; flex: none; width: 280px; }
     .node-search-input {
@@ -2990,6 +2995,7 @@
     function setUnifiedPanelTab(tab) {
       uspActiveTab = tab;
       document.getElementById('unifiedSidePanel').classList.add('open');
+      document.body.classList.add('panel-open');
       const rail = document.getElementById('uspRail');
       if (rail) rail.classList.add('usp-rail-hidden');
       [['ai', 'uspTabAi', 'uspBodyAi', 'uspRailAiBtn'],
@@ -3015,6 +3021,7 @@
       uspActiveTab = null;
       const panel = document.getElementById('unifiedSidePanel');
       if (panel) panel.classList.remove('open');
+      document.body.classList.remove('panel-open');
       const rail = document.getElementById('uspRail');
       if (rail) rail.classList.remove('usp-rail-hidden');
       ['uspTabAi', 'uspTabDetail', 'uspTabFilter'].forEach(id => {
@@ -4163,10 +4170,12 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       let min = Infinity;
       let max = -Infinity;
       vector.forEach(v => { if (v < min) min = v; if (v > max) max = v; });
-      const range = max - min || 1;
+      // 全零/全等向量没有色阶，给中性青灰底而不是最暗色（否则整条看起来像渲染失败）
+      const flat = max === min;
+      const range = flat ? 1 : max - min;
       vector.forEach((v, i) => {
         const cell = document.createElement('i');
-        cell.style.background = heatColor((v - min) / range);
+        cell.style.background = flat ? 'rgba(159, 183, 176, 0.22)' : heatColor((v - min) / range);
         cell.title = `dim ${i}: ${Number(v).toFixed(4)}`;
         strip.appendChild(cell);
       });
