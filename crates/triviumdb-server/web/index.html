@@ -5952,7 +5952,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       if (simulationRunning && graphNodes.length > 0 && simulationAlpha > 0.005) {
         tickPhysics();
         redrawGraph();
-        simulationAlpha *= 0.982;
+        simulationAlpha *= 0.95;
         simulationRafId = requestAnimationFrame(simulationStep);
       } else {
         simulationRafId = null;
@@ -6757,6 +6757,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     function applyStaticGraphLayout() {
       simulationRunning = false;
       if (simulationRafId !== null) { cancelAnimationFrame(simulationRafId); simulationRafId = null; }
+      stopAmbientMotion(); // 防御：旧版本遗留的漂移循环也必须停掉
       const physicsBtn = document.getElementById('togglePhysicsBtn');
       if (physicsBtn) physicsBtn.textContent = t('graph.physics.resume');
       let positions = new Map();
@@ -6784,7 +6785,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       redrawGraph();
       // 布局大改后 bbox 变化：重建 Sigma 实例让 mapFn 重算（规格要求）
       if (graphBackend === 'sigma') rebuildSigmaInstances();
-      startAmbientMotion();
+      // 静态布局必须保持确定性：不再启动持续 ambient 漂移
+      //（旧实现每帧 ±2.5px 正弦位移，在 WebGL 下会被看成右下角节点持续抖动）
       fitAllGraphViews(true); // PR-20 相机自动适配：静态布局确定 bbox 后立即拉回视口
     }
 
@@ -6816,8 +6818,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       ambientRafId = requestAnimationFrame(ambientStep);
     }
     function startAmbientMotion() {
-      if (graphLayoutMode === 'force') return;
-      if (ambientRafId === null) ambientRafId = requestAnimationFrame(ambientStep);
+      // 已停用：静态布局必须保持确定性。旧的 ±2.5px/帧漂移在 WebGL 下
+      // 表现为节点持续抖动，用户无法区分“加载中”和“已完成”。
     }
 
     function syncLayoutButtons() {
@@ -11447,9 +11449,13 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         assert(simulationRunning === false && simulationRafId === null, '静态档应关闭物理（无 rAF 循环）');
         assert(document.getElementById('togglePhysicsBtn').textContent === '恢复力学', '物理按钮应显示恢复态');
         assert(graphNodes.every(n => isFinite(n.x) && isFinite(n.y)), '静态布局后坐标应有限');
-        // PR-20 ambient 微动效：静态档记录锚点并启动漂移循环（reduced-motion 自动豁免）
+        // 静态档只记录锚点，不启动持续漂移：WebGL 下 ±2.5px/帧会被看成节点一直抖动
         assert(graphNodes.every(n => n.baseX !== undefined && n.baseY !== undefined), '静态档应记录 ambient 锚点 baseX/baseY');
-        assert(ambientRafId !== null, '静态档应启动环境微动效 rAF');
+        assert(ambientRafId === null, '静态档不应启动持续漂移 rAF');
+        const stableBefore = graphNodes.map(n => [n.x, n.y]);
+        await new Promise(r => setTimeout(r, 120));
+        assert(graphNodes.every((n, i) => Math.abs(n.x - stableBefore[i][0]) < 1e-6
+          && Math.abs(n.y - stableBefore[i][1]) < 1e-6), '静态档节点坐标应保持稳定，不得持续漂移');
         // 静态档下图数据重建（merge/render）也不应启动物理
         renderGraph(MATCH_ROWS);
         assert(simulationRunning === false, '静态档下重建图仍不应启动物理');
