@@ -9,6 +9,14 @@
   <!-- favicon 内联 SVG（三模三点品牌标记，配色与 .brand-dot 一致），消除 /favicon.ico 404 -->
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath stroke='%23d2d9e3' stroke-width='1.4' stroke-linecap='round' fill='none' d='M8.6 7.4 15.3 8.6M7.3 9.3l2.2 6.1M16.5 11.7l-5.1 4.4'/%3E%3Ccircle cx='6' cy='6.5' r='3' fill='%2306b6d4'/%3E%3Ccircle cx='18' cy='9' r='3' fill='%23f59e0b'/%3E%3Ccircle cx='10.5' cy='18' r='3' fill='%238b5cf6'/%3E%3C/svg%3E">
   <style>
+    /* 运行中流光：@property 让 conic-gradient 的角度可动画（Chromium 支持；
+       不支持时退化为静态渐变，不影响可读性） */
+    @property --tdb-angle { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+    @keyframes tdb-spin { to { --tdb-angle: 360deg; } }
+    @keyframes tdb-breathe { 0%, 100% { opacity: 0.45; } 50% { opacity: 0.9; } }
+    @keyframes tdb-sweep { from { background-position: 200% 0; } to { background-position: -100% 0; } }
+    @keyframes tdb-enter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
     /* 设计令牌来自两个参考站点的逆向提取：
        - 材质层/文字/三模色：triviumdb.com（暗色工程底）
        - 胶囊导航/暖金/衬线标题：astrmira.com（深空研究感）
@@ -22,10 +30,10 @@
       --border-color: rgba(184, 176, 160, 0.14);
       --border-strong: rgba(184, 176, 160, 0.30);
       --border-focus: #8fb3b0;
-      --text-main: #eee7dc;
-      --text-muted: #a9ada7;
-      --text-light: #6d716e;
-      --text-faint: #484c49;
+      --text-main: #f4eee4;
+      --text-muted: #b9bdb6;
+      --text-light: #8f958e;
+      --text-faint: #70766f;
       --primary: #eee7dc;
       --primary-hover: #f7f2e8;
       --primary-bg: rgba(238, 231, 220, 0.08);
@@ -63,9 +71,10 @@
       --bg-surface: #101215;
       --bg-surface-secondary: #191713;
       --bg-inset: #070806;
-      --text-main: #eee7dc;
-      --text-muted: #a9ada7;
-      --text-light: #6d716e;
+      --text-main: #f4eee4;
+      --text-muted: #b9bdb6;
+      --text-light: #8f958e;
+      --text-faint: #70766f;
     }
 
     /* 暖白浅色主题：同一套三模色，降低饱和、提高纸感（不是纯白后台） */
@@ -144,7 +153,7 @@
       border-bottom: 1px solid var(--border-color);
       display: flex;
       align-items: center;
-      justify-content: space-between;
+      gap: 12px;
       padding: 0 18px;
       user-select: none;
       z-index: 20;
@@ -167,7 +176,9 @@
     .header-status {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 8px;
+      margin-left: 2px;
+      min-width: 0;
     }
     .status-badge {
       display: inline-flex;
@@ -201,6 +212,7 @@
       display: flex;
       align-items: center;
       gap: 8px;
+      margin-left: auto;
     }
     .btn {
       display: inline-flex;
@@ -257,14 +269,16 @@
       flex-direction: column;
       user-select: none;
       z-index: 10;
+      overflow: hidden;
+      transition: width 200ms var(--ease-out);
     }
     .sidebar-header {
       padding: 14px 14px 10px;
       font-family: var(--font-mono);
-      font-size: 9px;
+      font-size: 10px;
       font-weight: 500;
       text-transform: uppercase;
-      letter-spacing: 0.12em;
+      letter-spacing: 0.10em;
       color: var(--text-faint);
       border-bottom: 1px solid var(--border-color);
       display: flex;
@@ -279,11 +293,11 @@
     .nav-section-title {
       padding: 16px 8px 7px;
       font-family: var(--font-mono);
-      font-size: 9px;
+      font-size: 10px;
       font-weight: 500;
       color: var(--text-faint);
       text-transform: uppercase;
-      letter-spacing: 0.12em;
+      letter-spacing: 0.10em;
     }
     .nav-item {
       display: flex;
@@ -294,6 +308,7 @@
       border-radius: var(--radius-sm);
       cursor: pointer;
       color: var(--text-muted);
+      font-size: 12.5px;
       line-height: 1.4;
       transition: background-color 0.16s var(--ease-out), color 0.16s var(--ease-out), box-shadow 0.16s var(--ease-out);
     }
@@ -315,10 +330,10 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .nav-item-icon { width: 15px; height: 15px; flex: none; opacity: 0.65; }
+    .nav-item-icon { width: 16px; height: 16px; flex: none; opacity: 0.75; }
     .badge {
       font-family: var(--font-mono);
-      font-size: 9px;
+      font-size: 10px;
       letter-spacing: 0.06em;
       padding: 1px 7px;
       border-radius: 9999px;
@@ -328,6 +343,146 @@
       flex: none;
     }
     .nav-item.active .badge { background: transparent; color: inherit; border-color: transparent; }
+
+    /* 侧栏底部：语言切换 + 收起为图标栏（参考 AstrmiraVideo 的 rail 态） */
+    .sidebar-footer {
+      flex: none;
+      padding: 8px;
+      border-top: 1px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .sidebar-lang {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 4px 6px;
+    }
+    .sidebar-lang-label {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-faint);
+      white-space: nowrap;
+    }
+    .seg {
+      display: inline-flex;
+      padding: 2px;
+      border: 1px solid var(--border-color);
+      border-radius: 999px;
+      background: var(--bg-surface);
+      gap: 2px;
+    }
+    .seg-btn {
+      border: 0;
+      background: transparent;
+      color: var(--text-light);
+      font: inherit;
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: background-color 0.16s var(--ease-out), color 0.16s var(--ease-out);
+    }
+    .seg-btn:hover { color: var(--text-main); }
+    .seg-btn[aria-pressed="true"] {
+      background: var(--primary);
+      color: var(--bg-ink);
+      font-weight: 600;
+    }
+    .sidebar-toggle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      padding: 6px 8px;
+      border: 0;
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--text-light);
+      font: inherit;
+      font-size: 11.5px;
+      cursor: pointer;
+      text-align: left;
+      transition: background-color 0.16s var(--ease-out), color 0.16s var(--ease-out);
+    }
+    .sidebar-toggle:hover { background: rgba(184, 176, 160, 0.06); color: var(--text-main); }
+    .sidebar-toggle svg { flex: none; transition: transform 200ms var(--ease-out); }
+    html[data-rail="1"] aside.sidebar { width: 64px; }
+    html[data-rail="1"] .sidebar-header span,
+    html[data-rail="1"] .nav-section-title,
+    html[data-rail="1"] .nav-item-left > span,
+    html[data-rail="1"] .nav-item .badge,
+    html[data-rail="1"] .sidebar-lang,
+    html[data-rail="1"] .sidebar-toggle-label { display: none; }
+    html[data-rail="1"] .sidebar-header { justify-content: center; padding-inline: 0; }
+    html[data-rail="1"] .nav-item { justify-content: center; padding: 8px 0; }
+    html[data-rail="1"] .nav-item-left { justify-content: center; }
+    html[data-rail="1"] .sidebar-footer { align-items: center; padding: 8px 6px; }
+    html[data-rail="1"] .sidebar-toggle { justify-content: center; padding: 7px 0; }
+    html[data-rail="1"] .sidebar-toggle svg { transform: rotate(180deg); }
+
+    /* 移动端：侧栏退化为遮罩抽屉，顶栏汉堡开关 */
+    .sidebar-mobile-btn { display: none; }
+    .sidebar-scrim { display: none; }
+    @media (max-width: 900px) {
+      .sidebar-mobile-btn { display: inline-flex; }
+      aside.sidebar {
+        position: fixed;
+        left: 0;
+        top: var(--header-height);
+        bottom: var(--status-height);
+        width: min(280px, 82vw);
+        z-index: 60;
+        transform: translateX(-100%);
+        transition: transform 200ms var(--ease-out);
+        box-shadow: var(--shadow-lg);
+      }
+      html[data-sidebar-open="1"] aside.sidebar { transform: translateX(0); }
+      html[data-sidebar-open="1"] .sidebar-scrim {
+        display: block;
+        position: fixed;
+        left: 0;
+        right: 0;
+        top: var(--header-height);
+        bottom: var(--status-height);
+        z-index: 55;
+        background: rgba(7, 8, 6, 0.58);
+        backdrop-filter: blur(2px);
+      }
+      /* 抽屉始终按展开态渲染，忽略桌面 rail 记忆 */
+      html[data-rail="1"] aside.sidebar { width: min(280px, 82vw); }
+      html[data-rail="1"] .sidebar-header span { display: inline; }
+      html[data-rail="1"] .nav-section-title { display: block; }
+      html[data-rail="1"] .nav-item-left > span { display: inline; }
+      html[data-rail="1"] .nav-item .badge { display: inline-block; }
+      html[data-rail="1"] .sidebar-lang { display: flex; }
+      html[data-rail="1"] .sidebar-toggle-label { display: inline; }
+      html[data-rail="1"] .nav-item { justify-content: space-between; padding: 7px 10px; }
+      html[data-rail="1"] .nav-item-left { justify-content: flex-start; }
+      html[data-rail="1"] .sidebar-header { justify-content: space-between; padding-inline: 14px; }
+      .sidebar-toggle { display: none; }
+    }
+    /* 窄屏顶栏：只保留品牌标记、连接状态和操作图标，避免横向溢出 */
+    @media (max-width: 700px) {
+      .header-brand > span:first-of-type,
+      .header-brand .badge,
+      #headerGeneration { display: none; }
+      #openTutorialBtn span,
+      #aiChatToggleBtn span { display: none; }
+      .header-actions a.btn[href="https://triviumdb.com/"] { display: none; }
+      .header-actions { gap: 4px; }
+      .header-actions .btn { padding: 5px 8px; }
+      .header-status { gap: 4px; }
+      .status-badge { padding: 3px 8px; font-size: 11px; }
+      .header-brand { gap: 6px; }
+      #statusAffected, #statusReads, #statusVersion { display: none; }
+      .status-left, .status-right { gap: 10px; white-space: nowrap; flex: none; }
+      .app-status-bar { font-size: 10px; padding: 0 10px; white-space: nowrap; overflow: hidden; }
+    }
 
     /* 中央多标签页工作台 */
     main.workspace {
@@ -345,10 +500,21 @@
       border-bottom: 1px solid var(--border-color);
       display: flex;
       align-items: center;
+      justify-content: space-between;
       padding: 0 16px;
-      gap: 4px;
-      overflow-x: auto;
+      gap: 12px;
+      overflow: visible;
     }
+    .tabs-scroll {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex: 1;
+      min-width: 0;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .tabs-scroll::-webkit-scrollbar { display: none; }
     .tab {
       display: flex;
       align-items: center;
@@ -356,7 +522,7 @@
       height: 30px;
       padding: 0 14px;
       cursor: pointer;
-      font-size: 12px;
+      font-size: 12.5px;
       font-weight: 500;
       color: var(--text-muted);
       border: none;
@@ -379,7 +545,11 @@
       flex-direction: column;
       overflow: hidden;
     }
-    .tab-pane.active { display: flex; }
+    .tab-pane.active { display: flex; animation: tdb-enter 180ms var(--ease-out); }
+    /* 页内自检/视觉基线：关闭过渡，避免断言读到动画中间态 */
+    body.selftest-running .tab-pane.active { animation: none; }
+    body.selftest-running .editor-container::before,
+    body.selftest-running .editor-container::after { animation: none; opacity: 0; }
 
     /* 编辑器与工具栏 */
     .editor-toolbar {
@@ -417,14 +587,60 @@
       overflow: hidden;
     }
     .editor-container {
-      height: 180px;
-      min-height: 100px;
+      height: 150px;
+      min-height: 96px;
       max-height: 60%;
       background: var(--bg-surface);
       border-bottom: 1px solid var(--border-color);
       position: relative;
       display: flex;
       flex: none;
+    }
+    /* 运行中的一圈青金流光 + 柔和径向光晕；只在查询执行期间出现 */
+    .editor-container::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: 0;
+      padding: 2px;
+      background: conic-gradient(from var(--tdb-angle),
+        transparent 0 55%,
+        rgba(143, 179, 176, 1) 72%,
+        rgba(214, 184, 129, 1) 84%,
+        transparent 96%);
+      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 200ms var(--ease-out);
+      z-index: 2;
+    }
+    .editor-container::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: linear-gradient(100deg,
+        transparent 35%,
+        rgba(143, 179, 176, 0.18) 47%,
+        rgba(214, 184, 129, 0.10) 53%,
+        transparent 65%);
+      background-size: 220% 100%;
+      opacity: 0;
+      transition: opacity 200ms var(--ease-out);
+      z-index: 0;
+    }
+    body.is-running .editor-container {
+      box-shadow: 0 0 0 1px rgba(143, 179, 176, 0.18), 0 0 28px rgba(143, 179, 176, 0.16);
+    }
+    body.is-running .editor-container::before {
+      opacity: 1;
+      animation: tdb-spin 3s linear infinite;
+    }
+    body.is-running .editor-container::after {
+      opacity: 1;
+      animation: tdb-sweep 1.8s linear infinite;
     }
     .editor-textarea {
       flex: 1;
@@ -478,17 +694,22 @@
       padding: 0 14px;
       gap: 4px;
       border-bottom: 1px solid var(--border-color);
+      overflow-x: auto;
+      scrollbar-width: none;
     }
+    .results-tabs::-webkit-scrollbar { display: none; }
     .res-tab {
       height: 26px;
       padding: 0 10px;
       border-radius: 999px;
       cursor: pointer;
-      font-size: 11.5px;
+      font-size: 12px;
       color: var(--text-muted);
       border: none;
       background: transparent;
       user-select: none;
+      white-space: nowrap;
+      flex: none;
       transition: background-color 0.16s var(--ease-out), color 0.16s var(--ease-out);
     }
     .res-tab:hover {
@@ -523,13 +744,14 @@
       padding: 8px 12px;
       font-family: var(--font-mono);
       font-weight: 500;
-      font-size: 10px;
+      font-size: 10.5px;
       text-transform: uppercase;
       letter-spacing: 0.08em;
       color: var(--text-faint);
       cursor: pointer;
       user-select: none;
       white-space: nowrap;
+      text-align: left;
     }
     table.data-grid th:hover { color: var(--text-main); }
     table.data-grid td {
@@ -540,7 +762,7 @@
       text-overflow: ellipsis;
       max-width: 320px;
       font-family: var(--font-mono);
-      font-size: 11.5px;
+      font-size: 12px;
     }
     table.data-grid tbody tr { transition: background-color 0.16s var(--ease-out); }
     table.data-grid tbody tr:hover { background: rgba(159, 183, 180, 0.04); }
@@ -585,24 +807,30 @@
       z-index: 6;
     }
     .graph-float-toolbar .btn { justify-content: center; padding: 4px 7px; font-size: 11px; }
-    /* PR-17 全局节点搜索（图内）：顶栏输入 + 下拉结果 */
-    .node-search-wrap { position: relative; }
+    /* 图内节点搜索：位于 tab 行右侧，与主标签同一视觉基线 */
+    .node-search-wrap { position: relative; flex: none; width: 280px; }
     .node-search-input {
-      padding: 4px 10px;
-      border-radius: var(--radius-sm);
+      padding: 4px 12px;
+      border-radius: 999px;
       border: 1px solid var(--border-color);
       background: var(--bg-surface);
       color: var(--text-main);
-      font-size: 12px;
-      width: 190px;
+      font-size: 12.5px;
+      width: 100%;
+      height: 28px;
       font-family: inherit;
     }
-    .node-search-input:focus { outline: none; border-color: var(--border-focus); }
+    .node-search-input:focus {
+      outline: none;
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 3px rgba(143, 179, 176, 0.12);
+    }
     .node-search-results {
       position: absolute;
-      top: calc(100% + 4px);
-      left: 0;
-      width: 300px;
+      top: calc(100% + 6px);
+      right: 0;
+      left: auto;
+      width: 320px;
       max-height: 320px;
       overflow-y: auto;
       background: var(--bg-surface);
@@ -626,6 +854,8 @@
     .node-search-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
     .node-search-meta { margin-left: auto; color: var(--text-light); font-size: 11px; white-space: nowrap; }
     .node-search-empty { padding: 8px; color: var(--text-light); font-size: 12px; }
+    @media (max-width: 1100px) { .node-search-wrap { width: 200px; } }
+    @media (max-width: 900px) { .node-search-wrap { display: none; } }
     /* PR-18 命名空间树面板：与过滤器面板同款式，left 错开 260px 与其并存 */
     .ns-panel {
       position: absolute;
@@ -1396,7 +1626,7 @@
       justify-content: space-between;
       padding: 0 16px;
       font-family: var(--font-mono);
-      font-size: 10px;
+      font-size: 11px;
       letter-spacing: 0.04em;
       color: var(--text-light);
       user-select: none;
@@ -1588,13 +1818,13 @@
 
     /* TQL 语法高亮叠加层（pre 与 textarea 必须完全对齐：同字体/行高/padding/white-space/tab-size/换行策略） */
     .editor-highlight {
-      position: absolute; inset: 0; margin: 0; overflow: hidden;
+      position: absolute; inset: 0; margin: 0; overflow: hidden; z-index: 1;
       padding: 14px 64px 12px 16px;
       font-family: var(--font-mono); font-size: 13px; line-height: 21px;
       white-space: pre-wrap; overflow-wrap: break-word; word-break: normal; tab-size: 2;
       color: var(--text-main); pointer-events: none;
     }
-    .editor-textarea { position: relative; color: transparent; }
+    .editor-textarea { position: relative; z-index: 1; color: transparent; }
     .editor-textarea::placeholder { color: var(--text-light); }
     .editor-textarea::selection { background: rgba(99, 102, 241, 0.25); }
     .tk-keyword { color: var(--primary); font-weight: 700; }
@@ -1678,6 +1908,13 @@
       font-size: 10.5px; color: var(--text-light); user-select: none;
     }
   </style>
+  <script>
+    // 首屏前置：侧栏 rail 与界面语言在样式生效前恢复，避免展开态闪一下再收起
+    try {
+      if (localStorage.getItem('tdb_sidebar_rail') === '1') document.documentElement.dataset.rail = '1';
+      if (localStorage.getItem('tdb_lang') === 'en') document.documentElement.lang = 'en';
+    } catch (_) {}
+  </script>
 </head>
 <body>
 
@@ -1694,13 +1931,6 @@
       <span class="badge">SERVER</span>
     </div>
 
-    <!-- PR-17 全局节点搜索（图内）：对当前图数据做 label/id/payload 子串匹配，点击结果飞行定位 -->
-    <div class="node-search-wrap">
-      <input class="node-search-input" id="nodeSearchInput" type="text" placeholder="搜索节点… (图内)"
-        autocomplete="off" spellcheck="false" aria-label="搜索图内节点" aria-controls="nodeSearchResults">
-      <div class="node-search-results" id="nodeSearchResults" role="listbox" aria-label="节点搜索结果" hidden></div>
-    </div>
-
     <div class="header-status">
       <span id="connStatus" class="status-badge">
         <span class="status-dot"></span>
@@ -1710,20 +1940,25 @@
     </div>
 
     <div class="header-actions">
+      <button class="btn sidebar-mobile-btn" id="sidebarMobileBtn" type="button"
+        aria-label="打开导航" aria-expanded="false" title="导航"
+        data-i18n-aria-label="sidebar.open" data-i18n-title="sidebar.open">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6.5" x2="20" y2="6.5"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17.5" x2="20" y2="17.5"/></svg>
+      </button>
       <button class="btn btn-primary" id="openTutorialBtn">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-        可视化使用教程
+        <span data-i18n="header.tutorial">可视化使用教程</span>
       </button>
       <!-- AI 助手切换按钮：未配置 LLM 时整体隐藏（updateAiVisibility 控制） -->
       <button class="btn" id="aiChatToggleBtn" title="AI 助手 (TQL Copilot)" hidden>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l1.9 5.7L19.6 10l-5.7 1.9L12 17.6l-1.9-5.7L4.4 10l5.7-1.3z"/><path d="M19 15l.9 2.6L22.5 18.5l-2.6.9L19 22l-.9-2.6-2.6-.9 2.6-.9z"/></svg>
-        AI 助手
+        <span data-i18n="header.ai">AI 助手</span>
       </button>
       <!-- 跳转官网文档（新窗口打开，rel=noopener 防止 window.opener 泄露） -->
       <a class="btn" href="https://triviumdb.com/" target="_blank" rel="noopener" title="打开 TriviumDB 官方文档 (新窗口)">
-        文档 ↗
+        <span data-i18n="header.docs">文档 ↗</span>
       </a>
-      <button class="btn" id="themeToggleBtn" title="切换深色/浅色模式">
+      <button class="btn" id="themeToggleBtn" title="切换深色/浅色模式" data-i18n-title="header.theme">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
       </button>
     </div>
@@ -1731,92 +1966,116 @@
 
   <!-- 主界面布局 -->
   <div class="app-body">
+    <!-- 移动端：侧栏抽屉遮罩 -->
+    <div class="sidebar-scrim" id="sidebarScrim"></div>
     <!-- 左侧对象导航树 (Navicat 风格对象管理器) -->
     <aside class="sidebar">
       <div class="sidebar-header">
-        <span>对象导航 (Explorer)</span>
-        <button class="btn" id="refreshMetaBtn" style="padding: 2px 6px;" title="刷新元数据">
+        <span data-i18n="sidebar.title">对象导航 (Explorer)</span>
+        <button class="btn" id="refreshMetaBtn" style="padding: 2px 6px;" title="刷新元数据" data-i18n-title="sidebar.refresh">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
         </button>
       </div>
       <div class="sidebar-content">
-        <div class="nav-section-title">三模数据引擎</div>
+        <div class="nav-section-title" data-i18n="sidebar.group.engine">三模数据引擎</div>
         <div class="nav-item active" data-action="quick-find">
           <div class="nav-item-left">
             <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-            <span>文档 (Documents)</span>
+            <span data-i18n="sidebar.item.documents">文档 (Documents)</span>
           </div>
           <span class="badge" id="docCountBadge">FIND</span>
         </div>
         <div class="nav-item" data-action="quick-match">
           <div class="nav-item-left">
             <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
-            <span>图拓扑 (Graph)</span>
+            <span data-i18n="sidebar.item.graph">图拓扑 (Graph)</span>
           </div>
           <span class="badge">MATCH</span>
         </div>
         <div class="nav-item" data-action="quick-search">
           <div class="nav-item-left">
             <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
-            <span>向量与 QuIVer</span>
+            <span data-i18n="sidebar.item.vector">向量与 QuIVer</span>
           </div>
           <span class="badge">SEARCH</span>
         </div>
 
-        <div class="nav-section-title">常用代码片段 (Snippets)</div>
+        <div class="nav-section-title" data-i18n="sidebar.group.snippets">常用代码片段 (Snippets)</div>
         <div class="nav-item" data-snippet='FIND {type: "person"} RETURN * LIMIT 20'>
           <div class="nav-item-left">
             <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
-            <span>扫描所有节点</span>
+            <span data-i18n="sidebar.item.scan">扫描所有节点</span>
           </div>
         </div>
         <div class="nav-item" data-snippet="MATCH (a)-[]->(b) RETURN a, b LIMIT 25">
           <div class="nav-item-left">
             <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
-            <span>探索一跳图关系</span>
+            <span data-i18n="sidebar.item.oneHop">探索一跳图关系</span>
           </div>
         </div>
         <div class="nav-item" data-snippet="MATCH (a)-[:knows*1..3]->(b) RETURN a, b LIMIT 20">
           <div class="nav-item-left">
             <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="6" r="3"/><circle cx="19" cy="18" r="3"/><path d="M12 3a9 9 0 0 1 9 9M12 21a9 9 0 0 1-9-9"/></svg>
-            <span>多跳可变长路径</span>
+            <span data-i18n="sidebar.item.multiHop">多跳可变长路径</span>
           </div>
         </div>
         <div class="nav-item" data-snippet='CREATE ({name: "Alice", type: "user", level: 5})'>
           <div class="nav-item-left">
             <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            <span>创建单节点 (Doc)</span>
+            <span data-i18n="sidebar.item.create">创建单节点 (Doc)</span>
           </div>
         </div>
         <div class="nav-item" data-snippet='EXPLAIN ANALYZE FIND {type: "person"} RETURN *'>
           <div class="nav-item-left">
             <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-            <span>剖析执行计划</span>
+            <span data-i18n="sidebar.item.explain">剖析执行计划</span>
           </div>
         </div>
 
-        <div class="nav-section-title">查询历史 (History)</div>
+        <div class="nav-section-title" data-i18n="sidebar.group.history">查询历史 (History)</div>
         <div id="historyList" style="max-height: 160px; overflow-y: auto;">
-          <div style="padding: 6px 14px; color: var(--text-light); font-size: 11px;">暂无历史记录</div>
+          <div style="padding: 6px 14px; color: var(--text-light); font-size: 11px;" data-i18n="sidebar.emptyHistory">暂无历史记录</div>
         </div>
+      </div>
+      <div class="sidebar-footer">
+        <div class="sidebar-lang" role="group" aria-label="界面语言">
+          <span class="sidebar-lang-label" data-i18n="sidebar.lang">界面语言</span>
+          <div class="seg" role="group">
+            <button class="seg-btn lang-btn" type="button" data-lang="zh" aria-pressed="true">中文</button>
+            <button class="seg-btn lang-btn" type="button" data-lang="en" aria-pressed="false">English</button>
+          </div>
+        </div>
+        <button class="sidebar-toggle" id="sidebarRailToggle" type="button" aria-expanded="true" title="收起侧栏 (Ctrl+B)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="14.5 6.5 9 12 14.5 17.5"/></svg>
+          <span class="sidebar-toggle-label" data-i18n="sidebar.collapse">收起侧栏</span>
+        </button>
       </div>
     </aside>
 
     <!-- 中央多标签页工作台 -->
     <main class="workspace">
       <!-- 标签栏（键盘可达：role=tab + tabindex + aria-selected，激活在 setupTabs） -->
-      <div class="tabs-bar" role="tablist" aria-label="工作台标签页">
-        <div class="tab active" data-tab="queryPane" role="tab" id="tab-queryPane" aria-controls="queryPane" aria-selected="true" tabindex="0">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-          <span>TQL 查询控制台</span>
+      <div class="tabs-bar">
+        <div class="tabs-scroll" role="tablist" aria-label="工作台标签页" data-i18n-aria-label="tabs.aria">
+          <div class="tab active" data-tab="queryPane" role="tab" id="tab-queryPane" aria-controls="queryPane" aria-selected="true" tabindex="0">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+            <span data-i18n="tabs.query">TQL 查询控制台</span>
+          </div>
+          <div class="tab" data-tab="graphExplorePane" role="tab" id="tab-graphExplorePane" aria-controls="graphExplorePane" aria-selected="false" tabindex="0">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/></svg>
+            <span data-i18n="tabs.graph">独立图拓扑探索</span>
+          </div>
+          <div class="tab" data-tab="vectorLabPane" role="tab" id="tab-vectorLabPane" aria-controls="vectorLabPane" aria-selected="false" tabindex="0">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="20" x2="12" y2="12"/><line x1="12" y1="12" x2="20" y2="4"/><circle cx="4" cy="20" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="20" cy="4" r="2"/></svg>
+            <span data-i18n="tabs.vector">向量检索 (Vector Lab)</span>
+          </div>
         </div>
-        <div class="tab" data-tab="graphExplorePane" role="tab" id="tab-graphExplorePane" aria-controls="graphExplorePane" aria-selected="false" tabindex="0">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/></svg>
-          <span>独立图拓扑探索</span>
-        </div>
-        <div class="tab" data-tab="vectorLabPane" role="tab" id="tab-vectorLabPane" aria-controls="vectorLabPane" aria-selected="false" tabindex="0">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="20" x2="12" y2="12"/><line x1="12" y1="12" x2="20" y2="4"/><circle cx="4" cy="20" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="20" cy="4" r="2"/></svg>
-          <span>向量检索 (Vector Lab)</span>
+        <!-- 图内节点搜索：放在 tab 行右侧，避免顶栏出现两段无锚点的浮空控件 -->
+        <div class="node-search-wrap">
+          <input class="node-search-input" id="nodeSearchInput" type="text" placeholder="搜索节点… (图内)"
+            data-i18n-placeholder="header.search" data-i18n-aria-label="header.searchAria"
+            autocomplete="off" spellcheck="false" aria-label="搜索图内节点" aria-controls="nodeSearchResults">
+          <div class="node-search-results" id="nodeSearchResults" role="listbox" aria-label="节点搜索结果" hidden></div>
         </div>
       </div>
 
@@ -1826,19 +2085,19 @@
           <div class="toolbar-left">
             <button class="btn btn-success" id="runQueryBtn" title="运行查询 (快捷键: Ctrl + Enter)">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-              <span>运行 (Run)</span>
+              <span data-i18n="toolbar.run">运行 (Run)</span>
             </button>
             <label class="checkbox-label" title="开启写入事务支持 (CREATE / LINK / DELETE 等)">
-              <input type="checkbox" id="mutationCheck"> 写入模式 (Mutation)
+              <input type="checkbox" id="mutationCheck"> <span data-i18n="toolbar.mutation">写入模式 (Mutation)</span>
             </label>
             <label class="checkbox-label" title="返回耗时剖析指标">
-              <input type="checkbox" id="profileCheck" checked> Profile 剖析
+              <input type="checkbox" id="profileCheck" checked> <span data-i18n="toolbar.profile">剖析 (Profile)</span>
             </label>
           </div>
           <div class="toolbar-right">
-            <button class="btn" id="formatTqlBtn" title="格式化查询文本">美化 TQL</button>
-            <button class="btn" id="clearEditorBtn" title="清空编辑器">清空</button>
-            <button class="btn" id="exportJsonBtn" title="导出当前结果为 JSON">导出 JSON</button>
+            <button class="btn" id="formatTqlBtn" title="格式化查询文本" data-i18n="toolbar.format">美化 TQL</button>
+            <button class="btn" id="clearEditorBtn" title="清空编辑器" data-i18n="toolbar.clear">清空</button>
+            <button class="btn" id="exportJsonBtn" title="导出当前结果为 JSON" data-i18n="toolbar.export">导出 JSON</button>
           </div>
         </div>
 
@@ -1846,7 +2105,7 @@
           <!-- 查询输入区（叠加层语法高亮：pre 与 textarea 文本对齐，textarea 文字透明仅露光标） -->
           <div class="editor-container">
             <pre class="editor-highlight" id="tqlHighlight" aria-hidden="true"></pre>
-            <textarea class="editor-textarea" id="tqlInput" spellcheck="false" placeholder="在此输入 TQL 语句，例如: FIND {type: &quot;person&quot;} RETURN * LIMIT 10 (按 Ctrl+Enter 运行)">FIND {type: "person"} RETURN * LIMIT 25</textarea>
+            <textarea class="editor-textarea" id="tqlInput" spellcheck="false" data-i18n-placeholder="editor.placeholder" placeholder="在此输入 TQL 语句，例如: FIND {type: &quot;person&quot;} RETURN * LIMIT 10 (按 Ctrl+Enter 运行)">FIND {type: "person"} RETURN * LIMIT 25</textarea>
             <span class="editor-chip">TQL</span>
           </div>
 
@@ -1854,13 +2113,13 @@
           <div class="results-container">
             <div class="results-tabs" role="tablist" aria-label="结果视图切换">
               <div class="res-tab active" data-view="grid" role="tab" aria-controls="viewGrid" aria-selected="true" tabindex="0">
-                <span>表格网格 (Data Grid)</span>
+                <span data-i18n="results.tab.grid">表格视图 (Data Grid)</span>
               </div>
               <div class="res-tab" data-view="graph" role="tab" aria-controls="viewGraph" aria-selected="false" tabindex="0">
-                <span>交互拓扑图 (Graph Canvas)</span>
+                <span data-i18n="results.tab.graph">交互拓扑图 (Graph Canvas)</span>
               </div>
               <div class="res-tab" data-view="json" role="tab" aria-controls="viewJson" aria-selected="false" tabindex="0">
-                <span>JSON 原始树</span>
+                <span data-i18n="results.tab.json">JSON 视图</span>
               </div>
             </div>
 
@@ -1868,13 +2127,13 @@
               <!-- 表格网格视图 -->
               <div id="viewGrid" style="height: 100%; overflow: auto;">
                 <table class="data-grid" id="gridTable">
-                  <thead><tr id="gridHead"><th>#</th><th>数据</th></tr></thead>
+                  <thead><tr id="gridHead"><th>#</th><th data-i18n="results.col.data">数据</th></tr></thead>
                   <tbody id="gridBody">
                     <tr><td colspan="2">
                       <div class="empty-cta">
                         <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
-                        <div>还没有查询结果</div>
-                        <button class="btn btn-primary" id="emptyRunBtn" type="button">运行第一条查询</button>
+                        <div data-i18n="results.empty.title">还没有查询结果</div>
+                        <button class="btn btn-primary" id="emptyRunBtn" type="button" data-i18n="results.empty.action">运行第一条查询</button>
                       </div>
                     </td></tr>
                   </tbody>
@@ -2307,6 +2566,230 @@
     function safeStorageSet(key, value) {
       try { localStorage.setItem(key, value); } catch (_) { /* 存储不可用时降级为内存态 */ }
     }
+
+    // ==========================================
+    // 外壳 i18n（zh/en）：只覆盖 UI chrome；
+    // 查询语法、数据内容、服务端 detail、教程正文不翻译。
+    // 缺键回落：目标语言 → 中文 → key（宁可显示 key，也不显示空白）
+    // ==========================================
+    const I18N = {
+      zh: {
+        'header.tutorial': '可视化使用教程',
+        'header.ai': 'AI 助手',
+        'header.docs': '文档 ↗',
+        'header.theme': '切换深色/浅色模式',
+        'header.search': '搜索节点… (图内)',
+        'header.searchAria': '搜索图内节点',
+        'header.status.connecting': '连接检测中...',
+        'header.status.online': '在线',
+        'header.status.degraded': '就绪异常',
+        'header.status.offline': '无法连接 Server',
+        'header.generation': 'Generation',
+        'tabs.query': 'TQL 查询控制台',
+        'tabs.graph': '独立图拓扑探索',
+        'tabs.vector': '向量检索 (Vector Lab)',
+        'tabs.aria': '工作台标签页',
+        'sidebar.title': '对象导航 (Explorer)',
+        'sidebar.refresh': '刷新元数据',
+        'sidebar.group.engine': '三模数据引擎',
+        'sidebar.group.snippets': '常用代码片段 (Snippets)',
+        'sidebar.group.history': '查询历史 (History)',
+        'sidebar.item.documents': '文档 (Documents)',
+        'sidebar.item.graph': '图拓扑 (Graph)',
+        'sidebar.item.vector': '向量与 QuIVer',
+        'sidebar.item.scan': '扫描所有节点',
+        'sidebar.item.oneHop': '探索一跳图关系',
+        'sidebar.item.multiHop': '多跳可变长路径',
+        'sidebar.item.create': '创建单节点 (Doc)',
+        'sidebar.item.explain': '剖析执行计划',
+        'sidebar.emptyHistory': '暂无历史记录',
+        'sidebar.collapse': '收起侧栏',
+        'sidebar.expand': '展开侧栏',
+        'sidebar.open': '打开导航',
+        'sidebar.lang': '界面语言',
+        'toolbar.run': '运行 (Run)',
+        'toolbar.running': '运行中...',
+        'toolbar.mutation': '写入模式 (Mutation)',
+        'toolbar.profile': '剖析 (Profile)',
+        'toolbar.format': '美化 TQL',
+        'toolbar.clear': '清空',
+        'toolbar.export': '导出 JSON',
+        'results.tab.grid': '表格视图 (Data Grid)',
+        'results.tab.graph': '交互拓扑图 (Graph Canvas)',
+        'results.tab.json': 'JSON 视图',
+        'results.empty.title': '还没有查询结果',
+        'results.empty.action': '运行第一条查询',
+        'results.col.data': '数据',
+        'results.col.result': '结果',
+        'results.col.status': '状态',
+        'results.col.affected': '受影响行数',
+        'results.col.created': '生成节点 ID',
+        'results.empty.rows': '查询成功，但没有匹配的行',
+        'results.empty.rerun': '重新运行查询',
+        'editor.placeholder': '在此输入 TQL 语句，例如: FIND {type: "person"} RETURN * LIMIT 10 (按 Ctrl+Enter 运行)',
+        'status.online': '在线',
+        'status.degraded': '就绪异常',
+        'status.offline': '无法连接 Server',
+        'status.writeQueue': '写队列',
+        'status.reads': '并发读',
+        'status.rows': '返回',
+        'status.elapsed': '耗时',
+        'status.version': '版本',
+        'status.quiver': 'QuIVer',
+        'status.ready': '就绪',
+        'status.warming': '预热中',
+        'status.rowsValue': '返回: {count} 行',
+        'status.createdValue': '创建: {count} 个',
+        'status.affectedValue': '影响: {count} 行',
+        'status.readonly': '只读',
+        'status.elapsedValue': '耗时: {ms} ms',
+        'status.queueValue': '写队列: {depth}/{capacity}',
+        'status.readsValue': '并发读: {count}',
+        'status.rowsZero': '返回: 0 行',
+        'status.elapsedZero': '耗时: -',
+        'status.affectedZero': '影响: -',
+      },
+      en: {
+        'header.tutorial': 'Interactive tutorial',
+        'header.ai': 'AI Copilot',
+        'header.docs': 'Docs ↗',
+        'header.theme': 'Toggle dark/light theme',
+        'header.search': 'Search nodes… (graph)',
+        'header.searchAria': 'Search graph nodes',
+        'header.status.connecting': 'Checking connection...',
+        'header.status.online': 'Online',
+        'header.status.degraded': 'Degraded',
+        'header.status.offline': 'Cannot reach server',
+        'header.generation': 'Generation',
+        'tabs.query': 'TQL Console',
+        'tabs.graph': 'Graph Explorer',
+        'tabs.vector': 'Vector Lab',
+        'tabs.aria': 'Workspace tabs',
+        'sidebar.title': 'Object Explorer',
+        'sidebar.refresh': 'Refresh metadata',
+        'sidebar.group.engine': 'Tri-model engine',
+        'sidebar.group.snippets': 'Snippets',
+        'sidebar.group.history': 'History',
+        'sidebar.item.documents': 'Documents',
+        'sidebar.item.graph': 'Graph',
+        'sidebar.item.vector': 'Vector & QuIVer',
+        'sidebar.item.scan': 'Scan all nodes',
+        'sidebar.item.oneHop': 'Explore 1-hop edges',
+        'sidebar.item.multiHop': 'Variable-length paths',
+        'sidebar.item.create': 'Create node (Doc)',
+        'sidebar.item.explain': 'Explain plan',
+        'sidebar.emptyHistory': 'No history yet',
+        'sidebar.collapse': 'Collapse sidebar',
+        'sidebar.expand': 'Expand sidebar',
+        'sidebar.open': 'Open navigation',
+        'sidebar.lang': 'Language',
+        'toolbar.run': 'Run',
+        'toolbar.running': 'Running...',
+        'toolbar.mutation': 'Mutation',
+        'toolbar.profile': 'Profile',
+        'toolbar.format': 'Format TQL',
+        'toolbar.clear': 'Clear',
+        'toolbar.export': 'Export JSON',
+        'results.tab.grid': 'Data Grid',
+        'results.tab.graph': 'Graph Canvas',
+        'results.tab.json': 'JSON',
+        'results.empty.title': 'No results yet',
+        'results.empty.action': 'Run the first query',
+        'results.col.data': 'Data',
+        'results.col.result': 'Result',
+        'results.col.status': 'Status',
+        'results.col.affected': 'Affected rows',
+        'results.col.created': 'Created node IDs',
+        'results.empty.rows': 'Query succeeded, but no matching rows',
+        'results.empty.rerun': 'Run again',
+        'editor.placeholder': 'Type TQL here, e.g. FIND {type: "person"} RETURN * LIMIT 10 (Ctrl+Enter to run)',
+        'status.online': 'Online',
+        'status.degraded': 'Degraded',
+        'status.offline': 'Cannot reach server',
+        'status.writeQueue': 'Write queue',
+        'status.reads': 'Reads',
+        'status.rows': 'Rows',
+        'status.elapsed': 'Elapsed',
+        'status.version': 'Version',
+        'status.quiver': 'QuIVer',
+        'status.ready': 'ready',
+        'status.warming': 'warming',
+        'status.rowsValue': 'Rows: {count}',
+        'status.createdValue': 'Created: {count}',
+        'status.affectedValue': 'Affected: {count} rows',
+        'status.readonly': 'Read-only',
+        'status.elapsedValue': 'Elapsed: {ms} ms',
+        'status.queueValue': 'Write queue: {depth}/{capacity}',
+        'status.readsValue': 'Reads: {count}',
+        'status.rowsZero': 'Rows: 0',
+        'status.elapsedZero': 'Elapsed: -',
+        'status.affectedZero': 'Affected: -',
+      }
+    };
+    let currentLang = 'zh';
+    function t(key, vars) {
+      const table = I18N[currentLang] || I18N.zh;
+      let text = table[key];
+      if (text === undefined) text = I18N.zh[key];
+      if (text === undefined) return key;
+      if (vars) {
+        text = text.replace(/\{(\w+)\}/g, (whole, name) =>
+          vars[name] === undefined ? whole : String(vars[name]));
+      }
+      return text;
+    }
+    function applyI18n() {
+      document.documentElement.lang = currentLang === 'en' ? 'en' : 'zh-CN';
+      document.querySelectorAll('[data-i18n]').forEach(el => {
+        const key = el.getAttribute('data-i18n');
+        if (key) el.textContent = t(key);
+      });
+      document.querySelectorAll('[data-i18n-title]').forEach(el => {
+        const key = el.getAttribute('data-i18n-title');
+        if (key) el.title = t(key);
+      });
+      document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+        const key = el.getAttribute('data-i18n-placeholder');
+        if (key) el.setAttribute('placeholder', t(key));
+      });
+      document.querySelectorAll('[data-i18n-aria-label]').forEach(el => {
+        const key = el.getAttribute('data-i18n-aria-label');
+        if (key) el.setAttribute('aria-label', t(key));
+      });
+      document.querySelectorAll('.lang-btn').forEach(btn => {
+        btn.setAttribute('aria-pressed', String(btn.dataset.lang === currentLang));
+      });
+      document.querySelectorAll('#gridHead th[data-column-key]').forEach(th => {
+        th.textContent = columnLabel(th.dataset.columnKey);
+      });
+      const rail = document.documentElement.dataset.rail === '1';
+      const railBtn = document.getElementById('sidebarRailToggle');
+      if (railBtn) railBtn.title = t(rail ? 'sidebar.expand' : 'sidebar.collapse') + ' (Ctrl+B)';
+      const railLabel = document.querySelector('.sidebar-toggle-label');
+      if (railLabel) railLabel.textContent = t(rail ? 'sidebar.expand' : 'sidebar.collapse');
+      // rail 态的悬停提示跟随语言重算
+      if (rail) {
+        document.querySelectorAll('.sidebar .nav-item').forEach(item => {
+          const label = item.querySelector('.nav-item-left > span');
+          if (label) item.title = label.textContent.trim();
+        });
+      }
+    }
+    function setLanguage(lang, persist) {
+      currentLang = lang === 'en' ? 'en' : 'zh';
+      if (persist !== false) safeStorageSet('tdb_lang', currentLang);
+      applyI18n();
+      if (typeof renderStatusBar === 'function') renderStatusBar();
+      // 状态文案由健康检查写入：切语言后补一次，保证“在线/就绪”跟随
+      if (typeof checkServerHealth === 'function') checkServerHealth();
+    }
+    function setupLanguage() {
+      currentLang = safeStorageGet('tdb_lang') === 'en' ? 'en' : 'zh';
+      document.querySelectorAll('.lang-btn').forEach(btn => {
+        btn.addEventListener('click', () => setLanguage(btn.dataset.lang));
+      });
+      applyI18n();
+    }
     // 历史记录装载：存储值损坏（非法 JSON / 非字符串数组）时回退空数组
     function loadQueryHistory() {
       try {
@@ -2682,10 +3165,86 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     ];
 
     // ==========================================
+    // 侧栏图标栏（rail）：248 ↔ 64，Ctrl+B 切换，状态持久化
+    // ==========================================
+    const SIDEBAR_RAIL_KEY = 'tdb_sidebar_rail';
+    function setSidebarRail(rail, persist) {
+      document.documentElement.dataset.rail = rail ? '1' : '0';
+      const btn = document.getElementById('sidebarRailToggle');
+      if (btn) {
+        btn.setAttribute('aria-expanded', String(!rail));
+        btn.title = t(rail ? 'sidebar.expand' : 'sidebar.collapse') + ' (Ctrl+B)';
+      }
+      document.querySelectorAll('.sidebar .nav-item').forEach(item => {
+        const label = item.querySelector('.nav-item-left > span');
+        if (rail && label) item.title = label.textContent.trim();
+        else item.removeAttribute('title');
+      });
+      if (typeof applyI18n === 'function') applyI18n();
+      if (persist) safeStorageSet(SIDEBAR_RAIL_KEY, rail ? '1' : '0');
+    }
+    function setupSidebarRail() {
+      setSidebarRail(safeStorageGet(SIDEBAR_RAIL_KEY) === '1', false);
+      const btn = document.getElementById('sidebarRailToggle');
+      if (btn) btn.addEventListener('click', () => {
+        setSidebarRail(document.documentElement.dataset.rail !== '1', true);
+      });
+      document.addEventListener('keydown', (e) => {
+        if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'b') return;
+        const target = e.target;
+        if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA'
+          || target.tagName === 'SELECT' || target.isContentEditable)) return;
+        e.preventDefault();
+        setSidebarRail(document.documentElement.dataset.rail !== '1', true);
+      });
+    }
+
+    // 移动端侧栏抽屉：顶栏汉堡开关 + 遮罩/Esc 关闭；打开时临时忽略桌面 rail
+    function setupMobileSidebar() {
+      const btn = document.getElementById('sidebarMobileBtn');
+      const scrim = document.getElementById('sidebarScrim');
+      const sidebar = document.querySelector('aside.sidebar');
+      if (!btn || !sidebar) return;
+      let restoreRail = false;
+      const isOpen = () => document.documentElement.dataset.sidebarOpen === '1';
+      const open = () => {
+        restoreRail = document.documentElement.dataset.rail === '1';
+        if (restoreRail) document.documentElement.dataset.rail = '0';
+        document.documentElement.dataset.sidebarOpen = '1';
+        btn.setAttribute('aria-expanded', 'true');
+      };
+      const close = () => {
+        document.documentElement.dataset.sidebarOpen = '0';
+        btn.setAttribute('aria-expanded', 'false');
+        if (restoreRail) {
+          setSidebarRail(true, false);
+          restoreRail = false;
+        }
+      };
+      btn.addEventListener('click', () => { isOpen() ? close() : open(); });
+      if (scrim) scrim.addEventListener('click', close);
+      sidebar.addEventListener('click', (e) => {
+        if (e.target.closest('.nav-item')) close();
+      });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && isOpen()) close();
+      });
+      if (window.matchMedia) {
+        window.matchMedia('(min-width: 901px)').addEventListener('change', (e) => {
+          if (e.matches && isOpen()) close();
+        });
+      }
+    }
+
+    // ==========================================
     // 初始化应用
     // ==========================================
     document.addEventListener('DOMContentLoaded', () => {
       setupTheme();
+      setupSidebarRail();
+      setupMobileSidebar();
+      setupLanguage();
+      renderStatusBar();
       setupEventListeners();
       setupTutorial();
       setupTabs();
@@ -2830,10 +3389,11 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       const el = document.getElementById('headerGeneration');
       if (!el) return;
       const full = String(gen);
+      const label = t('header.generation');
       el.textContent = full.length > GENERATION_BADGE_MAX
-        ? `Generation: ${full.slice(0, GENERATION_BADGE_MAX)}…`
-        : `Generation: ${full}`;
-      el.title = `Generation: ${full}`;
+        ? `${label}: ${full.slice(0, GENERATION_BADGE_MAX)}…`
+        : `${label}: ${full}`;
+      el.title = `${label}: ${full}`;
     }
 
     function showToast(message, duration = 2600) {
@@ -3020,15 +3580,15 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         if (res.ok) {
           const data = await res.json();
           connBadge.className = 'status-badge live';
-          connText.textContent = `在线 (${data.status})`;
+          connText.textContent = `${t('status.online')} (${data.status})`;
           document.getElementById('statusVersion').textContent = `TriviumDB Server v${data.version || '0.8.10'}`;
         } else {
           connBadge.className = 'status-badge dead';
-          connText.textContent = `就绪异常 (${res.status})`;
+          connText.textContent = `${t('status.degraded')} (${res.status})`;
         }
       } catch (err) {
         connBadge.className = 'status-badge dead';
-        connText.textContent = '无法连接 Server';
+        connText.textContent = t('status.offline');
       }
 
       // 抓取详细指标
@@ -3036,8 +3596,13 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         const resDetails = await fetch(`${API_BASE}/health/details`);
         if (resDetails.ok) {
           const details = await resDetails.json();
-          document.getElementById('statusQueue').textContent = `写队列: ${details.writeQueueDepth || 0}/${details.writeQueueCapacity || 256}`;
-          document.getElementById('statusReads').textContent = `并发读: ${details.activeReads || 0}`;
+          document.getElementById('statusQueue').textContent = t('status.queueValue', {
+            depth: details.writeQueueDepth || 0,
+            capacity: details.writeQueueCapacity || 256
+          });
+          document.getElementById('statusReads').textContent = t('status.readsValue', {
+            count: details.activeReads || 0
+          });
           renderStatusBarHealth(details);
         }
       } catch (_) {}
@@ -3066,6 +3631,33 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         healthEl.textContent = '';
         healthEl.className = 'status-pill';
         healthEl.title = '引擎整体就绪状态 (来自 /health/details 的 status)';
+      }
+    }
+
+    // 状态栏文本状态：语言切换时按最近一次查询结果重绘，而不是重置为 0
+    const statusState = { rows: 0, created: null, affected: undefined, elapsed: null, mutation: false };
+    function renderStatusBar() {
+      const rowsEl = document.getElementById('statusRowCount');
+      if (rowsEl) {
+        rowsEl.textContent = statusState.created !== null
+          ? t('status.createdValue', { count: statusState.created })
+          : t('status.rowsValue', { count: statusState.rows });
+      }
+      const affectedEl = document.getElementById('statusAffected');
+      if (affectedEl) {
+        if (statusState.mutation) {
+          affectedEl.textContent = t('status.affectedValue', { count: statusState.affected || 0 });
+        } else if (statusState.affected === null) {
+          affectedEl.textContent = t('status.readonly');
+        } else {
+          affectedEl.textContent = t('status.affectedZero');
+        }
+      }
+      const timeEl = document.getElementById('statusQueryTime');
+      if (timeEl) {
+        timeEl.textContent = statusState.elapsed === null
+          ? t('status.elapsedZero')
+          : t('status.elapsedValue', { ms: statusState.elapsed });
       }
     }
 
@@ -3115,6 +3707,10 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     // NDJSON 流式下列集合无法预先得知：新列在流中动态出现时补 <th>。
     // 行数达到虚拟阈值时从直建模式迁移到虚拟滑窗（保留滚动位置），
     // 后续批次只更新数据数组 + 通知窗口重算（钉底跟随/视口保持由控制器处理）。
+    // 服务端 meta 的列名 `_` 是内部占位（kind=node），展示层统一映射为“数据/Data”。
+    function columnLabel(key) {
+      return key === '_' ? t('results.col.data') : key;
+    }
     function createStreamGrid() {
       const head = document.getElementById('gridHead');
       const body = document.getElementById('gridBody');
@@ -3131,7 +3727,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           body.innerHTML = '';
           cols.forEach(c => {
             const th = document.createElement('th');
-            th.textContent = c;
+            th.dataset.columnKey = c;
+            th.textContent = columnLabel(c);
             head.appendChild(th);
           });
           gridDataRows = allRows;
@@ -3145,7 +3742,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
               virtual.addCol(k);
             } else {
               const th = document.createElement('th');
-              th.textContent = k;
+              th.dataset.columnKey = k;
+              th.textContent = columnLabel(k);
               head.appendChild(th);
             }
           });
@@ -3201,7 +3799,9 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
 
       const updateRowCount = () => {
         if (!isLatest()) return;
-        document.getElementById('statusRowCount').textContent = `返回: ${rows.length} 行`;
+        statusState.rows = rows.length;
+        statusState.created = null;
+        renderStatusBar();
         // 10000 行上限提示改为基于流式累计行数（语义不变）
         showRowLimitNotice(rows.length >= SERVER_MAX_QUERY_ROWS);
       };
@@ -3218,7 +3818,11 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         requestAnimationFrame(flushBatch);
       };
 
-      if (isLatest()) document.getElementById('statusAffected').textContent = '只读';
+      if (isLatest()) {
+        statusState.affected = null;
+        statusState.mutation = false;
+        renderStatusBar();
+      }
 
       await consumeNdjsonStream(response, (evt) => {
         if (!isLatest()) return;
@@ -3280,8 +3884,10 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       );
       saveHistory(query);
       updateRowCount();
-      document.getElementById('statusAffected').textContent = '只读';
-      document.getElementById('statusQueryTime').textContent = `耗时: ${(performance.now() - startTime).toFixed(1)} ms`;
+      statusState.affected = null;
+      statusState.mutation = false;
+      statusState.elapsed = (performance.now() - startTime).toFixed(1);
+      renderStatusBar();
 
       if (!grid) {
         // 空结果（仅 meta + summary rowCount 0）：与既有空态渲染保持一致
@@ -3301,13 +3907,19 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         updateGenerationBadge(data.generation);
       }
       if (isMutation) {
-        document.getElementById('statusAffected').textContent = `影响: ${data.affected || 0} 行`;
-        document.getElementById('statusRowCount').textContent = `创建: ${(data.createdIds || []).length} 个`;
+        statusState.mutation = true;
+        statusState.affected = data.affected || 0;
+        statusState.rows = 0;
+        statusState.created = (data.createdIds || []).length;
+        renderStatusBar();
         renderMutationResult(data);
       } else {
         const rows = data.rows || [];
-        document.getElementById('statusRowCount').textContent = `返回: ${rows.length} 行`;
-        document.getElementById('statusAffected').textContent = '只读';
+        statusState.mutation = false;
+        statusState.rows = rows.length;
+        statusState.created = null;
+        statusState.affected = null;
+        renderStatusBar();
         renderGrid(rows);
         renderGraph(rows);
         renderRawJson(data);
@@ -3336,8 +3948,9 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
 
       const runBtn = document.getElementById('runQueryBtn');
       __activeQueryCount++;
+      document.body.classList.add('is-running');
       runBtn.disabled = true;
-      runBtn.innerHTML = `<span>执行中...</span>`;
+      runBtn.innerHTML = `<span data-i18n="toolbar.running">${t('toolbar.running')}</span>`;
       showSkeleton();
 
       const startTime = performance.now();
@@ -3357,7 +3970,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         if (!isLatest()) return;
 
         const elapsed = (performance.now() - startTime).toFixed(1);
-        document.getElementById('statusQueryTime').textContent = `耗时: ${elapsed} ms`;
+        statusState.elapsed = elapsed;
+        renderStatusBar();
 
         // 非 2xx：服务端错误（400/500）恒为 JSON 错误体，走既有渲染
         if (!response.ok) {
@@ -3383,10 +3997,11 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         if (isLatest()) renderError({ title: '网络请求失败', detail: err.message });
       } finally {
         __activeQueryCount--;
+        if (__activeQueryCount === 0) document.body.classList.remove('is-running');
         if (isLatest()) {
           __queryAbort = null;
           runBtn.disabled = false;
-          runBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>运行 (Run)</span>`;
+          runBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg><span data-i18n="toolbar.run">${t('toolbar.run')}</span>`;
         }
       }
     }
@@ -3639,7 +4254,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       head.innerHTML = '';
       cols.forEach(c => {
         const th = document.createElement('th');
-        th.textContent = c;
+        th.dataset.columnKey = c;
+        th.textContent = columnLabel(c);
         head.appendChild(th);
       });
 
@@ -3766,7 +4382,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           cols.push(key);
           colsVersion++;
           const th = document.createElement('th');
-          th.textContent = key;
+          th.dataset.columnKey = key;
+          th.textContent = columnLabel(key);
           head.appendChild(th);
           colgroup.appendChild(document.createElement('col'));
         },
@@ -3914,11 +4531,11 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       showRowLimitNotice(!!rows && rows.length >= SERVER_MAX_QUERY_ROWS);
 
       if (!rows || rows.length === 0) {
-        head.innerHTML = '<th>#</th><th>结果</th>';
+        head.innerHTML = `<th>#</th><th>${t('results.col.result')}</th>`;
         body.innerHTML = `<tr><td colspan="2"><div class="empty-cta">
           <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
-          <div>查询成功，但没有匹配的行</div>
-          <button class="btn" id="emptyRunBtn" type="button">重新运行查询</button>
+          <div data-i18n="results.empty.rows">${t('results.empty.rows')}</div>
+          <button class="btn" id="emptyRunBtn" type="button" data-i18n="results.empty.rerun">${t('results.empty.rerun')}</button>
         </div></td></tr>`;
         animateResultsIn();
         return;
@@ -3940,7 +4557,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       // 小结果集：同步一次性构建（与历史行为一致，自检断言可直接读取 DOM）
       cols.forEach(c => {
         const th = document.createElement('th');
-        th.textContent = c;
+        th.dataset.columnKey = c;
+        th.textContent = columnLabel(c);
         head.appendChild(th);
       });
       gridDataRows = rows;
@@ -3960,7 +4578,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       teardownVirtualGrid();
       const head = document.getElementById('gridHead');
       const body = document.getElementById('gridBody');
-      head.innerHTML = '<th>状态</th><th>受影响行数</th><th>生成节点 ID</th>';
+      head.innerHTML = `<th>${t('results.col.status')}</th><th>${t('results.col.affected')}</th><th>${t('results.col.created')}</th>`;
       // DOM textContent 构建：affected/createdIds 为服务端数据路径，禁止插值进 innerHTML
       const tr = document.createElement('tr');
       const tdState = document.createElement('td');
@@ -4209,7 +4827,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           body: vectorToBody(vector)
         });
         const elapsed = (performance.now() - started).toFixed(1);
-        document.getElementById('statusQueryTime').textContent = `耗时: ${elapsed} ms`;
+        statusState.elapsed = elapsed;
+        renderStatusBar();
 
         if (!res.ok) {
           const err = await res.json().catch(() => ({ title: '请求失败', detail: res.statusText }));
@@ -8423,6 +9042,19 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         document.querySelector('[data-view="grid"]').click();
         assert(window.__tqlRequestCount === 0,
           '切换标签/结果视图不应执行查询，实际 ' + window.__tqlRequestCount + ' 次');
+      });
+
+      addAssert('i18n：外壳双语切换与恢复', 'i18n', async () => {
+        setLanguage('en');
+        assert(document.documentElement.lang === 'en', 'lang 应切到 en');
+        assert(document.getElementById('tab-queryPane').textContent.includes('TQL Console'),
+          '主标签应切到英文，实际 ' + document.getElementById('tab-queryPane').textContent);
+        assert(document.querySelector('.sidebar .nav-item[data-action="quick-find"]').textContent.includes('Documents'),
+          '侧栏应切到英文');
+        setLanguage('zh');
+        assert(document.documentElement.lang === 'zh-CN', 'lang 应恢复 zh-CN');
+        assert(document.getElementById('tab-queryPane').textContent.includes('TQL 查询控制台'),
+          '主标签应恢复中文');
       });
 
       addAssert('结果视图切换：grid/graph/json 三视图互斥', '标签页', async () => {
