@@ -152,7 +152,7 @@ Rust Embedded Core 是产品主体和公共语义权威。Python、Node、CLI �
 
 #### A14. QuIVer 与 ANN 算法的产品边界
 
-QuIVer 重构版本当前以 ICDE 为投稿目标，不得把历史 VLDB 投稿稿件或 arXiv 预印本写成正式录用。默认 SM-L2、显式校正/原生 L2 与历史 BQ 结果必须按真实版本区分，详见 [架构与实验边界](docs/quiver.md)。
+默认 SM-L2、显式校正/原生 L2 与历史 BQ 的算法行为和性能结果应按实际模式及版本区分，详见 [QuIVer 架构说明](docs/quiver.md)。
 
 QuIVer 是 TriviumDB 的核心 ANN 底座与主要产品卖点。以下规则区分两类变更：
 
@@ -358,7 +358,7 @@ For core algorithms and format changes, consider at least: an independent refere
 
 #### A14. Product boundaries for QuIVer and ANN algorithms
 
-The rebuilt QuIVer targets ICDE; earlier VLDB submission drafts and the arXiv preprint are not acceptance claims. Distinguish default SM-L2, explicit corrected/native-L2 modes, and historical BQ measurements by their actual revisions; see [architecture and evidence boundaries](docs/quiver.md).
+Distinguish the behavior and performance of default SM-L2, explicit corrected/native-L2 modes, and historical BQ by their actual modes and revisions; see [QuIVer architecture](docs/quiver.md).
 
 QuIVer is the core ANN foundation and a primary product differentiator of TriviumDB. The rules distinguish two kinds of change:
 

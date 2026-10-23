@@ -57,19 +57,7 @@ impl CompactionThread {
                     return;
                 }
 
-                // 1. 取出短命锁（Short-lived Lock），提取构建所需的内存副本快照
-                {
-                    let mut mt = memtable.write().unwrap_or_else(|p| {
-                        tracing::warn!("Compaction 线程: MemTable 互斥锁中毒，正在恢复 (MemTable Mutex poisoned, recovering)");
-                        p.into_inner()
-                    });
-                    // 后台压实只准备持久化需要的 BQ，不触发 ANN 或 merged 全量物化。
-                    mt.prepare_persistence_cache(false);
-                } // 👑👑👑 锁在此刻被丢弃，前台彻底解放！
-
-                // 2. 长时间无锁计算区（原旧版索引用，已废除，这里留出空白阶段）
-
-                // 3. 次级落盘锁阶段（用于写文件和热插拔指针）
+                // 持久化直接读取向量段，不再为旧 BQ 单独获取准备锁。
                 let mut mt = memtable.write().unwrap_or_else(|p| {
                     tracing::warn!("Compaction 线程：MemTable 互斥锁中毒，正在恢复 (Compaction thread: MemTable mutex poisoned, recovering)");
                     p.into_inner()

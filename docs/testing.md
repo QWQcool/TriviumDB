@@ -2,7 +2,7 @@
 
 > 从单元测试到属性测试、从覆盖率度量到变异测试：TriviumDB 的多层防御测试体系详解。
 >
-> 当前对应 `0.8.10` 版本源码；见[变更与验收范围](changes-0.8.10.md)。
+> 当前对应 `0.8.11` 版本源码；见[变更说明](changes-0.8.11.md)。
 
 ---
 
@@ -574,3 +574,22 @@ TriviumDB 通过多条独立 GitHub Actions 工作流执行测试、故障注入
 | `proptest 1.11`  | 属性测试   | `Cargo.toml` dev-dependencies（已内置） |
 | `cargo-llvm-cov` | 覆盖率度量 | `cargo install cargo-llvm-cov`          |
 | `cargo-mutants`  | 变异测试   | `cargo install cargo-mutants`           |
+
+## 向量存储开销回归
+
+`tests/storage/vector_memory.rs` 验证旧 BQ 默认零常驻、显式视图按容量计量和写入失效、两种持久化模式的合法空 BQ 块、mmap 单层零拷贝、混合层 COW/墓碑复用及过滤查询与 Rom 对照。`brute_force` 的独立串行 reference 覆盖 FP32/FP16/u64、尾维、同分、过滤、空段与混合分段；`test-hooks` 保留显式合并视图发布前的独占交错验证。历史 v5 fixture 使用独立的 32/48-chunk 位布局。
+
+```bash
+cargo test --test storage vector_memory
+cargo test --lib 分段精确扫描
+cargo test --features test-hooks --test concurrency 显式连续视图交错
+```
+
+## 文本索引生命周期
+
+`tests/storage/text_index_lifecycle.rs` 覆盖 Rom/Mmap 未加载保存、正文替换、关键词幂等、节点删除和 ID 复用、WAL 回放、预算拒绝、写入失败重试、只读零写和旧 v2 快照兼容。BM25 分数使用独立词袋 reference 校验；短中文检索同时验证 BM25 与 `CONTAINS` 扫描回退。Rust、Python、Node 的公共 API 测试复用 `tests/contracts/public_cases.json` 中的文本生命周期用例，并检查关闭后构建错误的透传。
+
+```bash
+cargo test --test storage text_index_lifecycle -- --test-threads=1
+cargo test --test contracts 共享json契约由rust适配器完整执行
+```

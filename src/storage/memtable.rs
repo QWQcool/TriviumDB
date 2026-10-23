@@ -319,10 +319,13 @@ pub(crate) struct QuiverBuildSnapshot {
 type CrossModalCacheKey = (String, Vec<u8>);
 type CrossModalCacheEntry = (u64, u64, u64, CrossModalStats);
 
-/// 内存工作区，扮演类似 LSM Tree 中 MemTable 的角色。
-///
-/// v0.4 改进：向量存储委托给 VecPool（分层 mmap + 内存增量），
-/// Payload 和邻接表保持纯内存存储（小而热，随机访问）。
+enum PendingTextMutation {
+    Keyword(NodeId, String),
+    Text(NodeId, String),
+    Delete(NodeId),
+}
+
+/// 数据库的权威内存工作区，向量池与派生索引共享节点生命周期。
 pub struct MemTable<T: VectorType> {
     dim: usize,
     next_id: NodeId,
@@ -338,12 +341,16 @@ pub struct MemTable<T: VectorType> {
     // 基础层由 OS PageCache 按需加载，启动零拷贝
     vec_pool: VecPool<T>,
 
-    // 量化签名池 (LSH / Binary Quantization) 初筛选
-    bq_signatures: Vec<BqSignature>,
-    bq_dirty: bool, // delete / update_vector 后标记需要重建
+    // 旧 Rust 整库签名视图仅在调用方显式请求时生成；正式查询和持久化不分配它。
+    bq_signatures: std::sync::OnceLock<Vec<BqSignature>>,
 
     // 附设文本倒排引擎 (完全可选，纯碎占用独立内存不干扰底座)
     text_index: TextIndex,
+    // 未加载的 sidecar 与待合并操作分开保存，避免把“未加载”解释为“空索引”。
+    deferred_text_path: Option<String>,
+    deferred_text_meta: Option<[u8; 28]>,
+    pending_text_mutations: Vec<PendingTextMutation>,
+    text_memory_limit: usize,
 
     // 2. 元数据映射（文档型负载）—— 原始 JSON 紧凑存储，按访问惰性解析
     payloads: PayloadStore,
@@ -433,9 +440,12 @@ impl<T: VectorType> MemTable<T> {
             property_generation: 0,
             graph_generation: 0,
             vec_pool: VecPool::new(dim),
-            bq_signatures: Vec::new(),
-            bq_dirty: false,
+            bq_signatures: std::sync::OnceLock::new(),
             text_index: TextIndex::new(),
+            deferred_text_path: None,
+            deferred_text_meta: None,
+            pending_text_mutations: Vec::new(),
+            text_memory_limit: 0,
             payloads: PayloadStore::default(),
             edges: HashMap::new(),
             mapped_graph: None,
@@ -477,9 +487,12 @@ impl<T: VectorType> MemTable<T> {
             property_generation: 0,
             graph_generation: 0,
             vec_pool,
-            bq_signatures: Vec::new(),
-            bq_dirty: false,
+            bq_signatures: std::sync::OnceLock::new(),
             text_index: TextIndex::new(),
+            deferred_text_path: None,
+            deferred_text_meta: None,
+            pending_text_mutations: Vec::new(),
+            text_memory_limit: 0,
             payloads: PayloadStore::default(),
             edges: HashMap::new(),
             mapped_graph: None,
@@ -555,6 +568,7 @@ impl<T: VectorType> MemTable<T> {
     fn mark_changed(&mut self, vectors_changed: bool) {
         self.generation = self.generation.wrapping_add(1);
         if vectors_changed {
+            self.bq_signatures.take();
             self.vector_generation = self.vector_generation.wrapping_add(1);
             self.cross_modal_stats_cache
                 .write()
@@ -666,6 +680,7 @@ impl<T: VectorType> MemTable<T> {
 
     /// 暴露 VecPool 的可变引用（供 flush 时持久化向量池）
     pub fn vec_pool_mut(&mut self) -> &mut VecPool<T> {
+        self.bq_signatures.take();
         &mut self.vec_pool
     }
 
@@ -1218,20 +1233,11 @@ impl<T: VectorType> MemTable<T> {
     }
 
     pub fn search_cache_needs_prepare(&self, materialize_flat: bool) -> bool {
-        let total = self.vec_pool.total_count();
-        let bq_needed = self.bq_signatures.len() != total || self.bq_dirty;
-        let flat_needed = (materialize_flat || self.quiver_index.is_none())
-            && self.vec_pool.cache_needs_rebuild();
-        bq_needed || flat_needed
+        materialize_flat && self.vec_pool.cache_needs_rebuild()
     }
 
     pub fn prepare_search_cache(&mut self, materialize_flat: bool) {
-        let total = self.vec_pool.total_count();
-        if self.bq_signatures.len() != total || self.bq_dirty {
-            self.rebuild_bq_signatures(total);
-            self.bq_dirty = false;
-        }
-        if materialize_flat || self.quiver_index.is_none() {
+        if materialize_flat {
             self.vec_pool.ensure_cache();
         }
     }
@@ -1278,39 +1284,17 @@ impl<T: VectorType> MemTable<T> {
             .saturating_add(sm_rows)
     }
 
-    /// 仅准备持久化需要的 BQ 与连续向量缓存，不触发 ANN 构建。
+    /// 显式准备连续视图；当前持久化直接使用分段向量，不需要物化。
     pub fn prepare_persistence_cache(&mut self, materialize_flat: bool) {
-        let total = self.vec_pool.total_count();
-        if self.bq_signatures.len() != total || self.bq_dirty {
-            self.rebuild_bq_signatures(total);
-            self.bq_dirty = false;
-        }
         if materialize_flat {
             self.vec_pool.ensure_cache();
         }
     }
 
-    /// 确保 BQ 签名/向量缓存已就绪，并自动管理 QuIVer 索引生命周期
-    ///
-    /// # 冷热分离与内存控制
-    /// `materialize_flat` 控制是否物化全量 merged 缓存（把整个 mmap 复制入堆）：
-    /// - `true`：调用方随后需要连续的 `flat_vectors()`（暴力全扫 / 残差影子查询 /
-    ///   Rom 持久化），必须物化。
-    /// - `false`：纯 QuIVer 检索路径——冷向量按需从 mmap 读取，无需 merged。
-    ///
-    /// 注意：即便传入 `false`，若没有可用的 QuIVer 索引（查询将回退到暴力全扫），
-    /// 仍会物化 merged 以保证暴力路径可用。
-    ///
-    /// BQ 签名与 QuIVer 构建均采用按 slot 流式读取 mmap 的方式，不依赖 merged 缓存。
+    /// 管理 QuIVer 自动构建；只有显式请求连续视图时才准备合并缓存。
+    /// 当前查询按 slot 或分段读取向量，不依赖连续副本和旧 1-bit 签名。
     pub fn ensure_vectors_cache(&mut self, materialize_flat: bool) {
-        // 1. BQ 签名（流式重建，不触发 merged 缓存）
-        let total = self.vec_pool.total_count();
-        if self.bq_signatures.len() != total || self.bq_dirty {
-            self.rebuild_bq_signatures(total);
-            self.bq_dirty = false;
-        }
-
-        // 2. QuIVer 自动构建：当数据量 >= 10,000 且索引不存在时自动触发
+        // QuIVer 自动构建：当数据量 >= 10,000 且索引不存在时自动触发
         let active = self.payloads.len();
         if self.dim <= crate::index::bq::MAX_BQ_DIM
             && self.auto_build_quiver
@@ -1320,36 +1304,36 @@ impl<T: VectorType> MemTable<T> {
             self.build_quiver_impl(&QuIVerConfig::default());
         }
 
-        // 3. 仅在确实需要连续 flat 数组时才物化 merged 缓存：
-        //    - 调用方显式要求（Rom 持久化 / 残差 / 强制暴力）
-        //    - 或没有 QuIVer 索引（查询将回退暴力全扫，需要 flat）
-        if materialize_flat || self.quiver_index.is_none() {
+        // 仅为显式连续视图请求物化混合两层的缓存。
+        if materialize_flat {
             self.vec_pool.ensure_cache();
         }
     }
 
-    /// 原位重建 BQ 签名，复用旧容量，避免新旧完整数组同时驻留。
-    fn rebuild_bq_signatures(&mut self, total: usize) {
-        self.bq_signatures.clear();
-        self.bq_signatures.reserve(total);
-        for i in 0..total {
-            match self.vec_pool.get(i) {
-                Some(v) => self.bq_signatures.push(BqSignature::from_vector(v)),
-                // 兜底以防向量池维度异常或越界
-                None => self.bq_signatures.push(BqSignature::empty()),
-            }
-        }
-    }
-
-    /// 获取 BQ 量化初筛签名
+    /// 按需计算单条旧式签名，不创建整库数组。
     pub fn get_bq_signature(&self, index: usize) -> Option<BqSignature> {
-        self.bq_signatures.get(index).copied()
+        if let Some(signatures) = self.bq_signatures.get() {
+            return signatures.get(index).copied();
+        }
+        self.vec_pool.get(index).map(BqSignature::from_vector)
     }
 
-    /// 直接暴露 BQ 签名数组的连续内存切片，用于热循环零开销扫描
-    #[inline]
+    /// 显式请求旧式连续签名视图时才分配；该分配计入内存统计。
     pub fn bq_signatures_slice(&self) -> &[BqSignature] {
-        &self.bq_signatures
+        self.bq_signatures.get_or_init(|| {
+            (0..self.vec_pool.total_count())
+                .map(|index| self.get_bq_signature(index).unwrap_or_default())
+                .collect()
+        })
+    }
+
+    /// 已物化旧签名视图所占的堆容量；未请求时为零。
+    pub fn bq_cache_bytes(&self) -> usize {
+        self.bq_signatures.get().map_or(0, |signatures| {
+            signatures
+                .capacity()
+                .saturating_mul(std::mem::size_of::<BqSignature>())
+        })
     }
 
     /// 直接暴露 Fast Tags (Bloom 签名) 数组切片，O(1) 极大加速属性过滤
@@ -1369,8 +1353,7 @@ impl<T: VectorType> MemTable<T> {
 
     /// 从持久化文件恢复 BQ 签名数组（跳过重建）
     pub fn set_bq_signatures(&mut self, sigs: Vec<BqSignature>) {
-        self.bq_signatures = sigs;
-        self.bq_dirty = false; // 刚恢复的签名是干净的
+        self.bq_signatures = std::sync::OnceLock::from(sigs);
     }
 
     /// 从持久化文件恢复 QuIVer 索引（跳过重建）
@@ -1496,12 +1479,6 @@ impl<T: VectorType> MemTable<T> {
         if self.dim > crate::index::bq::MAX_BQ_DIM {
             self.quiver_index = None;
             return;
-        }
-        // 确保 BQ 签名就绪（流式，不物化 merged），然后构建索引
-        let total = self.vec_pool.total_count();
-        if self.bq_signatures.len() != total || self.bq_dirty {
-            self.rebuild_bq_signatures(total);
-            self.bq_dirty = false;
         }
         self.build_quiver_impl(config);
     }
@@ -2340,6 +2317,7 @@ impl<T: VectorType> MemTable<T> {
         if !self.payloads.contains_key(&id) {
             return Err(TriviumError::NodeNotFound(id));
         }
+        self.reserve_text_deletes(1)?;
 
         // 1. 向量层：通过 VecPool 逻辑删除（置零），并回收物理卡槽
         if let Some(idx) = self.ids_to_indices.remove(&id) {
@@ -2354,6 +2332,12 @@ impl<T: VectorType> MemTable<T> {
         }
 
         // 3. 元数据层
+        if self.deferred_text_path.is_some() {
+            self.pending_text_mutations
+                .push(PendingTextMutation::Delete(id));
+        } else {
+            self.text_index.remove_node(id);
+        }
         self.payloads.remove(id);
         self.active_ids.remove(id);
 
@@ -2422,7 +2406,6 @@ impl<T: VectorType> MemTable<T> {
         self.mark_property_changed();
         self.mark_graph_changed();
 
-        self.bq_dirty = true;
         if !self.quiver_sync_paused {
             self.invalidate_quiver_for_delete(id);
         }
@@ -2639,7 +2622,6 @@ impl<T: VectorType> MemTable<T> {
         match self.ids_to_indices.get(&id) {
             Some(&idx) => {
                 self.vec_pool.update(idx, vector);
-                self.bq_dirty = true; // 向量变了，BQ 签名需要重建
                 // QuIVer 增量更新：soft_delete 旧向量 + incremental_insert 新向量
                 if !self.quiver_sync_paused
                     && let Some(ref mut quiver) = self.quiver_index
@@ -2775,9 +2757,21 @@ impl<T: VectorType> MemTable<T> {
             .as_ref()
             .map(|index| index.stats().hot_bytes)
             .unwrap_or_default();
-        let text_bytes = self.text_index.estimated_memory_bytes();
+        let text_bytes = self.text_index.estimated_memory_bytes()
+            + self.pending_text_mutations.capacity() * std::mem::size_of::<PendingTextMutation>()
+            + self
+                .pending_text_mutations
+                .iter()
+                .map(|mutation| match mutation {
+                    PendingTextMutation::Keyword(_, text) | PendingTextMutation::Text(_, text) => {
+                        text.capacity()
+                    }
+                    PendingTextMutation::Delete(_) => 0,
+                })
+                .sum::<usize>();
         let property_index_bytes = self.property_indexes.estimated_memory_bytes();
         vec_bytes
+            + self.bq_cache_bytes()
             + payload_bytes
             + edge_bytes
             + index_bytes
@@ -2799,13 +2793,23 @@ impl<T: VectorType> MemTable<T> {
 
     pub fn index_keyword(&mut self, id: NodeId, keyword: &str) {
         if self.contains(id) {
-            self.text_index.add_keyword(id, keyword);
+            if self.deferred_text_path.is_some() {
+                self.pending_text_mutations
+                    .push(PendingTextMutation::Keyword(id, keyword.to_owned()));
+            } else {
+                self.text_index.add_keyword(id, keyword);
+            }
         }
     }
 
     pub fn index_text(&mut self, id: NodeId, text: &str) {
         if self.contains(id) {
-            self.text_index.add_text(id, text);
+            if self.deferred_text_path.is_some() {
+                self.pending_text_mutations
+                    .push(PendingTextMutation::Text(id, text.to_owned()));
+            } else {
+                self.text_index.add_text(id, text);
+            }
         }
     }
 
@@ -2813,8 +2817,114 @@ impl<T: VectorType> MemTable<T> {
         self.text_index.build();
     }
 
+    pub(crate) fn try_build_text_index(&mut self) -> Result<()> {
+        self.text_index.try_build()
+    }
+
     pub(crate) fn set_text_index(&mut self, text_index: TextIndex) {
         self.text_index = text_index;
+        self.text_index
+            .retain_nodes(|id| self.active_ids.contains(id));
+        self.deferred_text_path = None;
+        self.deferred_text_meta = None;
+        self.pending_text_mutations = Vec::new();
+    }
+
+    pub(crate) fn defer_text_index(&mut self, path: &str) {
+        self.text_index = TextIndex::new();
+        self.deferred_text_path = Some(path.to_owned());
+        self.deferred_text_meta = crate::storage::file_format::deferred_text_metadata(path);
+        self.pending_text_mutations = Vec::new();
+    }
+
+    pub(crate) fn text_index_is_deferred(&self) -> bool {
+        self.deferred_text_path.is_some()
+    }
+
+    pub(crate) fn text_index_has_pending_changes(&self) -> bool {
+        !self.pending_text_mutations.is_empty()
+    }
+
+    pub(crate) fn deferred_text_metadata(&self) -> Option<[u8; 28]> {
+        self.deferred_text_meta
+    }
+
+    pub(crate) fn update_deferred_text_metadata(&mut self, metadata: [u8; 28]) {
+        self.deferred_text_meta = Some(metadata);
+    }
+
+    pub(crate) fn set_text_memory_limit(&mut self, limit: usize) {
+        self.text_memory_limit = limit;
+    }
+
+    fn check_text_memory_budget(&self, estimated_bytes: usize) -> Result<()> {
+        let current_bytes = self.estimated_memory_bytes();
+        if self.text_memory_limit > 0
+            && current_bytes.saturating_add(estimated_bytes) > self.text_memory_limit
+        {
+            return Err(TriviumError::CapacityReservationRejected {
+                requested_nodes: 0,
+                estimated_bytes,
+                current_bytes,
+                memory_limit: self.text_memory_limit,
+            });
+        }
+        Ok(())
+    }
+
+    /// 提交 WAL 前预留延期删除记录，避免事务应用期间再做可失败分配。
+    pub(crate) fn reserve_text_deletes(&mut self, count: usize) -> Result<()> {
+        if self.deferred_text_path.is_none() || count == 0 {
+            return Ok(());
+        }
+        let len = self.pending_text_mutations.len();
+        let capacity = self.pending_text_mutations.capacity();
+        let required =
+            len.checked_add(count)
+                .ok_or_else(|| TriviumError::CapacityAllocationFailed {
+                    reason: "延期文本操作数量溢出".into(),
+                })?;
+        if required <= capacity {
+            return Ok(());
+        }
+        let target = required.max(capacity.saturating_mul(2)).max(4);
+        let bytes = (target - capacity).saturating_mul(std::mem::size_of::<PendingTextMutation>());
+        self.check_text_memory_budget(bytes)?;
+        self.pending_text_mutations
+            .try_reserve_exact(target - len)
+            .map_err(|error| TriviumError::CapacityAllocationFailed {
+                reason: format!("预留延期文本操作失败: {error}"),
+            })
+    }
+
+    /// 在显式文本操作或发布待清理记录前加载，I/O 错误不丢弃待合并操作。
+    pub(crate) fn prepare_text_index(&mut self) -> Result<()> {
+        let Some(path) = self.deferred_text_path.as_deref() else {
+            return Ok(());
+        };
+        if self.text_memory_limit > 0 {
+            let bytes = std::fs::metadata(format!("{path}.text"))?.len();
+            // 保守计入解码、词典、posting 与自动机工作区，超预算先拒绝再解码。
+            let estimate = usize::try_from(bytes)
+                .ok()
+                .and_then(|bytes| bytes.checked_mul(32))
+                .and_then(|bytes| bytes.checked_add(64 * 1024))
+                .ok_or_else(|| TriviumError::CapacityAllocationFailed {
+                    reason: "文本索引加载峰值估算溢出".into(),
+                })?;
+            self.check_text_memory_budget(estimate)?;
+        }
+        let mut index =
+            crate::storage::file_format::read_deferred_text_index(path, self.deferred_text_meta)?;
+        for mutation in &self.pending_text_mutations {
+            match mutation {
+                PendingTextMutation::Keyword(id, keyword) => index.add_keyword(*id, keyword),
+                PendingTextMutation::Text(id, text) => index.add_text(*id, text),
+                PendingTextMutation::Delete(id) => index.remove_node(*id),
+            }
+        }
+        self.set_text_index(index);
+        Ok(())
     }
 
     pub(crate) fn text_index(&self) -> &TextIndex {
@@ -2830,16 +2940,18 @@ impl<T: VectorType> MemTable<T> {
     /// 遍历所有活跃节点的 payload JSON，将字符串字段值注入 BM25 倒排索引。
     /// 这使得文本混合检索在重启后自动恢复，无需额外持久化文件。
     pub fn rebuild_text_index_from_payloads(&mut self) {
+        self.deferred_text_path = None;
+        self.deferred_text_meta = None;
+        self.pending_text_mutations = Vec::new();
         self.text_index.clear();
         for (id, payload) in self.payloads.iter() {
             if let serde_json::Value::Object(map) = payload.as_ref() {
-                for (_key, value) in map {
-                    if let serde_json::Value::String(text) = value
-                        && !text.is_empty()
-                    {
-                        self.text_index.add_text(id, text);
-                    }
-                }
+                let text = map
+                    .values()
+                    .filter_map(serde_json::Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                self.text_index.add_text(id, &text);
             }
         }
         self.text_index.build();

@@ -19,7 +19,7 @@ use super::{lock_or_recover, write_or_recover};
 /// 设计要点：
 /// - 幂等性：已存在的 ID 会被跳过
 /// - 无论是否跳过插入，都推进 `next_id` 防止 ID 复用
-pub(crate) fn replay_entry<T: VectorType>(mt: &mut MemTable<T>, entry: WalEntry<T>) {
+pub(crate) fn replay_entry<T: VectorType>(mt: &mut MemTable<T>, entry: WalEntry<T>) -> Result<()> {
     match entry {
         WalEntry::Insert {
             id,
@@ -54,7 +54,7 @@ pub(crate) fn replay_entry<T: VectorType>(mt: &mut MemTable<T>, entry: WalEntry<
         }
         WalEntry::Delete { id } => {
             if mt.contains(id) {
-                let _ = mt.delete(id);
+                mt.delete(id)?;
             }
         }
         WalEntry::Unlink { src, dst } => {
@@ -83,6 +83,7 @@ pub(crate) fn replay_entry<T: VectorType>(mt: &mut MemTable<T>, entry: WalEntry<
             // 已在 wal.rs 内的回放过滤环节处理，这里不应再收到，直接忽略
         }
     }
+    Ok(())
 }
 
 // ════════════════════════════════════════════════════════
@@ -538,6 +539,11 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                 .map(|(id, payload)| (*id, payload.as_ref())),
         )?;
 
+        let delete_count = ops
+            .iter()
+            .filter(|op| matches!(op, TxOp::Delete { .. }))
+            .count();
+        mt.reserve_text_deletes(delete_count)?;
         let insert_count = pre_assigned_ids.iter().filter(|id| id.is_some()).count();
         let estimated_bytes = mt.estimate_reserve_bytes(insert_count)?;
         let current_bytes = mt.estimated_memory_bytes();

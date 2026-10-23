@@ -42,9 +42,28 @@ def run_shared_contract(root: str) -> None:
                 assert any(needle in str(error) for needle in expected["error_contains_any"])
             else:
                 raise AssertionError(case["name"])
+        elif case["operation"] == "text_lifecycle":
+            parameters = case["parameters"]
+            db.index_text(1, parameters["old_text"])
+            db.index_keyword(1, parameters["keyword"])
+            db.index_keyword(1, parameters["keyword"])
+            db.index_keyword(2, parameters["keyword"])
+            db.build_text_index()
+            db.index_text(1, parameters["new_text"])
+            for phase in ["before_delete", "after_delete"]:
+                if phase == "after_delete":
+                    db.delete(1)
+                for check in expected[phase]:
+                    assert len(db.tql(check["query"])) == check["count"], case["name"]
         else:
             raise AssertionError(f"未知共享契约操作: {case['operation']}")
     db.close()
+    try:
+        db.build_text_index()
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("关闭后的文本构建错误必须透传")
 
 
 def main() -> None:

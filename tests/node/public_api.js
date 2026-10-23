@@ -44,11 +44,26 @@ function runSharedContract(root) {
         error => expected.error_contains_any.some(needle => String(error).includes(needle)),
         testCase.name,
       )
+    } else if (testCase.operation === 'text_lifecycle') {
+      const parameters = testCase.parameters
+      db.indexText(1, parameters.old_text)
+      db.indexKeyword(1, parameters.keyword)
+      db.indexKeyword(1, parameters.keyword)
+      db.indexKeyword(2, parameters.keyword)
+      db.buildTextIndex()
+      db.indexText(1, parameters.new_text)
+      for (const phase of ['before_delete', 'after_delete']) {
+        if (phase === 'after_delete') db.delete(1)
+        for (const check of expected[phase]) {
+          assert.equal(db.tql(check.query).length, check.count, testCase.name)
+        }
+      }
     } else {
       throw new Error(`未知共享契约操作: ${testCase.operation}`)
     }
   }
   db.close()
+  assert.throws(() => db.buildTextIndex(), /closed|关闭/i)
 }
 
 try {
