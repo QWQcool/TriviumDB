@@ -1063,6 +1063,87 @@
       z-index: 6;
     }
     .graph-float-toolbar .btn { justify-content: center; min-width: 84px; padding: 4px 10px; font-size: 12px; }
+
+    /* V2 图探索覆盖层：HUD / 查询舱 / 底部布局条 / 结果抽屉 */
+    .v2-graph-stage { position: relative; }
+    .v2-hud { position: absolute; z-index: 9; display: flex; gap: 6px; }
+    .v2-hud.left { left: 12px; top: 12px; }
+    .v2-hud .btn { border-color: rgba(190, 214, 255, 0.22); background: rgba(9, 13, 26, 0.78); color: #eef4ff; border-radius: 999px; }
+    .v2-cockpit {
+      position: absolute; z-index: 10; top: 12px; left: 50%; transform: translateX(-50%);
+      width: min(640px, calc(100% - 540px)); min-width: 380px;
+      border: 1px solid rgba(190, 214, 255, 0.30); border-radius: 14px;
+      background: rgba(7, 11, 22, 0.86); box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+      overflow: hidden; backdrop-filter: blur(10px);
+    }
+    .v2-cockpit-bar { min-height: 40px; display: flex; align-items: center; gap: 8px; padding: 5px 8px; }
+    .v2-cockpit-mode {
+      height: 26px; padding: 0 8px; border: 1px solid rgba(99, 242, 231, 0.30);
+      border-radius: 6px; background: rgba(99, 242, 231, 0.12); color: #63f2e7;
+      font: 600 10.5px/1 var(--font-mono); cursor: pointer; white-space: nowrap;
+    }
+    .v2-cockpit-preview {
+      flex: 1; min-width: 0; color: #d8e6ff; font: 11.5px/1.4 var(--font-mono);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
+    }
+    .v2-cockpit-preview .kw { color: #63f2e7; }
+    .v2-cockpit-preview .str { color: #f4cf6a; }
+    .v2-cockpit-run {
+      height: 26px; padding: 0 11px; border: 0; border-radius: 999px;
+      background: linear-gradient(100deg, #63f2e7, #a78bfa); color: #06101c;
+      font-weight: 750; cursor: pointer; white-space: nowrap;
+    }
+    .v2-cockpit-body { display: none; grid-template-columns: 1.2fr 1fr; gap: 12px; padding: 10px 12px 12px; border-top: 1px solid rgba(190, 214, 255, 0.16); }
+    .v2-cockpit.open .v2-cockpit-body { display: grid; }
+    .v2-cockpit-query {
+      width: 100%; min-height: 92px; resize: vertical; border: 1px solid rgba(190, 214, 255, 0.16);
+      border-radius: 10px; background: rgba(3, 6, 14, 0.78); color: #d8e6ff;
+      padding: 8px 10px; font: 11.5px/1.7 var(--font-mono); outline: none;
+    }
+    .v2-cockpit-field { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; color: #aebad4; font-size: 11px; }
+    .v2-cockpit-field input[type="range"] { flex: 1; accent-color: #63f2e7; }
+    .v2-cockpit-hits { display: flex; flex-direction: column; gap: 6px; }
+    .v2-cockpit-hits-head { color: #72819f; font: 10px/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+    .v2-cockpit-empty { padding: 18px 10px; border: 1px dashed rgba(190, 214, 255, 0.16); border-radius: 10px; color: #72819f; font-size: 11.5px; text-align: center; }
+    .v2-graph-controls {
+      left: 50%; right: auto; bottom: 54px; transform: translateX(-50%);
+      flex-wrap: nowrap; max-width: calc(100% - 32px); z-index: 11;
+      background: rgba(5, 8, 18, 0.84); border-color: rgba(190, 214, 255, 0.30);
+      backdrop-filter: blur(10px);
+    }
+    .v2-graph-controls .btn { font-size: 11.5px; padding-inline: 9px; }
+    .v2-more-menu {
+      position: absolute; right: 12px; bottom: 100px; z-index: 12; display: none; flex-direction: column; gap: 5px;
+      padding: 6px; border: 1px solid rgba(190, 214, 255, 0.26); border-radius: 12px;
+      background: rgba(5, 8, 18, 0.92); box-shadow: 0 16px 38px rgba(0, 0, 0, 0.42);
+    }
+    .v2-more-menu.open { display: flex; }
+    .v2-more-menu .btn { justify-content: flex-start; min-width: 118px; border-color: transparent; background: transparent; color: #aebad4; }
+    .v2-more-menu .btn:hover { background: rgba(99, 242, 231, 0.10); border-color: transparent; color: #fff; }
+    .v2-dock {
+      position: absolute; left: 12px; right: 12px; bottom: 0; z-index: 10; height: 36px;
+      border: 1px solid rgba(190, 214, 255, 0.28); border-bottom: 0; border-radius: 14px 14px 0 0;
+      background: rgba(7, 11, 22, 0.90); overflow: hidden; transition: height 180ms var(--ease-out);
+    }
+    .v2-dock.open { height: 194px; }
+    .v2-dock-bar {
+      width: 100%; height: 35px; border: 0; background: transparent; color: #aebad4;
+      display: flex; align-items: center; justify-content: space-between; padding: 0 12px;
+      font: 11px/1 var(--font-mono); cursor: pointer;
+    }
+    .v2-dock-body { padding: 0 12px 12px; color: #72819f; font-size: 12px; }
+    .v2-dock-empty { padding: 18px; border: 1px dashed rgba(190, 214, 255, 0.14); border-radius: 10px; text-align: center; }
+    body.graph-dock-open .v2-graph-controls { bottom: 210px; }
+    body.graph-dock-open .v2-more-menu { bottom: 256px; }
+    @media (max-width: 1280px) {
+      .v2-hud.left { display: none; }
+      .v2-cockpit { width: calc(100% - 300px); min-width: 340px; }
+    }
+    @media (max-width: 900px) {
+      .v2-cockpit { width: calc(100% - 24px); min-width: 0; }
+      .v2-cockpit-body { grid-template-columns: 1fr; }
+      .v2-hud.left .btn { font-size: 11px; padding-inline: 8px; }
+    }
     /* 右侧统一面板打开时，图工具条与底栏左移，避免被 360px 面板盖住 */
     @media (min-width: 901px) {
       body.panel-open .graph-controls,
@@ -2540,27 +2621,55 @@
             <span style="color: var(--text-muted); font-size: 12px;" data-i18n="graph.hint.drag">提示：可在画布上自由拖拽节点，滚轮缩放，单击节点查看属性</span>
           </div>
         </div>
-        <div style="flex: 1; position: relative; background: var(--bg-surface);" id="standaloneGraphShell">
+        <div class="v2-graph-stage" style="flex: 1; position: relative; background: var(--bg-surface);" id="standaloneGraphShell">
           <canvas id="standaloneGraphCanvas" style="width: 100%; height: 100%; display: block;"></canvas>
           <!-- Sigma WebGL 渲染容器（独立画布的第二视图实例，共享同一图数据） -->
           <div class="graph-sigma-container" id="standaloneSigmaContainer" hidden></div>
-          <div class="graph-controls">
-            <button class="btn" id="centerStandaloneBtn" title="重置居中">居中视角</button>
-            <button class="btn" id="graphMergeBtnStandalone" title="把当前查询/检索结果并入图探索（增量合并）">并入图探索</button>
+          <div class="v2-hud left">
+            <button class="btn" id="graphHudSearch" data-i18n="graph.hud.search">图内搜索</button>
+            <button class="btn" id="graphHudKhop" title="k-hop 邻域步数">k-hop: 2</button>
+            <button class="btn" id="graphHudPath" data-i18n="graph.hud.path">路径追踪</button>
+          </div>
+          <section class="v2-cockpit" id="graphCockpit">
+            <div class="v2-cockpit-bar">
+              <button class="v2-cockpit-mode" id="graphCockpitToggle" type="button">TQL · VECTOR ▾</button>
+              <div class="v2-cockpit-preview" id="graphCockpitPreview"><span class="kw">SEARCH VECTOR</span> [0.12, -0.45, 0.78, 0.33] <span class="kw">TOP</span> 6 <span class="kw">RETURN</span> *</div>
+              <button class="v2-cockpit-run" id="graphCockpitRun" data-i18n="graph.cockpit.run">运行</button>
+            </div>
+            <div class="v2-cockpit-body">
+              <div>
+                <textarea class="v2-cockpit-query" id="graphCockpitQuery" spellcheck="false">SEARCH VECTOR [0.12, -0.45, 0.78, 0.33] TOP 6 RETURN *</textarea>
+                <div class="v2-cockpit-field"><span data-i18n="graph.cockpit.threshold">相似度阈值</span><input id="graphCockpitThreshold" type="range" min="70" max="95" value="75"><b id="graphCockpitThresholdValue">0.75</b></div>
+              </div>
+              <div>
+                <div class="v2-cockpit-hits-head" data-i18n="graph.cockpit.hits">命中节点</div>
+                <div id="graphCockpitHits" class="v2-cockpit-empty" data-i18n="graph.cockpit.empty">运行 TQL 后显示命中节点</div>
+              </div>
+            </div>
+          </section>
+          <div class="graph-controls v2-graph-controls">
             <button class="btn" id="toggleWebGLBtnStandalone" title="切换 WebGL/Canvas 渲染后端（加载失败自动回退 Canvas）">WebGL 渲染</button>
-            <button class="btn active" id="colorModeTypeBtnStandalone" title="按节点类型着色">按类型</button>
-            <button class="btn" id="colorModeCommunityBtnStandalone" title="Louvain 社区检测着色（按需加载）">按社区</button>
-            <button class="btn" id="graphFilterBtnStandalone" title="按节点类型 / 边 label 过滤显示">过滤器</button>
             <!-- PR-18 布局四档（独立探索视图，与全局布局模式同步） -->
             <button class="btn active" id="layoutForceBtnStandalone" title="力导向布局（物理模拟实时收敛）">力导向</button>
             <button class="btn" id="layoutClusterBtnStandalone" title="聚类布局：Louvain 社区分簇摆位（离线回退按类型分组），静态确定性">聚类</button>
             <button class="btn" id="layoutVectorBtnStandalone" title="向量星图：PCA 二维投影（无向量/低维节点放外环），静态确定性">向量星图</button>
             <button class="btn" id="layoutRadialBtnStandalone" title="度数径向布局：按连接数分同心环，静态确定性">度数径向</button>
-            <!-- PR-18 星云模式：显式 opt-in 的万级拓扑管线（Sigma 专属，物理关闭） -->
-            <button class="btn" id="nebulaModeBtn" title="星云模式：单查询拉取全库拓扑（MATCH 上限 10000 行），以 WebGL 星图呈现（Sigma 专属，物理关闭）">星云模式</button>
-            <!-- PR-18 命名空间树：按 payload 键分层导航 -->
+            <button class="btn" id="graphMoreBtn" data-i18n="graph.more">更多</button>
+          </div>
+          <div class="v2-more-menu" id="graphMoreMenu">
+            <button class="btn" id="centerStandaloneBtn" title="重置居中">居中视角</button>
+            <button class="btn" id="graphMergeBtnStandalone" title="把当前查询/检索结果并入图探索（增量合并）">并入图探索</button>
+            <button class="btn active" id="colorModeTypeBtnStandalone" title="按节点类型着色">按类型</button>
+            <button class="btn" id="colorModeCommunityBtnStandalone" title="Louvain 社区检测着色（按需加载）">按社区</button>
+            <button class="btn" id="graphFilterBtnStandalone" title="按节点类型 / 边 label 过滤显示">过滤器</button>
             <button class="btn" id="nsToggleBtn" title="命名空间树：按 payload 键分层浏览与聚焦">命名空间</button>
           </div>
+          <section class="v2-dock" id="graphDock">
+            <button class="v2-dock-bar" id="graphDockToggle" type="button">
+              <span data-i18n="graph.dock.title">结果</span><span>⌃</span>
+            </button>
+            <div class="v2-dock-body"><div class="v2-dock-empty" data-i18n="graph.dock.empty">运行查询后显示结果</div></div>
+          </section>
           <!-- PR-18 命名空间浮动面板（与过滤器面板同款式，错开位置可并存） -->
           <div class="ns-panel" id="nsPanel" hidden>
             <div class="gf-head"><strong data-i18n="graph.nsHead">命名空间</strong><button class="btn" id="nsCloseBtn" style="padding: 1px 8px;" data-i18n="graph.nsCollapse">收起</button></div>
@@ -2573,6 +2682,7 @@
             <button class="btn" id="gftZoomOutBtnStandalone" title="缩小">－</button>
             <button class="btn" id="gftFitBtnStandalone" title="适合窗口（按可见节点包围盒适配）">适合窗口</button>
             <button class="btn" id="gftExportPngBtnStandalone" title="导出 PNG（Sigma 走 toPNG，不可用时合成 layer 画布）">导出 PNG</button>
+            <button class="btn" id="nebulaModeBtn" title="星云模式：单查询拉取全库拓扑（MATCH 上限 10000 行），以 WebGL 星图呈现（Sigma 专属，物理关闭）">星云模式</button>
             <button class="btn" id="gftFullscreenBtnStandalone" title="画布全屏">全屏</button>
           </div>
           <!-- 过滤器面板已并入右侧统一面板（PR-19） -->
@@ -3099,6 +3209,15 @@
         'graph.tqlMerge': 'TQL 查询入图',
         'graph.tqlMergeTitle': '在探索器内运行只读 TQL，结果增量并入当前图（不离开探索流）',
         'graph.hint.drag': '提示：可在画布上自由拖拽节点，滚轮缩放，单击节点查看属性',
+        'graph.hud.search': '图内搜索',
+        'graph.hud.path': '路径追踪',
+        'graph.cockpit.run': '运行',
+        'graph.cockpit.threshold': '相似度阈值',
+        'graph.cockpit.hits': '命中节点',
+        'graph.cockpit.empty': '运行 TQL 后显示命中节点',
+        'graph.more': '更多',
+        'graph.dock.title': '结果',
+        'graph.dock.empty': '运行查询后显示结果',
         'graph.center': '居中视角',
         'graph.centerTitle': '重置居中',
         'graph.physics.freeze': '冻结力学',
@@ -3376,6 +3495,15 @@
         'graph.tqlMerge': 'Merge TQL into graph',
         'graph.tqlMergeTitle': 'Run read-only TQL inside the explorer and merge results without leaving the flow',
         'graph.hint.drag': 'Tip: drag nodes, scroll to zoom, click a node to inspect its payload',
+        'graph.hud.search': 'Graph search',
+        'graph.hud.path': 'Path trace',
+        'graph.cockpit.run': 'Run',
+        'graph.cockpit.threshold': 'Similarity threshold',
+        'graph.cockpit.hits': 'Matched nodes',
+        'graph.cockpit.empty': 'Run TQL to see matched nodes',
+        'graph.more': 'More',
+        'graph.dock.title': 'Results',
+        'graph.dock.empty': 'Results appear after a query',
         'graph.center': 'Fit view',
         'graph.centerTitle': 'Reset view',
         'graph.physics.freeze': 'Freeze physics',
@@ -4433,6 +4561,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       setupGraphRenderers();
       setupNodeSearch();          // PR-17：全局节点搜索
       setupGraphFloatToolbars();  // PR-17：画布浮动工具条
+      setupGraphV2Hud();          // V2：查询舱 / 更多菜单 / 结果抽屉
       startHealthPolling();
       setupPalette();
       setupAiChat();
@@ -7122,6 +7251,94 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         });
         redrawGraph();
       });
+    }
+
+    // V2 图探索覆盖层：先接查询舱/更多菜单/结果抽屉骨架，图视觉留给 Phase 3。
+    function setupGraphV2Hud() {
+      const cockpit = document.getElementById('graphCockpit');
+      const cockpitToggle = document.getElementById('graphCockpitToggle');
+      const cockpitPreview = document.getElementById('graphCockpitPreview');
+      const cockpitRun = document.getElementById('graphCockpitRun');
+      const cockpitQuery = document.getElementById('graphCockpitQuery');
+      const cockpitThreshold = document.getElementById('graphCockpitThreshold');
+      const cockpitThresholdValue = document.getElementById('graphCockpitThresholdValue');
+      if (cockpitToggle && cockpit) {
+        cockpitToggle.addEventListener('click', () => cockpit.classList.toggle('open'));
+      }
+      if (cockpitPreview && cockpit) {
+        cockpitPreview.addEventListener('click', () => cockpit.classList.toggle('open'));
+      }
+      if (cockpitThreshold && cockpitThresholdValue) {
+        cockpitThreshold.addEventListener('input', () => {
+          cockpitThresholdValue.textContent = (Number(cockpitThreshold.value) / 100).toFixed(2);
+        });
+      }
+      if (cockpitRun) {
+        cockpitRun.addEventListener('click', async () => {
+          const query = cockpitQuery ? cockpitQuery.value.trim() : '';
+          if (!query) { showToast(t('graph.cockpit.empty')); return; }
+          const input = document.getElementById('graphTqlInput');
+          if (input) input.value = query;
+          cockpitRun.disabled = true;
+          cockpitRun.textContent = t('gt.running');
+          try {
+            if (typeof runGraphTqlQuery === 'function') await runGraphTqlQuery();
+          } finally {
+            cockpitRun.disabled = false;
+            cockpitRun.textContent = t('graph.cockpit.run');
+          }
+        });
+      }
+
+      const moreBtn = document.getElementById('graphMoreBtn');
+      const moreMenu = document.getElementById('graphMoreMenu');
+      if (moreBtn && moreMenu) {
+        moreBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          moreMenu.classList.toggle('open');
+        });
+        moreMenu.addEventListener('click', (e) => {
+          if (e.target.closest('.btn')) moreMenu.classList.remove('open');
+        });
+        document.addEventListener('click', (e) => {
+          if (!moreMenu.contains(e.target) && e.target !== moreBtn) moreMenu.classList.remove('open');
+        });
+      }
+
+      const searchBtn = document.getElementById('graphHudSearch');
+      if (searchBtn) {
+        searchBtn.addEventListener('click', () => {
+          const input = document.getElementById('nodeSearchInput');
+          if (input) { input.focus(); input.select(); }
+        });
+      }
+      const khopBtn = document.getElementById('graphHudKhop');
+      const khopSelect = document.getElementById('khopDepthSelect');
+      if (khopBtn && khopSelect) {
+        khopBtn.textContent = `k-hop: ${khopSelect.value}`;
+        khopBtn.addEventListener('click', () => {
+          const values = [...khopSelect.options].map((o) => o.value);
+          const next = values[(values.indexOf(khopSelect.value) + 1) % values.length];
+          khopSelect.value = next;
+          khopSelect.dispatchEvent(new Event('change', { bubbles: true }));
+          khopBtn.textContent = `k-hop: ${next}`;
+        });
+      }
+      const pathBtn = document.getElementById('graphHudPath');
+      if (pathBtn) {
+        pathBtn.addEventListener('click', () => {
+          if (typeof setUnifiedPanelTab === 'function') setUnifiedPanelTab('detail');
+        });
+      }
+      const dock = document.getElementById('graphDock');
+      const dockToggle = document.getElementById('graphDockToggle');
+      if (dock && dockToggle) {
+        dockToggle.addEventListener('click', () => {
+          const open = dock.classList.toggle('open');
+          document.body.classList.toggle('graph-dock-open', open);
+          dockToggle.querySelector('span:last-child').textContent = open ? '⌄' : '⌃';
+        });
+      }
     }
 
     // ==========================================
