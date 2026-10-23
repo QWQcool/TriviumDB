@@ -24,7 +24,7 @@
     :root {
       --bg-app: #0b0a08;
       --bg-ink: #070806;
-      --bg-surface: #101215;
+      --bg-surface: #11110f;
       --bg-surface-secondary: #191713;
       --bg-inset: #070806;
       --border-color: rgba(184, 176, 160, 0.14);
@@ -85,13 +85,16 @@
       --btn-focus-ring: 0 0 0 2px rgba(143, 179, 176, 0.35);
       --motion-fast: 140ms;
       --motion-press: 90ms;
+      --motion-card: 160ms;
+      --motion-layout: 280ms;
+      --motion-panel: 180ms;
     }
 
     /* 默认暗色（首次访问由 setupTheme 落到 dark）。
        显式 dark 与根令牌一致，保证主题切换时不会回落到浅色。 */
     [data-theme="dark"] {
       --bg-app: #0b0a08;
-      --bg-surface: #101215;
+      --bg-surface: #11110f;
       --bg-surface-secondary: #191713;
       --bg-inset: #070806;
       --text-main: #f4eee4;
@@ -124,9 +127,9 @@
       --warning-bg: rgba(138, 109, 59, 0.10);
       --danger: #a34d4d;
       --danger-bg: rgba(163, 77, 77, 0.10);
-      --tri-doc: #8a7a5a;
-      --tri-graph: #6a5f7d;
-      --tri-vector: #3f6f6b;
+      --tri-doc: #8c764e;
+      --tri-graph: #645680;
+      --tri-vector: #4d7c78;
       --accent-gold: #8a6d3b;
       --shadow-sm: none;
       --shadow-md: 0 10px 26px rgba(60, 52, 40, 0.10);
