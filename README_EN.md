@@ -143,7 +143,7 @@ Suppose you're building an **AI conversation memory system** and the user says "
 
 **QuIVer** (Quantized Index for Vector Retrieval) is TriviumDB's in-house ANN graph index. QuIVer combines **fast BQ graph construction, training-free SM-L2 navigation, and cosine reranking of original vectors**. Navigation uses two-bit codes and per-vector magnitudes to score reconstructed squared L2; recall and throughput depend on the workload, parameters, and reranking budget.
 
-> 📖 [QuIVer architecture and configuration](docs/quiver.md) · [Benchmark guide](benches/README.md) · [0.8.10 changes](docs/changes-0.8.10.md)
+> 📖 [QuIVer architecture and configuration](docs/quiver.md) · [Benchmark guide](benches/README.md) · [0.8.11 changes](docs/changes-0.8.11.md)
 
 > ⚠️ **Dimension guidance: keeping database vectors at or below 3072 dimensions is strongly recommended.** TriviumDB storage and exact BruteForce retrieval support higher dimensions, but QuIVer's BQ signature safety limit is 3072 dimensions. Above this limit, automatic QuIVer construction is disabled and search safely falls back to BruteForce; manual QuIVer construction returns an explicit error. Higher-dimensional databases remain usable, but do not receive QuIVer ANN acceleration and incur substantially higher memory and compute costs.
 
@@ -293,7 +293,7 @@ const batchResults = await db.searchBatch(queryVectors, 10, 0, 0.0)
 
 ## Store Once, Query Many Ways
 
-Every TriviumDB node can carry a **vector, JSON document, sparse text, and graph relationships** at the same time. They share one NodeId space, transaction boundary, WAL, and lifecycle, so applications do not need to synchronize copies across a vector database, document store, and graph database. Write the data once, then choose the query path that matches each question.
+Every TriviumDB node can carry a **vector, JSON document, sparse text, and graph relationships**, accessed through one NodeId space and the query path that matches each question. Vector, document, and relationship mutations share transactions and the WAL. Separately registered sparse text is persisted by `flush()` or a writable handle's `close()`; applications should retain authoritative text and alias sources for rebuilding.
 
 ### TQL: A DIY-Composable Unified Query Language
 

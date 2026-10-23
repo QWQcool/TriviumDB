@@ -107,7 +107,7 @@ flowchart TD
         App2((Agent App)):::app
         TV[(TriviumDB<br/>单一引擎 / 单一文件 / 单一 ID 空间)]:::new
 
-        App2 ==`insert()` 向量+文本+元数据+图关系原子写入==> TV
+        App2 ==事务写入向量+文档+图关系==> TV
         TV ==`search_hybrid()` 双路混合归一锚定+图谱扩散一次返回==> App2
         TV -.`flush()` Mmap零拷贝极速热启动.-> TV
     end
@@ -218,7 +218,7 @@ const batchResults = await db.searchBatch(queryVectors, 10, 0, 0.0)
 
 ## 一次存储，多种查询
 
-TriviumDB 中的一个节点可以同时拥有**向量、JSON 文档、稀疏文本和图关系**。这些数据共享同一个 NodeId、事务、WAL 与生命周期，因此无需在向量库、文档库和图库之间同步副本。同一份数据写入一次，即可按业务问题选择不同的查询路径。
+TriviumDB 中的一个节点可以同时拥有**向量、JSON 文档、稀疏文本和图关系**，通过同一个 NodeId 按业务问题选择不同的查询路径。向量、文档与关系变更共享事务和 WAL；独立登记的稀疏文本通过 `flush()` 或可写句柄的 `close()` 持久化，应用应保留正文与别名来源以便重建。
 
 ### TQL：自由 DIY 的统一查询语言
 
@@ -334,7 +334,7 @@ Rust / Python / Node.js 三语言共享同一套 TQL、Prepared、四类属性�
 
 **QuIVer**（Quantized Index for Vector Retrieval）是 TriviumDB 自研的近似最近邻（ANN）图索引。使用 **BQ 快速构图 + 无训练 SM-L2 导航 + 原始向量余弦精排**；导航结合两位编码与每向量幅值信息计算重建平方 L2，召回和吞吐取决于数据、参数与精排预算。
 
-> 📖 [QuIVer 架构与配置](docs/quiver.md) · [基准测试指南](benches/README.md) · [0.8.10 变更说明](docs/changes-0.8.10.md)
+> 📖 [QuIVer 架构与配置](docs/quiver.md) · [基准测试指南](benches/README.md) · [0.8.11 变更说明](docs/changes-0.8.11.md)
 
 > ⚠️ **维度建议：强烈建议数据库向量维度不超过 3072。** TriviumDB 的通用存储与精确 BruteForce 检索允许更高维度，但 QuIVer 的 BQ 签名安全上限是 3072 维。超过该维度时引擎不会自动构建 QuIVer，检索会稳定回退到 BruteForce；手动构建 QuIVer 会返回明确错误。高维数据库仍可使用，但无法获得 QuIVer ANN 加速，内存和计算开销也会显著增加。
 
