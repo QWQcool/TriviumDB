@@ -1379,6 +1379,34 @@
       z-index: 2;
       background: var(--bg-surface);
     }
+    /* Graph Aurora：WebGL 容器也铺深空底与星点，避免 Sigma 透出暖黑卡片色 */
+    [data-theme="dark"] .graph-sigma-container {
+      background:
+        radial-gradient(ellipse 55% 45% at 22% 28%, rgba(99, 242, 231, 0.10), transparent 70%),
+        radial-gradient(ellipse 48% 42% at 78% 68%, rgba(167, 139, 250, 0.11), transparent 70%),
+        radial-gradient(circle at 50% 44%, rgba(16, 26, 52, 0.45), transparent 62%),
+        linear-gradient(180deg, #070b16 0%, #050812 58%, #04060d 100%);
+      background-color: #050812;
+    }
+    [data-theme="dark"] .graph-sigma-container::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        radial-gradient(circle, rgba(238, 246, 255, 0.72) 0 1px, transparent 1.5px),
+        radial-gradient(circle, rgba(238, 246, 255, 0.36) 0 1px, transparent 1.4px),
+        radial-gradient(circle, rgba(244, 207, 106, 0.62) 0 1.1px, transparent 1.8px);
+      background-size: 96px 96px, 151px 151px, 223px 223px;
+      background-position: 0 0, 31px 47px, 79px 21px;
+      opacity: 0.42;
+    }
+    /* WebGL 没有逐节点 shadowBlur；用 canvas 级 drop-shadow 做近似星云光晕 */
+    [data-theme="dark"] .graph-sigma-container canvas {
+      filter: drop-shadow(0 0 5px rgba(99, 242, 231, 0.26))
+              drop-shadow(0 0 10px rgba(167, 139, 250, 0.12));
+    }
+    body.graph-glow-off [data-theme="dark"] .graph-sigma-container canvas { filter: none; }
     /* 社区着色图例（按社区模式显示） */
     .graph-legend {
       position: absolute;
@@ -2683,6 +2711,7 @@
             <button class="btn" id="gftFitBtnStandalone" title="适合窗口（按可见节点包围盒适配）">适合窗口</button>
             <button class="btn" id="gftExportPngBtnStandalone" title="导出 PNG（Sigma 走 toPNG，不可用时合成 layer 画布）">导出 PNG</button>
             <button class="btn" id="nebulaModeBtn" title="星云模式：单查询拉取全库拓扑（MATCH 上限 10000 行），以 WebGL 星图呈现（Sigma 专属，物理关闭）">星云模式</button>
+            <button class="btn" id="graphMotionBtn" title="图动效开关" aria-pressed="true">动效: 开</button>
             <button class="btn" id="gftFullscreenBtnStandalone" title="画布全屏">全屏</button>
           </div>
           <!-- 过滤器面板已并入右侧统一面板（PR-19） -->
@@ -3211,6 +3240,10 @@
         'graph.hint.drag': '提示：可在画布上自由拖拽节点，滚轮缩放，单击节点查看属性',
         'graph.hud.search': '图内搜索',
         'graph.hud.path': '路径追踪',
+        'graph.motion.label': '动效',
+        'graph.motion.on': '开',
+        'graph.motion.off': '关',
+        'graph.motion.reduced': '系统已启用“减少动态效果”',
         'graph.cockpit.run': '运行',
         'graph.cockpit.threshold': '相似度阈值',
         'graph.cockpit.hits': '命中节点',
@@ -3497,6 +3530,10 @@
         'graph.hint.drag': 'Tip: drag nodes, scroll to zoom, click a node to inspect its payload',
         'graph.hud.search': 'Graph search',
         'graph.hud.path': 'Path trace',
+        'graph.motion.label': 'Motion',
+        'graph.motion.on': 'on',
+        'graph.motion.off': 'off',
+        'graph.motion.reduced': 'Reduced motion is enabled by the system',
         'graph.cockpit.run': 'Run',
         'graph.cockpit.threshold': 'Similarity threshold',
         'graph.cockpit.hits': 'Matched nodes',
@@ -3918,6 +3955,7 @@
         else genEl.textContent = `${t('header.generation')}: -`;
       }
       syncHeaderViewName();
+      syncGraphMotionButton();
       UNLABELED_EDGE_LABEL = t('graph.edgeUnlabeled');
       applyGraphChromeI18n();
     }
@@ -4580,9 +4618,14 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     // 主题切换（localStorage 优先；无保存值时跟随系统 prefers-color-scheme）
     function applyThemeAttributes(theme) {
       document.documentElement.setAttribute('data-theme', theme);
+      // 三模节点色随主题切换（暗色 B 派高亮 / 浅色暖石低饱和）
+      if (graphColorMode === 'type') {
+        graphNodes.forEach(n => { n.color = getNodeColor(n.typeKey); });
+      }
       redrawGraph();
       // Sigma 实例的主题相关配色（节点边/画布底色）随主题重建
       if (graphBackend === 'sigma') rebuildSigmaInstances();
+      startGraphAuroraMotion();
       scheduleGraphHashWrite(); // PR-21 深链：主题变更入 hash（selftest 页内部禁用）
     }
     function setupTheme() {
@@ -4841,6 +4884,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           if (targetId === 'graphExplorePane') {
             initStandaloneGraph();
           }
+          startGraphAuroraMotion();
           scheduleGraphHashWrite(); // PR-21 深链：活动标签页入 hash（selftest 页内部禁用）
         });
       });
@@ -4858,7 +4902,10 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           document.getElementById('viewGrid').style.display = view === 'grid' ? 'block' : 'none';
           document.getElementById('viewGraph').style.display = view === 'graph' ? 'block' : 'none';
           document.getElementById('viewJson').style.display = view === 'json' ? 'block' : 'none';
-          if (view === 'graph') redrawGraph();
+          if (view === 'graph') {
+            redrawGraph();
+            startGraphAuroraMotion();
+          }
         });
       });
       syncHeaderViewName();
@@ -6401,6 +6448,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         const pathHint = document.getElementById('pathHint');
         if (pathHint) pathHint.textContent = '';
       }
+      document.body.classList.toggle('graph-glow-off', graphNodes.length > GRAPH_AURORA_MAX_NODES);
+      startGraphAuroraMotion();
     }
 
     // 规模护栏分流：>1500 只渲染（物理必关），300<n≤1500 关物理保静态布局，
@@ -6454,6 +6503,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     // 力导向布局引擎（斥力 + 弹簧 + 向心力，冷却收敛后自动停止）
     // ==========================================
     function startSimulation(alpha) {
+      stopGraphAuroraMotion();
       // prefers-reduced-motion：跳过布局动画，同步收敛到静态布局后直接绘制
       //（引擎坐标不变，WebGL 后端同样受益；物理锁定的静态布局本就不进动画）
       if (prefersReducedMotion() && graphNodes.length > 0 && !physicsLockedByScale) {
@@ -6476,6 +6526,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         simulationRafId = requestAnimationFrame(simulationStep);
       } else {
         simulationRafId = null;
+        startGraphAuroraMotion();
       }
     }
 
@@ -6546,15 +6597,22 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     }
 
     function getNodeColor(type) {
-      // 三模色（payload 米金 / graph 紫灰 / vector 青灰）+ 语义色，低饱和
-      const colors = {
+      const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+      // 暗色图舞台用 B 派高亮三模色；浅色仍保持暖石低饱和色。
+      const colors = dark ? {
+        person: '#5eead4',
+        paper: '#fbbf24',
+        topic: '#a78bfa',
+        user: '#f4cf6a',
+        event: '#f472b6'
+      } : {
         person: '#8fb3b0',
         paper: '#c6b9a0',
         topic: '#9589ad',
         user: '#d6b881',
         event: '#c77777'
       };
-      return colors[type] || '#8fb3b0';
+      return colors[type] || colors.person;
     }
 
     // ==========================================
@@ -6565,6 +6623,12 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     // ==========================================
     const NODE_SEARCH_MAX_RESULTS = 12; // 节点搜索下拉最多展示条数
     const GRAPH_DEGREE_RADIUS_CAP = 20; // 度数计入半径的上限（超过后半径封顶 2 倍）
+    const GRAPH_AURORA_FULL_NODES = 300;  // 全量 glow/呼吸上限
+    const GRAPH_AURORA_MAX_NODES = 1500;  // 超过后关闭 glow 与流动
+    let auroraPhase = 0;
+    let auroraRafId = null;
+    let auroraLastDraw = 0;
+    let graphMotionEnabled = null;
 
     // 边透明度：节点越密边越淡；≤300 节点恒为 0.35，超密 clamp 到 0.05 下限
     function graphEdgeAlpha(nodeCount) {
@@ -7339,6 +7403,15 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           dockToggle.querySelector('span:last-child').textContent = open ? '⌄' : '⌃';
         });
       }
+      const motionBtn = document.getElementById('graphMotionBtn');
+      if (motionBtn) {
+        syncGraphMotionButton();
+        motionBtn.addEventListener('click', () => setGraphMotionEnabled(!isGraphMotionEnabled()));
+      }
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') stopGraphAuroraMotion();
+        else startGraphAuroraMotion();
+      });
     }
 
     // ==========================================
@@ -7402,6 +7475,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       // 静态布局必须保持确定性：不再启动持续 ambient 漂移
       //（旧实现每帧 ±2.5px 正弦位移，在 WebGL 下会被看成右下角节点持续抖动）
       fitAllGraphViews(true); // PR-20 相机自动适配：静态布局确定 bbox 后立即拉回视口
+      startGraphAuroraMotion();
     }
 
     // ==========================================
@@ -7434,6 +7508,66 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     function startAmbientMotion() {
       // 已停用：静态布局必须保持确定性。旧的 ±2.5px/帧漂移在 WebGL 下
       // 表现为节点持续抖动，用户无法区分“加载中”和“已完成”。
+    }
+
+    // ==========================================
+    // Graph Aurora 动效：只改变 glow/脉冲相位，不移动节点坐标。
+    // 默认开启；prefers-reduced-motion 下默认关闭；用户可手动切换。
+    // ==========================================
+    function isGraphMotionEnabled() {
+      if (graphMotionEnabled === null) {
+        const saved = localStorage.getItem('tdb_graph_motion');
+        graphMotionEnabled = saved === null ? !prefersReducedMotion() : saved === '1';
+      }
+      return graphMotionEnabled && !prefersReducedMotion();
+    }
+
+    function syncGraphMotionButton() {
+      const btn = document.getElementById('graphMotionBtn');
+      if (!btn) return;
+      const on = isGraphMotionEnabled();
+      btn.textContent = `${t('graph.motion.label')}: ${t(on ? 'graph.motion.on' : 'graph.motion.off')}`;
+      btn.setAttribute('aria-pressed', String(on));
+      btn.disabled = prefersReducedMotion();
+      if (prefersReducedMotion()) btn.title = t('graph.motion.reduced');
+    }
+
+    function setGraphMotionEnabled(enabled) {
+      graphMotionEnabled = !!enabled && !prefersReducedMotion();
+      safeStorageSet('tdb_graph_motion', graphMotionEnabled ? '1' : '0');
+      syncGraphMotionButton();
+      if (graphMotionEnabled) startGraphAuroraMotion();
+      else stopGraphAuroraMotion();
+      redrawGraph();
+    }
+
+    function stopGraphAuroraMotion() {
+      if (auroraRafId !== null) {
+        cancelAnimationFrame(auroraRafId);
+        auroraRafId = null;
+      }
+    }
+
+    function auroraStep(ts) {
+      auroraRafId = null;
+      if (!isGraphMotionEnabled() || simulationRunning || document.visibilityState === 'hidden') return;
+      if (!graphNodes.length || graphNodes.length > GRAPH_AURORA_MAX_NODES) return;
+      const graphVisible = document.getElementById('graphExplorePane')?.classList.contains('active')
+        || (document.getElementById('viewGraph') && document.getElementById('viewGraph').offsetParent !== null);
+      if (!graphVisible) return;
+      const interval = graphNodes.length > GRAPH_AURORA_FULL_NODES ? 150 : 66;
+      if (ts - auroraLastDraw >= interval) {
+        auroraPhase = ts;
+        auroraLastDraw = ts;
+        redrawGraph();
+      }
+      auroraRafId = requestAnimationFrame(auroraStep);
+    }
+
+    function startGraphAuroraMotion() {
+      if (!isGraphMotionEnabled() || simulationRunning) return;
+      if (!graphNodes.length || graphNodes.length > GRAPH_AURORA_MAX_NODES) return;
+      if (auroraRafId === null) auroraRafId = requestAnimationFrame(auroraStep);
     }
 
     function syncLayoutButtons() {
@@ -7775,25 +7909,56 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     // 浅色主题浅灰渐变（无星点），与 Sigma 容器 var(--bg-surface) 观感一致
     function drawSpaceBackground(ctx, canvas) {
       const dark = document.documentElement.getAttribute('data-theme') === 'dark';
-      const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      const w = canvas.width;
+      const h = canvas.height;
+      const grad = ctx.createLinearGradient(0, 0, 0, h);
       if (dark) {
-        grad.addColorStop(0, '#0a0c0e');
-        grad.addColorStop(1, '#070806');
+        grad.addColorStop(0, '#070b16');
+        grad.addColorStop(0.58, '#050812');
+        grad.addColorStop(1, '#04060d');
       } else {
         grad.addColorStop(0, '#f7f4ee');
         grad.addColorStop(1, '#eae5da');
       }
       ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillRect(0, 0, w, h);
       if (!dark) return;
-      // 星点（仅深色主题）：黄金比例常数散布的确定性伪随机位置（每帧重绘结果一致）
-      ctx.fillStyle = 'rgba(238, 231, 220, 0.20)';
-      for (let i = 0; i < 90; i++) {
-        const x = ((i * 0.61803398875) % 1) * canvas.width;
-        const y = ((i * 0.75487766624) % 1) * canvas.height;
-        const r = i % 6 === 0 ? 1.4 : 0.7;
-        ctx.fillRect(x, y, r, r);
+      // 两团低透明度星云，制造“深空舞台”而不是纯黑画布
+      const nebulaA = ctx.createRadialGradient(w * 0.24, h * 0.28, 0, w * 0.24, h * 0.28, Math.max(w, h) * 0.42);
+      nebulaA.addColorStop(0, 'rgba(99, 242, 231, 0.10)');
+      nebulaA.addColorStop(1, 'rgba(99, 242, 231, 0)');
+      ctx.fillStyle = nebulaA;
+      ctx.fillRect(0, 0, w, h);
+      const nebulaB = ctx.createRadialGradient(w * 0.78, h * 0.68, 0, w * 0.78, h * 0.68, Math.max(w, h) * 0.38);
+      nebulaB.addColorStop(0, 'rgba(167, 139, 250, 0.11)');
+      nebulaB.addColorStop(1, 'rgba(167, 139, 250, 0)');
+      ctx.fillStyle = nebulaB;
+      ctx.fillRect(0, 0, w, h);
+      // 星点：固定黄金比例序列，每帧重绘结果一致，不参与节点布局
+      ctx.save();
+      for (let i = 0; i < 160; i++) {
+        const x = ((i * 0.61803398875) % 1) * w;
+        const y = ((i * 0.75487766624) % 1) * h;
+        const bright = i % 11 === 0;
+        ctx.globalAlpha = bright ? 0.62 : 0.18 + (i % 5) * 0.045;
+        ctx.fillStyle = i % 17 === 0 ? '#f4cf6a' : '#eef6ff';
+        ctx.beginPath();
+        ctx.arc(x, y, bright ? 1.35 : 0.7, 0, Math.PI * 2);
+        ctx.fill();
       }
+      // 两颗十字星，仅作边缘点缀
+      ctx.globalAlpha = 0.42;
+      ctx.strokeStyle = '#f4cf6a';
+      ctx.lineWidth = 0.8;
+      [[0.82, 0.18], [0.16, 0.78]].forEach(([px, py]) => {
+        const x = px * w;
+        const y = py * h;
+        ctx.beginPath();
+        ctx.moveTo(x - 6, y); ctx.lineTo(x + 6, y);
+        ctx.moveTo(x, y - 6); ctx.lineTo(x, y + 6);
+        ctx.stroke();
+      });
+      ctx.restore();
     }
 
     // 圆角药丸（手动路径，兼容无 ctx.roundRect 的引擎）
@@ -7809,6 +7974,41 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       ctx.lineTo(x, y + r);
       ctx.arcTo(x, y, x + r, y, r);
       ctx.closePath();
+    }
+
+    // B 派有向边箭头：沿曲线末端切线方向绘制，节点覆盖前仍能读出方向
+    function drawArrowHead(ctx, x, y, angle, size, color, alpha) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(angle);
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(-size, size * 0.48);
+      ctx.lineTo(-size * 0.72, 0);
+      ctx.lineTo(-size, -size * 0.48);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // 节点 glow 预算：小图全量呼吸；中大图只给选中/枢纽；超大图关闭。
+    function graphAuroraGlow(node) {
+      if (document.documentElement.getAttribute('data-theme') !== 'dark') return 0;
+      if (!isGraphMotionEnabled()) {
+        if (graphNodes.length > GRAPH_AURORA_MAX_NODES) return 0;
+        return selectedNode === node ? 14 : 5;
+      }
+      if (graphNodes.length > GRAPH_AURORA_MAX_NODES) return 0;
+      if (graphNodes.length > GRAPH_AURORA_FULL_NODES) {
+        return selectedNode === node ? 15 : (node.degree >= 6 ? 6 : 0);
+      }
+      if (node._glowPhase === undefined) {
+        node._glowPhase = (String(node.id).charCodeAt(0) || 7) * 0.37;
+      }
+      const phase = auroraPhase * 0.0017;
+      return (selectedNode === node ? 16 : 7) + Math.sin(phase + node._glowPhase) * 2.5;
     }
 
     // 场景绘制：把当前图数据按相机变换画到一个 canvas 上
@@ -7831,6 +8031,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       const selectedStroke = dark ? '#d6b881' : '#8a6d3b';
 
       // 绘制连线（过滤器生效：隐藏类型/label 的元素整体跳过）
+      ctx.lineCap = 'round';
       graphEdges.forEach((edge, idx) => {
         const s = nodeMap.get(edge.source);
         const t = nodeMap.get(edge.target);
@@ -7847,27 +8048,76 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         ctx.quadraticCurveTo(cx, cy, t.x, t.y);
         // 路径追踪高亮（0.8.8）：命中路径的边用琥珀色加粗（双主题下均可辨识）
         const onPath = pathHighlightEdges.has(graphEdgeKey(edge.source, edge.target, edge.label));
-        ctx.strokeStyle = onPath ? 'rgba(214, 184, 129, 0.95)' : 'rgba(' + edgeBase + ', ' + edgeAlpha + ')';
-        ctx.lineWidth = onPath ? 3 : (dark ? 1.2 : 1.4);
-        ctx.stroke();
+        if (dark) {
+          // B 派：源色 → 目标色渐变边，透明度随密度衰减
+          const grad = ctx.createLinearGradient(s.x, s.y, t.x, t.y);
+          grad.addColorStop(0, s.color || '#5eead4');
+          grad.addColorStop(1, t.color || '#a78bfa');
+          ctx.strokeStyle = onPath ? 'rgba(244, 207, 106, 0.96)' : grad;
+          ctx.globalAlpha = onPath ? 1 : Math.min(0.72, edgeAlpha + 0.18);
+          ctx.lineWidth = onPath ? 3.2 : 1.35;
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+          // 有向箭头：靠近目标节点边缘，不覆盖节点本体
+          const angle = Math.atan2(t.y - cy, t.x - cx);
+          const headX = t.x - Math.cos(angle) * (nodeRadius(t) + 2);
+          const headY = t.y - Math.sin(angle) * (nodeRadius(t) + 2);
+          drawArrowHead(ctx, headX, headY, angle, onPath ? 10 : 7.5,
+            onPath ? '#f4cf6a' : (t.color || '#aebad4'), onPath ? 0.96 : 0.78);
+        } else {
+          ctx.strokeStyle = onPath ? 'rgba(214, 184, 129, 0.95)' : 'rgba(' + edgeBase + ', ' + edgeAlpha + ')';
+          ctx.lineWidth = onPath ? 3 : 1.4;
+          ctx.stroke();
+        }
 
         if (edge.label) {
-          ctx.fillStyle = 'rgba(' + edgeBase + ', ' + Math.min(edgeAlpha + 0.25, 0.9) + ')';
+          ctx.save();
           ctx.font = '10px ' + CANVAS_FONT_FAMILY;
+          ctx.textAlign = 'left';
+          // 标签 Halo：与边线交叉时仍可读（浅色用暖白，暗色用深空底）
+          ctx.strokeStyle = dark ? 'rgba(5, 8, 18, 0.92)' : 'rgba(251, 249, 245, 0.95)';
+          ctx.lineWidth = dark ? 3 : 2.8;
+          ctx.strokeText(edge.label, cx, cy - 3);
+          ctx.fillStyle = dark
+            ? 'rgba(214, 228, 255, ' + Math.min(edgeAlpha + 0.42, 0.86) + ')'
+            : 'rgba(' + edgeBase + ', ' + Math.min(edgeAlpha + 0.25, 0.9) + ')';
           ctx.fillText(edge.label, cx, cy - 3);
+          ctx.restore();
         }
       });
 
-      // 绘制节点
+      // 绘制节点；暗色图舞台使用 B 派径向 glow / 选中双环
       graphNodes.forEach(node => {
         if (!isNodeVisible(node)) return;
+        const r = nodeRadius(node);
+        const glow = graphAuroraGlow(node);
+        ctx.save();
+        if (glow > 0) {
+          ctx.shadowColor = node.color;
+          ctx.shadowBlur = glow;
+        }
         ctx.beginPath();
-        ctx.arc(node.x, node.y, nodeRadius(node), 0, Math.PI * 2);
+        ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
         ctx.fillStyle = node.color;
         ctx.fill();
+        ctx.restore();
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
         ctx.strokeStyle = selectedNode === node ? selectedStroke : nodeStroke;
         ctx.lineWidth = selectedNode === node ? 3 : 1;
         ctx.stroke();
+        if (selectedNode === node) {
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, r + 6, 0, Math.PI * 2);
+          ctx.strokeStyle = dark ? 'rgba(244, 207, 106, 0.92)' : selectedStroke;
+          ctx.lineWidth = 2.2;
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, r + 10, 0, Math.PI * 2);
+          ctx.strokeStyle = dark ? 'rgba(99, 242, 231, 0.32)' : 'rgba(138, 109, 59, 0.30)';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        }
       });
 
       // 标签单独一层绘制（pill 模式带底色，避免压在节点圆上）
@@ -7875,9 +8125,15 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         if (!isNodeVisible(node)) return;
         ctx.textAlign = 'center';
         if (labelMode === 'normal') {
-          ctx.fillStyle = nodeLabel;
+          ctx.save();
           ctx.font = '11px ' + CANVAS_FONT_FAMILY;
+          // Text Halo：浅色图边线加深后，标签需要背景色描边才能保持可读
+          ctx.strokeStyle = dark ? 'rgba(5, 8, 18, 0.94)' : 'rgba(251, 249, 245, 0.96)';
+          ctx.lineWidth = dark ? 3.2 : 3;
+          ctx.strokeText(node.label, node.x, node.y + 28);
+          ctx.fillStyle = nodeLabel;
           ctx.fillText(node.label, node.x, node.y + 28);
+          ctx.restore();
         } else {
           let text = node.label;
           if (text.length > GRAPH_PILL_MAX_CHARS) text = text.slice(0, GRAPH_PILL_MAX_CHARS) + '…';
@@ -7889,9 +8145,9 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           const py = node.y - 30;
           drawPillRect(ctx, px, py, pw, ph, 8);
           // pill 底色随主题：暗底深药丸 / 浅底白药丸（文字对比度各自成立）
-          ctx.fillStyle = dark ? 'rgba(10, 12, 14, 0.86)' : 'rgba(251, 249, 245, 0.94)';
+          ctx.fillStyle = dark ? 'rgba(7, 11, 22, 0.88)' : 'rgba(251, 249, 245, 0.94)';
           ctx.fill();
-          ctx.strokeStyle = dark ? 'rgba(184, 176, 160, 0.28)' : 'rgba(60, 52, 40, 0.22)';
+          ctx.strokeStyle = dark ? 'rgba(190, 214, 255, 0.24)' : 'rgba(60, 52, 40, 0.22)';
           ctx.lineWidth = 1;
           ctx.stroke();
           ctx.fillStyle = nodeLabel;
@@ -8026,19 +8282,27 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         // PR-17：size 与 Canvas nodeRadius 同比例随度数缩放（7 × (1 + min(degree,20)*0.06)）
         graph.addNode(n.id, {
           x: p.x, y: p.y,
-          size: 7 * (1 + Math.min(n.degree || 0, GRAPH_DEGREE_RADIUS_CAP) * 0.06),
+          size: 14 * (1 + Math.min(n.degree || 0, GRAPH_DEGREE_RADIUS_CAP) * 0.06),
           label: n.label, color: n.color, hidden: !isNodeVisible(n)
         });
       });
-      // 边色随节点密度自适应（8 位 hex alpha）；基色/透明度与 Canvas 后端一致，
-      // 统一走 sigmaEdgeBaseColor()（路径高亮还原时复用同一公式）
+      // 边色随节点密度自适应（8 位 hex alpha）；暗色用源节点色，
+      // 在 WebGL 里近似 Canvas 的渐变边；路径高亮仍复用 sigmaEdgeBaseColor()。
       const sigmaEdgeColor = sigmaEdgeBaseColor();
+      const sigmaAlpha = dark
+        ? Math.min(0.72, graphEdgeAlpha(graphNodes.length) + 0.18)
+        : lightGraphEdgeAlpha(graphNodes.length);
       graphEdges.forEach(e => {
         const key = graphEdgeKey(e.source, e.target, e.label);
         if (graph.hasNode(e.source) && graph.hasNode(e.target) && !graph.hasEdge(key)) {
+          const sourceNode = nodeMap.get(e.source);
+          const edgeColor = dark && sourceNode
+            ? sourceNode.color + alphaToHexByte(sigmaAlpha)
+            : sigmaEdgeColor;
           graph.addEdgeWithKey(key, e.source, e.target, {
-            size: 1,
-            color: sigmaEdgeColor,
+            size: dark ? 1.3 : 1,
+            type: dark ? 'arrow' : 'line',
+            color: edgeColor,
             label: e.label || '',
             hidden: !isEdgeVisible(e)
           });
@@ -8051,17 +8315,39 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         preserveDrawingBuffer: true,
         defaultEdgeColor: sigmaEdgeColor,
         // 标签色跟随主题（画布底已跟随主题，见 .graph-sigma-container）
-        labelColor: { color: dark ? '#e2e8f0' : '#1e293b' },
-        labelDensity: 1.2,
+        labelColor: { color: dark ? '#eef4ff' : '#1e293b' },
+        labelSize: dark ? 12 : 11,
+        labelDensity: 1.1,
+        labelRenderedSizeThreshold: 7,
         minCameraRatio: 0.05,
         maxCameraRatio: 20
       });
       // 节点点击 → 360° 抽屉（与 Canvas 后端行为一致）
       sigma.on('clickNode', ({ node }) => {
         const gnode = nodeMap.get(node);
-        if (gnode) openNodeDrawer(gnode);
+        if (gnode) {
+          selectedNode = gnode;
+          syncSigmaSelection(viewId);
+          openNodeDrawer(gnode);
+        }
       });
       sigmaInstances[viewId] = { sigma, graph, mapFn };
+      syncSigmaSelection(viewId);
+    }
+
+    // WebGL 没有 Canvas 的双环，选中节点用金色 + 放大做等价反馈
+    function syncSigmaSelection(viewId) {
+      const inst = sigmaInstances[viewId];
+      if (!inst || inst.sigma.killed) return;
+      inst.graph.forEachNode((id) => {
+        const n = nodeMap.get(id);
+        if (!n) return;
+        const selected = selectedNode && String(selectedNode.id) === String(id);
+        inst.graph.setNodeAttribute(id, 'color', selected ? '#f4cf6a' : n.color);
+        inst.graph.setNodeAttribute(id, 'size',
+          (selected ? 18 : 14) * (1 + Math.min(n.degree || 0, GRAPH_DEGREE_RADIUS_CAP) * 0.06));
+      });
+      inst.sigma.refresh();
     }
 
     function destroySigmaInstance(viewId) {
@@ -8155,6 +8441,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         redrawGraph();
       }
       syncBackendButtons();
+      startGraphAuroraMotion();
     }
 
     function syncBackendButtons() {
@@ -8786,7 +9073,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     function sigmaEdgeBaseColor() {
       const dark = document.documentElement.getAttribute('data-theme') === 'dark';
       const alpha = dark ? graphEdgeAlpha(graphNodes.length) : lightGraphEdgeAlpha(graphNodes.length);
-      return (dark ? '#9fb7b4' : '#5f523b') + alphaToHexByte(alpha);
+      return (dark ? '#7dd3c7' : '#5f523b') + alphaToHexByte(alpha);
     }
 
     function clearPathHighlight() {
