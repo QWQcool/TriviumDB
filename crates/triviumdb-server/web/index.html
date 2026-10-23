@@ -236,6 +236,19 @@
     .brand-dot--graph { fill: var(--tri-graph); }
     .brand-dot--vector { fill: var(--tri-vector); }
     .brand-link { stroke: var(--border-strong); stroke-width: 1.4; stroke-linecap: round; }
+    .header-view-name {
+      max-width: 220px;
+      padding-right: 12px;
+      border-right: 1px solid var(--border-color);
+      color: var(--text-main);
+      font-family: var(--font-display);
+      font-size: 13px;
+      font-weight: 650;
+      letter-spacing: -0.01em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
     .header-status {
       display: flex;
       align-items: center;
@@ -503,23 +516,27 @@
     }
     .nav-item:active { transform: translateX(1px) scale(0.995); }
     .nav-item.active {
+      border-radius: 12px;
       background: linear-gradient(100deg,
-        rgba(143, 179, 176, 0.16),
-        rgba(149, 137, 173, 0.18));
-      color: var(--text-main);
-      font-weight: 600;
+        rgba(99, 242, 231, 0.22) 0%,
+        rgba(167, 139, 250, 0.24) 78%,
+        rgba(99, 242, 231, 0.10) 100%);
+      color: #fff;
+      font-weight: 650;
       box-shadow:
-        inset 2px 0 0 var(--tri-vector),
-        0 0 0 1px rgba(143, 179, 176, 0.12),
-        0 6px 18px rgba(7, 8, 6, 0.20);
+        inset 3px 0 0 #63f2e7,
+        0 0 18px rgba(99, 242, 231, 0.10);
     }
     [data-theme="light"] .nav-item.active {
+      color: var(--text-main);
       background: linear-gradient(100deg,
-        rgba(77, 124, 120, 0.12),
-        rgba(100, 86, 128, 0.10));
+        rgba(77, 124, 120, 0.18),
+        rgba(100, 86, 128, 0.16) 78%,
+        rgba(77, 124, 120, 0.08));
       box-shadow:
-        inset 2px 0 0 var(--tri-vector),
-        0 0 0 1px rgba(77, 124, 120, 0.14);
+        inset 3px 0 0 var(--tri-vector),
+        0 0 0 1px rgba(77, 124, 120, 0.12),
+        0 0 14px rgba(77, 124, 120, 0.08);
     }
     .nav-item-left {
       display: flex;
@@ -644,6 +661,7 @@
     .sidebar-scrim { display: none; }
     @media (max-width: 900px) {
       .sidebar-mobile-btn { display: inline-flex; }
+      .header-view-name { max-width: 150px; font-size: 12.5px; }
       aside.sidebar {
         position: fixed;
         left: 0;
@@ -687,6 +705,7 @@
     }
     /* 窄屏顶栏：只保留品牌标记、连接状态和操作图标，避免横向溢出 */
     @media (max-width: 700px) {
+      .header-view-name,
       .header-brand > span:first-of-type,
       .header-brand .badge,
       #headerGeneration { display: none; }
@@ -2244,6 +2263,7 @@
 
   <!-- 顶部导航栏 -->
   <header class="app-header">
+    <div class="header-view-name" id="headerViewName">图与向量探索器</div>
     <div class="header-status">
       <span id="connStatus" class="status-badge">
         <span class="status-dot"></span>
@@ -3769,6 +3789,7 @@
         if (genEl.dataset.full) updateGenerationBadge(genEl.dataset.full);
         else genEl.textContent = `${t('header.generation')}: -`;
       }
+      syncHeaderViewName();
       UNLABELED_EDGE_LABEL = t('graph.edgeUnlabeled');
       applyGraphChromeI18n();
     }
@@ -4665,6 +4686,12 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     }
 
     // 工作台标签页与结果视图切换（含 aria-selected 同步与 Enter/Space 键盘激活）
+    function syncHeaderViewName() {
+      const el = document.getElementById('headerViewName');
+      if (!el) return;
+      const tab = document.querySelector('.tabs-bar .tab.active');
+      el.textContent = tab ? tab.textContent.trim() : t('tabs.query');
+    }
     function setupTabs() {
       document.querySelectorAll('.tabs-bar .tab').forEach(tab => {
         enableKeyboardActivation(tab);
@@ -4681,6 +4708,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           animateTabIn(targetId);
           // 侧栏「三模数据引擎」高亮随主标签联动
           if (TAB_SIDEBAR_MAP[targetId]) syncSidebarHighlight(TAB_SIDEBAR_MAP[targetId]);
+          syncHeaderViewName();
           if (targetId === 'graphExplorePane') {
             initStandaloneGraph();
           }
@@ -4704,6 +4732,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           if (view === 'graph') redrawGraph();
         });
       });
+      syncHeaderViewName();
     }
 
     // ==========================================
@@ -10216,10 +10245,16 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         document.querySelector('[data-tab="vectorLabPane"]').click();
         assert(document.getElementById('vectorLabPane').classList.contains('active'), 'vectorLabPane 应激活');
         assert(!document.getElementById('queryPane').classList.contains('active'), 'queryPane 应失活');
+        assert(document.getElementById('headerViewName').textContent.includes('向量检索'),
+          '顶栏视图名应跟随向量检索');
         document.querySelector('[data-tab="graphExplorePane"]').click();
         assert(document.getElementById('graphExplorePane').classList.contains('active'), 'graphExplorePane 应激活');
+        assert(document.getElementById('headerViewName').textContent.includes('图拓扑'),
+          '顶栏视图名应跟随图探索');
         document.querySelector('[data-tab="queryPane"]').click();
         assert(document.getElementById('queryPane').classList.contains('active'), 'queryPane 应恢复激活');
+        assert(document.getElementById('headerViewName').textContent.includes('TQL 查询控制台'),
+          '顶栏视图名应恢复查询控制台');
       });
 
       addAssert('标签页切换：不触发新的查询请求', '标签页', async () => {
@@ -10237,6 +10272,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         assert(document.documentElement.lang === 'en', 'lang 应切到 en');
         assert(document.getElementById('tab-queryPane').textContent.includes('TQL Console'),
           '主标签应切到英文，实际 ' + document.getElementById('tab-queryPane').textContent);
+        assert(document.getElementById('headerViewName').textContent.includes('TQL Console'),
+          '顶栏视图名应切英文，实际 ' + document.getElementById('headerViewName').textContent);
         assert(document.querySelector('.sidebar .nav-item[data-action="quick-find"]').textContent.includes('Documents'),
           '侧栏应切到英文');
         assert(document.querySelector('#loadWholeGraphBtn [data-i18n="graph.loadWhole"]').textContent.includes('Load full graph'),
@@ -10259,6 +10296,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         assert(document.documentElement.lang === 'zh-CN', 'lang 应恢复 zh-CN');
         assert(document.getElementById('tab-queryPane').textContent.includes('TQL 查询控制台'),
           '主标签应恢复中文');
+        assert(document.getElementById('headerViewName').textContent.includes('TQL 查询控制台'),
+          '顶栏视图名应恢复中文');
         assert(document.querySelector('#loadWholeGraphBtn [data-i18n="graph.loadWhole"]').textContent.includes('加载全图拓扑'),
           '图探索主按钮应恢复中文');
         assert(document.querySelector('#tutorialStepsNav .tutorial-step-item').textContent.includes('三模合一引擎总览'),
