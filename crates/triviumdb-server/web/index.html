@@ -4208,6 +4208,10 @@
     let simulationAlpha = 1;
     let simulationRafId = null;
     let selectedNode = null;
+    // 首屏自动适配：新数据落入力导向布局后，等模拟收敛做一次 fit（用户一旦手动
+    // 缩放/拖拽即取消，避免把用户镜头强行拉回）
+    let pendingGraphAutoFit = false;
+    let cameraTouchedByUser = false;
     let transform = { x: 0, y: 0, k: 1 };
     let isDraggingCanvas = false;
     let dragStart = { x: 0, y: 0 };
@@ -6573,9 +6577,15 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
 
     // 增量并入保持已有坐标；新增边或更新边属性也必须刷新渲染器与度数。
     function mergeRowsIntoGraph(rows) {
+      const wasEmpty = graphNodes.length === 0;
       const result = appendGraphRows(rows);
       if (result.addedNodes || result.addedEdges || result.changedEdges) {
         recomputeDegrees();
+        // 探索器首次载入走增量合并（非 renderGraph），同样需要首屏自动适配
+        if (wasEmpty && graphNodes.length && graphLayoutMode === 'force' && !physicsLockedByScale) {
+          pendingGraphAutoFit = true;
+          cameraTouchedByUser = false;
+        }
         applyGraphPhysicsPolicy();
         if (graphBackend === 'sigma') {
           if (graphColorMode === 'community') applyCommunityColors();
@@ -6631,6 +6641,12 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       appendGraphRows(rows);
 
       recomputeDegrees(); // PR-17：全量重建后重算度数（节点半径 / Sigma size 依赖）
+      // 新数据首屏自动适配：仅力导向档需要（静态布局在 applyStaticGraphLayout 内已 fit）；
+      // 必须在 applyGraphPhysicsPolicy 之前置位，reduced-motion 的同步收敛路径才能消费
+      if (graphNodes.length && graphLayoutMode === 'force' && !physicsLockedByScale) {
+        pendingGraphAutoFit = true;
+        cameraTouchedByUser = false;
+      }
       applyGraphPhysicsPolicy();
       // WebGL 后端下新数据到达：按当前着色模式重建 Sigma 实例
       if (graphBackend === 'sigma') {
@@ -6709,6 +6725,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       if (prefersReducedMotion() && graphNodes.length > 0 && !physicsLockedByScale) {
         for (let i = 0; i < 60; i++) tickPhysics();
         simulationAlpha = 0.005; // 视为已收敛
+        consumePendingAutoFit();
         redrawGraph();
         return;
       }
@@ -6726,8 +6743,16 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         simulationRafId = requestAnimationFrame(simulationStep);
       } else {
         simulationRafId = null;
+        consumePendingAutoFit();
         startGraphAuroraMotion();
       }
+    }
+
+    // 首屏适配消费：模拟收敛后执行一次；用户已手动操作镜头则放弃
+    function consumePendingAutoFit() {
+      if (!pendingGraphAutoFit) return;
+      pendingGraphAutoFit = false;
+      if (!cameraTouchedByUser) fitAllGraphViews(false);
     }
 
     function tickPhysics() {
@@ -6796,6 +6821,17 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       }
     }
 
+    // 未知类型不再一律回退 person 色（多类型图会全部同色、失去辨识度）：
+    // 用稳定哈希落到 6 色扩展盘，保证同类型跨会话同色、不同类型尽量分散。
+    const GRAPH_EXTRA_COLORS_DARK = ['#4ade80', '#60a5fa', '#f472b6', '#fbbf24', '#a78bfa', '#5eead4'];
+    const GRAPH_EXTRA_COLORS_LIGHT = ['#5f8a63', '#5b7ba6', '#b06a7f', '#a8863f', '#7d6a9e', '#4d7c78'];
+    function graphTypeHash(type) {
+      const s = String(type || '');
+      let h = 0;
+      for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+      return Math.abs(h);
+    }
+
     function getNodeColor(type) {
       const dark = document.documentElement.getAttribute('data-theme') === 'dark';
       // 暗色图舞台用 B 派高亮三模色；浅色仍保持暖石低饱和色。
@@ -6804,15 +6840,23 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         paper: '#fbbf24',
         topic: '#a78bfa',
         user: '#f4cf6a',
-        event: '#f472b6'
+        event: '#f472b6',
+        project: '#60a5fa',
+        design: '#f472b6',
+        product: '#4ade80'
       } : {
         person: '#8fb3b0',
         paper: '#c6b9a0',
         topic: '#9589ad',
         user: '#d6b881',
-        event: '#c77777'
+        event: '#c77777',
+        project: '#5b7ba6',
+        design: '#b06a7f',
+        product: '#5f8a63'
       };
-      return colors[type] || colors.person;
+      if (colors[type]) return colors[type];
+      const extra = dark ? GRAPH_EXTRA_COLORS_DARK : GRAPH_EXTRA_COLORS_LIGHT;
+      return extra[graphTypeHash(type) % extra.length];
     }
 
     // ==========================================
@@ -6872,7 +6916,9 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         if (n.y < minY) minY = n.y;
         if (n.y > maxY) maxY = n.y;
       });
-      return { minX, minY, maxX, maxY };
+      // 预留节点半径 + 选中双环余量：只按圆心包围盒 fit 会导致节点边缘/环溢出舞台
+      const margin = 26;
+      return { minX: minX - margin, minY: minY - margin, maxX: maxX + margin, maxY: maxY + margin };
     }
 
     // 包围盒 → 相机变换（中心对齐 + 按边距适配缩放；空 bbox 回落居中 k=1）
@@ -6881,7 +6927,9 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       if (!bbox) return { x: canvasW / 2, y: canvasH / 2, k: 1 };
       const w = Math.max(bbox.maxX - bbox.minX, 1);
       const h = Math.max(bbox.maxY - bbox.minY, 1);
-      const k = Math.min(3, Math.max(0.05,
+      // 上限 1.6：小图（几十个节点）按圆心包围盒算出的 k 可达 3~4，
+      // 会把 11px 标签放大到 30px+、节点圆溢出舞台（V2 对照验收问题）。
+      const k = Math.min(1.6, Math.max(0.05,
         Math.min((canvasW - pad * 2) / w, (canvasH - pad * 2) / h)));
       return {
         x: canvasW / 2 - ((bbox.minX + bbox.maxX) / 2) * k,
@@ -7143,6 +7191,17 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       const rest = Array.from(keys).filter(k => !preferred.includes(k)).sort();
       return preferred.concat(rest).slice(0, 30);
     }
+
+    // 用户一旦在任一图画布上缩放/拖拽，即视为接管镜头：取消首屏自动适配
+    ['mousedown', 'wheel'].forEach((evt) => {
+      document.addEventListener(evt, (e) => {
+        const el = e.target;
+        if (el && el.tagName === 'CANVAS') {
+          cameraTouchedByUser = true;
+          pendingGraphAutoFit = false;
+        }
+      }, { capture: true, passive: true });
+    });
 
     function initCanvas(canvasId) {
       const canvas = document.getElementById(canvasId);
@@ -8298,7 +8357,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       if (document.documentElement.getAttribute('data-theme') !== 'dark') return 0;
       if (!isGraphMotionEnabled()) {
         if (graphNodes.length > GRAPH_AURORA_MAX_NODES) return 0;
-        return selectedNode === node ? 14 : 5;
+        return selectedNode === node ? 18 : 8;
       }
       if (graphNodes.length > GRAPH_AURORA_MAX_NODES) return 0;
       if (graphNodes.length > GRAPH_AURORA_FULL_NODES) {
@@ -8308,7 +8367,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         node._glowPhase = (String(node.id).charCodeAt(0) || 7) * 0.37;
       }
       const phase = auroraPhase * 0.0017;
-      return (selectedNode === node ? 16 : 7) + Math.sin(phase + node._glowPhase) * 2.5;
+      return (selectedNode === node ? 18 : 10) + Math.sin(phase + node._glowPhase) * 3;
     }
 
     // 场景绘制：把当前图数据按相机变换画到一个 canvas 上
@@ -8354,8 +8413,9 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           grad.addColorStop(0, s.color || '#5eead4');
           grad.addColorStop(1, t.color || '#a78bfa');
           ctx.strokeStyle = onPath ? 'rgba(244, 207, 106, 0.96)' : grad;
-          ctx.globalAlpha = onPath ? 1 : Math.min(0.72, edgeAlpha + 0.18);
-          ctx.lineWidth = onPath ? 3.2 : 1.35;
+          // 深空底上 0.53 的复合透明度实测过淡（V2 对照边几乎不可见），提到 ~0.63
+          ctx.globalAlpha = onPath ? 1 : Math.min(0.78, edgeAlpha + 0.28);
+          ctx.lineWidth = onPath ? 3.2 : 1.5;
           ctx.stroke();
           ctx.globalAlpha = 1;
           // 有向箭头：靠近目标节点边缘，不覆盖节点本体
@@ -8579,10 +8639,11 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       graphNodes.forEach(n => {
         const p = mapFn(n);
         // 过滤器：hidden 属性由 Sigma 原生支持（WebGL 下护栏/过滤语义一致）
-        // PR-17：size 与 Canvas nodeRadius 同比例随度数缩放（7 × (1 + min(degree,20)*0.06)）
+        // PR-17：size 与 Canvas nodeRadius 同比例随度数缩放（16 × (1 + min(degree,20)*0.06)）
+        // 与 Canvas nodeRadius(16) 保持一致，切换后端时节点视觉尺寸不跳变
         graph.addNode(n.id, {
           x: p.x, y: p.y,
-          size: 14 * (1 + Math.min(n.degree || 0, GRAPH_DEGREE_RADIUS_CAP) * 0.06),
+          size: 16 * (1 + Math.min(n.degree || 0, GRAPH_DEGREE_RADIUS_CAP) * 0.06),
           label: n.label, color: n.color, hidden: !isNodeVisible(n)
         });
       });
@@ -8600,7 +8661,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
             ? sourceNode.color + alphaToHexByte(sigmaAlpha)
             : sigmaEdgeColor;
           graph.addEdgeWithKey(key, e.source, e.target, {
-            size: dark ? 1.3 : 1,
+            size: dark ? 1.5 : 1,
             type: dark ? 'arrow' : 'line',
             color: edgeColor,
             label: e.label || '',
@@ -8645,7 +8706,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         const selected = selectedNode && String(selectedNode.id) === String(id);
         inst.graph.setNodeAttribute(id, 'color', selected ? '#f4cf6a' : n.color);
         inst.graph.setNodeAttribute(id, 'size',
-          (selected ? 18 : 14) * (1 + Math.min(n.degree || 0, GRAPH_DEGREE_RADIUS_CAP) * 0.06));
+          (selected ? 20 : 16) * (1 + Math.min(n.degree || 0, GRAPH_DEGREE_RADIUS_CAP) * 0.06));
       });
       inst.sigma.refresh();
     }
@@ -8728,7 +8789,9 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           if (el) el.hidden = false;
         });
         rebuildSigmaInstances();
-        buttons.forEach(b => { b.disabled = false; });
+        // Sigma 默认相机 ratio=1 只覆盖坐标系一段，切换后按可见节点包围盒适配一次，
+        // 避免首屏有节点落在视口外（与 Canvas 后端 fit 语义对齐）
+        if (graphNodes.length) fitAllGraphViews(false);        buttons.forEach(b => { b.disabled = false; });
       } else {
         graphBackend = 'canvas';
         destroySigmaInstances();

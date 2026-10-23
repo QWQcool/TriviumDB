@@ -52,22 +52,22 @@
 
 ## 3. 新 DOM 命名
 
-| 新 id | 用途 |
-|---|---|
-| `graphCockpit` | 顶部查询舱外壳 |
-| `graphCockpitToggle` | 展开/收起 |
-| `graphCockpitQuery` | 查询摘要/编辑器 |
-| `graphSimThreshold` | 相似度阈值 |
-| `graphCockpitRun` | 运行按钮 |
-| `graphHitList` | 查询命中列表 |
-| `graphResultDock` | 底部结果抽屉 |
-| `graphDockToggle` | 抽屉展开/收起 |
-| `graphDockGrid` | 表格 tab |
-| `graphDockJson` | JSON tab |
-| `graphMotionToggle` | 图动效开关 |
-| `graphHudSearch` | 图内搜索 |
-| `graphHudKhop` | k-hop 入口 |
-| `graphHudPath` | 路径追踪 |
+| 新 id | 用途 | 实现名（2026-10-23 核对） |
+|---|---|---|
+| `graphCockpit` | 顶部查询舱外壳 | 同名 |
+| `graphCockpitToggle` | 展开/收起 | 同名 |
+| `graphCockpitQuery` | 查询摘要/编辑器 | 同名 |
+| `graphSimThreshold` | 相似度阈值 | **`graphCockpitThreshold`**（+ `graphCockpitThresholdValue`） |
+| `graphCockpitRun` | 运行按钮 | 同名 |
+| `graphHitList` | 查询命中列表 | **`graphCockpitHits`** |
+| `graphResultDock` | 底部结果抽屉 | **`graphDock`**（+ `graphDockCount`） |
+| `graphDockToggle` | 抽屉展开/收起 | 同名 |
+| `graphDockGrid` | 表格 tab | `graphDockGrid` / tab 按钮 `graphDockGridTab` |
+| `graphDockJson` | JSON tab | `graphDockJson` / tab 按钮 `graphDockJsonTab` |
+| `graphMotionToggle` | 图动效开关 | **`graphMotionBtn`**（持久化键仍为 `tdb_graph_motion`） |
+| `graphHudSearch` | 图内搜索 | 同名 |
+| `graphHudKhop` | k-hop 入口 | 同名 |
+| `graphHudPath` | 路径追踪 | 同名 |
 
 新 class 统一前缀：`g-`（graph overlay）、`v2-`（布局辅助），避免与既有样式冲突。
 
@@ -112,3 +112,15 @@
 - 不新增 C 风格切换按钮；
 - 现有主题按钮仍切旧浅色，但不作为 V2 验收项；
 - V2 验收通过后，单独开 C 阶段：暖石底、`#5f523b` 边线、文字 Halo、浅色三模色。
+
+## 8. 实施进度（2026-10-24 核对）
+
+| Phase | 状态 | 说明 |
+|---|---|---|
+| 0 冻结蓝本 | ✅ | 本目录 6 份 HTML + 本映射表 |
+| 1 壳层 / 侧栏 / token | ✅ | 星尘侧栏、B 版选中态、暗浅 token 已落地 |
+| 2 图舞台 / HUD / 查询舱 / 抽屉骨架 | ✅ | id 以上表「实现名」列为准 |
+| 3 Canvas 视觉 → Sigma 对齐 | 🟡 | Canvas：未知类型哈希配色、边可见度、光晕、首屏自动适配已调；Sigma：节点尺寸/选中尺寸/边宽已与 Canvas 对齐并加切换后 fit。**已知差异**：Sigma WebGL 单色边无法复刻 Canvas 源→目标渐变、无节点描边程序 |
+| 4 详情四卡 | 🟡 | Payload / Vector / Edges 三卡已就绪；第 4 卡「向量空间投影」未实现 |
+| 5 响应式 / i18n / 降级 / 动效开关 | 🟡 | i18n、断点（1280/1100/900/700）、动效开关（`graphMotionBtn`）已完成；390 宽度实机复核未做 |
+| 6 selftest / ui-smoke / 视觉基线 | 🟡 | 页内 selftest 126/126 通过；`ui-smoke` 因本机缺 Playwright 未执行；视觉基线待 Phase 3 定稿后重建 |
