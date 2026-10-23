@@ -1295,8 +1295,12 @@ pub mod python {
             )
         }
 
-        fn build_text_index(&mut self) {
-            let _ = dispatch!(self, mut db => db.build_text_index());
+        fn build_text_index(&mut self) -> PyResult<()> {
+            dispatch!(self, mut db => db.build_text_index()).map_err(
+                |e: crate::error::TriviumError| {
+                    pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
+                },
+            )
         }
 
         // ════════ 属性二级索引 ════════

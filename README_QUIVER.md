@@ -1,6 +1,6 @@
-# QuIVer — Implementation and Experiment Guide
+# QuIVer — Reviewer and Reproducibility Guide
 
-> **Updated**: 2026-10-21. Current implementation means `0.8.10` source; release artifact status is tracked by the release workflows and package registries. It adds graph connectivity protection to the SM-L2 implementation introduced in `0.8.9`; earlier `0.8.8` packages do not include those SM changes. Record the evaluated version, Git revision, and build identity. See [changes and validation scope](docs/changes-0.8.10.md).
+> **Artifact version**: `0.8.11`. SM-L2 navigation was introduced in `0.8.9`; `0.8.10` adds graph connectivity protection. Record the evaluated Git revision and build identity. `0.8.11` reduces vector storage overhead and hardens text index lifecycle without changing the QuIVer navigation algorithm. See [version changes](docs/changes-0.8.11.md).
 >
 > **Submission target**: **ICDE** for the rebuilt version. This is not an acceptance, proceedings, or publication claim.
 >

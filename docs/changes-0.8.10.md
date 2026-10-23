@@ -1,6 +1,6 @@
-# TriviumDB 0.8.10：变更与验收范围
+# TriviumDB 0.8.10
 
-> 更新：2026-10-21。本文对应 `0.8.10` 版本源码。发布按功能分支 → dev → master 的验收流程进行，再在通过验收的 master 发布提交上创建 `v0.8.10`，触发 PyPI、NPM 与 Server CD。crates.io 仍按项目规则单独发布；制品是否已发布以流水线和各包仓库为准。
+本版本改进 QuIVer 构图连通性、发布中断恢复和 TQL 解析防护，并增加 WebUI 图探索与 AI 辅助功能。
 
 ## 本次变更
 
@@ -15,18 +15,12 @@
 - **WebUI 验收修复**：自检增至 124 项；Chromium/WebKit 使用真实 Server 与独立临时库，测试脚本只清理自己创建的进程和文件。Windows CI 对已有七张 Win32 基线执行实际比较，缺失基线或依赖时报错，截图与差异图始终上传；详见 [WebUI 测试指南](webui-testing.md)。
 - **文档与元数据**：同步 Rust Core、CLI、Server、Python、Node、锁文件及控制台版本显示，更新架构、迁移、预算和 unsafe 验证边界。
 
-## 使用与评估边界
+## 索引升级与查询行为
 
-旧索引应重新构建以采用本次构图规则。入口全可达只说明拓扑可遍历全库，不保证有限 `ef` 和精排预算下的 Recall@K 达到 100%。本地[连通性对照记录](benchmarks/quiver-connectivity-20261021.json)覆盖七组合成数据、四个查询宽度及 Recall、QPS、延迟和热内存；其中低内在维度的有限宽度召回仍有限，不代表真实百万规模或 ICDE 冻结实验已经验收。
+旧索引应重新构建以采用本次构图规则。入口全可达只说明拓扑可遍历全库，不保证有限 `ef` 和精排预算下的 Recall@K 达到 100%。[连通性基准记录](benchmarks/quiver-connectivity-20261021.json)覆盖七组合成数据、四个查询宽度及 Recall、QPS、延迟和热内存；低内在维度数据仍可能需要更大的搜索宽度；这些合成数据不覆盖真实百万规模场景。
 
-本次默认查询仍为无训练 SM-L2 导航与原始向量余弦精排；ICDE 是投稿目标，不代表已录用。详见[QuIVer 架构与证据边界](quiver.md)。
+默认查询使用无训练 SM-L2 导航与原始向量余弦精排，详见 [QuIVer 架构说明](quiver.md)。
 
-## 验收口径
+## 测试
 
-提交前执行贡献指南规定的格式、Clippy、全工作区、`test-hooks` 补充套件及 Python/Node 编译检查，并检查 workflow 语法和版本一致性。Miri 的裸指针/并发邻接表子集使用四个随机种子；TSan 的实际运行结果需由 Linux CI 确认。不能把目标编译检查写成 TSan 运行通过，也不能把专项测试写成所有 unsafe 已证明安全。
-
-CI 的各项结果绑定本次提交；尚未完成的远程任务不得写成通过。测试命令、执行范围和工具限制见[测试实践](testing.md#threadsanitizer-与-miri)。
-
-## 集成验收记录
-
-Core 候选 `fca845b62618a8bdb6e61c550c79ab3f59742d4b` 已通过[完整 CI](https://github.com/YoKONCy/TriviumDB/actions/runs/39507014417)，包括 TSan、Miri、ASan 与多平台测试。集成候选的本地工作区 1473 项测试与关键 hook/query 套件 308 项测试通过；格式、两组 Clippy、Python/Node 编译和 TypeScript 检查通过。WebUI 双引擎端到端与各 124 项自检通过，七张现有视觉基线比较差异为 0.00%–0.15%，未更新基线。最终集成提交与 master 发布提交仍分别接受其对应 CI，既有候选的通过记录不能代替后续提交验收。
+测试覆盖多平台读写、发布中断恢复、确定性并发交错、差分验证及 ASan/TSan/Miri 专项检查。执行命令和覆盖范围见 [测试实践](testing.md)，WebUI 自检、端到端及视觉回归见 [WebUI 测试指南](webui-testing.md)。

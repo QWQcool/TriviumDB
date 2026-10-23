@@ -359,12 +359,30 @@ fn write_text_index_meta(db_path: &str) -> std::io::Result<()> {
     bytes.extend_from_slice(&std::fs::metadata(db_path)?.len().to_le_bytes());
     bytes.extend_from_slice(&text_size.to_le_bytes());
     bytes.extend_from_slice(&file_crc32(&text_path)?.to_le_bytes());
+    write_text_index_meta_bytes(db_path, &bytes)
+}
+
+fn write_text_index_meta_bytes(db_path: &str, bytes: &[u8]) -> std::io::Result<()> {
     let meta_path = text_index_meta_path_from_db(db_path);
     let tmp = format!("{meta_path}.tmp");
     let mut file = File::create(&tmp)?;
-    file.write_all(&bytes)?;
+    file.write_all(bytes)?;
     file.sync_all()?;
     robust_rename_and_sync(Path::new(&tmp), Path::new(&meta_path))
+}
+
+pub(crate) fn deferred_text_metadata(db_path: &str) -> Option<[u8; 28]> {
+    let bytes = std::fs::read(text_index_meta_path_from_db(db_path)).ok()?;
+    let meta: [u8; 28] = bytes.try_into().ok()?;
+    (meta[..4] == *b"TMET"
+        && meta[4..8] == 1u32.to_le_bytes()
+        && meta[8..16] == std::fs::metadata(db_path).ok()?.len().to_le_bytes()
+        && meta[16..24]
+            == std::fs::metadata(text_index_path_from_db(db_path))
+                .ok()?
+                .len()
+                .to_le_bytes())
+    .then_some(meta)
 }
 
 fn validate_text_index_meta(db_path: &str) -> bool {
@@ -396,6 +414,14 @@ pub fn save<T: VectorType>(
     path: &str,
     mode: StorageMode,
 ) -> Result<()> {
+    // 在主文件发布前处理延期操作；失败时保留原 sidecar 与所有待合并记录。
+    let release_text_after_save =
+        memtable.text_index_is_deferred() && memtable.text_index_has_pending_changes();
+    if release_text_after_save {
+        memtable.prepare_text_index()?;
+    }
+    // 保留原 CRC，不以重新计算校验和的方式“认可”未加载文件中的损坏。
+    let preserved_text_meta = memtable.deferred_text_metadata();
     match mode {
         StorageMode::Mmap => save_mmap(memtable, path),
         StorageMode::Rom => {
@@ -433,23 +459,26 @@ pub fn save<T: VectorType>(
     }
 
     let text_path = text_index_path_from_db(path);
-    if let Err(error) = memtable
-        .text_index()
-        .save_to_file(std::path::Path::new(&text_path))
-    {
-        tracing::warn!(
-            "TextIndex 持久化失败（不影响主数据）(TextIndex persist failed): {}",
-            error
-        );
-    } else if std::path::Path::new(&text_path).exists() {
-        if let Err(error) = write_text_index_meta(path) {
-            tracing::warn!(
-                "TextIndex 元数据持久化失败 (TextIndex metadata persistence failed): {}",
-                error
-            );
+    if memtable.text_index_is_deferred() {
+        if let Some(mut meta) = preserved_text_meta {
+            meta[8..16].copy_from_slice(&std::fs::metadata(path)?.len().to_le_bytes());
+            write_text_index_meta_bytes(path, &meta)?;
+            memtable.update_deferred_text_metadata(meta);
         }
     } else {
-        std::fs::remove_file(text_index_meta_path_from_db(path)).ok();
+        memtable.text_index().save_to_file(Path::new(&text_path))?;
+        if Path::new(&text_path).exists() {
+            write_text_index_meta(path)?;
+            if release_text_after_save {
+                memtable.defer_text_index(path);
+            }
+        } else {
+            match std::fs::remove_file(text_index_meta_path_from_db(path)) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
     }
 
     crate::index::property::save_sidecar(memtable.property_indexes(), path, memtable.node_count())?;
@@ -540,8 +569,7 @@ fn save_mmap<T: VectorType>(memtable: &mut MemTable<T>, path: &str) -> Result<()
 
 /// Rom 模式保存：把向量合并，写单文件，抛弃 .vec
 fn save_rom<T: VectorType>(memtable: &mut MemTable<T>, path: &str) -> Result<()> {
-    // 1. Rom 单文件持久化必须物化完整 flat，但不得隐式构建 ANN。
-    memtable.prepare_persistence_cache(true);
+    // 1. 分段写入向量，不创建旧签名或合并数组，也不隐式构建 ANN。
     let total_vectors = memtable.internal_indices().len();
 
     // 2. 将数据合并写入单文件
@@ -574,9 +602,7 @@ fn save_tdb<T: VectorType>(
     vec_count: usize,
     is_mmap_mode: bool,
 ) -> Result<()> {
-    // 持久化只准备磁盘格式需要的数据，禁止隐式触发 ANN 构建。
-    // Mmap 分离模式下向量已在 .vec 文件，无需把整库复制入堆。
-    memtable.prepare_persistence_cache(!is_mmap_mode);
+    // 两种模式都直接读取已有向量段，不创建全库临时数组或隐式构建 ANN。
 
     let tmp_path = format!("{}.tmp", path);
     let file = File::create(&tmp_path)?;
@@ -683,8 +709,9 @@ fn save_tdb<T: VectorType>(
 
     // 3. Vector Block (Rom 用)
     if !is_mmap_mode {
-        let flat = memtable.flat_vectors();
-        w.write_all(bytemuck::cast_slice(flat))?;
+        let (base, delta) = memtable.vec_pool().vector_segments();
+        w.write_all(bytemuck::cast_slice(base))?;
+        w.write_all(bytemuck::cast_slice(delta))?;
     }
 
     // 4. Edge Block
@@ -705,18 +732,12 @@ fn save_tdb<T: VectorType>(
         w.write_all(metadata.as_bytes())?;
     }
 
-    // 5. BQ Metadata Block
-    let bq_sigs = memtable.bq_signatures_slice();
-    let bq_count = bq_sigs.len() as u64;
+    // 5. 旧 1-bit BQ 已不参与查询；合法空缓存块保留既有格式的可读性。
     w.write_all(BQ_BLOCK_MAGIC)?;
     w.write_all(&BQ_BLOCK_VERSION.to_le_bytes())?;
     w.write_all(&(BqSignature::MAX_CHUNKS as u16).to_le_bytes())?;
+    let bq_count = 0u64;
     w.write_all(&bq_count.to_le_bytes())?;
-    for signature in bq_sigs {
-        for chunk in signature.data {
-            w.write_all(&chunk.to_le_bytes())?;
-        }
-    }
 
     // 6. Unique Constraint 权威定义块。Posting 仍在可重建的 .pidx，约束定义属于主数据。
     let unique_definitions = memtable.unique_index_definitions();
@@ -884,8 +905,7 @@ pub fn load<T: VectorType>(
                 .filter(|marker| marker.payload_size.is_some())
                 .map(|marker| marker.generation);
             install_payload_sidecar_if_present(&mut mt, path, payload_generation)?;
-            // Payload 已就绪后再恢复依赖它的派生索引和约束。
-            load_bq_block(&mut mt, bytes, bq_layout)?;
+            // 旧 BQ 块仅校验格式几何，不物化；Payload 就绪后恢复现用索引和约束。
             load_property_indexes(
                 &mut mt,
                 path,
@@ -900,6 +920,8 @@ pub fn load<T: VectorType>(
             load_quiver_index(&mut mt, path, repair_sidecars, missing_index_policy)?;
             if load_text_sidecar {
                 load_text_index(&mut mt, path, repair_sidecars, missing_index_policy)?;
+            } else if Path::new(&text_index_path_from_db(path)).exists() {
+                mt.defer_text_index(path);
             }
             Ok(mt)
         } else {
@@ -921,8 +943,7 @@ pub fn load<T: VectorType>(
             version,
             &mmap,
         )?;
-        // 尝试从 BQ Block 恢复签名
-        load_bq_block(&mut mt, bytes, bq_layout)?;
+        // 旧 BQ 块已校验，无需恢复未被当前查询使用的数组。
         load_property_indexes(
             &mut mt,
             path,
@@ -935,6 +956,8 @@ pub fn load<T: VectorType>(
         load_quiver_index(&mut mt, path, repair_sidecars, missing_index_policy)?;
         if load_text_sidecar {
             load_text_index(&mut mt, path, repair_sidecars, missing_index_policy)?;
+        } else if Path::new(&text_index_path_from_db(path)).exists() {
+            mt.defer_text_index(path);
         }
         Ok(mt)
     }
@@ -1221,9 +1244,6 @@ fn load_edges<T: VectorType>(
 
 #[derive(Clone, Copy)]
 struct BqDiskLayout {
-    count: usize,
-    chunks_per_signature: usize,
-    data_start: usize,
     end_offset: usize,
 }
 
@@ -1280,9 +1300,6 @@ fn parse_bq_layout(
             )));
         }
         return Ok(Some(BqDiskLayout {
-            count,
-            chunks_per_signature,
-            data_start: count_end,
             end_offset: file_len,
         }));
     }
@@ -1331,9 +1348,6 @@ fn parse_bq_layout(
         return Ok(None);
     }
     Ok(Some(BqDiskLayout {
-        count,
-        chunks_per_signature,
-        data_start: header_end,
         end_offset: expected_end,
     }))
 }
@@ -1428,41 +1442,6 @@ fn load_unique_constraints<T: VectorType>(
     memtable.restore_unique_index_definitions(&definitions)
 }
 
-fn load_bq_block<T: VectorType>(
-    memtable: &mut MemTable<T>,
-    bytes: &[u8],
-    layout: Option<BqDiskLayout>,
-) -> Result<()> {
-    let Some(layout) = layout else {
-        return Ok(());
-    };
-    let mut sigs = Vec::new();
-    sigs.try_reserve_exact(layout.count).map_err(|error| {
-        TriviumError::CapacityAllocationFailed {
-            reason: format!("恢复 BQ 签名时分配失败: {error}"),
-        }
-    })?;
-    let signature_bytes = layout.chunks_per_signature * 8;
-    for index in 0..layout.count {
-        let mut signature = BqSignature::empty();
-        let start = layout.data_start + index * signature_bytes;
-        for chunk in 0..layout.chunks_per_signature {
-            signature.data[chunk] = read_u64_le(bytes, start + chunk * 8, "BQ chunk")?;
-        }
-        sigs.push(signature);
-    }
-
-    memtable.set_bq_signatures(sigs);
-    tracing::info!(
-        "从 .tdb 恢复了 {} 个 BQ 签名，每个 {} chunks (Restored {} BQ signatures with {} chunks each)",
-        layout.count,
-        layout.chunks_per_signature,
-        layout.count,
-        layout.chunks_per_signature
-    );
-    Ok(())
-}
-
 fn load_mapped_graph<T: VectorType>(memtable: &mut MemTable<T>, db_path: &str) -> Result<()> {
     if let Some(graph) =
         crate::storage::graph_blocks::MappedGraphStore::open(db_path, memtable.node_count())?
@@ -1508,6 +1487,23 @@ fn load_property_indexes<T: VectorType>(
             Ok(())
         }
     }
+}
+
+pub(crate) fn read_deferred_text_index(
+    db_path: &str,
+    metadata: Option<[u8; 28]>,
+) -> Result<crate::index::text::TextIndex> {
+    let text_path = text_index_path_from_db(db_path);
+    let valid = metadata.is_some_and(|meta| {
+        std::fs::metadata(&text_path).is_ok_and(|text| meta[16..24] == text.len().to_le_bytes())
+            && file_crc32(&text_path).is_ok_and(|crc| meta[24..28] == crc.to_le_bytes())
+    });
+    if !valid {
+        return Err(TriviumError::ImmutableArtifactInvalid {
+            reason: "未加载的文本索引缺失、损坏或与主数据不匹配".into(),
+        });
+    }
+    crate::index::text::TextIndex::load_from_file(Path::new(&text_path)).map_err(TriviumError::Io)
 }
 
 fn load_text_index<T: VectorType>(

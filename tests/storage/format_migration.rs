@@ -101,7 +101,9 @@ fn rewrite_v6_as_v5(path: &Path, chunks: usize) {
     let edge_offset = u64::from_le_bytes(bytes[42..50].try_into().unwrap()) as usize;
     let bq_offset = u64::from_le_bytes(bytes[50..58].try_into().unwrap()) as usize;
     assert_eq!(&bytes[bq_offset..bq_offset + 4], b"TBQF");
-    let count = u64::from_le_bytes(bytes[bq_offset + 8..bq_offset + 16].try_into().unwrap());
+    // 历史 fixture 独立构造，不依赖当前 writer 是否保留可重建的旧 BQ 缓存。
+    let count = node_count as u64;
+    let dim = u32::from_le_bytes(bytes[6..10].try_into().unwrap()) as usize;
 
     let sidecar_path = current_payload_path(path);
     let mut rewritten = bytes[..payload_offset].to_vec();
@@ -142,8 +144,16 @@ fn rewrite_v6_as_v5(path: &Path, chunks: usize) {
     rewritten[50..58].copy_from_slice(&legacy_bq_offset.to_le_bytes());
     rewritten.extend_from_slice(&count.to_le_bytes());
     for index in 0..count as usize {
-        let source = bq_offset + 16 + index * V5_CURRENT_CHUNKS * 8;
-        rewritten.extend_from_slice(&bytes[source..source + chunks * 8]);
+        for chunk in 0..chunks {
+            let mut bits = 0u64;
+            for bit in 0..64 {
+                let component = chunk * 64 + bit;
+                if component < dim && (index == 1 || component % 2 == 0) {
+                    bits |= 1u64 << bit;
+                }
+            }
+            rewritten.extend_from_slice(&bits.to_le_bytes());
+        }
     }
     std::fs::write(path, rewritten).unwrap();
     refresh_flush_marker(path);
@@ -205,7 +215,7 @@ fn v5_四十八chunk从零点七一后可读并在close后升级v6() {
 }
 
 #[test]
-fn v6_BQ块使用显式自描述布局() {
+fn 当前格式使用自描述空BQ缓存块() {
     let path = tmp_db("v6_layout");
     seed_v6(&path, StorageMode::Rom, 64);
     let bytes = std::fs::read(path).unwrap();
@@ -222,7 +232,7 @@ fn v6_BQ块使用显式自描述布局() {
     );
     assert_eq!(
         u64::from_le_bytes(bytes[offset + 8..offset + 16].try_into().unwrap()),
-        2
+        0
     );
 }
 

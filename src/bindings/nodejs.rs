@@ -2115,10 +2115,11 @@ pub mod nodejs {
                 .map_err(|e| napi::Error::from_reason(e.to_string()))
         }
 
-        /// 在批量插入或重启后必须调用，用于重编译自动机与词频
+        /// 预热关键词自动机；损坏或缺失的延期索引会返回错误。
         #[napi]
-        pub fn build_text_index(&mut self) {
-            let _ = dispatch!(self, mut db => db.build_text_index());
+        pub fn build_text_index(&mut self) -> napi::Result<()> {
+            dispatch!(self, mut db => db.build_text_index())
+                .map_err(|e| napi::Error::from_reason(e.to_string()))
         }
 
         // ── 属性二级索引 ──

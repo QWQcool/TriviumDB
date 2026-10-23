@@ -141,13 +141,9 @@ Suppose you're building an **AI conversation memory system** and the user says "
 
 ## QuIVer: ANN Graph Index
 
-**QuIVer** (Quantized Index for Vector Retrieval) is TriviumDB's in-house ANN graph index. Current source combines **fast BQ graph construction, training-free SM-L2 navigation, and cosine reranking of original vectors**. Navigation uses two-bit codes and per-vector magnitudes to score reconstructed squared L2; recall and throughput depend on the workload, parameters, and reranking budget.
+**QuIVer** (Quantized Index for Vector Retrieval) is TriviumDB's in-house ANN graph index. QuIVer combines **fast BQ graph construction, training-free SM-L2 navigation, and cosine reranking of original vectors**. Navigation uses two-bit codes and per-vector magnitudes to score reconstructed squared L2; recall and throughput depend on the workload, parameters, and reranking budget.
 
-> 📄 **Submission status**: The rebuilt version targets **ICDE**; this is not an acceptance or publication claim. The [earlier arXiv preprint](https://arxiv.org/abs/2605.02171) describes the historical method and experiments.
->
-> 🔬 **Implementation and experiments**: [Current architecture, modes, and evidence boundaries](docs/quiver.md) · [Experiment guide](README_QUIVER.md). Current source is `0.8.10`, with release artifacts tracked by the release workflows and package registries; see [changes and validation scope](docs/changes-0.8.10.md). It adds graph connectivity protection. Default SM-L2 was introduced in `0.8.9`; earlier `0.8.8` packages do not include those SM changes.
->
-> The earlier preprint's 12-dataset Recall/QPS and hot-memory figures do not directly describe the rebuilt version. Bind results to their implementation, graph, metric, budget, and data identity; distinguish cosine SM-L2, explicit native L2, and historical BQ measurements.
+> 📖 [QuIVer architecture and configuration](docs/quiver.md) · [Benchmark guide](benches/README.md) · [0.8.11 changes](docs/changes-0.8.11.md)
 
 > ⚠️ **Dimension guidance: keeping database vectors at or below 3072 dimensions is strongly recommended.** TriviumDB storage and exact BruteForce retrieval support higher dimensions, but QuIVer's BQ signature safety limit is 3072 dimensions. Above this limit, automatic QuIVer construction is disabled and search safely falls back to BruteForce; manual QuIVer construction returns an explicit error. Higher-dimensional databases remain usable, but do not receive QuIVer ANN acceleration and incur substantially higher memory and compute costs.
 
@@ -297,7 +293,7 @@ const batchResults = await db.searchBatch(queryVectors, 10, 0, 0.0)
 
 ## Store Once, Query Many Ways
 
-Every TriviumDB node can carry a **vector, JSON document, sparse text, and graph relationships** at the same time. They share one NodeId space, transaction boundary, WAL, and lifecycle, so applications do not need to synchronize copies across a vector database, document store, and graph database. Write the data once, then choose the query path that matches each question.
+Every TriviumDB node can carry a **vector, JSON document, sparse text, and graph relationships**, accessed through one NodeId space and the query path that matches each question. Vector, document, and relationship mutations share transactions and the WAL. Separately registered sparse text is persisted by `flush()` or a writable handle's `close()`; applications should retain authoritative text and alias sources for rebuilding.
 
 ### TQL: A DIY-Composable Unified Query Language
 
@@ -616,7 +612,7 @@ TriviumDB's cognitive retrieval pipeline implements the following academic works
 
 In-house data structures and algorithms:
 
-- **QuIVer** — ANN graph index with fast BQ construction, training-free SM-L2 navigation, and cosine reranking in current source; the rebuilt version targets ICDE
+- **QuIVer** — ANN graph index with fast BQ construction, training-free SM-L2 navigation, and cosine reranking
 - **TSNG** (Tri-Signal Navigation Graph) — tri-signal (vector / property / graph) hybrid retrieval research track with multiple access-path strategies and exact ground-truth evaluation
 - **Parallel Bit-Tag Array** — Bloom-filter-inspired JSON fast filtering
 - **Reverse Hash Net** — O(1) reverse edge lookup hash index
@@ -625,7 +621,7 @@ In-house data structures and algorithms:
 
 ### 📝 Citing QuIVer
 
-The entry below identifies the earlier preprint. Also record the evaluated software revision when using the rebuilt implementation; do not turn the ICDE submission target into a proceedings citation:
+QuIVer research reference:
 
 ```bibtex
 @article{quiver2026,
