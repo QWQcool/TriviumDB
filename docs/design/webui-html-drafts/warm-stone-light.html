@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TriviumDB 设计稿 C · 暖石浅色图</title>
+<style>
+  :root {
+    --bg: #f3efe6;
+    --panel: #fbf9f4;
+    --shell: #eee9dd;
+    --line: #ddd5c4;
+    --line-strong: #c8c0ad;
+    --text: #242018;
+    --muted: #5d574c;
+    --faint: #8a8374;
+    --teal: #4d7c78;
+    --violet: #645680;
+    --ochre: #8c764e;
+    --gold: #9e7f47;
+    --radius: 14px;
+    --mono: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { height: 100vh; overflow: hidden; background: var(--bg); color: var(--text); font: 13px/1.5 Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; }
+  header { height: 54px; display: flex; align-items: center; gap: 14px; padding: 0 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  .brand { display: flex; align-items: center; gap: 9px; font-weight: 650; letter-spacing: -.02em; }
+  .brand svg { width: 24px; height: 24px; }
+  .seg { display: inline-flex; padding: 2px; border: 1px solid var(--line); border-radius: 999px; background: var(--shell); }
+  .seg button { border: 0; background: transparent; height: 28px; padding: 0 12px; border-radius: 999px; color: var(--muted); }
+  .seg button.active { background: var(--text); color: var(--panel); }
+  .search { margin-left: auto; width: min(420px, 38vw); display: flex; align-items: center; gap: 8px; height: 34px; border: 1px solid var(--line); border-radius: 10px; padding: 0 11px; background: var(--panel); color: var(--faint); }
+  .status { display: inline-flex; align-items: center; gap: 7px; color: var(--teal); font-size: 12px; }
+  .app { height: calc(100vh - 82px); display: grid; grid-template-columns: 54px 1fr 360px; }
+  .rail { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; padding: 12px 0; gap: 8px; }
+  .rail button { width: 34px; height: 34px; border-radius: 10px; border: 1px solid transparent; color: var(--muted); background: transparent; }
+  .rail button:hover { border-color: var(--line); background: var(--shell); color: var(--text); }
+  .stage { position: relative; overflow: hidden; background:
+      linear-gradient(var(--line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--line) 1px, transparent 1px);
+    background-size: 34px 34px; background-position: center; }
+  .stage svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .layout-bar { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; gap: 6px; padding: 6px; border-radius: 999px; background: rgba(251,249,244,.94); border: 1px solid var(--line-strong); box-shadow: 0 12px 28px rgba(60,52,40,.12); }
+  .layout-bar button { height: 30px; padding: 0 13px; border: 0; border-radius: 999px; background: transparent; color: var(--muted); }
+  .layout-bar button.active { background: var(--text); color: var(--panel); font-weight: 650; }
+  .panel { border-left: 1px solid var(--line); background: var(--shell); padding: 12px; overflow: auto; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+  .tabs button { flex: 1; height: 32px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel); color: var(--muted); }
+  .tabs button.active { color: var(--text); border-color: var(--gold); box-shadow: inset 0 -2px 0 var(--gold); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: 10px; overflow: hidden; }
+  .card .head { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-left: 3px solid var(--accent, var(--ochre)); font-weight: 650; }
+  .card .body { padding: 0 12px 12px; color: var(--muted); }
+  .kv { font: 11.5px/1.75 var(--mono); color: #4d463a; }
+  .heat { display: flex; height: 24px; border-radius: 5px; overflow: hidden; border: 1px solid var(--line-strong); }
+  .heat i { flex: 1; }
+  .mini { width: 100%; height: 130px; display: block; border: 1px solid var(--line); border-radius: 10px; background: #fffdf8; }
+  footer { height: 28px; display: flex; align-items: center; gap: 16px; padding: 0 14px; border-top: 1px solid var(--line); background: var(--panel); color: var(--faint); font: 10.5px/1 var(--mono); }
+  @media (max-width: 1000px) { .app { grid-template-columns: 54px 1fr; } .panel { display: none; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="12" fill="none" stroke="#242018" opacity=".3"/><circle cx="10" cy="11" r="3.2" fill="#8c764e"/><circle cx="22" cy="13.5" r="3.2" fill="#645680"/><circle cx="14.5" cy="23" r="3.2" fill="#4d7c78"/></svg>TriviumDB</div>
+  <div class="seg"><button class="active">探索器</button><button>查询台</button><button>向量检索</button></div>
+  <div class="search">⌕ 搜索节点 / 属性 / 边类型</div>
+  <div class="status">● 状态 · WebGL</div>
+</header>
+
+<div class="app">
+  <nav class="rail" aria-label="画布工具">
+    <button title="选择">↖</button><button title="拖动">✥</button><button title="放大">＋</button><button title="缩小">－</button><button title="搜索">⌕</button><button title="布局">◎</button>
+  </nav>
+
+  <main class="stage">
+    <svg viewBox="0 0 860 620" aria-label="浅色示例图谱">
+      <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#5f523b"/></marker></defs>
+      <g stroke="#5f523b" stroke-width="1.35" opacity=".82" marker-end="url(#arrow)">
+        <line x1="430" y1="310" x2="280" y2="160"/><line x1="430" y1="310" x2="330" y2="210"/><line x1="430" y1="310" x2="560" y2="130"/>
+        <line x1="430" y1="310" x2="620" y2="250"/><line x1="430" y1="310" x2="620" y2="390"/><line x1="430" y1="310" x2="250" y2="430"/>
+        <line x1="430" y1="310" x2="200" y2="260"/><line x1="430" y1="310" x2="500" y2="520"/><line x1="330" y1="210" x2="360" y2="110"/>
+        <line x1="280" y1="160" x2="360" y2="110"/><line x1="250" y1="430" x2="160" y2="520"/><line x1="620" y1="390" x2="520" y2="500"/>
+      </g>
+      <g>
+        <circle cx="430" cy="310" r="17" fill="#4d7c78" stroke="#9e7f47" stroke-width="2.5"/>
+        <circle cx="280" cy="160" r="12" fill="#4d7c78"/><circle cx="330" cy="210" r="12" fill="#4d7c78"/>
+        <circle cx="360" cy="110" r="11" fill="#645680"/><circle cx="560" cy="130" r="11" fill="#8c764e"/>
+        <circle cx="620" cy="250" r="11" fill="#645680"/><circle cx="620" cy="390" r="11" fill="#8c764e"/>
+        <circle cx="250" cy="430" r="12" fill="#8c764e"/><circle cx="200" cy="260" r="11" fill="#645680"/>
+        <circle cx="500" cy="520" r="10" fill="#4d7c78"/><circle cx="160" cy="520" r="9" fill="#645680"/><circle cx="520" cy="500" r="9" fill="#8c764e"/>
+      </g>
+      <g font-family="Inter, PingFang SC" font-size="11.5" fill="#242018" style="paint-order: stroke" stroke="#fbf9f4" stroke-width="4px" stroke-linejoin="round">
+        <text x="430" y="338" text-anchor="middle">User: 4892</text>
+        <text x="280" y="184" text-anchor="middle">User: 4892</text><text x="330" y="234" text-anchor="middle">IP: 192.168.1.1</text>
+        <text x="360" y="94" text-anchor="middle">User: 4893</text><text x="560" y="114" text-anchor="middle">User: 4897</text>
+        <text x="620" y="274" text-anchor="middle">User: 764e</text><text x="620" y="414" text-anchor="middle">Device: 7666</text>
+        <text x="250" y="454" text-anchor="middle">User: 4643</text><text x="200" y="284" text-anchor="middle">User: 4891</text>
+        <text x="500" y="544" text-anchor="middle">User: 4895</text><text x="160" y="544" text-anchor="middle">User: 4643</text>
+      </g>
+    </svg>
+    <div class="layout-bar"><button class="active">力导向</button><button>聚类</button><button>向量星图</button><button>度数径向</button></div>
+  </main>
+
+  <aside class="panel">
+    <div class="tabs"><button class="active">节点详情</button><button>过滤器</button><button>AI 助手</button></div>
+    <div class="card" style="--accent:#8c764e"><div class="head"><span>Payload</span><span>折叠</span></div><div class="body kv">{<br>&nbsp;&nbsp;"id": "node_9481",<br>&nbsp;&nbsp;"category": "User",<br>&nbsp;&nbsp;"risk_score": 0.87<br>}</div></div>
+    <div class="card" style="--accent:#4d7c78"><div class="head"><span>Vector</span><span>768d</span></div><div class="body"><div class="heat"><i style="background:#21433f"></i><i style="background:#4d7c78"></i><i style="background:#8fb3ae"></i><i style="background:#c9c06a"></i><i style="background:#8c764e"></i><i style="background:#645680"></i><i style="background:#4d7c78"></i><i style="background:#8fb3ae"></i><i style="background:#c9c06a"></i><i style="background:#8c764e"></i></div></div></div>
+    <div class="card" style="--accent:#645680"><div class="head"><span>Edges</span><span>8</span></div><div class="body">
+      <div class="kv">→ has_phone<br>← transfer_from<br>→ has_phone<br>← transfer_from</div>
+      <svg class="mini" viewBox="0 0 320 130" style="margin-top:10px"><g stroke="#645680" stroke-width="1" opacity=".8"><line x1="160" y1="65" x2="65" y2="30"/><line x1="160" y1="65" x2="255" y2="28"/><line x1="160" y1="65" x2="80" y2="108"/><line x1="160" y1="65" x2="245" y2="104"/><line x1="160" y1="65" x2="160" y2="15"/></g><circle cx="160" cy="65" r="10" fill="#4d7c78" stroke="#9e7f47"/><circle cx="65" cy="30" r="6" fill="#645680"/><circle cx="255" cy="28" r="6" fill="#8c764e"/><circle cx="80" cy="108" r="6" fill="#8c764e"/><circle cx="245" cy="104" r="6" fill="#645680"/><circle cx="160" cy="15" r="6" fill="#4d7c78"/></svg>
+    </div></div>
+  </aside>
+</div>
+
+<footer><span>渲染引擎: Sigma WebGL</span><span>浅色高对比度模式</span><span>边线密度自适应: α=0.74</span><span>耗时: 1.8ms</span></footer>
+</body>
+</html>

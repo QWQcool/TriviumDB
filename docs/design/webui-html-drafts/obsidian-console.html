@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TriviumDB 设计稿 A · 星尘控制台</title>
+<style>
+  :root {
+    --bg: #070a12;
+    --shell: rgba(8, 10, 17, 0.78);
+    --shell-strong: rgba(8, 10, 17, 0.9);
+    --surface: #11110f;
+    --card: #181613;
+    --card-2: #14130f;
+    --line: rgba(224, 224, 214, 0.11);
+    --line-strong: rgba(224, 224, 214, 0.22);
+    --text: #f4eee4;
+    --muted: #b7bcb4;
+    --faint: #8d928b;
+    --gold: #d8b46a;
+    --teal: #67b8b0;
+    --violet: #9a8bbd;
+    --sand: #c8b795;
+    --danger: #d0837c;
+    --radius-s: 8px;
+    --radius-m: 12px;
+    --radius-l: 18px;
+    --mono: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    height: 100vh;
+    overflow: hidden;
+    color: var(--text);
+    font: 13px/1.5 Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    background: transparent;
+    letter-spacing: 0.005em;
+  }
+  .stars {
+    position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden;
+    background:
+      radial-gradient(circle at 8% 10%, rgba(124, 112, 214, 0.2), transparent 26%),
+      radial-gradient(ellipse 58% 48% at 18% 28%, rgba(80, 92, 160, 0.22), transparent 70%),
+      radial-gradient(ellipse 50% 42% at 82% 72%, rgba(118, 70, 142, 0.18), transparent 70%),
+      linear-gradient(180deg, #070b16 0%, #0a0a15 56%, #070806 100%);
+  }
+  .stars::before, .stars::after {
+    content: "";
+    position: absolute; inset: -20px;
+    background-image:
+      radial-gradient(circle, rgba(238,244,255,.75) 0 1px, transparent 1.6px),
+      radial-gradient(circle, rgba(238,244,255,.4) 0 1px, transparent 1.4px),
+      radial-gradient(circle, rgba(216,180,106,.6) 0 1.1px, transparent 1.8px);
+    background-size: 96px 96px, 151px 151px, 223px 223px;
+    background-position: 0 0, 31px 47px, 79px 21px;
+    opacity: .45;
+  }
+  .stars::after { transform: scale(1.2); opacity: .16; filter: blur(.2px); }
+  header, aside, main, footer { position: relative; z-index: 1; }
+  header {
+    height: 52px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 0 18px;
+    background: var(--shell-strong);
+    border-bottom: 1px solid var(--line);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; min-width: 214px; }
+  .mark { width: 28px; height: 28px; }
+  .brand strong { display: block; font-size: 15px; letter-spacing: -0.02em; }
+  .brand span { display: block; margin-top: -1px; font: 9px/1 var(--mono); letter-spacing: .14em; color: var(--faint); text-transform: uppercase; }
+  .tabs { display: flex; gap: 6px; }
+  .tab {
+    height: 32px; padding: 0 13px; border: 1px solid transparent; border-radius: 999px;
+    color: var(--muted); background: transparent; display: inline-flex; align-items: center; gap: 7px;
+    cursor: pointer;
+  }
+  .tab.active { color: var(--text); background: rgba(216,180,106,.12); border-color: rgba(216,180,106,.28); }
+  .header-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px;
+    border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 12px;
+    background: rgba(255,255,255,.025);
+  }
+  .pill.ok { color: #a9d18b; border-color: rgba(169,185,134,.3); background: rgba(169,185,134,.08); }
+  .app { height: calc(100vh - 80px); display: flex; min-height: 0; }
+  aside {
+    width: 236px; flex: none; display: flex; flex-direction: column; min-height: 0;
+    background: var(--shell); border-right: 1px solid var(--line);
+  }
+  .side-title { padding: 14px 14px 8px; font: 10px/1 var(--mono); letter-spacing: .14em; color: var(--faint); text-transform: uppercase; }
+  .group { padding: 8px 8px 0; }
+  .group-title { display: flex; align-items: center; justify-content: space-between; padding: 10px 10px 6px; color: var(--faint); font: 10px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+  .item {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 9px 10px; border-radius: 10px; color: var(--muted); cursor: pointer;
+  }
+  .item .left { display: flex; align-items: center; gap: 9px; min-width: 0; }
+  .item svg { width: 17px; height: 17px; opacity: .85; flex: none; }
+  .item:hover { color: var(--text); background: rgba(255,255,255,.035); transform: translateX(1px); }
+  .item.active {
+    color: var(--text); font-weight: 600;
+    background: linear-gradient(100deg, rgba(103,184,176,.16), rgba(154,139,189,.18));
+    box-shadow: inset 2px 0 0 var(--teal), 0 0 0 1px rgba(103,184,176,.12);
+  }
+  .meta { font: 9px/1 var(--mono); color: var(--faint); border: 1px solid var(--line); border-radius: 999px; padding: 3px 7px; }
+  .side-foot { margin-top: auto; padding: 12px; border-top: 1px solid var(--line); color: var(--faint); font-size: 11px; }
+  main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 14px; gap: 12px; }
+  .toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .btn {
+    height: 32px; padding: 0 13px; border-radius: 9px; border: 1px solid rgba(201,190,170,.36);
+    background: rgba(255,255,255,.035); color: var(--text); display: inline-flex; align-items: center; gap: 7px;
+    cursor: pointer; transition: transform .15s ease, border-color .15s ease, background .15s ease, box-shadow .15s ease;
+  }
+  .btn:hover { transform: translateY(-1px); border-color: rgba(103,184,176,.55); background: rgba(103,184,176,.1); box-shadow: 0 6px 18px rgba(0,0,0,.28); }
+  .btn:active { transform: translateY(0) scale(.98); }
+  .btn.primary { background: var(--gold); border-color: var(--gold); color: #17130d; font-weight: 650; }
+  .btn.primary:hover { background: #e3c281; box-shadow: 0 8px 22px rgba(216,180,106,.22); }
+  .check { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12.5px; }
+  .check input { accent-color: var(--gold); }
+  .work { flex: 1; min-height: 0; display: grid; grid-template-rows: 168px 1fr; gap: 12px; }
+  .editor, .result, .panel-card {
+    border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius-m);
+    box-shadow: 0 12px 36px rgba(0,0,0,.24);
+  }
+  .editor { display: grid; grid-template-columns: 44px 1fr; overflow: hidden; }
+  .lines { padding: 14px 0; border-right: 1px solid var(--line); background: rgba(255,255,255,.02); color: var(--faint); font: 12px/22px var(--mono); text-align: right; padding-right: 10px; }
+  .code { padding: 14px; font: 13px/22px var(--mono); white-space: pre; color: #e8e2d2; }
+  .code .kw { color: var(--teal); } .code .str { color: var(--gold); } .code .num { color: #d9a0a0; }
+  .result { border-radius: var(--radius-l); overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
+  .result-tabs { height: 44px; flex: none; display: flex; align-items: center; gap: 4px; padding: 0 14px; border-bottom: 1px solid var(--line); }
+  .rtab { height: 28px; padding: 0 12px; border-radius: 999px; color: var(--muted); border: 0; background: transparent; cursor: pointer; }
+  .rtab.active { color: var(--text); background: rgba(216,180,106,.12); font-weight: 650; }
+  .table-wrap { overflow: auto; }
+  table { width: 100%; border-collapse: collapse; min-width: 720px; }
+  th { position: sticky; top: 0; background: var(--surface); color: var(--faint); font: 10px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line-strong); }
+  td { padding: 10px 12px; border-bottom: 1px solid rgba(224,224,214,.07); font-size: 12.5px; vertical-align: middle; }
+  tbody tr:hover { background: rgba(103,184,176,.045); }
+  .id { font-family: var(--mono); color: #d8d2c0; }
+  .tagdoc, .taggraph, .tagvec { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; font-size: 11px; }
+  .tagdoc { color: #201a11; background: var(--sand); }
+  .taggraph { color: #171221; background: var(--violet); }
+  .tagvec { color: #0e1b19; background: var(--teal); }
+  .score { display: inline-flex; align-items: center; gap: 8px; font-family: var(--mono); color: var(--text); }
+  .bar { width: 72px; height: 6px; border-radius: 99px; background: rgba(255,255,255,.07); overflow: hidden; }
+  .bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--teal), var(--gold)); }
+  .view { display: none; flex: 1; min-height: 0; }
+  .view.active { display: block; }
+  .graph-view, .json-view { height: 100%; padding: 10px; }
+  .json-view pre { height: 100%; overflow: auto; margin: 0; padding: 14px; border-radius: 12px; background: #0b0a08; border: 1px solid var(--line); color: #cfc8b7; font: 11.5px/1.7 var(--mono); }
+  .panel { width: 340px; flex: none; background: var(--shell); border-left: 1px solid var(--line); padding: 12px; overflow: auto; }
+  .panel-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+  .ptab { flex: 1; height: 32px; border-radius: 9px; border: 1px solid var(--line); color: var(--muted); background: transparent; }
+  .ptab.active { color: var(--text); border-color: rgba(216,180,106,.35); background: rgba(216,180,106,.08); }
+  .panel-card { border-radius: 12px; margin-bottom: 10px; overflow: hidden; }
+  .panel-card .head { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-left: 3px solid var(--accent, var(--sand)); color: var(--text); font-weight: 650; }
+  .panel-card .body { padding: 0 12px 12px; color: var(--muted); }
+  .kv { font: 11.5px/1.7 var(--mono); color: #cfc8b7; }
+  .heat { display: flex; height: 22px; border-radius: 5px; overflow: hidden; border: 1px solid var(--line); }
+  .heat i { flex: 1; }
+  .mini { width: 100%; height: 120px; display: block; }
+  footer { height: 28px; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 0 14px; background: var(--shell-strong); border-top: 1px solid var(--line); color: var(--faint); font: 11px/1 var(--mono); }
+  @media (max-width: 1180px) { .panel { display: none; } }
+  @media (max-width: 900px) {
+    body { overflow: auto; }
+    .app { height: auto; flex-direction: column; }
+    aside { width: 100%; border-right: 0; border-bottom: 1px solid var(--line); }
+    main { padding: 10px; }
+    .work { grid-template-rows: 150px auto; }
+  }
+</style>
+</head>
+<body>
+<div class="stars" aria-hidden="true"></div>
+<header>
+  <div class="brand">
+    <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="12" fill="none" stroke="#f4eee4" opacity=".28"/><circle cx="10" cy="11" r="3.4" fill="#c8b795"/><circle cx="22" cy="13.5" r="3.4" fill="#9a8bbd"/><circle cx="14.5" cy="23" r="3.4" fill="#67b8b0"/></svg>
+    <div><strong>TriviumDB</strong><span>星尘工作台</span></div>
+  </div>
+  <nav class="tabs" aria-label="主视图">
+    <button class="tab active">TQL 查询控制台</button>
+    <button class="tab">独立图探索器</button>
+    <button class="tab">向量检索</button>
+  </nav>
+  <div class="header-right">
+    <span class="pill ok">● 在线</span>
+    <span class="pill">代次: 2ef6dbb</span>
+    <button class="btn">可视化使用教程</button>
+    <button class="btn">主题</button>
+  </div>
+</header>
+
+<div class="app">
+  <aside>
+    <div class="side-title">对象导航</div>
+    <div class="group">
+      <div class="group-title"><span>三模数据引擎</span><span>⋯</span></div>
+      <div class="item active"><div class="left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 3.5h7.5L19 9v11.5H6z"/><path d="M13.5 3.5V9H19"/></svg><span>文档</span></div><span class="meta">FIND</span></div>
+      <div class="item"><div class="left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="M8.4 13.3l7.2 4.2M15.6 6.5 8.4 10.7"/></svg><span>图拓扑</span></div><span class="meta">MATCH</span></div>
+      <div class="item"><div class="left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3 21 7.5 12 12 3 7.5z"/><path d="M3 12l9 4.5 9-4.5M3 16.5 12 21l9-4.5"/></svg><span>向量与 QuIVer</span></div><span class="meta">SEARCH</span></div>
+    </div>
+    <div class="group">
+      <div class="group-title"><span>常用代码片段</span></div>
+      <div class="item"><div class="left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 4.5 4.5"/></svg><span>扫描所有节点</span></div></div>
+      <div class="item"><div class="left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="5" cy="12" r="2.3"/><circle cx="19" cy="6" r="2.3"/><circle cx="19" cy="18" r="2.3"/><path d="M7.2 11l9.6-4M7.2 13l9.6 4" stroke-dasharray="2 2.5"/></svg><span>探索一跳图关系</span></div></div>
+      <div class="item"><div class="left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="7.5"/><path d="M12 8v8M8 12h8"/></svg><span>创建单节点</span></div></div>
+    </div>
+    <div class="side-foot">界面语言：中文 · English</div>
+  </aside>
+
+  <main>
+    <div class="toolbar">
+      <button class="btn primary">▶ 运行</button>
+      <label class="check"><input type="checkbox"> 写入模式</label>
+      <label class="check"><input type="checkbox" checked> 剖析</label>
+      <span style="flex:1"></span>
+      <button class="btn">美化 TQL</button>
+      <button class="btn">清空</button>
+      <button class="btn">导出 JSON</button>
+    </div>
+
+    <section class="work">
+      <div class="editor" aria-label="TQL 编辑器">
+        <div class="lines">01<br>02<br>03<br>04<br>05<br>06</div>
+        <div class="code"><span class="kw">MATCH</span> (p {name: <span class="str">"Alice"</span>})-[:AUTHORED]->(paper)-[:COVERS]->(topic)
+<span class="kw">WHERE</span> paper.year &gt;= <span class="num">2024</span>
+<span class="kw">RETURN</span> p, paper, topic
+<span class="kw">LIMIT</span> <span class="num">6</span>;</div>
+      </div>
+
+      <div class="result">
+        <div class="result-tabs" role="tablist" aria-label="结果视图切换">
+          <button class="rtab active" data-view="grid">表格视图</button>
+          <button class="rtab" data-view="graph">交互拓扑图</button>
+          <button class="rtab" data-view="json">JSON 视图</button>
+          <span style="margin-left:auto" class="pill">6 行 · 4.2ms</span>
+        </div>
+
+        <div class="view active table-wrap" id="view-grid">
+          <table>
+            <thead><tr><th>#</th><th>ID</th><th>类型</th><th>标识</th><th>详细信息</th><th>相似度</th></tr></thead>
+            <tbody>
+              <tr><td>1</td><td class="id">usr_9042_xk</td><td><span class="tagdoc">文档</span></td><td><span class="taggraph">图拓扑</span></td><td class="id">{name: "Alice", role: "architect"}</td><td><span class="score"><span class="bar"><i style="width:96%"></i></span>0.9642</span></td></tr>
+              <tr><td>2</td><td class="id">paper_3109</td><td><span class="tagdoc">文档</span></td><td><span class="tagvec">向量</span></td><td class="id">{title: "Graph Core Engine"}</td><td><span class="score"><span class="bar"><i style="width:93%"></i></span>0.9318</span></td></tr>
+              <tr><td>3</td><td class="id">topic_4410</td><td><span class="tagdoc">文档</span></td><td><span class="taggraph">图拓扑</span></td><td class="id">{name: "Tri-Model DB"}</td><td><span class="score"><span class="bar"><i style="width:89%"></i></span>0.8904</span></td></tr>
+              <tr><td>4</td><td class="id">usr_88</td><td><span class="tagdoc">文档</span></td><td><span class="tagvec">向量</span></td><td class="id">{name: "Bob", level: 5}</td><td><span class="score"><span class="bar"><i style="width:85%"></i></span>0.8521</span></td></tr>
+              <tr><td>5</td><td class="id">paper_72</td><td><span class="tagdoc">文档</span></td><td><span class="taggraph">图拓扑</span></td><td class="id">{title: "HNSW Vector Index"}</td><td><span class="score"><span class="bar"><i style="width:81%"></i></span>0.8103</span></td></tr>
+              <tr><td>6</td><td class="id">topic_09</td><td><span class="tagdoc">文档</span></td><td><span class="tagvec">向量</span></td><td class="id">{name: "QuIVer"}</td><td><span class="score"><span class="bar"><i style="width:77%"></i></span>0.7742</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="view graph-view" id="view-graph">
+          <svg viewBox="0 0 900 430" width="100%" height="100%" aria-label="示例拓扑图">
+            <defs>
+              <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#c8b795"/></marker>
+            </defs>
+            <g stroke="#c8b795" stroke-width="1.2" opacity=".72" marker-end="url(#arrow)">
+              <line x1="450" y1="215" x2="300" y2="120"/><line x1="450" y1="215" x2="610" y2="110"/>
+              <line x1="450" y1="215" x2="700" y2="250"/><line x1="450" y1="215" x2="250" y2="300"/>
+              <line x1="450" y1="215" x2="520" y2="350"/><line x1="450" y1="215" x2="160" y2="180"/>
+              <line x1="300" y1="120" x2="230" y2="60"/><line x1="610" y1="110" x2="700" y2="70"/>
+              <line x1="250" y1="300" x2="170" y2="370"/><line x1="520" y1="350" x2="630" y2="385"/>
+            </g>
+            <g font-family="Inter, PingFang SC" font-size="11" fill="#f4eee4">
+              <circle cx="450" cy="215" r="18" fill="#67b8b0" stroke="#d8b46a" stroke-width="2.4"/><text x="450" y="244" text-anchor="middle">usr_9042_xk</text>
+              <circle cx="300" cy="120" r="12" fill="#9a8bbd"/><text x="300" y="104" text-anchor="middle">paper_3109</text>
+              <circle cx="610" cy="110" r="12" fill="#c8b795"/><text x="610" y="94" text-anchor="middle">topic_4410</text>
+              <circle cx="700" cy="250" r="11" fill="#9a8bbd"/><text x="700" y="276" text-anchor="middle">paper_72</text>
+              <circle cx="250" cy="300" r="11" fill="#c8b795"/><text x="250" y="326" text-anchor="middle">topic_09</text>
+              <circle cx="520" cy="350" r="10" fill="#67b8b0"/><text x="520" y="374" text-anchor="middle">usr_88</text>
+              <circle cx="160" cy="180" r="9" fill="#9a8bbd"/><text x="160" y="206" text-anchor="middle">edge</text>
+              <circle cx="230" cy="60" r="8" fill="#c8b795"/><circle cx="700" cy="70" r="8" fill="#67b8b0"/>
+              <circle cx="170" cy="370" r="8" fill="#9a8bbd"/><circle cx="630" cy="385" r="8" fill="#c8b795"/>
+            </g>
+          </svg>
+        </div>
+
+        <div class="view json-view" id="view-json">
+<pre>{
+  "rows": [
+    { "id": "usr_9042_xk", "type": "person", "payload": { "name": "Alice", "role": "architect" }, "score": 0.9642 },
+    { "id": "paper_3109", "type": "paper", "payload": { "title": "Graph Core Engine", "year": 2024 }, "score": 0.9318 }
+  ],
+  "stats": { "elapsed_ms": 4.2, "scanned": 1024, "engine": "QuIVer" }
+}</pre>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <section class="panel" aria-label="节点详情">
+    <div class="panel-tabs">
+      <button class="ptab active">节点详情</button><button class="ptab">过滤器</button><button class="ptab">AI 助手</button>
+    </div>
+    <div class="panel-card" style="--accent: var(--sand)">
+      <div class="head"><span>Payload</span><span>展开</span></div>
+      <div class="body kv">{<br>&nbsp;&nbsp;"name": "Alice",<br>&nbsp;&nbsp;"role": "architect",<br>&nbsp;&nbsp;"year": 2024,<br>&nbsp;&nbsp;"citations": 128<br>}</div>
+    </div>
+    <div class="panel-card" style="--accent: var(--teal)">
+      <div class="head"><span>Vector</span><span>768d</span></div>
+      <div class="body">
+        <div class="heat" aria-hidden="true"><i style="background:#142b29"></i><i style="background:#2b5450"></i><i style="background:#67b8b0"></i><i style="background:#9ad0c8"></i><i style="background:#d8b46a"></i><i style="background:#9a8bbd"></i><i style="background:#2b5450"></i><i style="background:#67b8b0"></i><i style="background:#d8b46a"></i><i style="background:#142b29"></i><i style="background:#67b8b0"></i><i style="background:#9a8bbd"></i><i style="background:#d8b46a"></i><i style="background:#2b5450"></i><i style="background:#67b8b0"></i></div>
+        <div class="kv" style="margin-top:8px">[-0.041, 0.812, 0.119, … 765]</div>
+      </div>
+    </div>
+    <div class="panel-card" style="--accent: var(--violet)">
+      <div class="head"><span>Edges</span><span>14</span></div>
+      <div class="body">
+        <div class="kv">→ AUTHORED paper_3109<br>← CITED_BY paper_72<br>→ COVERS topic_4410</div>
+        <svg class="mini" viewBox="0 0 300 120" style="margin-top:10px">
+          <g stroke="#9a8bbd" stroke-width="1" opacity=".75"><line x1="150" y1="60" x2="60" y2="25"/><line x1="150" y1="60" x2="250" y2="30"/><line x1="150" y1="60" x2="75" y2="100"/><line x1="150" y1="60" x2="235" y2="96"/></g>
+          <circle cx="150" cy="60" r="10" fill="#67b8b0" stroke="#d8b46a"/><circle cx="60" cy="25" r="6" fill="#9a8bbd"/><circle cx="250" cy="30" r="6" fill="#c8b795"/><circle cx="75" cy="100" r="6" fill="#c8b795"/><circle cx="235" cy="96" r="6" fill="#9a8bbd"/>
+        </svg>
+      </div>
+    </div>
+  </section>
+</div>
+
+<footer>
+  <span>耗时: 4.2 ms</span><span>返回: 6 行</span><span>QuIVer: ready</span><span>写队列: 0/256</span><span>TriviumDB Server v0.8.10</span>
+</footer>
+<script>
+  document.querySelectorAll('.rtab').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.rtab').forEach((x) => x.classList.remove('active'));
+      tab.classList.add('active');
+      document.querySelectorAll('.result .view').forEach((v) => v.classList.remove('active'));
+      document.getElementById('view-' + tab.dataset.view).classList.add('active');
+    });
+  });
+</script>
+</body>
+</html>

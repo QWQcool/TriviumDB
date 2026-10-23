@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TriviumDB 设计稿 D · 组件状态板</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { min-height: 100vh; font: 12px/1.5 Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; background: #05070d; color: #f4eee4; }
+  .sheet { min-height: 100vh; display: grid; grid-template-columns: 1fr 1fr; }
+  section { padding: 28px; }
+  .dark { background: #070806; }
+  .light { background: #f4f1ea; color: #242018; }
+  h1 { font: 600 20px/1.2 Inter, sans-serif; letter-spacing: -.02em; margin-bottom: 4px; }
+  .sub { font: 10px/1.6 "Cascadia Mono", monospace; letter-spacing: .14em; text-transform: uppercase; opacity: .62; margin-bottom: 22px; }
+  h2 { font: 600 13px/1.4 Inter, sans-serif; margin: 24px 0 12px; }
+  .grid { display: grid; grid-template-columns: 86px repeat(5, 1fr); gap: 8px; align-items: center; }
+  .label { font-family: "Cascadia Mono", monospace; font-size: 10px; letter-spacing: .08em; opacity: .6; text-transform: uppercase; }
+  .btn { height: 32px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; border: 1px solid; }
+  .dark .btn { color: #f4eee4; }
+  .light .btn { color: #242018; }
+  .primary { background: #d8b46a; border-color: #d8b46a; color: #17130d; font-weight: 650; }
+  .primary.hover { transform: translateY(-1px); background: #e3c281; border-color: #67b8b0; box-shadow: 0 4px 12px rgba(0,0,0,.35); }
+  .primary.active { transform: scale(.98); background: #b69455; }
+  .primary.focus { outline: 2px solid #67b8b0; outline-offset: 2px; }
+  .primary.disabled { opacity: .38; }
+  .secondary { background: rgba(244,238,228,.035); border-color: rgba(201,190,170,.42); }
+  .dark .secondary.hover { transform: translateY(-1px); background: rgba(103,184,176,.1); border-color: #67b8b0; box-shadow: 0 3px 10px rgba(0,0,0,.28); }
+  .secondary.active { transform: scale(.98); }
+  .secondary.focus { outline: 2px solid #67b8b0; outline-offset: 2px; }
+  .secondary.disabled { opacity: .38; }
+  .danger { background: rgba(208,131,124,.1); border-color: rgba(208,131,124,.45); color: #e08a82; }
+  .danger.hover { transform: translateY(-1px); background: rgba(208,131,124,.18); border-color: #d0837c; }
+  .danger.focus { outline: 2px solid #d0837c; outline-offset: 2px; }
+  .danger.disabled { opacity: .35; }
+  .light .primary { background: #9e7f47; border-color: #9e7f47; color: #fffaf0; }
+  .light .primary.focus, .light .secondary.focus { outline-color: #4d7c78; }
+  .light .secondary { background: rgba(36,32,24,.03); border-color: rgba(60,52,40,.28); }
+  .light .secondary.hover { background: rgba(77,124,120,.1); border-color: #4d7c78; }
+  .light .danger { background: rgba(168,72,63,.1); border-color: rgba(168,72,63,.42); color: #a8483f; }
+  .capsules, .inputs { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .cap { height: 26px; padding: 0 10px; border-radius: 999px; display: inline-flex; align-items: center; gap: 6px; font-size: 11px; border: 1px solid; }
+  .dark .cap { border-color: rgba(224,224,214,.14); background: rgba(255,255,255,.03); }
+  .light .cap { border-color: rgba(60,52,40,.16); background: rgba(255,255,255,.42); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; }
+  .input { flex: 1; min-width: 220px; height: 32px; border-radius: 8px; border: 1px solid; display: flex; align-items: center; padding: 0 10px; }
+  .dark .input { border-color: rgba(201,190,170,.35); background: #11110f; color: #b9bdb6; }
+  .dark .input.focus { border-color: #67b8b0; box-shadow: 0 0 0 2px rgba(103,184,176,.25); color: #f4eee4; }
+  .light .input { border-color: rgba(60,52,40,.28); background: #fbf9f4; color: #5d574c; }
+  .light .input.focus { border-color: #4d7c78; box-shadow: 0 0 0 2px rgba(77,124,120,.22); color: #242018; }
+  .card { border-radius: 18px; border: 1px solid; padding: 12px; }
+  .dark .card { background: #191713; border-color: rgba(224,224,214,.11); }
+  .light .card { background: #fbf9f4; border-color: #ddd5c4; }
+  table { width: 100%; border-collapse: collapse; }
+  th { font: 600 10px/1 "Cascadia Mono", monospace; letter-spacing: .08em; text-transform: uppercase; text-align: left; padding: 8px 8px; opacity: .62; border-bottom: 1px solid; }
+  td { font: 11px/1.5 "Cascadia Mono", monospace; padding: 8px; opacity: .88; border-bottom: 1px solid rgba(128,128,128,.12); }
+  .dark th { border-color: rgba(224,224,214,.22); } .light th { border-color: #c8c0ad; }
+  .note { margin-top: 18px; font-size: 11px; opacity: .62; line-height: 1.8; }
+  @media (max-width: 900px) { .sheet { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <section class="dark">
+    <h1>Astrmira Obsidian Dark Mode</h1>
+    <div class="sub">Trivium DB · Component State Sheet</div>
+    <h2>按钮状态矩阵</h2>
+    <div class="grid">
+      <span class="label">Primary</span><button class="btn primary">运行</button><button class="btn primary hover">悬停</button><button class="btn primary active">按下</button><button class="btn primary focus">焦点</button><button class="btn primary disabled">禁用</button>
+      <span class="label">Secondary</span><button class="btn secondary">剖析</button><button class="btn secondary hover">悬停</button><button class="btn secondary active">按下</button><button class="btn secondary focus">焦点</button><button class="btn secondary disabled">禁用</button>
+      <span class="label">Danger</span><button class="btn danger">删除节点</button><button class="btn danger hover">悬停</button><button class="btn danger active">按下</button><button class="btn danger focus">焦点</button><button class="btn danger disabled">禁用</button>
+    </div>
+    <h2>三模胶囊与输入框</h2>
+    <div class="capsules">
+      <span class="cap"><i class="dot" style="background:#67b8b0"></i>向量</span>
+      <span class="cap"><i class="dot" style="background:#9a8bbd"></i>图拓扑</span>
+      <span class="cap"><i class="dot" style="background:#c8b795"></i>文档</span>
+      <span class="cap"><i class="dot" style="background:#a9d18b"></i>WebGL 就绪</span>
+      <span class="cap"><i class="dot" style="background:#d8b46a"></i>写入模式</span>
+    </div>
+    <div class="inputs" style="margin-top:12px"><div class="input">搜索节点 ID…</div><div class="input focus">输入焦点（2px 青圈）</div></div>
+    <h2>结果卡样例</h2>
+    <div class="card"><table><thead><tr><th>_id</th><th>type</th><th>vector_norm</th><th>elapsed_ms</th></tr></thead><tbody><tr><td>hashID2860657889952649…</td><td>hash</td><td>{VECTOR '0…', data, 0…}</td><td>0.1ms</td></tr><tr><td>hashID29636827ab9876f39…</td><td>hash</td><td>{VECTOR '0…', data, 0…}</td><td>0.2ms</td></tr></tbody></table></div>
+    <p class="note">按钮统一 32px / 12.5px / 8px 圆角；hover 上浮 1px，active scale(.98)，focus 2px 青圈。暗色文字 ≥ #b9bdb6，卡片不超过 18px 圆角。</p>
+  </section>
+
+  <section class="light">
+    <h1>Warm Stone Light Mode</h1>
+    <div class="sub">Warm paper · high contrast</div>
+    <h2>按钮状态矩阵</h2>
+    <div class="grid">
+      <span class="label">Primary</span><button class="btn primary">运行</button><button class="btn primary hover">悬停</button><button class="btn primary active">按下</button><button class="btn primary focus">焦点</button><button class="btn primary disabled">禁用</button>
+      <span class="label">Secondary</span><button class="btn secondary">剖析</button><button class="btn secondary hover">悬停</button><button class="btn secondary active">按下</button><button class="btn secondary focus">焦点</button><button class="btn secondary disabled">禁用</button>
+      <span class="label">Danger</span><button class="btn danger">删除节点</button><button class="btn danger hover">悬停</button><button class="btn danger active">按下</button><button class="btn danger focus">焦点</button><button class="btn danger disabled">禁用</button>
+    </div>
+    <h2>三模胶囊与输入框</h2>
+    <div class="capsules">
+      <span class="cap"><i class="dot" style="background:#4d7c78"></i>向量</span>
+      <span class="cap"><i class="dot" style="background:#645680"></i>图拓扑</span>
+      <span class="cap"><i class="dot" style="background:#8c764e"></i>文档</span>
+      <span class="cap"><i class="dot" style="background:#4f6b3a"></i>WebGL 就绪</span>
+      <span class="cap"><i class="dot" style="background:#9e7f47"></i>写入模式</span>
+    </div>
+    <div class="inputs" style="margin-top:12px"><div class="input">搜索节点 ID…</div><div class="input focus">输入焦点（2px 青圈）</div></div>
+    <h2>结果卡样例</h2>
+    <div class="card"><table><thead><tr><th>_id</th><th>type</th><th>vector_norm</th><th>elapsed_ms</th></tr></thead><tbody><tr><td>hashID2860657889952649…</td><td>hash</td><td>{VECTOR '0…', data, 0…}</td><td>0.1ms</td></tr><tr><td>hashID29636827ab9876f39…</td><td>hash</td><td>{VECTOR '0…', data, 0…}</td><td>0.2ms</td></tr></tbody></table></div>
+    <p class="note">浅色三模色使用深色阶：#4d7c78 / #645680 / #8c764e；图边线 #5f523b，标签必须有 2.5px #fbf9f4 文字描边。</p>
+  </section>
+</div>
+</body>
+</html>

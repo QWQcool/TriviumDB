@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TriviumDB WebUI 设计稿选择</title>
+<style>
+  :root {
+    --bg: #070a12;
+    --panel: #0d111c;
+    --panel-2: #111522;
+    --line: rgba(223, 232, 255, 0.12);
+    --text: #f4eee4;
+    --muted: #aab0bd;
+    --faint: #767c8c;
+    --teal: #65e3d2;
+    --violet: #a78bfa;
+    --gold: #d8b46a;
+    --sand: #c9b895;
+    --danger: #e08a82;
+    --radius: 16px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    min-height: 100vh;
+    color: var(--text);
+    font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    background:
+      radial-gradient(circle at 12% 10%, rgba(101, 227, 210, 0.12), transparent 28%),
+      radial-gradient(circle at 84% 18%, rgba(167, 139, 250, 0.12), transparent 30%),
+      linear-gradient(180deg, #070a12, #05070d 62%, #070806);
+    letter-spacing: 0.005em;
+  }
+  .shell { max-width: 1180px; margin: 0 auto; padding: 34px 22px 60px; }
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 10px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--muted);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+  h1 {
+    margin-top: 14px;
+    font-size: clamp(30px, 4vw, 48px);
+    line-height: 1.05;
+    letter-spacing: -0.04em;
+    font-weight: 650;
+  }
+  .lead { margin-top: 12px; max-width: 780px; color: var(--muted); font-size: 14px; line-height: 1.8; }
+  .grid { margin-top: 30px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .card {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 22px;
+    background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.015));
+    min-height: 280px;
+    display: flex;
+    flex-direction: column;
+  }
+  .thumb {
+    height: 150px;
+    border-bottom: 1px solid var(--line);
+    background:
+      radial-gradient(circle at 20% 20%, var(--thumb-a, rgba(101,227,210,.22)), transparent 34%),
+      radial-gradient(circle at 78% 22%, var(--thumb-b, rgba(167,139,250,.20)), transparent 34%),
+      linear-gradient(135deg, #0b1020, #070a12);
+  }
+  .card[data-kind="light"] .thumb { background: linear-gradient(135deg, #f4f1ea, #e9e2d4); }
+  .body { padding: 18px; display: flex; flex-direction: column; gap: 12px; flex: 1; }
+  .topline { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  h2 { font-size: 20px; letter-spacing: -0.02em; }
+  .tag { flex: none; padding: 4px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+  p { color: var(--muted); font-size: 13px; line-height: 1.75; }
+  .points { display: grid; gap: 6px; color: var(--text); font-size: 12.5px; }
+  .points span { color: var(--muted); }
+  .actions { margin-top: auto; display: flex; align-items: center; gap: 10px; }
+  .open {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 36px;
+    padding: 0 14px;
+    border-radius: 10px;
+    text-decoration: none;
+    color: #081018;
+    background: linear-gradient(100deg, var(--teal), var(--violet));
+    font-size: 13px;
+    font-weight: 650;
+  }
+  .note { color: var(--faint); font-size: 12px; }
+  .decision {
+    margin-top: 24px;
+    border: 1px solid rgba(216, 180, 106, 0.26);
+    border-radius: 22px;
+    padding: 18px;
+    background: rgba(216, 180, 106, 0.06);
+  }
+  .decision h3 { font-size: 16px; margin-bottom: 8px; }
+  .decision p { color: #d8cfbd; }
+  code { font-family: "JetBrains Mono", Consolas, monospace; font-size: 0.92em; color: var(--teal); }
+  @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+  <main class="shell">
+    <span class="eyebrow">TriviumDB · 设计稿选择</span>
+    <h1>先选完整设计稿，再进入开发。</h1>
+    <p class="lead">这一批设计稿是按 Gemini 初稿与讨论稿重新整理的可浏览 HTML 原型。它们不连后端、不改产品代码，只用于确定信息架构、密度、材质和图视觉。选定某一张后，再按该稿进入实现。</p>
+
+    <section class="grid">
+      <article class="card">
+        <div class="thumb" style="--thumb-a: rgba(99,242,231,.24); --thumb-b: rgba(216,180,106,.22);"></div>
+        <div class="body">
+          <div class="topline"><h2>V2 · 星尘侧栏 × 星夜图探索</h2><span class="tag">当前推荐</span></div>
+          <p>按你的选择合成：保留 A 的对象导航侧栏，把主舞台切到 B 的强图视觉；另加悬浮查询舱、右侧详情/投影和底部结果抽屉。</p>
+          <div class="points">
+            <div>· 定位 <span>B 负责图，A 负责导航与壳层</span></div>
+            <div>· 新增 <span>顶部查询舱 / 底部结果抽屉 / 动效开关</span></div>
+            <div>· 参照 <span>Sigma.js / G6 / Cytoscape / react-force-graph / vis-network / Reagraph</span></div>
+          </div>
+          <div class="actions">
+            <a class="open" href="./v2-hybrid-explorer.html">打开设计稿 →</a>
+            <span class="note">建议作为主候选</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="thumb" style="--thumb-a: rgba(216,180,106,.25); --thumb-b: rgba(101,227,210,.16);"></div>
+        <div class="body">
+          <div class="topline"><h2>A · 星尘控制台</h2><span class="tag">壳层参考</span></div>
+          <p>贴近现有控制台：四区工作台、TQL 编辑器、结果表、右侧节点详情。材质是暖黑曜石 + 星尘背景，适合作为全产品的默认壳层。</p>
+          <div class="points">
+            <div>· 改动最小 <span>布局保留，品牌与侧栏升级</span></div>
+            <div>· 重点 <span>编辑器/结果表/节点详情的信息层级</span></div>
+            <div>· 风险 <span>低，可直接落到当前单文件 UI</span></div>
+          </div>
+          <div class="actions">
+            <a class="open" href="./obsidian-console.html">打开设计稿 →</a>
+            <span class="note">对应现有 queryPane</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="thumb" style="--thumb-a: rgba(97,242,231,.28); --thumb-b: rgba(244,114,182,.22);"></div>
+        <div class="body">
+          <div class="topline"><h2>B · 星夜图探索</h2><span class="tag">图视觉候选</span></div>
+          <p>采用你喜欢的参考图方向：深空底、发光节点、渐变边、悬浮信息卡、向量投影。适合只用于图探索器，不建议把整套控制台都改成霓虹。</p>
+          <div class="points">
+            <div>· 改动最大 <span>图画布视觉与动效重写</span></div>
+            <div>· 重点 <span>节点 glow、渐变边、选中态、右下投影</span></div>
+            <div>· 风险 <span>高，需性能降级与浅色另作处理</span></div>
+          </div>
+          <div class="actions">
+            <a class="open" href="./aurora-explorer.html">打开设计稿 →</a>
+            <span class="note">对应 Graph Explorer</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="card" data-kind="light">
+        <div class="thumb"></div>
+        <div class="body">
+          <div class="topline"><h2>C · 暖石浅色图</h2><span class="tag">浅色对照</span></div>
+          <p>白天模式不走星空，保留暖纸、细网格、深金棕边线和文字 Halo。用于验证浅色下节点标签、边线和详情面板的可读性。</p>
+          <div class="points">
+            <div>· 改动中等 <span>只处理浅色图与详情面板</span></div>
+            <div>· 重点 <span>#5f523b 边线 + 文字描边 + 三模深色阶</span></div>
+            <div>· 风险 <span>低，和星夜图视觉共存</span></div>
+          </div>
+          <div class="actions">
+            <a class="open" href="./warm-stone-light.html">打开设计稿 →</a>
+            <span class="note">对应 light theme</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="thumb" style="--thumb-a: rgba(224,138,130,.18); --thumb-b: rgba(216,180,106,.18);"></div>
+        <div class="body">
+          <div class="topline"><h2>D · 组件状态板</h2><span class="tag">开发基准</span></div>
+          <p>按钮五态、三模胶囊、输入框、结果卡与动效分镜。选定页面后，这一页作为组件级实现基准，避免每张图单独发挥。</p>
+          <div class="points">
+            <div>· 用途 <span>统一按钮/标签/输入/卡片规格</span></div>
+            <div>· 重点 <span>hover / active / focus / disabled</span></div>
+            <div>· 风险 <span>低，作为视觉回归参照</span></div>
+          </div>
+          <div class="actions">
+            <a class="open" href="./component-sheet.html">打开设计稿 →</a>
+            <span class="note">对应 component system</span>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="decision">
+      <h3>建议的选择方式</h3>
+      <p>当前优先看 <code>V2</code>：它已经按你的偏好把 B 的图视觉放到主舞台，同时保留 A 的对象导航侧栏。若 V2 通过，A/B/C/D 不再单独落地，而是作为 V2 的局部参照：A 管导航与查询台，B 管图画布，C 管浅色，D 管组件状态。</p>
+    </section>
+  </main>
+</body>
+</html>

@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TriviumDB 设计稿 V2 · 星尘侧栏 × 星夜图探索</title>
+<style>
+  :root {
+    --shell: rgba(10, 10, 9, 0.86);
+    --shell-strong: rgba(8, 9, 14, 0.92);
+    --surface: #11110f;
+    --card: #181613;
+    --stage: #050812;
+    --line: rgba(224, 224, 214, 0.11);
+    --line-strong: rgba(201, 190, 170, 0.34);
+    --stage-line: rgba(190, 214, 255, 0.15);
+    --stage-line-strong: rgba(190, 214, 255, 0.32);
+    --text: #f4eee4;
+    --muted: #b7bcb4;
+    --faint: #8d928b;
+    --stage-text: #eef4ff;
+    --stage-muted: #aebad4;
+    --stage-faint: #72819f;
+    --gold: #d8b46a;
+    --teal: #67b8b0;
+    --violet: #9a8bbd;
+    --sand: #c8b795;
+    --cyan: #63f2e7;
+    --purple: #a78bfa;
+    --pink: #f472b6;
+    --green: #54e39a;
+    --amber: #f4cf6a;
+    --radius-s: 9px;
+    --radius-m: 12px;
+    --radius-l: 16px;
+    --mono: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+    --sans: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    --sidebar-w: 264px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    height: 100vh; overflow: hidden; color: var(--text); background: #070806;
+    font: 12.5px/1.5 var(--sans); letter-spacing: 0.005em;
+  }
+  .stars {
+    position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background:
+      radial-gradient(circle at 10% 12%, rgba(124, 112, 214, 0.18), transparent 25%),
+      radial-gradient(ellipse 58% 48% at 20% 28%, rgba(80, 92, 160, 0.18), transparent 70%),
+      radial-gradient(ellipse 50% 42% at 82% 72%, rgba(118, 70, 142, 0.16), transparent 70%),
+      linear-gradient(180deg, #070b16 0%, #090911 56%, #070806 100%);
+  }
+  .stars::before {
+    content: ""; position: absolute; inset: 0;
+    background-image:
+      radial-gradient(circle, rgba(244,238,228,.72) 0 1px, transparent 1.5px),
+      radial-gradient(circle, rgba(244,238,228,.38) 0 1px, transparent 1.4px),
+      radial-gradient(circle, rgba(216,180,106,.62) 0 1.1px, transparent 1.8px);
+    background-size: 92px 92px, 148px 148px, 224px 224px;
+    background-position: 0 0, 31px 47px, 79px 21px;
+    opacity: .36;
+  }
+  header, .workbench, footer { position: relative; z-index: 1; }
+  header {
+    height: 50px; display: flex; align-items: center; gap: 12px; padding: 0 14px;
+    background: var(--shell-strong); border-bottom: 1px solid var(--line);
+  }
+  .view-name { font-weight: 650; letter-spacing: -0.01em; }
+  .status { display: flex; gap: 8px; margin-left: 8px; }
+  .pill { height: 27px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: rgba(255,255,255,.03); display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; }
+  .pill.ok { color: #a9d18b; border-color: rgba(169,185,134,.32); background: rgba(169,185,134,.08); }
+  .header-actions { margin-left: auto; display: flex; gap: 8px; }
+  .btn {
+    height: 30px; padding: 0 11px; border-radius: 8px; border: 1px solid var(--line-strong);
+    background: rgba(244,238,228,.035); color: var(--text); display: inline-flex; align-items: center; gap: 6px;
+    cursor: pointer; transition: transform 150ms ease, border-color 150ms ease, background 150ms ease, box-shadow 150ms ease;
+    white-space: nowrap;
+  }
+  .btn:hover { transform: translateY(-1px); border-color: var(--teal); background: rgba(103,184,176,.1); box-shadow: 0 4px 12px rgba(0,0,0,.28); }
+  .btn:active { transform: scale(.98); }
+  .btn.primary { background: var(--gold); border-color: var(--gold); color: #17130d; font-weight: 650; }
+  .btn.stage-btn { border-color: var(--stage-line); background: rgba(9,13,26,.82); color: var(--stage-text); border-radius: 999px; }
+  .btn.stage-btn:hover { border-color: rgba(99,242,231,.5); background: rgba(99,242,231,.10); box-shadow: 0 0 18px rgba(99,242,231,.14); }
+  .btn.stage-btn.active { border-color: rgba(99,242,231,.62); background: rgba(99,242,231,.14); color: #fff; box-shadow: 0 0 18px rgba(99,242,231,.18); }
+  .workbench { height: calc(100vh - 78px); display: flex; min-height: 0; }
+
+  /* A 侧栏：对象导航，不改成 Overview/Collections 营销式菜单 */
+  aside.objects {
+    width: var(--sidebar-w); flex: none; display: flex; flex-direction: column; min-height: 0;
+    background: var(--shell); border-right: 1px solid var(--line); backdrop-filter: blur(8px);
+    transition: width 180ms cubic-bezier(.22,1,.36,1);
+  }
+  aside.objects.rail { width: 64px; }
+  aside.objects.rail .hide-rail { display: none !important; }
+  .brand { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 12px; border-bottom: 1px solid var(--line); }
+  .brand-main { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .brand svg { width: 30px; height: 30px; flex: none; }
+  .brand strong { display: block; font-size: 15px; letter-spacing: -0.02em; }
+  .brand span { display: block; font: 9px/1 var(--mono); color: var(--faint); letter-spacing: .12em; text-transform: uppercase; }
+  .rail-btn { width: 30px; height: 28px; padding: 0; justify-content: center; }
+  .nav-scroll { flex: 1; overflow-y: auto; padding: 8px; }
+  .side-label { padding: 8px 10px 4px; font: 10px/1 var(--mono); color: var(--faint); letter-spacing: .14em; text-transform: uppercase; }
+  .group { padding-top: 6px; }
+  .group-title { display: flex; justify-content: space-between; align-items: center; padding: 10px 10px 6px; color: var(--faint); font: 10px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+  .nav-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 40px; padding: 0 10px; border-radius: 10px; color: var(--muted); cursor: pointer; white-space: nowrap; }
+  .nav-item .left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .nav-item svg { width: 18px; height: 18px; opacity: .86; flex: none; }
+  .nav-item:hover { color: var(--text); background: rgba(255,255,255,.045); transform: translateX(1px); }
+  .nav-item.active {
+    color: #fff; font-weight: 650; border-radius: 12px;
+    background: linear-gradient(100deg,
+      rgba(99, 242, 231, 0.22) 0%,
+      rgba(167, 139, 250, 0.24) 78%,
+      rgba(99, 242, 231, 0.10) 100%);
+    box-shadow: inset 3px 0 0 var(--cyan), 0 0 18px rgba(99, 242, 231, 0.10);
+  }
+  .meta { font: 9px/1 var(--mono); color: var(--faint); border: 1px solid var(--line); border-radius: 999px; padding: 3px 7px; }
+  .side-foot { padding: 12px; border-top: 1px solid var(--line); color: var(--faint); font-size: 11px; }
+
+  /* B 主舞台：强图视觉，但不污染壳层文字 */
+  main.stage { flex: 1; min-width: 0; position: relative; overflow: hidden; background: radial-gradient(circle at 50% 46%, rgba(16,26,52,.46), rgba(5,8,18,.68) 68%); }
+  .stage svg.graph { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .hud { position: absolute; z-index: 8; display: flex; gap: 7px; }
+  .hud.left { left: 12px; top: 12px; }
+  .hud.right { right: 12px; top: 12px; }
+  .hud.bottom { left: 50%; bottom: 48px; transform: translateX(-50%); padding: 6px 8px; border: 1px solid var(--stage-line-strong); border-radius: 999px; background: rgba(5,8,18,.82); backdrop-filter: blur(10px); box-shadow: 0 12px 32px rgba(0,0,0,.46); transition: bottom 180ms ease; }
+  .hud.bottom.dock-open { bottom: 210px; }
+
+  .cockpit {
+    position: absolute; left: 50%; top: 12px; transform: translateX(-50%);
+    width: min(700px, calc(100% - 560px)); min-width: 430px;
+    border: 1px solid var(--stage-line-strong); border-radius: 14px;
+    background: rgba(7,11,22,.86); backdrop-filter: blur(12px);
+    box-shadow: 0 18px 48px rgba(0,0,0,.55), 0 0 28px rgba(99,242,231,.07);
+    overflow: hidden; z-index: 9; transition: width 180ms ease;
+  }
+  .cockpit-bar { height: 42px; padding: 0 10px; display: flex; align-items: center; gap: 9px; }
+  .mode { font: 650 10.5px/1 var(--mono); color: var(--cyan); padding: 4px 8px; border-radius: 6px; background: rgba(99,242,231,.12); border: 1px solid rgba(99,242,231,.30); cursor: pointer; }
+  .preview { flex: 1; min-width: 0; font: 12px/1 var(--mono); color: #d8e6ff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+  .preview .kw { color: var(--cyan); } .preview .str { color: var(--amber); }
+  .run { height: 28px; padding: 0 13px; border: 0; border-radius: 999px; background: linear-gradient(100deg, rgba(99,242,231,.94), rgba(167,139,250,.94)); color: #06101c; font-weight: 750; cursor: pointer; box-shadow: 0 0 16px rgba(99,242,231,.24); }
+  .drawer { display: none; grid-template-columns: 1.15fr 1fr; gap: 14px; padding: 12px 14px 14px; border-top: 1px solid var(--stage-line); }
+  .cockpit.open .drawer { display: grid; }
+  .query-box { border: 1px solid var(--stage-line); border-radius: 12px; background: rgba(3,6,14,.78); padding: 10px 12px; font: 12px/1.75 var(--mono); color: #d8e6ff; }
+  .query-box .kw { color: var(--cyan); } .query-box .str { color: var(--amber); }
+  .field { display: grid; gap: 6px; margin-top: 10px; }
+  .field label { color: var(--stage-muted); font-size: 11.5px; display: flex; justify-content: space-between; }
+  .field input[type="range"] { width: 100%; accent-color: var(--cyan); }
+  .mini-results { display: flex; flex-direction: column; gap: 6px; max-height: 170px; overflow-y: auto; }
+  .hit { padding: 8px 10px; border-radius: 11px; border: 1px solid rgba(190,214,255,.09); background: rgba(255,255,255,.025); cursor: pointer; }
+  .hit:hover, .hit.active { border-color: rgba(99,242,231,.38); background: rgba(99,242,231,.09); }
+  .hit .id { display: flex; justify-content: space-between; font: 12px/1 var(--mono); color: var(--stage-text); }
+  .hit .sim { color: var(--cyan); }
+  .chips { margin-top: 5px; display: flex; gap: 5px; }
+  .chip { height: 19px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--stage-line); color: var(--stage-muted); font-size: 10px; display: inline-flex; align-items: center; }
+
+  .dock { position: absolute; left: 12px; right: 12px; bottom: 0; height: 36px; z-index: 10; border: 1px solid var(--stage-line-strong); border-bottom: 0; border-radius: 14px 14px 0 0; background: rgba(7,11,22,.88); backdrop-filter: blur(10px); overflow: hidden; transition: height 180ms ease; }
+  .dock.open { height: 188px; }
+  .dock-bar { height: 36px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; cursor: pointer; color: var(--stage-muted); }
+  .dock-tabs { display: flex; gap: 6px; }
+  .dtab { height: 24px; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; color: var(--stage-muted); font-size: 11.5px; }
+  .dtab.active { background: rgba(216,180,106,.15); color: var(--gold); font-weight: 650; }
+  .dock-body { flex: 1; overflow: auto; padding: 0 10px 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { position: sticky; top: 0; background: #0b0f1d; color: var(--stage-faint); font: 650 10px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--stage-line-strong); }
+  td { padding: 6px 8px; border-bottom: 1px solid rgba(190,214,255,.08); color: var(--stage-muted); }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover td, tbody tr.active td { background: rgba(99,242,231,.08); color: var(--stage-text); }
+  .tag { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font-size: 10.5px; font-weight: 650; }
+  .t-doc { background: var(--sand); color: #1d170f; } .t-grp { background: var(--violet); color: #161120; } .t-vec { background: var(--teal); color: #0d1c1a; }
+  .score { display: inline-flex; align-items: center; gap: 8px; font-family: var(--mono); color: var(--stage-text); }
+  .bar { width: 68px; height: 6px; border-radius: 99px; background: rgba(255,255,255,.08); overflow: hidden; }
+  .bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--cyan), var(--amber)); }
+
+  aside.inspector { width: 356px; flex: none; background: var(--shell); border-left: 1px solid var(--line); backdrop-filter: blur(8px); overflow: hidden; }
+  .inspector-inner { height: 100%; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+  .ptabs { display: flex; gap: 6px; }
+  .ptab { flex: 1; height: 30px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--muted); }
+  .ptab.active { color: var(--text); border-color: rgba(216,180,106,.42); background: rgba(216,180,106,.10); font-weight: 650; }
+  .pcard { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .pcard-head { padding: 9px 12px; display: flex; justify-content: space-between; align-items: center; border-left: 3px solid var(--accent, var(--sand)); font-weight: 650; background: rgba(255,255,255,.015); }
+  .pcard-body { padding: 8px 12px 11px; color: var(--muted); font-size: 12px; }
+  .kv { font: 11.5px/1.68 var(--mono); color: var(--muted); }
+  .kv b { color: var(--text); font-weight: 650; }
+  .heat { display: flex; height: 20px; border-radius: 6px; overflow: hidden; border: 1px solid var(--line-strong); margin: 7px 0; }
+  .heat i { flex: 1; }
+  .actions { display: flex; gap: 8px; margin-top: 10px; }
+  .actions .primary { flex: 1; justify-content: center; border: 0; background: linear-gradient(100deg, var(--teal), var(--violet)); color: #10110f; font-weight: 750; }
+  .actions .ghost { flex: 1; justify-content: center; }
+  .projection { width: 100%; height: 150px; display: block; }
+  footer { height: 28px; display: flex; align-items: center; gap: 16px; padding: 0 14px; background: var(--shell-strong); border-top: 1px solid var(--line); color: var(--faint); font: 10.5px/1 var(--mono); }
+  @keyframes pulse { 0% { r: 18; opacity: .95; stroke-width: 3; } 100% { r: 220; opacity: 0; stroke-width: .5; } }
+  .pulse { animation: pulse 1.05s cubic-bezier(.16,1,.3,1) forwards; }
+  body.motion-off *, body.motion-off *::before, body.motion-off *::after { animation: none !important; transition: none !important; }
+  @media (max-width: 1260px) { aside.inspector { display: none; } .cockpit { width: min(640px, calc(100% - 340px)); } }
+  @media (max-width: 980px) { aside.objects { display: none; } .cockpit { width: calc(100% - 24px); min-width: 0; } }
+</style>
+</head>
+<body>
+<div class="stars" aria-hidden="true"></div>
+<header>
+  <div class="view-name">图与向量探索器</div>
+  <div class="status"><span class="pill ok">● 在线</span><span class="pill">QuIVer: ready</span><span class="pill">代次: 2ef6dbb</span></div>
+  <div class="header-actions">
+    <button class="btn" id="motionBtn">动效: 开</button>
+    <button class="btn" onclick="document.getElementById('cockpit').classList.toggle('open')">悬浮查询舱</button>
+    <button class="btn" onclick="document.querySelector('.dock').classList.toggle('open'); syncDock();">结果抽屉</button>
+  </div>
+</header>
+
+<div class="workbench">
+  <aside class="objects" id="objectsNav">
+    <div class="brand">
+      <div class="brand-main">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="12" fill="none" stroke="currentColor" opacity=".30"/><path d="M10.5 11.5 21 14.5M11.5 14.5l4.5 8M21 16l-7.5 6.5" stroke="currentColor" opacity=".32" fill="none"/><circle cx="10" cy="10.5" r="3.4" fill="#c8b795"/><circle cx="22" cy="13.5" r="3.4" fill="#9a8bbd"/><circle cx="14.5" cy="23" r="3.4" fill="#67b8b0"/></svg>
+        <div class="hide-rail"><strong>TriviumDB</strong><span>星尘工作台</span></div>
+      </div>
+      <button class="btn rail-btn" id="railBtn" title="收起侧栏">◀</button>
+    </div>
+    <div class="nav-scroll">
+      <div class="side-label hide-rail">对象导航</div>
+      <div class="group">
+        <div class="group-title"><span class="hide-rail">三模数据引擎</span><span>▾</span></div>
+        <div class="nav-item active"><div class="left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 3.5h7.5L19 9v11.5H6z"/><path d="M13.5 3.5V9H19"/></svg><span class="hide-rail">文档</span></div><span class="meta hide-rail">FIND</span></div>
+        <div class="nav-item"><div class="left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="M8.4 13.3l7.2 4.2M15.6 6.5 8.4 10.7"/></svg><span class="hide-rail">图拓扑</span></div><span class="meta hide-rail">MATCH</span></div>
+        <div class="nav-item"><div class="left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3 21 7.5 12 12 3 7.5z"/><path d="M3 12l9 4.5 9-4.5M3 16.5 12 21l9-4.5"/></svg><span class="hide-rail">向量与 QuIVer</span></div><span class="meta hide-rail">SEARCH</span></div>
+      </div>
+      <div class="group">
+        <div class="group-title"><span class="hide-rail">常用代码片段</span><span>▾</span></div>
+        <div class="nav-item"><div class="left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 4.5 4.5"/></svg><span class="hide-rail">扫描所有节点</span></div></div>
+        <div class="nav-item"><div class="left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="5" cy="12" r="2.3"/><circle cx="19" cy="6" r="2.3"/><circle cx="19" cy="18" r="2.3"/><path d="M7.2 11l9.6-4M7.2 13l9.6 4" stroke-dasharray="2 2.5"/></svg><span class="hide-rail">探索一跳图关系</span></div></div>
+        <div class="nav-item"><div class="left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="7.5"/><path d="M12 8v8M8 12h8"/></svg><span class="hide-rail">创建单节点</span></div></div>
+      </div>
+      <div class="group">
+        <div class="group-title"><span class="hide-rail">查询历史</span><span>▾</span></div>
+        <div class="nav-item"><div class="left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v5h5"/><path d="M12 8v4.2l3 1.8"/></svg><span class="hide-rail">MATCH (a)-[:knows*1..3]-&gt;(b)</span></div></div>
+        <div class="nav-item"><div class="left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v5h5"/><path d="M12 8v4.2l3 1.8"/></svg><span class="hide-rail">SEARCH VECTOR [0.12, -0.45]</span></div></div>
+      </div>
+    </div>
+    <div class="side-foot hide-rail">界面语言：中文 · English</div>
+  </aside>
+
+  <main class="stage">
+    <div class="hud left"><button class="btn stage-btn">图内搜索</button><button class="btn stage-btn">k-hop: 2</button><button class="btn stage-btn" id="pulseBtn">路径追踪</button></div>
+    <div class="hud right"><button class="btn stage-btn">＋</button><button class="btn stage-btn">－</button><button class="btn stage-btn">适应窗口</button><button class="btn stage-btn active">星云模式</button></div>
+
+    <section class="cockpit" id="cockpit">
+      <div class="cockpit-bar">
+        <span class="mode" onclick="this.closest('.cockpit').classList.toggle('open')">TQL · KNN ▾</span>
+        <div class="preview" onclick="this.closest('.cockpit').classList.toggle('open')"><span class="kw">MATCH</span> (u:Agent)-[r:RECALLS]-&gt;(m) <span class="kw">WHERE</span> cosine(u.vector, <span class="str">$q</span>) &gt; 0.75 <span class="kw">RETURN</span> u, m <span class="kw">LIMIT</span> 6</div>
+        <button class="run" id="runBtn">▶ 运行</button>
+      </div>
+      <div class="drawer">
+        <div>
+          <div style="font-weight:650;color:var(--stage-text);margin-bottom:6px">模式查询与相似度搜索</div>
+          <div class="query-box" contenteditable="true" spellcheck="false"><span class="kw">MATCH</span> (u:Agent)-[r:RECALLS]-&gt;(m)<br><span class="kw">WHERE</span> cosine(u.vector, <span class="str">$q</span>) &gt; 0.75<br><span class="kw">RETURN</span> u, r, m <span class="kw">LIMIT</span> 6</div>
+          <div class="field"><label><span>过滤条件</span><span style="font-family:var(--mono);color:var(--cyan)">payload.status == active</span></label></div>
+          <div class="field"><label><span>相似度阈值</span><span id="simText" style="font-family:var(--mono);color:var(--amber)">0.75</span></label><input type="range" min="70" max="95" value="75" oninput="document.getElementById('simText').textContent=(this.value/100).toFixed(2)"></div>
+        </div>
+        <div>
+          <div class="side-label" style="padding:0 0 6px;color:var(--stage-faint)">搜索结果</div>
+          <div class="mini-results">
+            <div class="hit active" data-node="node_90123"><div class="id"><span>node_90123</span><span class="sim">0.94</span></div><div class="chips"><span class="chip">Agent</span><span class="chip">Context</span></div></div>
+            <div class="hit" data-node="memory_07"><div class="id"><span>memory_07</span><span class="sim">0.88</span></div><div class="chips"><span class="chip">Memory</span><span class="chip">Vector</span></div></div>
+            <div class="hit" data-node="session_889"><div class="id"><span>session_889</span><span class="sim">0.81</span></div><div class="chips"><span class="chip">Session</span></div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <svg class="graph" viewBox="80 40 700 560" aria-label="星夜图探索示例">
+      <defs>
+        <filter id="glow" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="5.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+        <filter id="soft" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="18"/></filter>
+        <linearGradient id="edgeA" x1="0" x2="1"><stop offset="0" stop-color="#63f2e7"/><stop offset="1" stop-color="#a78bfa"/></linearGradient>
+        <linearGradient id="edgeB" x1="0" x2="1"><stop offset="0" stop-color="#a78bfa"/><stop offset="1" stop-color="#f472b6"/></linearGradient>
+        <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#aebad4"/></marker>
+      </defs>
+      <g id="nebula">
+        <ellipse cx="430" cy="300" rx="250" ry="160" transform="rotate(-12 430 300)" fill="rgba(99,242,231,.055)" filter="url(#soft)"/>
+        <ellipse cx="540" cy="270" rx="170" ry="120" transform="rotate(18 540 270)" fill="rgba(244,114,182,.05)" filter="url(#soft)"/>
+        <ellipse cx="430" cy="300" rx="250" ry="160" transform="rotate(-12 430 300)" fill="none" stroke="rgba(99,242,231,.22)" stroke-dasharray="5 6"/>
+        <ellipse cx="430" cy="300" rx="175" ry="112" transform="rotate(-12 430 300)" fill="none" stroke="rgba(167,139,250,.24)" stroke-dasharray="4 5"/>
+      </g>
+      <g opacity=".48" stroke="#aebad4" stroke-width=".8" marker-end="url(#arr)">
+        <line x1="430" y1="300" x2="280" y2="150"/><line x1="430" y1="300" x2="585" y2="150"/><line x1="430" y1="300" x2="680" y2="360"/>
+        <line x1="430" y1="300" x2="270" y2="455"/><line x1="430" y1="300" x2="520" y2="520"/><line x1="430" y1="300" x2="170" y2="320"/>
+        <line x1="280" y1="150" x2="190" y2="80"/><line x1="585" y1="150" x2="670" y2="80"/><line x1="270" y1="455" x2="170" y2="540"/><line x1="520" y1="520" x2="640" y2="560"/>
+      </g>
+      <g stroke="url(#edgeA)" stroke-width="2" marker-end="url(#arr)">
+        <line x1="430" y1="300" x2="320" y2="235"/><line x1="430" y1="300" x2="560" y2="245"/><line x1="430" y1="300" x2="640" y2="305"/>
+      </g>
+      <g stroke="url(#edgeB)" stroke-width="2" marker-end="url(#arr)">
+        <line x1="430" y1="300" x2="500" y2="425"/><line x1="430" y1="300" x2="230" y2="395"/>
+      </g>
+      <g font-family="var(--mono)" font-size="10" fill="#aebad4" opacity=".95">
+        <text x="365" y="260" transform="rotate(-28 365 260)">RECALLS</text>
+        <text x="488" y="258" transform="rotate(-18 488 258)">HAS_METADATA</text>
+        <text x="548" y="314" transform="rotate(4 548 314)">CONTRIBUTES_TO</text>
+        <text x="360" y="392" transform="rotate(35 360 392)">RECALLS</text>
+        <text x="452" y="360" transform="rotate(52 452 360)">HAS_METADATA</text>
+      </g>
+      <circle class="pulse-ring" cx="430" cy="300" r="18" fill="none" stroke="#63f2e7" opacity="0"/>
+      <g filter="url(#glow)">
+        <circle class="node hit-node" data-node="node_90123" cx="430" cy="300" r="18" fill="#63f2e7"/><circle class="selected-ring" cx="430" cy="300" r="26" fill="none" stroke="#f4cf6a" stroke-width="2.2"/>
+        <circle class="node" data-node="memory_07" cx="320" cy="235" r="12" fill="#a78bfa"/>
+        <circle class="node" data-node="context_01" cx="560" cy="245" r="12" fill="#63f2e7"/>
+        <circle class="node" data-node="agent_12" cx="640" cy="305" r="11" fill="#f472b6"/>
+        <circle class="node" data-node="session_889" cx="500" cy="425" r="11" fill="#f472b6"/>
+        <circle class="node" data-node="recall_31" cx="230" cy="395" r="11" fill="#a78bfa"/>
+        <circle class="node" cx="280" cy="150" r="10" fill="#a78bfa"/><circle class="node" cx="585" cy="150" r="10" fill="#63f2e7"/>
+        <circle class="node" cx="680" cy="360" r="9" fill="#54e39a"/><circle class="node" cx="270" cy="455" r="9" fill="#a78bfa"/>
+        <circle class="node" cx="520" cy="520" r="9" fill="#54e39a"/><circle class="node" cx="170" cy="320" r="8" fill="#f472b6"/>
+        <circle class="node" cx="190" cy="80" r="7" fill="#63f2e7"/><circle class="node" cx="670" cy="80" r="7" fill="#f472b6"/>
+        <circle class="node" cx="170" cy="540" r="7" fill="#a78bfa"/><circle class="node" cx="640" cy="560" r="7" fill="#f4cf6a"/>
+      </g>
+      <g font-family="Inter, PingFang SC" font-size="11.5" fill="#eef4ff" style="paint-order: stroke" stroke="#050812" stroke-width="3.5px" stroke-linejoin="round">
+        <text x="430" y="332" text-anchor="middle">node_90123</text>
+        <text x="320" y="218" text-anchor="middle">memory_07</text><text x="560" y="228" text-anchor="middle">context_01</text>
+        <text x="640" y="288" text-anchor="middle">agent_12</text><text x="500" y="450" text-anchor="middle">session_889</text>
+        <text x="230" y="378" text-anchor="middle">recall_31</text><text x="280" y="134" text-anchor="middle">edge_hub</text>
+        <text x="585" y="134" text-anchor="middle">quiver_idx</text>
+      </g>
+    </svg>
+
+    <div class="hud bottom" id="layoutDock"><button class="btn stage-btn">Canvas / WebGL</button><button class="btn stage-btn active">力导向</button><button class="btn stage-btn">星云聚类</button><button class="btn stage-btn">向量星图</button><button class="btn stage-btn">度数径向</button></div>
+
+    <section class="dock" id="dock">
+      <div class="dock-bar" onclick="toggleDock()">
+        <div class="dock-tabs"><button class="dtab active">表格视图</button><button class="dtab">JSON 视图</button></div>
+        <span style="font:10.5px/1 var(--mono)">点击选中星体 · 展开结果</span>
+      </div>
+      <div class="dock-body">
+        <table><thead><tr><th>#</th><th>节点 ID</th><th>类型</th><th>关联边</th><th>Payload 摘要</th><th>相似度</th></tr></thead><tbody>
+          <tr class="active" data-node="node_90123"><td>1</td><td>node_90123</td><td><span class="tag t-vec">向量</span></td><td>RECALLS</td><td>{"role":"assistant","session":"sess_889"}</td><td><span class="score"><span class="bar"><i style="width:94%"></i></span>0.9642</span></td></tr>
+          <tr data-node="memory_07"><td>2</td><td>memory_07</td><td><span class="tag t-grp">图拓扑</span></td><td>RECALLS</td><td>{"title":"Agent Episodic Memory"}</td><td><span class="score"><span class="bar"><i style="width:88%"></i></span>0.9318</span></td></tr>
+          <tr data-node="context_01"><td>3</td><td>context_01</td><td><span class="tag t-vec">向量</span></td><td>HAS_METADATA</td><td>{"title":"Prompt Window Context"}</td><td><span class="score"><span class="bar"><i style="width:89%"></i></span>0.8904</span></td></tr>
+          <tr data-node="agent_12"><td>4</td><td>agent_12</td><td><span class="tag t-doc">文档</span></td><td>CONTRIBUTES_TO</td><td>{"name":"Planner Sub-Agent"}</td><td><span class="score"><span class="bar"><i style="width:85%"></i></span>0.8521</span></td></tr>
+        </tbody></table>
+      </div>
+    </section>
+  </main>
+
+  <aside class="inspector">
+    <div class="inspector-inner">
+      <div class="ptabs"><button class="ptab active">节点详情</button><button class="ptab">过滤器</button><button class="ptab">AI 助手</button></div>
+      <div class="pcard" style="--accent:var(--sand)"><div class="pcard-head"><span id="nodeTitle">node_90123</span><span>文档</span></div><div class="pcard-body"><div class="kv">ID: <b>#90123</b><br>类型: <b>Graph &amp; Vector Hub</b><br>Metadata: <b>{"role":"assistant","session":"sess_889"}</b><br>连接数: <b>8 Incoming / 12 Outgoing</b></div><div class="actions"><button class="btn primary">探索邻居</button><button class="btn ghost">原始文档</button></div></div></div>
+      <div class="pcard" style="--accent:var(--teal)"><div class="pcard-head"><span>Vector 向量指纹</span><span>768d</span></div><div class="pcard-body"><div class="heat"><i style="background:#142b29"></i><i style="background:#2b5450"></i><i style="background:#67b8b0"></i><i style="background:#9ad0c8"></i><i style="background:#d8b46a"></i><i style="background:#9a8bbd"></i><i style="background:#2b5450"></i><i style="background:#67b8b0"></i><i style="background:#d8b46a"></i><i style="background:#142b29"></i><i style="background:#67b8b0"></i><i style="background:#9a8bbd"></i><i style="background:#d8b46a"></i><i style="background:#2b5450"></i><i style="background:#67b8b0"></i></div><div class="kv">[-0.124, 0.456, -0.892, … 765]</div></div></div>
+      <div class="pcard" style="--accent:var(--violet)"><div class="pcard-head"><span>Edges 拓扑边与迷你环</span><span>14</span></div><div class="pcard-body"><div class="kv">→ RECALLS memory_07 · 0.93<br>→ HAS_METADATA context_01 · 0.89<br>→ CONTRIBUTES_TO agent_12 · 0.85</div><svg viewBox="0 0 320 120" style="width:100%;height:110px;margin-top:8px"><g stroke="#9a8bbd" opacity=".75"><line x1="160" y1="60" x2="60" y2="25"/><line x1="160" y1="60" x2="260" y2="30"/><line x1="160" y1="60" x2="80" y2="100"/><line x1="160" y1="60" x2="245" y2="96"/></g><circle cx="160" cy="60" r="10" fill="#67b8b0" stroke="#d8b46a"/><circle cx="60" cy="25" r="6" fill="#9a8bbd"/><circle cx="260" cy="30" r="6" fill="#c8b795"/><circle cx="80" cy="100" r="6" fill="#c8b795"/><circle cx="245" cy="96" r="6" fill="#9a8bbd"/></svg></div></div>
+      <div class="pcard" style="--accent:var(--cyan)"><div class="pcard-head"><span>向量空间投影</span><span>UMAP</span></div><div class="pcard-body"><svg class="projection" viewBox="0 0 320 150"><g fill="none" stroke="rgba(190,214,255,.28)"><path d="M70 30 205 14 248 82 108 104z"/><path d="M70 30v58l38 16 0-72zM205 14v58l43 10V82zM108 104v58l140-22V82z"/></g><g><circle cx="130" cy="70" r="2" fill="#63f2e7"/><circle cx="150" cy="62" r="2" fill="#63f2e7"/><circle cx="164" cy="86" r="2" fill="#63f2e7"/><circle cx="122" cy="96" r="2" fill="#63f2e7"/><circle cx="196" cy="66" r="2" fill="#a78bfa"/><circle cx="212" cy="84" r="2" fill="#a78bfa"/><circle cx="222" cy="58" r="2" fill="#a78bfa"/><circle cx="188" cy="102" r="2" fill="#a78bfa"/><circle cx="106" cy="112" r="2" fill="#f472b6"/><circle cx="136" cy="126" r="2" fill="#f472b6"/><circle cx="156" cy="112" r="2" fill="#f472b6"/><circle cx="214" cy="118" r="2" fill="#54e39a"/><circle cx="230" cy="104" r="2" fill="#54e39a"/><circle cx="238" cy="132" r="2" fill="#54e39a"/><circle cx="162" cy="92" r="3" fill="#f4cf6a"/></g></svg></div></div>
+    </div>
+  </aside>
+</div>
+
+<footer><span>Rendered 150 nodes, 420 edges in 12ms</span><span>布局: 力导向</span><span>后端: WebGL2 + SVG Glow</span><span>帧率: 60 FPS</span><span>TriviumDB Server v0.8.10</span></footer>
+<script>
+  const data = {
+    node_90123: ['node_90123', 'Graph & Vector Hub', '8 Incoming / 12 Outgoing', '{"role":"assistant","session":"sess_889"}'],
+    memory_07: ['memory_07', 'Vector Memory', '3 Incoming / 5 Outgoing', '{"title":"Agent Episodic Memory"}'],
+    context_01: ['context_01', 'Vector Context', '4 Incoming / 6 Outgoing', '{"title":"Prompt Window Context"}'],
+    agent_12: ['agent_12', 'Document Agent', '2 Incoming / 8 Outgoing', '{"name":"Planner Sub-Agent"}'],
+    session_889: ['session_889', 'Session Node', '2 Incoming / 4 Outgoing', '{"id":"sess_889"}'],
+    recall_31: ['recall_31', 'Recall Edge', '1 Incoming / 3 Outgoing', '{"kind":"recall"}']
+  };
+  const title = document.getElementById('nodeTitle');
+  const kv = title.closest('.pcard').querySelector('.kv');
+  function selectNode(id, el) {
+    document.querySelectorAll('.node').forEach(n => n.classList.remove('hit-node'));
+    document.querySelectorAll('.hit, .dock tbody tr').forEach(n => n.classList.remove('active'));
+    if (el) el.classList.add('active');
+    const node = document.querySelector(`.node[data-node="${id}"]`);
+    if (node) node.classList.add('hit-node');
+    const d = data[id] || data.node_90123;
+    title.textContent = d[0];
+    kv.innerHTML = `ID: <b>#${d[0].split('_')[1] || d[0]}</b><br>类型: <b>${d[1]}</b><br>Metadata: <b>${d[3]}</b><br>连接数: <b>${d[2]}</b>`;
+  }
+  document.querySelectorAll('.node[data-node], .hit[data-node], .dock tr[data-node]').forEach(el => {
+    el.addEventListener('click', () => selectNode(el.dataset.node, el.classList.contains('node') ? null : el));
+  });
+  function syncDock() { document.getElementById('layoutDock').classList.toggle('dock-open', document.getElementById('dock').classList.contains('open')); }
+  function toggleDock() { document.getElementById('dock').classList.toggle('open'); syncDock(); }
+  function pulse() {
+    const ring = document.querySelector('.pulse-ring');
+    ring.classList.remove('pulse'); void ring.getBoundingClientRect(); ring.classList.add('pulse');
+  }
+  document.getElementById('runBtn').addEventListener('click', pulse);
+  document.getElementById('pulseBtn').addEventListener('click', pulse);
+  document.getElementById('railBtn').addEventListener('click', () => {
+    const nav = document.getElementById('objectsNav');
+    const rail = nav.classList.toggle('rail');
+    document.getElementById('railBtn').textContent = rail ? '▶' : '◀';
+  });
+  const motionBtn = document.getElementById('motionBtn');
+  motionBtn.addEventListener('click', () => {
+    const off = document.body.classList.toggle('motion-off');
+    motionBtn.textContent = off ? '动效: 关' : '动效: 开';
+  });
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) document.body.classList.add('motion-off');
+</script>
+</body>
+</html>
