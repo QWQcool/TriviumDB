@@ -1112,6 +1112,11 @@
       backdrop-filter: blur(10px);
     }
     .v2-graph-controls .btn { font-size: 11.5px; padding-inline: 9px; }
+    .v2-graph-controls--flat { bottom: 16px; }
+    @media (min-width: 901px) {
+      body.panel-open .v2-graph-controls { right: auto; transform: translateX(calc(-50% - 170px)); }
+      body.panel-open .v2-more-menu { right: 376px; }
+    }
     .v2-more-menu {
       position: absolute; right: 12px; bottom: 100px; z-index: 12; display: none; flex-direction: column; gap: 5px;
       padding: 6px; border: 1px solid rgba(190, 214, 255, 0.26); border-radius: 12px;
@@ -1153,6 +1158,17 @@
       .v2-cockpit { width: calc(100% - 24px); min-width: 0; }
       .v2-cockpit-body { grid-template-columns: 1fr; }
       .v2-hud.left .btn { font-size: 11px; padding-inline: 8px; }
+    }
+    @media (max-width: 700px) {
+      .v2-graph-controls {
+        justify-content: flex-start;
+        max-width: calc(100% - 20px);
+        overflow-x: auto;
+        scrollbar-width: none;
+      }
+      .v2-graph-controls::-webkit-scrollbar { display: none; }
+      .v2-graph-controls .btn { flex: none; }
+      #graphMoreBtnQuery, #graphMoreBtn { order: -1; }
     }
     /* 右侧统一面板打开时，图工具条与底栏左移，避免被 360px 面板盖住 */
     @media (min-width: 901px) {
@@ -2067,10 +2083,42 @@
     .status-pill--bad { background: var(--danger-bg); color: var(--danger); }
 
     /* 向量检索实验台 (Vector Lab) */
-    .vector-lab { display: flex; flex: 1; overflow: hidden; }
+    .vector-lab {
+      display: grid;
+      grid-template-columns: 340px minmax(0, 1fr);
+      grid-template-rows: auto minmax(0, 1fr);
+      flex: 1;
+      overflow: hidden;
+    }
+    .vl-query-summary {
+      grid-column: 1 / -1;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 0;
+      max-width: 100%;
+      overflow: hidden;
+      padding: 9px 14px 8px;
+      border-bottom: 1px solid var(--border-color);
+      background: var(--bg-surface-secondary);
+    }
+    .vl-query-summary-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .vl-query-summary-label { font-size: var(--ui-copy-size); color: var(--ui-copy-color); white-space: nowrap; }
+    .vl-query-dim {
+      height: 20px; padding: 0 7px; border-radius: 999px;
+      border: 1px solid rgba(143, 179, 176, 0.34);
+      color: var(--tri-vector); background: rgba(143, 179, 176, 0.08);
+      font: 10px/1 var(--font-mono); display: inline-flex; align-items: center; white-space: nowrap;
+    }
+    .vl-query-values {
+      flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      color: var(--text-main); font: 11px/1.4 var(--font-mono);
+    }
+    .vl-query-heat { height: 28px; min-height: 28px; display: flex; align-items: stretch; }
+    .vl-query-heat .heat-strip { width: 100%; height: 28px; }
     .vl-config {
-      width: 340px;
-      flex: none;
+      width: auto;
+      min-width: 0;
       overflow-y: auto;
       padding: 14px;
       border-right: 1px solid var(--border-color);
@@ -2150,6 +2198,15 @@
       overflow: hidden;
       padding: 12px 14px;
       gap: 10px;
+      min-height: 0;
+    }
+    @media (max-width: 900px) {
+      .vector-lab { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr); }
+      .vl-config { width: 100%; min-width: 0; border-right: 0; border-bottom: 1px solid var(--border-color); max-height: 46vh; }
+      .vl-query-summary { padding-inline: 10px; }
+      .vl-query-summary-line { flex-wrap: wrap; }
+      .vl-query-values { flex-basis: calc(100% - 110px); }
+      .vl-query-heat { min-height: 28px; }
     }
     .vl-pipeline {
       display: flex;
@@ -2634,25 +2691,28 @@
                   <span></span>
                   <button class="result-notice-close" type="button" aria-label="关闭提示" data-i18n-aria-label="common.closePrompt">✕</button>
                 </div>
-                <div class="graph-controls">
-                  <button class="btn" id="centerGraphBtn" title="重置居中">居中视角</button>
-                  <button class="btn" id="togglePhysicsBtn" title="固定物理模拟">冻结力学</button>
-                  <button class="btn" id="graphMergeBtn" title="把当前查询/检索结果并入图探索（增量合并）">并入图探索</button>
+                <div class="graph-controls v2-graph-controls v2-graph-controls--flat">
                   <button class="btn" id="toggleWebGLBtn" title="切换 WebGL/Canvas 渲染后端（加载失败自动回退 Canvas）">WebGL 渲染</button>
-                  <button class="btn active" id="colorModeTypeBtn" title="按节点类型着色">按类型</button>
-                  <button class="btn" id="colorModeCommunityBtn" title="Louvain 社区检测着色（按需加载）">按社区</button>
-                  <button class="btn" id="graphFilterBtn" title="按节点类型 / 边 label 过滤显示">过滤器</button>
                   <!-- PR-18 布局四档：力导向为默认；其余三档为一次性确定性静态布局（物理关闭） -->
                   <button class="btn active" id="layoutForceBtn" title="力导向布局（物理模拟实时收敛）">力导向</button>
                   <button class="btn" id="layoutClusterBtn" title="聚类布局：Louvain 社区分簇摆位（离线回退按类型分组），静态确定性">聚类</button>
                   <button class="btn" id="layoutVectorBtn" title="向量星图：PCA 二维投影（无向量/低维节点放外环），静态确定性">向量星图</button>
                   <button class="btn" id="layoutRadialBtn" title="度数径向布局：按连接数分同心环，静态确定性">度数径向</button>
+                  <button class="btn" id="graphMoreBtnQuery" data-i18n="graph.more">更多</button>
+                </div>
+                <div class="v2-more-menu" id="graphMoreMenuQuery">
+                  <button class="btn" id="centerGraphBtn" title="重置居中">居中视角</button>
+                  <button class="btn" id="togglePhysicsBtn" title="固定物理模拟">冻结力学</button>
+                  <button class="btn active" id="colorModeTypeBtn" title="按节点类型着色">按类型</button>
+                  <button class="btn" id="colorModeCommunityBtn" title="Louvain 社区检测着色（按需加载）">按社区</button>
+                  <button class="btn" id="graphFilterBtn" title="按节点类型 / 边 label 过滤显示">过滤器</button>
                 </div>
                 <!-- PR-17 画布浮动工具条：缩放 / 适合窗口 / 全屏（右上角垂直） -->
                 <div class="graph-float-toolbar" role="group" aria-label="画布视图工具条">
                   <button class="btn" id="gftZoomInBtn" title="放大">＋</button>
                   <button class="btn" id="gftZoomOutBtn" title="缩小">－</button>
                   <button class="btn" id="gftFitBtn" title="适合窗口（按可见节点包围盒适配）">适合窗口</button>
+                  <button class="btn" id="graphMergeBtn" title="把当前查询/检索结果并入图探索（增量合并）">并入图探索</button>
                   <button class="btn" id="gftExportPngBtn" title="导出 PNG（Canvas 路径）">导出 PNG</button>
                   <button class="btn" id="gftFullscreenBtn" title="画布全屏">全屏</button>
                 </div>
@@ -2778,6 +2838,15 @@
       <!-- 标签页 3：向量检索实验台 (Vector Lab) -->
       <div class="tab-pane" id="vectorLabPane" role="tabpanel" aria-labelledby="tab-vectorLabPane">
         <div class="vector-lab">
+          <div class="vl-query-summary" id="vlQuerySummary">
+            <div class="vl-query-summary-line">
+              <span class="vl-query-summary-label" data-i18n="vector.queryVector">查询向量</span>
+              <span class="vl-query-dim" id="vlQueryDim">--</span>
+              <span class="vl-query-values" id="vlQueryValues">未选择向量</span>
+              <button class="btn" id="vlQueryExpandBtn" type="button" data-i18n="vector.expandJson" style="margin-left:auto;">展开 JSON</button>
+            </div>
+            <div class="vl-query-heat" id="vlQueryHeat"></div>
+          </div>
           <!-- 左侧：查询向量与参数配置 -->
           <section class="vl-config">
             <div class="vl-source-tabs">
@@ -2802,7 +2871,6 @@
               <label class="vl-label" for="vlJsonInput" data-i18n="vector.jsonLabel">查询向量 JSON 数组</label>
               <textarea class="vl-input" id="vlJsonInput" rows="4" spellcheck="false" placeholder="例如: [0.12, -0.45, 0.78, 0.33]" data-i18n-placeholder="vector.jsonPlaceholder"></textarea>
               <div class="vl-hint vl-hint--ok" id="vlDimHint" data-i18n="vector.dimHint">维度校验：选中节点后以该节点 vector 维度为准，否则以服务端返回为准</div>
-              <div id="vlVectorPreview"></div>
             </div>
 
             <!-- 检索参数 -->
@@ -3416,6 +3484,10 @@
         'vector.pipeline.hits': '返回 hits',
         'vector.noHits': '没有命中结果（可尝试降低 min_score 或放宽 top_k）',
         'vector.preview': '预览',
+        'vector.queryVector': '查询向量',
+        'vector.queryEmpty': '未选择向量',
+        'vector.expandJson': '展开 JSON',
+        'vector.dimBadge': '{dim} 维',
         'vector.dimSuffix': ' · dim={dim}',
         'vector.noVectorSuffix': ' · 无向量',
         'vector.selected': '已选节点 #{id}，dim={dim}，前若干维: [{preview}{more}]',
@@ -3716,6 +3788,10 @@
         'vector.pipeline.hits': 'Hits',
         'vector.noHits': 'No hits (try lowering min_score or raising top_k)',
         'vector.preview': 'Preview',
+        'vector.queryVector': 'Query vector',
+        'vector.queryEmpty': 'No vector selected',
+        'vector.expandJson': 'Expand JSON',
+        'vector.dimBadge': '{dim} dims',
         'vector.dimSuffix': ' · dim={dim}',
         'vector.noVectorSuffix': ' · no vector',
         'vector.selected': 'Selected node #{id}, dim={dim}, first dims: [{preview}{more}]',
@@ -4034,6 +4110,7 @@
       syncHeaderViewName();
       syncGraphMotionButton();
       renderGraphDock();
+      updateVectorSummary(vlActiveVector);
       UNLABELED_EDGE_LABEL = t('graph.edgeUnlabeled');
       applyGraphChromeI18n();
     }
@@ -4749,10 +4826,15 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       }, (ctx) => {
         if (ctx.conditions.reduce) return;
         gsap.defaults({ ease: 'power3.out' });
-        gsap.timeline({ defaults: { duration: 0.5 } })
-          .from('header.app-header', { yPercent: -100, autoAlpha: 0 })
-          .from('aside.sidebar', { x: -20, autoAlpha: 0 }, '-=0.3')
-          .from('main.workspace', { y: 14, autoAlpha: 0 }, '-=0.35')
+        // 移动端侧栏是 off-canvas 抽屉：不能让 GSAP 把 inline transform 写成 x:0，
+        // 否则首屏抽屉会悬在屏幕左缘（正式 CSS 是 translateX(-100%)）。
+        const mobileShell = window.matchMedia('(max-width: 900px)').matches;
+        const shellTl = gsap.timeline({ defaults: { duration: 0.5 } })
+          .from('header.app-header', { yPercent: -100, autoAlpha: 0 });
+        if (!mobileShell) {
+          shellTl.from('aside.sidebar', { x: -20, autoAlpha: 0 }, '-=0.3');
+        }
+        shellTl.from('main.workspace', { y: 14, autoAlpha: 0 }, mobileShell ? '-=0.3' : '-=0.35')
           .from('footer.app-status-bar', { yPercent: 100, autoAlpha: 0 }, '-=0.3');
         gsap.from('.brand-dot', {
           scale: 0,
@@ -6073,6 +6155,25 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     // ==========================================
     let vlCandidates = [];   // 候选节点缓存（来自选择器 TQL）
     let vlKnownDim = null;   // 已知服务端维度（取自最近一次选中的节点向量，用于 JSON 来源的长度预校验）
+    let vlActiveVector = null; // 当前查询向量（顶部摘要槽 + 28px 热力条）
+
+    function updateVectorSummary(vector) {
+      vlActiveVector = Array.isArray(vector) && vector.length ? vector.slice() : null;
+      const valuesEl = document.getElementById('vlQueryValues');
+      const dimEl = document.getElementById('vlQueryDim');
+      const heatEl = document.getElementById('vlQueryHeat');
+      if (!valuesEl || !dimEl || !heatEl) return;
+      if (!vlActiveVector) {
+        valuesEl.textContent = t('vector.queryEmpty');
+        dimEl.textContent = '--';
+        heatEl.replaceChildren();
+        return;
+      }
+      const preview = vlActiveVector.slice(0, 6).map(v => Number(v).toFixed(3)).join(', ');
+      valuesEl.textContent = preview + (vlActiveVector.length > 6 ? ', …' : '');
+      dimEl.textContent = t('vector.dimBadge', { dim: vlActiveVector.length });
+      heatEl.replaceChildren(renderHeatStrip(vlActiveVector));
+    }
 
     function setupVectorLab() {
       document.getElementById('vlSourceTabNode').addEventListener('click', () => switchVectorSource(true));
@@ -6081,6 +6182,13 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       document.getElementById('vlNodeSelect').addEventListener('change', onVectorNodeSelected);
       document.getElementById('vlJsonInput').addEventListener('input', updateVectorJsonPreview);
       document.getElementById('vlRunBtn').addEventListener('click', runVectorSearch);
+      document.getElementById('vlQueryExpandBtn').addEventListener('click', () => {
+        switchVectorSource(false);
+        if (vlActiveVector) document.getElementById('vlJsonInput').value = JSON.stringify(vlActiveVector);
+        updateVectorJsonPreview();
+        document.getElementById('vlJsonInput').focus();
+      });
+      updateVectorSummary(null);
     }
 
     // 切换查询向量来源（节点选择器 / JSON 粘贴）
@@ -6089,20 +6197,29 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       document.getElementById('vlSourceTabJson').classList.toggle('active', !useNode);
       document.getElementById('vlSourceNode').hidden = !useNode;
       document.getElementById('vlSourceJson').hidden = useNode;
-      if (!useNode) updateVectorJsonPreview();
+      if (useNode) {
+        if (vlCandidates.length) onVectorNodeSelected();
+        else updateVectorSummary(null);
+      } else {
+        updateVectorJsonPreview();
+      }
     }
 
     // JSON 来源实时预览：解析成功则渲染热力条（非法输入清空预览，错误由检索时校验报告）
     function updateVectorJsonPreview() {
-      const previewEl = document.getElementById('vlVectorPreview');
-      previewEl.textContent = '';
       let parsed;
       try {
         parsed = JSON.parse(document.getElementById('vlJsonInput').value.trim());
-      } catch (_) { return; }
+      } catch (_) {
+        updateVectorSummary(null);
+        return;
+      }
       if (!Array.isArray(parsed) || !parsed.length
-        || parsed.some(v => typeof v !== 'number' || !Number.isFinite(v))) return;
-      previewEl.appendChild(renderHeatBlock(parsed, t('vector.preview')));
+        || parsed.some(v => typeof v !== 'number' || !Number.isFinite(v))) {
+        updateVectorSummary(null);
+        return;
+      }
+      updateVectorSummary(parsed);
     }
 
     // 执行选择器 TQL 并将返回节点填充到下拉框
@@ -6178,12 +6295,16 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       const select = document.getElementById('vlNodeSelect');
       const hint = document.getElementById('vlNodeHint');
       const node = vlCandidates[parseInt(select.value, 10)];
-      if (!node) return;
+      if (!node) {
+        updateVectorSummary(null);
+        return;
+      }
 
       hint.hidden = false;
       if (!Array.isArray(node.vector) || node.vector.length === 0) {
         hint.className = 'vl-hint';
         hint.textContent = t('vector.noVectorNode', { id: node.id });
+        updateVectorSummary(null);
         return;
       }
       vlKnownDim = node.vector.length;
@@ -6193,10 +6314,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         id: node.id, dim: node.vector.length, preview,
         more: node.vector.length > 8 ? ', ...' : ''
       });
-      // 选中节点即热力条预览
-      const previewEl = document.getElementById('vlVectorPreview');
-      previewEl.textContent = '';
-      previewEl.appendChild(renderHeatBlock(node.vector, t('vector.preview')));
+      updateVectorSummary(node.vector);
     }
 
     // 从当前激活来源解析查询向量，非法输入抛出 {title, detail}
@@ -7436,20 +7554,23 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         });
       }
 
-      const moreBtn = document.getElementById('graphMoreBtn');
-      const moreMenu = document.getElementById('graphMoreMenu');
-      if (moreBtn && moreMenu) {
-        moreBtn.addEventListener('click', (e) => {
+      const bindMoreMenu = (btnId, menuId) => {
+        const btn = document.getElementById(btnId);
+        const menu = document.getElementById(menuId);
+        if (!btn || !menu) return;
+        btn.addEventListener('click', (e) => {
           e.stopPropagation();
-          moreMenu.classList.toggle('open');
+          menu.classList.toggle('open');
         });
-        moreMenu.addEventListener('click', (e) => {
-          if (e.target.closest('.btn')) moreMenu.classList.remove('open');
+        menu.addEventListener('click', (e) => {
+          if (e.target.closest('.btn')) menu.classList.remove('open');
         });
         document.addEventListener('click', (e) => {
-          if (!moreMenu.contains(e.target) && e.target !== moreBtn) moreMenu.classList.remove('open');
+          if (!menu.contains(e.target) && e.target !== btn) menu.classList.remove('open');
         });
-      }
+      };
+      bindMoreMenu('graphMoreBtn', 'graphMoreMenu');
+      bindMoreMenu('graphMoreBtnQuery', 'graphMoreMenuQuery');
 
       const searchBtn = document.getElementById('graphHudSearch');
       if (searchBtn) {
