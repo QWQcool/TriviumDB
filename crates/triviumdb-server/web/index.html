@@ -27,6 +27,9 @@
       --bg-surface: #11110f;
       --bg-surface-secondary: #191713;
       --bg-inset: #070806;
+      --shell-bg: rgba(7, 10, 18, 0.64);
+      --shell-bg-strong: rgba(7, 10, 18, 0.82);
+      --star-opacity: 0.85;
       --border-color: rgba(184, 176, 160, 0.14);
       --border-strong: rgba(184, 176, 160, 0.30);
       --border-focus: #8fb3b0;
@@ -52,7 +55,7 @@
       --font-sans: "Segoe UI Variable Text", "Geist", "Inter", "Noto Sans SC", "PingFang SC", system-ui, sans-serif;
       --font-display: "Segoe UI Variable Display", "Space Grotesk", "Geist", "Noto Sans SC", system-ui, sans-serif;
       --font-serif: Georgia, "Noto Serif SC", "Songti SC", "Noto Serif", serif;
-      --sidebar-width: 248px;
+      --sidebar-width: 264px;
       --header-height: 56px;
       --status-height: 28px;
       --radius-sm: 8px;
@@ -110,6 +113,9 @@
       --bg-surface: #fbf9f5;
       --bg-surface-secondary: #f0ece3;
       --bg-inset: #e7e1d6;
+      --shell-bg: #f4f1ea;
+      --shell-bg-strong: #eae5da;
+      --star-opacity: 0;
       --border-color: rgba(60, 52, 40, 0.14);
       --border-strong: rgba(60, 52, 40, 0.28);
       --border-focus: #3f6f6b;
@@ -162,6 +168,31 @@
       -webkit-font-smoothing: antialiased;
       font-feature-settings: "ss01" 1, "cv01" 1;
     }
+    /* 暗色星尘层：固定背景，不参与布局；浅色主题直接隐藏 */
+    .starfield {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      overflow: hidden;
+      opacity: var(--star-opacity);
+      background:
+        radial-gradient(circle at 8% 10%, rgba(124, 112, 214, 0.20), transparent 26%),
+        radial-gradient(ellipse 60% 50% at 18% 28%, rgba(80, 92, 160, 0.26), transparent 70%),
+        radial-gradient(ellipse 50% 42% at 82% 72%, rgba(118, 70, 142, 0.20), transparent 70%),
+        radial-gradient(circle at 50% 0%, rgba(64, 86, 128, 0.14), transparent 62%),
+        linear-gradient(180deg, #070b16 0%, #0a0a15 55%, #070806 100%);
+    }
+    .starfield svg { display: block; width: 100%; height: 100%; animation: starDrift 180s linear infinite alternate; }
+    [data-theme="light"] .starfield { display: none; }
+    .icon-sprite { position: absolute; width: 0; height: 0; overflow: hidden; pointer-events: none; }
+    @keyframes starDrift {
+      from { transform: translate3d(0, 0, 0); }
+      to { transform: translate3d(-14px, 8px, 0); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .starfield svg { animation: none; }
+    }
     ::selection { background: var(--primary-bg); }
     :focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; border-radius: 4px; }
     ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -181,7 +212,7 @@
     header.app-header {
       height: var(--header-height);
       flex: none;
-      background: var(--bg-ink);
+      background: var(--shell-bg-strong);
       border-bottom: 1px solid var(--border-color);
       display: flex;
       align-items: center;
@@ -353,6 +384,7 @@
       display: flex;
       overflow: hidden;
       position: relative;
+      z-index: 1;
       min-height: 0;
     }
 
@@ -360,7 +392,7 @@
     aside.sidebar {
       width: var(--sidebar-width);
       flex: none;
-      background: var(--bg-app);
+      background: var(--shell-bg);
       border-right: 1px solid var(--border-color);
       display: flex;
       flex-direction: column;
@@ -382,10 +414,61 @@
       align-items: center;
       justify-content: space-between;
     }
+    .sidebar-brand {
+      padding: 14px 12px;
+      text-transform: none;
+      letter-spacing: 0;
+      justify-content: space-between;
+    }
+    .sidebar-brand-main {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+    .sidebar-brand .brand-mark { width: 30px; height: 30px; color: var(--text-main); }
+    .sidebar-brand-copy {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      min-width: 0;
+    }
+    .sidebar-brand-copy strong {
+      font-family: var(--font-display);
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      color: var(--text-main);
+      line-height: 1.2;
+    }
+    .sidebar-brand-copy span {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      font-weight: 400;
+      letter-spacing: 0.08em;
+      color: var(--ui-micro-color);
+      text-transform: uppercase;
+    }
+    .sidebar-brand .btn {
+      width: 30px;
+      min-height: 28px;
+      padding: 0;
+      background: transparent;
+      border-color: var(--border-color);
+    }
+    .sidebar-nav-label {
+      padding: 8px 12px 0;
+      font-family: var(--font-mono);
+      font-size: var(--ui-micro-size);
+      font-weight: 500;
+      color: var(--ui-micro-color);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
     .sidebar-content {
       flex: 1;
       overflow-y: auto;
-      padding: 10px 8px 14px;
+      padding: 8px 8px 14px;
     }
     .nav-section-title {
       padding: 16px 8px 7px;
@@ -401,7 +484,7 @@
       align-items: center;
       justify-content: space-between;
       gap: 8px;
-      padding: 7px 10px;
+      padding: 9px 10px;
       border-radius: var(--radius-sm);
       cursor: pointer;
       color: var(--text-muted);
@@ -420,10 +503,23 @@
     }
     .nav-item:active { transform: translateX(1px) scale(0.995); }
     .nav-item.active {
-      background: rgba(159, 183, 180, 0.08);
+      background: linear-gradient(100deg,
+        rgba(143, 179, 176, 0.16),
+        rgba(149, 137, 173, 0.18));
       color: var(--text-main);
       font-weight: 600;
-      box-shadow: inset 2px 0 0 var(--tri-vector);
+      box-shadow:
+        inset 2px 0 0 var(--tri-vector),
+        0 0 0 1px rgba(143, 179, 176, 0.12),
+        0 6px 18px rgba(7, 8, 6, 0.20);
+    }
+    [data-theme="light"] .nav-item.active {
+      background: linear-gradient(100deg,
+        rgba(77, 124, 120, 0.12),
+        rgba(100, 86, 128, 0.10));
+      box-shadow:
+        inset 2px 0 0 var(--tri-vector),
+        0 0 0 1px rgba(77, 124, 120, 0.14);
     }
     .nav-item-left {
       display: flex;
@@ -436,7 +532,7 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .nav-item-icon { width: 16px; height: 16px; flex: none; opacity: 0.75; }
+    .nav-item-icon { width: 18px; height: 18px; flex: none; opacity: 0.8; }
     .badge {
       font-family: var(--font-mono);
       font-size: var(--ui-micro-size);
@@ -526,12 +622,17 @@
     .sidebar-toggle svg { flex: none; transition: transform 200ms var(--ease-out); }
     html[data-rail="1"] aside.sidebar { width: 64px; }
     html[data-rail="1"] .sidebar-header span,
+    html[data-rail="1"] .sidebar-brand-copy,
+    html[data-rail="1"] .sidebar-brand .btn,
+    html[data-rail="1"] .sidebar-nav-label,
     html[data-rail="1"] .nav-section-title,
     html[data-rail="1"] .nav-item-left > span,
     html[data-rail="1"] .nav-item .badge,
+    html[data-rail="1"] #historyList,
     html[data-rail="1"] .sidebar-lang,
     html[data-rail="1"] .sidebar-toggle-label { display: none; }
     html[data-rail="1"] .sidebar-header { justify-content: center; padding-inline: 0; }
+    html[data-rail="1"] .sidebar-brand-main { justify-content: center; }
     html[data-rail="1"] .nav-item { justify-content: center; padding: 8px 0; }
     html[data-rail="1"] .nav-item-left { justify-content: center; }
     html[data-rail="1"] .sidebar-footer { align-items: center; padding: 8px 6px; }
@@ -550,6 +651,7 @@
         bottom: var(--status-height);
         width: min(280px, 82vw);
         z-index: 60;
+        background: var(--bg-app);
         transform: translateX(-100%);
         transition: transform 200ms var(--ease-out);
         box-shadow: var(--shadow-lg);
@@ -563,12 +665,16 @@
         top: var(--header-height);
         bottom: var(--status-height);
         z-index: 55;
-        background: rgba(7, 8, 6, 0.58);
+        background: rgba(7, 8, 6, 0.72);
         backdrop-filter: blur(2px);
       }
       /* 抽屉始终按展开态渲染，忽略桌面 rail 记忆 */
       html[data-rail="1"] aside.sidebar { width: min(280px, 82vw); }
       html[data-rail="1"] .sidebar-header span { display: inline; }
+      html[data-rail="1"] .sidebar-brand-copy { display: flex; }
+      html[data-rail="1"] .sidebar-brand .btn { display: inline-flex; }
+      html[data-rail="1"] .sidebar-brand-main { justify-content: flex-start; }
+      html[data-rail="1"] .sidebar-nav-label { display: block; }
       html[data-rail="1"] .nav-section-title { display: block; }
       html[data-rail="1"] .nav-item-left > span { display: inline; }
       html[data-rail="1"] .nav-item .badge { display: inline-block; }
@@ -603,13 +709,13 @@
       display: flex;
       flex-direction: column;
       overflow: hidden;
-      background: var(--bg-app);
+      background: transparent;
       min-width: 0;
     }
     .tabs-bar {
       height: 48px;
       flex: none;
-      background: var(--bg-ink);
+      background: var(--shell-bg);
       border-bottom: 1px solid var(--border-color);
       display: flex;
       align-items: center;
@@ -1769,7 +1875,7 @@
     footer.app-status-bar {
       height: var(--status-height);
       flex: none;
-      background: var(--bg-ink);
+      background: var(--shell-bg);
       border-top: 1px solid var(--border-color);
       display: flex;
       align-items: center;
@@ -2070,25 +2176,80 @@
 </head>
 <body>
 
+  <!-- 暗色星尘背景（JS 生成固定种子 SVG，浅色主题隐藏） -->
+  <div class="starfield" id="starfield" aria-hidden="true"></div>
+
+  <!-- 侧栏 SVG 图标 sprite：全部 currentColor，跟随主题与交互态 -->
+  <svg class="icon-sprite" aria-hidden="true" focusable="false">
+    <defs>
+      <symbol id="icon-brand" viewBox="0 0 32 32">
+        <circle cx="16" cy="16" r="12.5" fill="none" stroke="currentColor" stroke-width="0.9" opacity="0.32"/>
+        <path d="M10.5 11.5 21 14.5M11.5 14.5l4.5 8M21 16l-7.5 6.5" fill="none" stroke="currentColor" stroke-width="1.1" opacity="0.35" stroke-linecap="round"/>
+        <circle cx="10" cy="10.5" r="3.4" fill="var(--tri-doc)"/>
+        <circle cx="22" cy="13.5" r="3.4" fill="var(--tri-graph)"/>
+        <circle cx="14.5" cy="23" r="3.4" fill="var(--tri-vector)"/>
+        <circle cx="16" cy="16" r="1.1" fill="currentColor" opacity="0.65"/>
+      </symbol>
+      <symbol id="icon-document" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 3.5h7.5L19 9v11.5H6z"/>
+        <path d="M13.5 3.5V9H19"/>
+        <circle cx="14.2" cy="12.8" r="0.65" fill="currentColor" stroke="none"/>
+        <circle cx="14.2" cy="15.5" r="0.65" fill="currentColor" stroke="none"/>
+        <circle cx="14.2" cy="18.2" r="0.65" fill="currentColor" stroke="none"/>
+      </symbol>
+      <symbol id="icon-graph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/>
+        <path d="M8.4 13.3l7.2 4.2M15.6 6.5L8.4 10.7"/>
+      </symbol>
+      <symbol id="icon-vector" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 3 21 7.5 12 12 3 7.5z"/>
+        <path d="M3 12l9 4.5 9-4.5M3 16.5 12 21l9-4.5"/>
+      </symbol>
+      <symbol id="icon-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 4.5 4.5"/>
+      </symbol>
+      <symbol id="icon-hop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="5" cy="12" r="2.3"/><circle cx="19" cy="6" r="2.3"/><circle cx="19" cy="18" r="2.3"/>
+        <path d="M7.2 11l9.6-4M7.2 13l9.6 4" stroke-dasharray="2 2.5"/>
+      </symbol>
+      <symbol id="icon-path" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="5" cy="17" r="2.3"/><circle cx="19" cy="7" r="2.3"/>
+        <path d="M7.1 15.4C11 14 11.5 9.6 16.9 8.2"/>
+      </symbol>
+      <symbol id="icon-create" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="7.5"/><path d="M12 8v8M8 12h8"/>
+      </symbol>
+      <symbol id="icon-plan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 18h4V6h7"/><circle cx="18" cy="6" r="2.2"/>
+        <path d="M18 8.2v4.3h-4v4.2"/>
+      </symbol>
+      <symbol id="icon-snippets" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 8l-4 4 4 4M15 8l4 4-4 4"/>
+      </symbol>
+      <symbol id="icon-history" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v5h5"/><path d="M12 8v4.2l3 1.8"/>
+      </symbol>
+      <symbol id="icon-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 6l6 6-6 6"/>
+      </symbol>
+      <symbol id="icon-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 4v6h-6M4 20v-6h6"/>
+        <path d="M5.2 9a8 8 0 0 1 13.2-3L20 10M4 14l1.6 4A8 8 0 0 0 19 15"/>
+      </symbol>
+      <symbol id="icon-collapse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14 6l-6 6 6 6"/><path d="M20 5v14"/>
+      </symbol>
+    </defs>
+  </svg>
+
   <!-- 顶部导航栏 -->
   <header class="app-header">
-    <div class="header-brand">
-      <svg class="brand-mark" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path class="brand-link" d="M8.6 7.4 15.3 8.6M7.3 9.3l2.2 6.1M16.5 11.7l-5.1 4.4"/>
-        <circle class="brand-dot" cx="6" cy="6.5" r="3"/>
-        <circle class="brand-dot brand-dot--graph" cx="18" cy="9" r="3"/>
-        <circle class="brand-dot brand-dot--vector" cx="10.5" cy="18" r="3"/>
-      </svg>
-      <span>TriviumDB Console</span>
-      <span class="badge">SERVER</span>
-    </div>
-
     <div class="header-status">
       <span id="connStatus" class="status-badge">
         <span class="status-dot"></span>
         <span id="connText">连接检测中...</span>
       </span>
-      <span class="badge" id="headerGeneration">Generation: -</span>
+      <span class="badge" id="headerGeneration">代次: -</span>
     </div>
 
     <div class="header-actions">
@@ -2122,31 +2283,38 @@
     <div class="sidebar-scrim" id="sidebarScrim"></div>
     <!-- 左侧对象导航树 (Navicat 风格对象管理器) -->
     <aside class="sidebar">
-      <div class="sidebar-header">
-        <span data-i18n="sidebar.title">对象导航</span>
+      <div class="sidebar-header sidebar-brand">
+        <div class="sidebar-brand-main">
+          <svg class="brand-mark" aria-hidden="true"><use href="#icon-brand"></use></svg>
+          <div class="sidebar-brand-copy">
+            <strong>TriviumDB</strong>
+            <span data-i18n="sidebar.brandSub">星尘工作台</span>
+          </div>
+        </div>
         <button class="btn" id="refreshMetaBtn" style="padding: 2px 6px;" title="刷新元数据" data-i18n-title="sidebar.refresh">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          <svg width="14" height="14" aria-hidden="true"><use href="#icon-refresh"></use></svg>
         </button>
       </div>
       <div class="sidebar-content">
+        <div class="sidebar-nav-label" data-i18n="sidebar.title">对象导航</div>
         <div class="nav-section-title" data-i18n="sidebar.group.engine">三模数据引擎</div>
         <div class="nav-item active" data-action="quick-find">
           <div class="nav-item-left">
-            <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <svg class="nav-item-icon" aria-hidden="true"><use href="#icon-document"></use></svg>
             <span data-i18n="sidebar.item.documents">文档</span>
           </div>
           <span class="badge" id="docCountBadge">FIND</span>
         </div>
         <div class="nav-item" data-action="quick-match">
           <div class="nav-item-left">
-            <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+            <svg class="nav-item-icon" aria-hidden="true"><use href="#icon-graph"></use></svg>
             <span data-i18n="sidebar.item.graph">图拓扑</span>
           </div>
           <span class="badge">MATCH</span>
         </div>
         <div class="nav-item" data-action="quick-search">
           <div class="nav-item-left">
-            <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+            <svg class="nav-item-icon" aria-hidden="true"><use href="#icon-vector"></use></svg>
             <span data-i18n="sidebar.item.vector">向量与 QuIVer</span>
           </div>
           <span class="badge">SEARCH</span>
@@ -2155,31 +2323,31 @@
         <div class="nav-section-title" data-i18n="sidebar.group.snippets">常用代码片段</div>
         <div class="nav-item" data-snippet='FIND {type: "person"} RETURN * LIMIT 20'>
           <div class="nav-item-left">
-            <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
+            <svg class="nav-item-icon" aria-hidden="true"><use href="#icon-search"></use></svg>
             <span data-i18n="sidebar.item.scan">扫描所有节点</span>
           </div>
         </div>
         <div class="nav-item" data-snippet="MATCH (a)-[]->(b) RETURN a, b LIMIT 25">
           <div class="nav-item-left">
-            <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+            <svg class="nav-item-icon" aria-hidden="true"><use href="#icon-graph"></use></svg>
             <span data-i18n="sidebar.item.oneHop">探索一跳图关系</span>
           </div>
         </div>
         <div class="nav-item" data-snippet="MATCH (a)-[:knows*1..3]->(b) RETURN a, b LIMIT 20">
           <div class="nav-item-left">
-            <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="6" r="3"/><circle cx="19" cy="18" r="3"/><path d="M12 3a9 9 0 0 1 9 9M12 21a9 9 0 0 1-9-9"/></svg>
+            <svg class="nav-item-icon" aria-hidden="true"><use href="#icon-hop"></use></svg>
             <span data-i18n="sidebar.item.multiHop">多跳可变长路径</span>
           </div>
         </div>
         <div class="nav-item" data-snippet='CREATE ({name: "Alice", type: "user", level: 5})'>
           <div class="nav-item-left">
-            <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            <svg class="nav-item-icon" aria-hidden="true"><use href="#icon-create"></use></svg>
             <span data-i18n="sidebar.item.create">创建单节点</span>
           </div>
         </div>
         <div class="nav-item" data-snippet='EXPLAIN ANALYZE FIND {type: "person"} RETURN *'>
           <div class="nav-item-left">
-            <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            <svg class="nav-item-icon" aria-hidden="true"><use href="#icon-plan"></use></svg>
             <span data-i18n="sidebar.item.explain">剖析执行计划</span>
           </div>
         </div>
@@ -2198,7 +2366,7 @@
           </div>
         </div>
         <button class="sidebar-toggle" id="sidebarRailToggle" type="button" aria-expanded="true" title="收起侧栏 (Ctrl+B)">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="14.5 6.5 9 12 14.5 17.5"/></svg>
+          <svg width="14" height="14" aria-hidden="true"><use href="#icon-collapse"></use></svg>
           <span class="sidebar-toggle-label" data-i18n="sidebar.collapse">收起侧栏</span>
         </button>
       </div>
@@ -2735,12 +2903,13 @@
         'header.status.online': '在线',
         'header.status.degraded': '就绪异常',
         'header.status.offline': '无法连接 Server',
-        'header.generation': 'Generation',
+        'header.generation': '代次',
         'tabs.query': 'TQL 查询控制台',
         'tabs.graph': '独立图拓扑探索',
         'tabs.vector': '向量检索',
         'tabs.aria': '工作台标签页',
         'sidebar.title': '对象导航',
+        'sidebar.brandSub': '星尘工作台',
         'sidebar.refresh': '刷新元数据',
         'sidebar.group.engine': '三模数据引擎',
         'sidebar.group.snippets': '常用代码片段',
@@ -2829,6 +2998,7 @@
         'tabs.vector': 'Vector Lab',
         'tabs.aria': 'Workspace tabs',
         'sidebar.title': 'Object Explorer',
+        'sidebar.brandSub': 'Stardust Workspace',
         'sidebar.refresh': 'Refresh metadata',
         'sidebar.group.engine': 'Tri-model engine',
         'sidebar.group.snippets': 'Snippets',
@@ -3594,6 +3764,11 @@
       document.querySelectorAll('#pathHopsSelect option').forEach(o => {
         o.textContent = t('detail.hops', { n: o.value });
       });
+      const genEl = document.getElementById('headerGeneration');
+      if (genEl) {
+        if (genEl.dataset.full) updateGenerationBadge(genEl.dataset.full);
+        else genEl.textContent = `${t('header.generation')}: -`;
+      }
       UNLABELED_EDGE_LABEL = t('graph.edgeUnlabeled');
       applyGraphChromeI18n();
     }
@@ -4182,8 +4357,47 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     // ==========================================
     // 初始化应用
     // ==========================================
+    // 固定种子生成星点：避免每次刷新星位变化，视觉基线与截图可复现。
+    function initStarfield() {
+      const host = document.getElementById('starfield');
+      if (!host || host.firstChild) return;
+      const ns = 'http://www.w3.org/2000/svg';
+      const svg = document.createElementNS(ns, 'svg');
+      svg.setAttribute('viewBox', '0 0 1600 1000');
+      svg.setAttribute('preserveAspectRatio', 'xMidYMid slice');
+      svg.setAttribute('aria-hidden', 'true');
+      let seed = 0x1a2b3c4d;
+      const rnd = () => {
+        seed = (seed * 1664525 + 1013904223) >>> 0;
+        return seed / 4294967296;
+      };
+      for (let i = 0; i < 240; i++) {
+        const c = document.createElementNS(ns, 'circle');
+        const roll = rnd();
+        const r = roll < 0.08 ? 1.25 : (roll < 0.3 ? 0.8 : 0.5);
+        c.setAttribute('cx', (rnd() * 1600).toFixed(1));
+        c.setAttribute('cy', (rnd() * 1000).toFixed(1));
+        c.setAttribute('r', String(r));
+        c.setAttribute('fill', i % 17 === 0 ? '#e4c98f' : '#dfe8ff');
+        c.setAttribute('opacity', (0.16 + rnd() * 0.50).toFixed(2));
+        svg.appendChild(c);
+      }
+      // 两颗固定的十字星，给侧栏/画布边缘一点“星芒”焦点
+      [[1320, 170, 9], [245, 760, 7]].forEach(([x, y, s]) => {
+        const p = document.createElementNS(ns, 'path');
+        p.setAttribute('d', `M${x} ${y - s}v${s * 2}M${x - s} ${y}h${s * 2}`);
+        p.setAttribute('fill', 'none');
+        p.setAttribute('stroke', '#f0d9a6');
+        p.setAttribute('stroke-width', '0.8');
+        p.setAttribute('opacity', '0.42');
+        svg.appendChild(p);
+      });
+      host.appendChild(svg);
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
       setupTheme();
+      initStarfield();
       setupSidebarRail();
       setupMobileSidebar();
       setupLanguage();
@@ -4332,6 +4546,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       const el = document.getElementById('headerGeneration');
       if (!el) return;
       const full = String(gen);
+      el.dataset.full = full;
       const label = t('header.generation');
       el.textContent = full.length > GENERATION_BADGE_MAX
         ? `${label}: ${full.slice(0, GENERATION_BADGE_MAX)}…`
@@ -4523,11 +4738,11 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         if (res.ok) {
           const data = await res.json();
           connBadge.className = 'status-badge live';
-          connText.textContent = `${t('status.online')} (${data.status})`;
+          connText.textContent = t('status.online');
           document.getElementById('statusVersion').textContent = `TriviumDB Server v${data.version || '0.8.10'}`;
         } else {
           connBadge.className = 'status-badge dead';
-          connText.textContent = `${t('status.degraded')} (${res.status})`;
+          connText.textContent = t('status.degraded');
         }
       } catch (err) {
         connBadge.className = 'status-badge dead';
