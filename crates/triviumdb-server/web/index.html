@@ -1131,8 +1131,18 @@
       display: flex; align-items: center; justify-content: space-between; padding: 0 12px;
       font: 11px/1 var(--font-mono); cursor: pointer;
     }
-    .v2-dock-body { padding: 0 12px 12px; color: #72819f; font-size: 12px; }
+    .v2-dock-body { padding: 0 12px 12px; color: #72819f; font-size: 12px; display: flex; flex-direction: column; min-height: 0; flex: 1; }
     .v2-dock-empty { padding: 18px; border: 1px dashed rgba(190, 214, 255, 0.14); border-radius: 10px; text-align: center; }
+    .v2-dock-tabs { display: flex; gap: 5px; padding: 0 0 6px; flex: none; }
+    .v2-dock-tab { height: 24px; padding: 0 10px; border: 1px solid transparent; border-radius: 999px; background: transparent; color: #72819f; font-size: 11px; cursor: pointer; }
+    .v2-dock-tab.active { color: #f4cf6a; background: rgba(216, 180, 106, 0.13); border-color: rgba(216, 180, 106, 0.20); }
+    .v2-dock-view { flex: 1; min-height: 0; overflow: auto; }
+    .v2-dock table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+    .v2-dock th { position: sticky; top: 0; background: #0b0f1d; color: #72819f; font: 650 9.5px/1 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; text-align: left; padding: 6px 8px; border-bottom: 1px solid rgba(190, 214, 255, 0.22); }
+    .v2-dock td { padding: 5px 8px; border-bottom: 1px solid rgba(190, 214, 255, 0.08); color: #aebad4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
+    .v2-dock tr { cursor: pointer; }
+    .v2-dock tr:hover td, .v2-dock tr.active td { background: rgba(99, 242, 231, 0.08); color: #eef4ff; }
+    .v2-dock-json { margin: 0; padding: 8px 10px; border: 1px solid rgba(190, 214, 255, 0.14); border-radius: 9px; background: rgba(3, 6, 14, 0.7); color: #cfe6ff; font: 11px/1.65 var(--font-mono); white-space: pre-wrap; }
     body.graph-dock-open .v2-graph-controls { bottom: 210px; }
     body.graph-dock-open .v2-more-menu { bottom: 256px; }
     @media (max-width: 1280px) {
@@ -1456,18 +1466,43 @@
     .node-detail-drawer.open { transform: translateX(0); }
     .node-detail-drawer h4 { font-size: 13px; font-weight: 600; }
 
-    /* 节点 360° 视图 (Trinity 三平面) */
-    .inspector-plane { margin-bottom: 14px; }
+    /* 节点 360° 视图 (Trinity 三平面)：V2 四卡片 + 3px 三模色条 */
+    .inspector-plane {
+      margin-bottom: 12px;
+      padding: 10px 10px 10px 12px;
+      border: 1px solid var(--border-color);
+      border-left: 3px solid var(--plane-accent, var(--tri-doc));
+      border-radius: 12px;
+      background: var(--bg-surface);
+    }
+    .node-detail-drawer .inspector-plane:nth-of-type(1) { --plane-accent: var(--tri-doc); }
+    .node-detail-drawer .inspector-plane:nth-of-type(2) { --plane-accent: var(--tri-vector); }
+    .node-detail-drawer .inspector-plane:nth-of-type(3) { --plane-accent: var(--tri-graph); }
     .inspector-plane-title {
+      position: sticky;
+      top: -14px;
+      z-index: 2;
       display: flex;
       align-items: center;
       gap: 7px;
+      margin: -10px -10px 8px -12px;
+      padding: 8px 10px 7px 9px;
+      border-bottom: 1px solid var(--border-color);
+      background: var(--bg-surface);
       font-size: 11.5px;
       font-weight: 600;
       color: var(--text-muted);
       text-transform: uppercase;
       letter-spacing: 0.04em;
-      margin-bottom: 6px;
+      backdrop-filter: blur(6px);
+    }
+    #drawerNodePayload {
+      max-height: 220px;
+      overflow: hidden;
+    }
+    #drawerNodePayload.expanded {
+      max-height: none;
+      overflow: visible;
     }
     .inspector-dot {
       width: 7px;
@@ -2694,9 +2729,30 @@
           </div>
           <section class="v2-dock" id="graphDock">
             <button class="v2-dock-bar" id="graphDockToggle" type="button">
-              <span data-i18n="graph.dock.title">结果</span><span>⌃</span>
+              <span data-i18n="graph.dock.title">结果</span>
+              <span id="graphDockCount">0 个节点 · 0 条边</span>
+              <span>⌃</span>
             </button>
-            <div class="v2-dock-body"><div class="v2-dock-empty" data-i18n="graph.dock.empty">运行查询后显示结果</div></div>
+            <div class="v2-dock-body">
+              <div class="v2-dock-tabs">
+                <button class="v2-dock-tab active" id="graphDockGridTab" type="button" data-i18n="graph.dock.grid">表格</button>
+                <button class="v2-dock-tab" id="graphDockJsonTab" type="button" data-i18n="graph.dock.json">JSON</button>
+              </div>
+              <div class="v2-dock-view" id="graphDockGrid">
+                <div class="v2-dock-empty" id="graphDockEmpty" data-i18n="graph.dock.empty">运行查询后显示结果</div>
+                <table id="graphDockTable" hidden>
+                  <thead><tr>
+                    <th data-i18n="graph.dock.nodeId">节点 ID</th>
+                    <th data-i18n="graph.dock.type">类型</th>
+                    <th data-i18n="graph.dock.degree">度数</th>
+                    <th data-i18n="graph.dock.label">标签</th>
+                    <th data-i18n="graph.dock.payload">Payload 摘要</th>
+                  </tr></thead>
+                  <tbody id="graphDockBody"></tbody>
+                </table>
+              </div>
+              <div class="v2-dock-view" id="graphDockJsonView" hidden><pre class="v2-dock-json" id="graphDockJson"></pre></div>
+            </div>
           </section>
           <!-- PR-18 命名空间浮动面板（与过滤器面板同款式，错开位置可并存） -->
           <div class="ns-panel" id="nsPanel" hidden>
@@ -2855,6 +2911,7 @@
         <section class="inspector-plane">
           <div class="inspector-plane-title"><span class="inspector-dot" style="background: var(--tri-doc);"></span>Payload</div>
           <div class="json-view" id="drawerNodePayload" style="padding: 8px 10px;"></div>
+          <button class="btn" id="payloadExpandBtn" type="button" hidden data-i18n="detail.expandPayload" style="margin-top: 6px;">展开全部</button>
         </section>
         <section class="inspector-plane">
           <div class="inspector-plane-title"><span class="inspector-dot" style="background: var(--tri-vector);"></span>Vector</div>
@@ -3251,6 +3308,14 @@
         'graph.more': '更多',
         'graph.dock.title': '结果',
         'graph.dock.empty': '运行查询后显示结果',
+        'graph.dock.grid': '表格',
+        'graph.dock.json': 'JSON',
+        'graph.dock.nodeId': '节点 ID',
+        'graph.dock.type': '类型',
+        'graph.dock.degree': '度数',
+        'graph.dock.label': '标签',
+        'graph.dock.payload': 'Payload 摘要',
+        'graph.dock.count': '{nodes} 个节点 · {edges} 条边',
         'graph.center': '居中视角',
         'graph.centerTitle': '重置居中',
         'graph.physics.freeze': '冻结力学',
@@ -3377,6 +3442,8 @@
         'detail.title': '节点详情',
         'detail.node': '节点: #{id} ({label})',
         'detail.noVector': '无向量',
+        'detail.expandPayload': '展开全部',
+        'detail.collapsePayload': '收起',
         'detail.allDims': '全部 {count} 维数值',
         'detail.khop': '{n} 跳',
         'detail.khopAria': '邻域扩展跳数',
@@ -3541,6 +3608,14 @@
         'graph.more': 'More',
         'graph.dock.title': 'Results',
         'graph.dock.empty': 'Results appear after a query',
+        'graph.dock.grid': 'Table',
+        'graph.dock.json': 'JSON',
+        'graph.dock.nodeId': 'Node ID',
+        'graph.dock.type': 'Type',
+        'graph.dock.degree': 'Degree',
+        'graph.dock.label': 'Label',
+        'graph.dock.payload': 'Payload summary',
+        'graph.dock.count': '{nodes} nodes · {edges} edges',
         'graph.center': 'Fit view',
         'graph.centerTitle': 'Reset view',
         'graph.physics.freeze': 'Freeze physics',
@@ -3667,6 +3742,8 @@
         'detail.title': 'Node details',
         'detail.node': 'Node: #{id} ({label})',
         'detail.noVector': 'No vector attached',
+        'detail.expandPayload': 'Expand all',
+        'detail.collapsePayload': 'Collapse',
         'detail.allDims': 'Show all {count} dimensions',
         'detail.khop': '{n} hop(s)',
         'detail.khopAria': 'Neighborhood hops',
@@ -3956,6 +4033,7 @@
       }
       syncHeaderViewName();
       syncGraphMotionButton();
+      renderGraphDock();
       UNLABELED_EDGE_LABEL = t('graph.edgeUnlabeled');
       applyGraphChromeI18n();
     }
@@ -4600,6 +4678,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       setupNodeSearch();          // PR-17：全局节点搜索
       setupGraphFloatToolbars();  // PR-17：画布浮动工具条
       setupGraphV2Hud();          // V2：查询舱 / 更多菜单 / 结果抽屉
+      setupGraphDock();           // V2：底部结果表格/JSON 与行选中
+      setupPayloadExpand();       // V2：Payload 8 行折叠
       startHealthPolling();
       setupPalette();
       setupAiChat();
@@ -6385,6 +6465,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         }
       }
       renderGraphFilterPanels();
+      renderGraphDock();
       return result.addedNodes;
     }
 
@@ -6449,6 +6530,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         if (pathHint) pathHint.textContent = '';
       }
       document.body.classList.toggle('graph-glow-off', graphNodes.length > GRAPH_AURORA_MAX_NODES);
+      renderGraphDock();
       startGraphAuroraMotion();
     }
 
@@ -7412,6 +7494,103 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         if (document.visibilityState === 'hidden') stopGraphAuroraMotion();
         else startGraphAuroraMotion();
       });
+    }
+
+    // 底部图结果抽屉：直接消费 graphNodes/graphEdges，和图探索器保持同一数据源
+    function graphDockPayload(node) {
+      try {
+        const text = JSON.stringify(node.payload || {});
+        return text.length > 96 ? text.slice(0, 96) + '…' : text;
+      } catch (_) {
+        return '{}';
+      }
+    }
+    function syncGraphDockSelection() {
+      const body = document.getElementById('graphDockBody');
+      if (!body) return;
+      body.querySelectorAll('tr[data-node-id]').forEach((tr) => {
+        tr.classList.toggle('active', !!selectedNode && String(tr.dataset.nodeId) === String(selectedNode.id));
+      });
+    }
+    function renderGraphDock() {
+      const count = document.getElementById('graphDockCount');
+      const table = document.getElementById('graphDockTable');
+      const empty = document.getElementById('graphDockEmpty');
+      const body = document.getElementById('graphDockBody');
+      const json = document.getElementById('graphDockJson');
+      if (!count || !table || !empty || !body || !json) return;
+      count.textContent = t('graph.dock.count', { nodes: graphNodes.length, edges: graphEdges.length });
+      const hasRows = graphNodes.length > 0;
+      empty.hidden = hasRows;
+      table.hidden = !hasRows;
+      if (!hasRows) {
+        body.innerHTML = '';
+        json.textContent = '{}';
+        return;
+      }
+      body.innerHTML = graphNodes.slice(0, 500).map((node) => `
+        <tr data-node-id="${escapeHtml(String(node.id))}">
+          <td title="${escapeHtml(String(node.id))}">${escapeHtml(String(node.id))}</td>
+          <td>${escapeHtml(String(node.typeKey || ''))}</td>
+          <td>${Number(node.degree || 0)}</td>
+          <td title="${escapeHtml(String(node.label || ''))}">${escapeHtml(String(node.label || ''))}</td>
+          <td title="${escapeHtml(graphDockPayload(node))}">${escapeHtml(graphDockPayload(node))}</td>
+        </tr>`).join('');
+      json.textContent = JSON.stringify({
+        nodes: graphNodes.slice(0, 200).map((n) => ({
+          id: n.id, label: n.label, type: n.typeKey, degree: n.degree || 0,
+          payload: n.payload || {}, vectorLength: (n.vector || []).length
+        })),
+        edges: graphEdges.slice(0, 400).map((e) => ({
+          source: e.source, target: e.target, label: e.label, weight: e.weight
+        })),
+        truncated: graphNodes.length > 200 || graphEdges.length > 400
+      }, null, 2);
+      syncGraphDockSelection();
+    }
+    function setupPayloadExpand() {
+      const btn = document.getElementById('payloadExpandBtn');
+      const payload = document.getElementById('drawerNodePayload');
+      if (!btn || !payload || btn.dataset.bound === '1') return;
+      btn.dataset.bound = '1';
+      btn.addEventListener('click', () => {
+        const expanded = payload.classList.toggle('expanded');
+        btn.textContent = t(expanded ? 'detail.collapsePayload' : 'detail.expandPayload');
+      });
+    }
+    function setupGraphDock() {
+      const gridTab = document.getElementById('graphDockGridTab');
+      const jsonTab = document.getElementById('graphDockJsonTab');
+      const grid = document.getElementById('graphDockGrid');
+      const json = document.getElementById('graphDockJsonView');
+      if (gridTab && jsonTab && grid && json) {
+        const show = (isGrid) => {
+          grid.hidden = !isGrid;
+          json.hidden = isGrid;
+          gridTab.classList.toggle('active', isGrid);
+          jsonTab.classList.toggle('active', !isGrid);
+        };
+        gridTab.addEventListener('click', () => show(true));
+        jsonTab.addEventListener('click', () => show(false));
+      }
+      const body = document.getElementById('graphDockBody');
+      if (body) {
+        body.addEventListener('click', (e) => {
+          const tr = e.target.closest('tr[data-node-id]');
+          if (!tr) return;
+          const node = nodeMap.get(tr.dataset.nodeId);
+          if (!node) return;
+          selectedNode = node;
+          syncGraphDockSelection();
+          if (graphBackend === 'sigma') {
+            syncSigmaSelection('query');
+            syncSigmaSelection('standalone');
+          }
+          redrawGraph();
+          openNodeDrawer(node);
+        });
+      }
+      renderGraphDock();
     }
 
     // ==========================================
@@ -8789,6 +8968,13 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
 
       // 平面 1: Payload（可折叠 JSON 树）
       renderJsonTree(document.getElementById('drawerNodePayload'), node.payload ?? {});
+      const payloadEl = document.getElementById('drawerNodePayload');
+      const payloadBtn = document.getElementById('payloadExpandBtn');
+      if (payloadEl && payloadBtn) {
+        payloadEl.classList.remove('expanded');
+        payloadBtn.hidden = payloadEl.scrollHeight <= 220;
+        payloadBtn.textContent = t('detail.expandPayload');
+      }
 
       // 平面 2: Vector（维度 + 前 16 维数值，超长折叠）
       renderDrawerVector(node.vector || []);
@@ -8798,6 +8984,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
 
       document.getElementById('nodeDrawer').classList.add('open');
       setUnifiedPanelTab('detail'); // PR-19：详情内容迁入统一面板，打开即切详情 tab
+      syncGraphDockSelection();
     }
 
     // Vector 平面：热力条（min-max 归一顺序色带，hover 显示 dim/数值）+ 摘要（dim 数与 L2 范数），
@@ -9198,11 +9385,12 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     // 独立图拓扑探索标签页
     function initStandaloneGraph() {
       document.getElementById('loadWholeGraphBtn').onclick = () => {
-        // 直接投影真实边，保留方向、标签与权重。
-        setEditorValue('MATCH (a)-[relation]->(b) RETURN a, relation, b LIMIT 100');
-        document.querySelector('[data-tab="queryPane"]').click();
-        document.querySelector('[data-view="graph"]').click();
-        executeCurrentQuery();
+        // V2：原地加载到探索器，不再跳到查询控制台。
+        // 复用探索器 TQL 管线，保留方向、标签与权重。
+        const query = 'MATCH (a)-[relation]->(b) RETURN a, relation, b LIMIT 100';
+        const input = document.getElementById('graphTqlInput');
+        if (input) input.value = query;
+        runGraphTqlQuery();
       };
     }
 
@@ -10985,15 +11173,21 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       });
 
       // 死按钮回归修复
-      addAssert('死按钮修复：加载全图拓扑用合法语法出图', '回归修复', async () => {
-        const before = currentResultData;
+      addAssert('死按钮修复：加载全图拓扑原地并入探索器', '回归修复', async () => {
+        document.querySelector('[data-tab="graphExplorePane"]').click();
+        document.getElementById('graphTqlStatus').textContent = '';
+        const before = graphNodes.length;
         document.getElementById('loadWholeGraphBtn').click();
-        await waitFor(() => currentResultData && currentResultData !== before, 3000, '查询应完成');
-        assert(document.getElementById('tqlInput').value === 'MATCH (a)-[relation]->(b) RETURN a, relation, b LIMIT 100',
-          '应投影真实边对象');
-        assert(document.getElementById('viewGraph').style.display === 'block', '应切换到图视图');
-        assert((currentResultData.rows || []).length === 2, '应返回 2 行');
-        await waitFor(() => graphNodes.length === 3, 3000, '图节点应渲染');
+        await waitFor(() => document.getElementById('graphTqlStatus').textContent.includes('结果'),
+          5000, '探索器原地加载应完成');
+        assert(document.querySelector('.tabs-bar .tab.active').dataset.tab === 'graphExplorePane',
+          '应停留探索器，不跳查询控制台');
+        assert(document.getElementById('graphTqlInput').value.indexOf('MATCH') === 0,
+          '应使用合法 MATCH 查询');
+        assert(graphNodes.length >= before, '图节点应保持/增加');
+        // 恢复查询上下文，避免后续网格用例在探索器标签下运行
+        document.querySelector('[data-tab="queryPane"]').click();
+        document.querySelector('[data-view="grid"]').click();
       });
 
       // ---------- 边界加固（PR-10）：XSS / 深嵌套 / 大数组 / 万行网格 / 图规模护栏 ----------
@@ -11406,10 +11600,14 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         document.querySelector('[data-tab="graphExplorePane"]').click();
         assert(sigmaInstances.standalone, '独立画布 Sigma 实例应存在（后端全局共享）');
         assert(sigmaInstances.standalone.graph.order() === 3, '独立画布应渲染同一图数据');
+        const before = graphNodes.length;
+        document.getElementById('graphTqlStatus').textContent = '';
         document.getElementById('loadWholeGraphBtn').click();
-        await waitFor(() => document.getElementById('tqlInput').value.indexOf('MATCH') === 0, 3000, '按钮应填充 MATCH 查询');
-        await waitFor(() => currentResultData && (currentResultData.rows || []).length === 2, 3000, '查询应完成并渲染 2 行');
-        assert(graphNodes.length === 3, '共享图数据应更新');
+        await waitFor(() => document.getElementById('graphTqlStatus').textContent.includes('结果'),
+          5000, '原地加载应完成');
+        await waitFor(() => sigmaInstances.standalone && sigmaInstances.standalone.graph.order() === graphNodes.length,
+          3000, 'Sigma 图应与共享图数据一致');
+        assert(graphNodes.length >= before, '共享图数据应保持/更新');
       });
 
       addAssert('WebGL 图渲染：CDN 加载失败回退 Canvas 并 toast 提示', 'WebGL 图渲染', async () => {
