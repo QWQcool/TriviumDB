@@ -359,12 +359,30 @@ fn write_text_index_meta(db_path: &str) -> std::io::Result<()> {
     bytes.extend_from_slice(&std::fs::metadata(db_path)?.len().to_le_bytes());
     bytes.extend_from_slice(&text_size.to_le_bytes());
     bytes.extend_from_slice(&file_crc32(&text_path)?.to_le_bytes());
+    write_text_index_meta_bytes(db_path, &bytes)
+}
+
+fn write_text_index_meta_bytes(db_path: &str, bytes: &[u8]) -> std::io::Result<()> {
     let meta_path = text_index_meta_path_from_db(db_path);
     let tmp = format!("{meta_path}.tmp");
     let mut file = File::create(&tmp)?;
-    file.write_all(&bytes)?;
+    file.write_all(bytes)?;
     file.sync_all()?;
     robust_rename_and_sync(Path::new(&tmp), Path::new(&meta_path))
+}
+
+pub(crate) fn deferred_text_metadata(db_path: &str) -> Option<[u8; 28]> {
+    let bytes = std::fs::read(text_index_meta_path_from_db(db_path)).ok()?;
+    let meta: [u8; 28] = bytes.try_into().ok()?;
+    (meta[..4] == *b"TMET"
+        && meta[4..8] == 1u32.to_le_bytes()
+        && meta[8..16] == std::fs::metadata(db_path).ok()?.len().to_le_bytes()
+        && meta[16..24]
+            == std::fs::metadata(text_index_path_from_db(db_path))
+                .ok()?
+                .len()
+                .to_le_bytes())
+    .then_some(meta)
 }
 
 fn validate_text_index_meta(db_path: &str) -> bool {
@@ -396,6 +414,14 @@ pub fn save<T: VectorType>(
     path: &str,
     mode: StorageMode,
 ) -> Result<()> {
+    // 在主文件发布前处理延期操作；失败时保留原 sidecar 与所有待合并记录。
+    let release_text_after_save =
+        memtable.text_index_is_deferred() && memtable.text_index_has_pending_changes();
+    if release_text_after_save {
+        memtable.prepare_text_index()?;
+    }
+    // 保留原 CRC，不以重新计算校验和的方式“认可”未加载文件中的损坏。
+    let preserved_text_meta = memtable.deferred_text_metadata();
     match mode {
         StorageMode::Mmap => save_mmap(memtable, path),
         StorageMode::Rom => {
@@ -433,23 +459,26 @@ pub fn save<T: VectorType>(
     }
 
     let text_path = text_index_path_from_db(path);
-    if let Err(error) = memtable
-        .text_index()
-        .save_to_file(std::path::Path::new(&text_path))
-    {
-        tracing::warn!(
-            "TextIndex 持久化失败（不影响主数据）(TextIndex persist failed): {}",
-            error
-        );
-    } else if std::path::Path::new(&text_path).exists() {
-        if let Err(error) = write_text_index_meta(path) {
-            tracing::warn!(
-                "TextIndex 元数据持久化失败 (TextIndex metadata persistence failed): {}",
-                error
-            );
+    if memtable.text_index_is_deferred() {
+        if let Some(mut meta) = preserved_text_meta {
+            meta[8..16].copy_from_slice(&std::fs::metadata(path)?.len().to_le_bytes());
+            write_text_index_meta_bytes(path, &meta)?;
+            memtable.update_deferred_text_metadata(meta);
         }
     } else {
-        std::fs::remove_file(text_index_meta_path_from_db(path)).ok();
+        memtable.text_index().save_to_file(Path::new(&text_path))?;
+        if Path::new(&text_path).exists() {
+            write_text_index_meta(path)?;
+            if release_text_after_save {
+                memtable.defer_text_index(path);
+            }
+        } else {
+            match std::fs::remove_file(text_index_meta_path_from_db(path)) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
     }
 
     crate::index::property::save_sidecar(memtable.property_indexes(), path, memtable.node_count())?;
@@ -891,6 +920,8 @@ pub fn load<T: VectorType>(
             load_quiver_index(&mut mt, path, repair_sidecars, missing_index_policy)?;
             if load_text_sidecar {
                 load_text_index(&mut mt, path, repair_sidecars, missing_index_policy)?;
+            } else if Path::new(&text_index_path_from_db(path)).exists() {
+                mt.defer_text_index(path);
             }
             Ok(mt)
         } else {
@@ -925,6 +956,8 @@ pub fn load<T: VectorType>(
         load_quiver_index(&mut mt, path, repair_sidecars, missing_index_policy)?;
         if load_text_sidecar {
             load_text_index(&mut mt, path, repair_sidecars, missing_index_policy)?;
+        } else if Path::new(&text_index_path_from_db(path)).exists() {
+            mt.defer_text_index(path);
         }
         Ok(mt)
     }
@@ -1454,6 +1487,23 @@ fn load_property_indexes<T: VectorType>(
             Ok(())
         }
     }
+}
+
+pub(crate) fn read_deferred_text_index(
+    db_path: &str,
+    metadata: Option<[u8; 28]>,
+) -> Result<crate::index::text::TextIndex> {
+    let text_path = text_index_path_from_db(db_path);
+    let valid = metadata.is_some_and(|meta| {
+        std::fs::metadata(&text_path).is_ok_and(|text| meta[16..24] == text.len().to_le_bytes())
+            && file_crc32(&text_path).is_ok_and(|crc| meta[24..28] == crc.to_le_bytes())
+    });
+    if !valid {
+        return Err(TriviumError::ImmutableArtifactInvalid {
+            reason: "未加载的文本索引缺失、损坏或与主数据不匹配".into(),
+        });
+    }
+    crate::index::text::TextIndex::load_from_file(Path::new(&text_path)).map_err(TriviumError::Io)
 }
 
 fn load_text_index<T: VectorType>(

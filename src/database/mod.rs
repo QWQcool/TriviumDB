@@ -572,6 +572,7 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
             MemTable::new(dim)
         };
 
+        memtable.set_text_memory_limit(config.memory_limit);
         if config.access_mode == AccessMode::ReadWrite {
             Wal::upgrade_legacy_wal::<T>(path)?;
         }
@@ -599,7 +600,7 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                     valid_offset
                 );
                 for entry in entries {
-                    transaction::replay_entry(&mut memtable, entry);
+                    transaction::replay_entry(&mut memtable, entry)?;
                 }
             } else {
                 tracing::info!(
@@ -963,6 +964,7 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
     /// 设为 0 表示无限制（默认）。
     pub fn set_memory_limit(&mut self, bytes: usize) {
         self.memory_limit = bytes;
+        write_or_recover(&self.memtable).set_text_memory_limit(bytes);
     }
 
     /// 为后续插入主动预留额外节点容量。
@@ -1417,6 +1419,7 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         {
             let mut mt = write_or_recover(&self.memtable);
             mt.validate_delete(id)?;
+            mt.reserve_text_deletes(1)?;
             let mut w = lock_or_recover(&self.wal);
             w.append(&WalEntry::Delete::<T> { id })?;
             mt.delete(id)?;
@@ -1618,15 +1621,23 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         self.require_write_access("index_keyword")?;
         let _operation = self.enter_operation()?;
         reject_hook_reentrant_write()?;
+        if keyword.is_empty() {
+            return Err(TriviumError::InvalidInput("关键词不能为空".into()));
+        }
         let mut mt = write_or_recover(&self.memtable);
+        mt.validate_update_payload(id)?;
+        mt.prepare_text_index()?;
         mt.index_keyword(id, keyword);
         Ok(())
     }
 
     pub fn index_text(&mut self, id: NodeId, text: &str) -> Result<()> {
         self.require_write_access("index_text")?;
+        let _operation = self.enter_operation()?;
         reject_hook_reentrant_write()?;
         let mut mt = write_or_recover(&self.memtable);
+        mt.validate_update_payload(id)?;
+        mt.prepare_text_index()?;
         mt.index_text(id, text);
         Ok(())
     }
@@ -1636,8 +1647,8 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         let _operation = self.enter_operation()?;
         reject_hook_reentrant_write()?;
         let mut mt = write_or_recover(&self.memtable);
-        mt.build_text_index();
-        Ok(())
+        mt.prepare_text_index()?;
+        mt.try_build_text_index()
     }
 
     pub fn get_payload(&self, id: NodeId) -> Option<serde_json::Value> {

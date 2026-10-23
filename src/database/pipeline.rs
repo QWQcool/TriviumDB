@@ -465,6 +465,7 @@ fn recall_text_ranked<T: VectorType>(
         for (id, score) in text_engine.search_bm25(txt, config.bm25_k1, config.bm25_b) {
             *combined.entry(id).or_insert(0.0) += score;
         }
+        combined.retain(|id, _| matches_payload_filter(mt, config.payload_filter.as_ref(), *id));
         ranking.extend(combined);
         ranking.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
         ranking.truncate(effective_recall_k(config));

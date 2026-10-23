@@ -634,21 +634,21 @@ export class TriviumDB {
   searchHybrid(queryVector: Vector, queryText: string, topK?: number, expandDepth?: number, minScore?: number, hybridAlpha?: number, payloadFilter?: Record<string, unknown>): JsSearchHit[];
 
   /**
-   * 建立用于双路召回的长文本 BM25 索引
+   * 替换节点的 BM25 正文；空文本清除正文，关键词保持不变
    * @param id   节点 ID
    * @param text 文本内容
    */
   indexText(id: number, text: string): void;
 
   /**
-   * 建立用于精确命中的 AC 自动机高级关键词索引
+   * 注册 AC 关键词；同节点重复注册幂等，同词可关联多个节点
    * @param id      节点 ID
    * @param keyword 关键词内容
    */
   indexKeyword(id: number, keyword: string): void;
 
   /**
-   * 重编译文本索引与词频，在批量插入或重启后必须调用以生效
+   * 预热关键词自动机；延期索引加载或构建失败会抛出异常
    */
   buildTextIndex(): void;
 
