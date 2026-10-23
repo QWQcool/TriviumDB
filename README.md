@@ -334,7 +334,7 @@ Rust / Python / Node.js 三语言共享同一套 TQL、Prepared、四类属性�
 
 **QuIVer**（Quantized Index for Vector Retrieval）是 TriviumDB 自研的近似最近邻（ANN）图索引。使用 **BQ 快速构图 + 无训练 SM-L2 导航 + 原始向量余弦精排**；导航结合两位编码与每向量幅值信息计算重建平方 L2，召回和吞吐取决于数据、参数与精排预算。
 
-> 📖 [QuIVer 架构与配置](docs/quiver.md) · [基准测试指南](benches/README.md) · [0.8.11 变更说明](docs/changes-0.8.11.md)
+> 📖 [QuIVer 架构与配置](docs/quiver.md) · [基准测试指南](benches/README.md) · [0.8.11 变更说明](docs/changes/0.8.11.md)
 
 > ⚠️ **维度建议：强烈建议数据库向量维度不超过 3072。** TriviumDB 的通用存储与精确 BruteForce 检索允许更高维度，但 QuIVer 的 BQ 签名安全上限是 3072 维。超过该维度时引擎不会自动构建 QuIVer，检索会稳定回退到 BruteForce；手动构建 QuIVer 会返回明确错误。高维数据库仍可使用，但无法获得 QuIVer ANN 加速，内存和计算开销也会显著增加。
 

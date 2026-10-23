@@ -1,6 +1,6 @@
 # TriviumDB API 完整参考
 
-> **版本**: v0.8.11 版本源码；见[变更说明](changes-0.8.11.md)。
+> **版本**: v0.8.11 版本源码；见[变更说明](changes/0.8.11.md)。
 > **语言**: Rust 核心 + Python 绑定 (PyO3) + Node.js 绑定 (napi-rs)  
 > **许可**: Apache-2.0
 

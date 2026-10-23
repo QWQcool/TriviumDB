@@ -1,6 +1,6 @@
 # QuIVer — Reviewer and Reproducibility Guide
 
-> **Artifact version**: `0.8.11`. SM-L2 navigation was introduced in `0.8.9`; `0.8.10` adds graph connectivity protection. Record the evaluated Git revision and build identity. `0.8.11` reduces vector storage overhead and hardens text index lifecycle without changing the QuIVer navigation algorithm. See [version changes](docs/changes-0.8.11.md).
+> **Artifact version**: `0.8.11`. SM-L2 navigation was introduced in `0.8.9`; `0.8.10` adds graph connectivity protection. Record the evaluated Git revision and build identity. `0.8.11` reduces vector storage overhead and hardens text index lifecycle without changing the QuIVer navigation algorithm. See [version changes](docs/changes/0.8.11.md).
 >
 > **Submission target**: **ICDE** for the rebuilt version. This is not an acceptance, proceedings, or publication claim.
 >
