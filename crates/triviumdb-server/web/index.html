@@ -1090,8 +1090,8 @@
       flex: 1; min-width: 0; color: #d8e6ff; font: 11.5px/1.4 var(--font-mono);
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
     }
-    .v2-cockpit-preview .kw { color: #63f2e7; }
-    .v2-cockpit-preview .str { color: #f4cf6a; }
+    .v2-cockpit-preview .kw, .v2-cockpit-preview .tk-keyword { color: #63f2e7; }
+    .v2-cockpit-preview .str, .v2-cockpit-preview .tk-string, .v2-cockpit-preview .tk-number { color: #f4cf6a; }
     .v2-cockpit-run {
       height: 26px; padding: 0 11px; border: 0; border-radius: 999px;
       background: linear-gradient(100deg, #63f2e7, #a78bfa); color: #06101c;
@@ -1109,6 +1109,32 @@
     .v2-cockpit-hits { display: flex; flex-direction: column; gap: 6px; }
     .v2-cockpit-hits-head { color: #72819f; font: 10px/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
     .v2-cockpit-empty { padding: 18px 10px; border: 1px dashed rgba(190, 214, 255, 0.16); border-radius: 10px; color: #72819f; font-size: 11.5px; text-align: center; }
+    /* 查询舱命中列表（V2 蓝本 mini-results：ID + 相似度 + 类型 chips） */
+    .v2-cockpit-hit { padding: 8px 10px; border-radius: 11px; border: 1px solid rgba(190, 214, 255, 0.09); background: rgba(255, 255, 255, 0.025); cursor: pointer; }
+    .v2-cockpit-hit:hover, .v2-cockpit-hit.active { border-color: rgba(99, 242, 231, 0.38); background: rgba(99, 242, 231, 0.09); }
+    .v2-hit-id { display: flex; justify-content: space-between; gap: 8px; font: 12px/1 var(--font-mono); color: #eef4ff; overflow: hidden; }
+    .v2-hit-sim { color: #63f2e7; flex: none; }
+    .v2-hit-chips { margin-top: 5px; display: flex; gap: 5px; flex-wrap: wrap; }
+    .v2-hit-chip { height: 19px; padding: 0 7px; border-radius: 999px; border: 1px solid rgba(190, 214, 255, 0.15); color: #aebad4; font-size: 10px; display: inline-flex; align-items: center; }
+    /* 查询舱编辑框语法高亮 overlay：pre 在下承色，textarea 在上透明字 + 青色光标 */
+    .v2-cockpit-qwrap { position: relative; }
+    .v2-cockpit-qhl {
+      position: absolute; inset: 0; margin: 0; overflow: hidden; pointer-events: none;
+      border: 1px solid rgba(190, 214, 255, 0.16); border-radius: 10px; background: rgba(3, 6, 14, 0.78);
+      padding: 8px 10px; font: 11.5px/1.7 var(--font-mono); color: #d8e6ff;
+      white-space: pre-wrap; word-break: break-word;
+    }
+    .v2-cockpit-qhl .kw, .v2-cockpit-qhl .tk-keyword { color: #63f2e7; }
+    .v2-cockpit-qhl .str, .v2-cockpit-qhl .tk-string, .v2-cockpit-qhl .tk-number { color: #f4cf6a; }
+    .v2-cockpit-qhl .tk-comment { color: #72819f; }
+    .v2-cockpit-qwrap .v2-cockpit-query { position: relative; background: transparent; color: transparent; caret-color: #63f2e7; border-color: transparent; }
+    .v2-cockpit-qwrap .v2-cockpit-query:focus { border-color: rgba(99, 242, 231, 0.4); }
+    /* 结果抽屉：类型彩色胶囊 / 相似度渐变条（V2 蓝本 t-doc/t-grp/t-vec + score bar） */
+    .v2-dock-idx { color: #72819f; font-family: var(--font-mono); }
+    .v2-dock-tag { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font-size: 10.5px; font-weight: 650; color: #10110f; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .v2-dock-score { display: inline-flex; align-items: center; gap: 8px; font-family: var(--font-mono); color: #eef4ff; }
+    .v2-dock-bar { width: 68px; height: 6px; border-radius: 99px; background: rgba(255, 255, 255, 0.08); overflow: hidden; display: inline-block; flex: none; }
+    .v2-dock-bar i { display: block; height: 100%; background: linear-gradient(90deg, #63f2e7, #f4cf6a); }
     .v2-graph-controls {
       left: 50%; right: auto; bottom: 54px; transform: translateX(-50%);
       flex-wrap: nowrap; max-width: calc(100% - 32px); z-index: 11;
@@ -2776,7 +2802,10 @@
             </div>
             <div class="v2-cockpit-body">
               <div>
-                <textarea class="v2-cockpit-query" id="graphCockpitQuery" spellcheck="false">SEARCH VECTOR [0.12, -0.45, 0.78, 0.33] TOP 6 RETURN *</textarea>
+                <div class="v2-cockpit-qwrap">
+                  <pre class="v2-cockpit-qhl" id="graphCockpitQueryHl" aria-hidden="true"></pre>
+                  <textarea class="v2-cockpit-query" id="graphCockpitQuery" spellcheck="false">SEARCH VECTOR [0.12, -0.45, 0.78, 0.33] TOP 6 RETURN *</textarea>
+                </div>
                 <div class="v2-cockpit-field"><span data-i18n="graph.cockpit.threshold">相似度阈值</span><input id="graphCockpitThreshold" type="range" min="70" max="95" value="75"><b id="graphCockpitThresholdValue">0.75</b></div>
               </div>
               <div>
@@ -2817,11 +2846,12 @@
                 <div class="v2-dock-empty" id="graphDockEmpty" data-i18n="graph.dock.empty">运行查询后显示结果</div>
                 <table id="graphDockTable" hidden>
                   <thead><tr>
+                    <th data-i18n="graph.dock.index">#</th>
                     <th data-i18n="graph.dock.nodeId">节点 ID</th>
                     <th data-i18n="graph.dock.type">类型</th>
-                    <th data-i18n="graph.dock.degree">度数</th>
-                    <th data-i18n="graph.dock.label">标签</th>
+                    <th data-i18n="graph.dock.edges">关联边</th>
                     <th data-i18n="graph.dock.payload">Payload 摘要</th>
+                    <th data-i18n="graph.dock.sim">相似度</th>
                   </tr></thead>
                   <tbody id="graphDockBody"></tbody>
                 </table>
@@ -3400,11 +3430,14 @@
         'graph.dock.empty': '运行查询后显示结果',
         'graph.dock.grid': '表格',
         'graph.dock.json': 'JSON',
+        'graph.dock.index': '#',
         'graph.dock.nodeId': '节点 ID',
         'graph.dock.type': '类型',
-        'graph.dock.degree': '度数',
-        'graph.dock.label': '标签',
+        'graph.dock.edges': '关联边',
         'graph.dock.payload': 'Payload 摘要',
+        'graph.dock.sim': '相似度',
+        'graph.cockpit.merged': 'KNN 命中已并入图（新增 {added}，图内共 {total}）',
+        'graph.cockpit.filtered': '相似度阈值 {v} 过滤后无命中',
         'graph.dock.count': '{nodes} 个节点 · {edges} 条边',
         'graph.center': '居中视角',
         'graph.centerTitle': '重置居中',
@@ -3710,11 +3743,14 @@
         'graph.dock.empty': 'Results appear after a query',
         'graph.dock.grid': 'Table',
         'graph.dock.json': 'JSON',
+        'graph.dock.index': '#',
         'graph.dock.nodeId': 'Node ID',
         'graph.dock.type': 'Type',
-        'graph.dock.degree': 'Degree',
-        'graph.dock.label': 'Label',
+        'graph.dock.edges': 'Edge',
         'graph.dock.payload': 'Payload summary',
+        'graph.dock.sim': 'Similarity',
+        'graph.cockpit.merged': 'KNN hits merged ({added} new, {total} in graph)',
+        'graph.cockpit.filtered': 'No hits above similarity {v}',
         'graph.dock.count': '{nodes} nodes · {edges} edges',
         'graph.center': 'Fit view',
         'graph.centerTitle': 'Reset view',
@@ -7635,17 +7671,55 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         cockpitRun.addEventListener('click', async () => {
           const query = cockpitQuery ? cockpitQuery.value.trim() : '';
           if (!query) { showToast(t('graph.cockpit.empty')); return; }
-          const input = document.getElementById('graphTqlInput');
-          if (input) input.value = query;
+          const knn = parseCockpitSearchQuery(query);
           cockpitRun.disabled = true;
           cockpitRun.textContent = t('gt.running');
           try {
-            if (typeof runGraphTqlQuery === 'function') await runGraphTqlQuery();
+            if (knn && cockpitThreshold) {
+              // KNN 模式：专用端点取回带分数命中。引擎分数是内部融合分（非 0~1 余弦），
+              // UI 侧按本批最高分归一为相对相似度；阈值滑杆做客户端过滤（0.70~0.95）。
+              const minScore = Number(cockpitThreshold.value) / 100;
+              const raw = await runCockpitVectorSearch(knn);
+              const maxScore = raw.length ? Math.max(...raw.map(h => h.score)) : 0;
+              const passing = raw.filter(h => maxScore > 0 ? h.score / maxScore >= minScore - 1e-9 : true);
+              if (!passing.length) {
+                renderCockpitHits({ summary: t('graph.cockpit.filtered', { v: minScore.toFixed(2) }) });
+                showToast(t('graph.cockpit.filtered', { v: minScore.toFixed(2) }));
+              } else {
+                mergeSearchHitsIntoGraph(passing);
+              }
+            } else {
+              const input = document.getElementById('graphTqlInput');
+              if (input) input.value = query;
+              await runGraphTqlQuery();
+            }
+          } catch (err) {
+            showToast(err && err.message ? err.message : t('gt.netFail', { msg: '' }));
           } finally {
             cockpitRun.disabled = false;
             cockpitRun.textContent = t('graph.cockpit.run');
           }
         });
+      }
+
+      // 查询舱语法高亮 overlay + 预览同步（V2 蓝本 kw 青 / str 金；预览栏实时反映当前查询）
+      const cockpitQueryHl = document.getElementById('graphCockpitQueryHl');
+      if (cockpitQuery && cockpitQueryHl) {
+        const syncCockpitQueryVisual = () => {
+          cockpitQueryHl.innerHTML = highlightTql(cockpitQuery.value) + '\n';
+          cockpitQueryHl.scrollTop = cockpitQuery.scrollTop;
+          cockpitQueryHl.scrollLeft = cockpitQuery.scrollLeft;
+          if (cockpitPreview) {
+            const oneLine = cockpitQuery.value.replace(/\s+/g, ' ').trim();
+            if (oneLine) cockpitPreview.innerHTML = highlightTql(oneLine);
+          }
+        };
+        cockpitQuery.addEventListener('input', syncCockpitQueryVisual);
+        cockpitQuery.addEventListener('scroll', () => {
+          cockpitQueryHl.scrollTop = cockpitQuery.scrollTop;
+          cockpitQueryHl.scrollLeft = cockpitQuery.scrollLeft;
+        });
+        syncCockpitQueryVisual();
       }
 
       const bindMoreMenu = (btnId, menuId) => {
@@ -7743,14 +7817,45 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         json.textContent = '{}';
         return;
       }
-      body.innerHTML = graphNodes.slice(0, 500).map((node) => `
+      // 关联边列：预计算每个节点出现最多的边标签（一次 O(E)，避免逐行扫全边）
+      const edgeLabelCounts = new Map();
+      graphEdges.forEach(e => {
+        for (const end of [e.source, e.target]) {
+          const key = String(end);
+          if (!edgeLabelCounts.has(key)) edgeLabelCounts.set(key, new Map());
+          const label = String(e.label || '');
+          if (!label) continue;
+          const counts = edgeLabelCounts.get(key);
+          counts.set(label, (counts.get(label) || 0) + 1);
+        }
+      });
+      const primaryEdgeLabel = (id) => {
+        const counts = edgeLabelCounts.get(String(id));
+        if (!counts || !counts.size) return '';
+        let best = '', bestN = 0;
+        counts.forEach((n, label) => { if (n > bestN || (n === bestN && label < best)) { best = label; bestN = n; } });
+        return best;
+      };
+      body.innerHTML = graphNodes.slice(0, 500).map((node, idx) => {
+        const type = String(node.typeKey || '');
+        const tag = type
+          ? `<span class="v2-dock-tag" style="background:${getNodeColor(type)}">${escapeHtml(type)}</span>`
+          : '—';
+        const edgeLabel = primaryEdgeLabel(node.id);
+        const sim = typeof node._sim === 'number' ? node._sim : null;
+        const simCell = sim === null
+          ? '—'
+          : `<span class="v2-dock-score"><span class="v2-dock-bar"><i style="width:${Math.max(2, Math.round(sim * 100))}%"></i></span>${sim.toFixed(4)}</span>`;
+        return `
         <tr data-node-id="${escapeHtml(String(node.id))}">
+          <td class="v2-dock-idx">${idx + 1}</td>
           <td title="${escapeHtml(String(node.id))}">${escapeHtml(String(node.id))}</td>
-          <td>${escapeHtml(String(node.typeKey || ''))}</td>
-          <td>${Number(node.degree || 0)}</td>
-          <td title="${escapeHtml(String(node.label || ''))}">${escapeHtml(String(node.label || ''))}</td>
+          <td>${tag}</td>
+          <td>${edgeLabel ? escapeHtml(edgeLabel) : '—'}</td>
           <td title="${escapeHtml(graphDockPayload(node))}">${escapeHtml(graphDockPayload(node))}</td>
-        </tr>`).join('');
+          <td>${simCell}</td>
+        </tr>`;
+      }).join('');
       json.textContent = JSON.stringify({
         nodes: graphNodes.slice(0, 200).map((n) => ({
           id: n.id, label: n.label, type: n.typeKey, degree: n.degree || 0,
@@ -7842,8 +7947,13 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       const physicsBtn = document.getElementById('togglePhysicsBtn');
       if (physicsBtn) physicsBtn.textContent = t('graph.physics.resume');
       let positions = new Map();
+      graphNodes.forEach(n => { n._cluster = null; }); // 仅聚类布局携带分组标记（drawClusterRings 用）
       if (graphLayoutMode === 'cluster') {
-        positions = computeClusterLayout(graphNodes, graphEdges, nodeCommunities.size ? nodeCommunities : null);
+        const communities = nodeCommunities.size ? nodeCommunities : null;
+        positions = computeClusterLayout(graphNodes, graphEdges, communities);
+        graphNodes.forEach(n => {
+          n._cluster = (communities && communities.get(n.id)) || n.typeKey || '(unknown)';
+        });
       } else if (graphLayoutMode === 'vector') {
         // PR-20：有枢轴（最近检索向量 / 抽屉节点向量）→ 检索聚焦布局；无枢轴 → 纯 pca2d（现状）
         const pivot = vectorLayoutPivot();
@@ -7979,6 +8089,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     async function setGraphLayoutMode(mode) {
       if (mode === graphLayoutMode) return;
       graphLayoutMode = mode;
+      if (mode !== 'cluster') graphNodes.forEach(n => { n._cluster = null; }); // 星云环标记仅聚类布局携带
       syncLayoutButtons();
       if (!window.__TRIVIUM_SELFTEST__) saveGraphPrefs(); // PR-21 偏好记忆
       scheduleGraphHashWrite(); // PR-21 深链
@@ -8402,6 +8513,74 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       ctx.restore();
     }
 
+    // V2 蓝本星云聚类虚线环：聚类布局下每簇（≥3 节点）画外虚线椭圆 + 内紫虚线椭圆 + 柔填充。
+    // 分组标记 _cluster 由 applyStaticLayout 聚类分支写入（与摆位同源：社区 → 类型回退）。
+    function drawClusterRings(ctx) {
+      if (graphLayoutMode !== 'cluster' || graphNodes.length > 600) return;
+      const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+      const groups = new Map();
+      graphNodes.forEach(n => {
+        if (n._cluster == null) return;
+        if (!groups.has(n._cluster)) groups.set(n._cluster, []);
+        groups.get(n._cluster).push(n);
+      });
+      groups.forEach(members => {
+        if (members.length < 3) return;
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        members.forEach(n => {
+          if (n.x < minX) minX = n.x;
+          if (n.x > maxX) maxX = n.x;
+          if (n.y < minY) minY = n.y;
+          if (n.y > maxY) maxY = n.y;
+        });
+        const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+        const rx = Math.max((maxX - minX) / 2 + 46, 60);
+        const ry = Math.max((maxY - minY) / 2 + 46, 44);
+        ctx.save();
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+        ctx.fillStyle = dark ? 'rgba(99, 242, 231, 0.05)' : 'rgba(77, 124, 120, 0.06)';
+        ctx.fill();
+        ctx.setLineDash([5, 6]);
+        ctx.strokeStyle = dark ? 'rgba(99, 242, 231, 0.22)' : 'rgba(77, 124, 120, 0.34)';
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, rx * 0.72, ry * 0.72, 0, 0, Math.PI * 2);
+        ctx.setLineDash([4, 5]);
+        ctx.strokeStyle = dark ? 'rgba(167, 139, 250, 0.24)' : 'rgba(100, 86, 128, 0.32)';
+        ctx.stroke();
+        ctx.restore();
+      });
+    }
+
+    // V2 蓝本脉冲扩散环：运行/路径追踪成功后从锚点扩出 r18→220 青色环（约 1.05s，ease-out）。
+    // 只改视觉不改坐标（动效关闭 0 漂移门禁不受影响）；动效关闭或系统减弱动效时不触发。
+    const GRAPH_PULSE_MS = 1050;
+    let __graphPulses = [];
+    function spawnGraphPulse(node) {
+      if (!node || !isGraphMotionEnabled() || prefersReducedMotion()) return;
+      __graphPulses.push({ x: node.x, y: node.y, start: performance.now() });
+      if (__graphPulses.length > 6) __graphPulses.shift();
+      startGraphAuroraMotion(); // 确保有 rAF 循环驱动重绘
+    }
+    function drawGraphPulses(ctx, now) {
+      if (!__graphPulses.length) return;
+      __graphPulses = __graphPulses.filter(p => now - p.start < GRAPH_PULSE_MS);
+      __graphPulses.forEach(p => {
+        const k = Math.min(1, (now - p.start) / GRAPH_PULSE_MS);
+        const ease = 1 - Math.pow(1 - k, 3);
+        ctx.save();
+        ctx.globalAlpha = 0.95 * (1 - k);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 18 + 202 * ease, 0, Math.PI * 2);
+        ctx.strokeStyle = '#63f2e7';
+        ctx.lineWidth = 3 * (1 - k) + 0.5;
+        ctx.stroke();
+        ctx.restore();
+      });
+    }
+
     // 节点 glow 预算：小图全量呼吸；中大图只给选中/枢纽；超大图关闭。
     function graphAuroraGlow(node) {
       if (document.documentElement.getAttribute('data-theme') !== 'dark') return 0;
@@ -8427,6 +8606,9 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       ctx.save();
       ctx.translate(t.x, t.y);
       ctx.scale(t.k, t.k);
+
+      drawClusterRings(ctx);
+      drawGraphPulses(ctx, performance.now());
 
       const labelMode = graphLabelMode(graphNodes.length, t.k);
       // 配色跟随主题（PR-20 评审定版）：深色主题暗底浅线；浅色主题用户定版
@@ -8483,15 +8665,21 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         if (edge.label) {
           ctx.save();
           ctx.font = '10px ' + CANVAS_FONT_FAMILY;
-          ctx.textAlign = 'left';
+          ctx.textAlign = 'center';
+          // V2 蓝本：标签沿边方向旋转贴合；倒置角度翻转 180° 保证始终可读
+          let labelAngle = Math.atan2(dy, dx);
+          if (labelAngle > Math.PI / 2) labelAngle -= Math.PI;
+          if (labelAngle < -Math.PI / 2) labelAngle += Math.PI;
+          ctx.translate(cx, cy);
+          ctx.rotate(labelAngle);
           // 标签 Halo：与边线交叉时仍可读（浅色用暖白，暗色用深空底）
           ctx.strokeStyle = dark ? 'rgba(5, 8, 18, 0.92)' : 'rgba(251, 249, 245, 0.95)';
           ctx.lineWidth = dark ? 3 : 2.8;
-          ctx.strokeText(edge.label, cx, cy - 3);
+          ctx.strokeText(edge.label, 0, -4);
           ctx.fillStyle = dark
             ? 'rgba(214, 228, 255, ' + Math.min(edgeAlpha + 0.42, 0.86) + ')'
             : 'rgba(' + edgeBase + ', ' + Math.min(edgeAlpha + 0.25, 0.9) + ')';
-          ctx.fillText(edge.label, cx, cy - 3);
+          ctx.fillText(edge.label, 0, -4);
           ctx.restore();
         }
       });
@@ -9145,6 +9333,96 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       el.textContent = message;
     }
 
+    // ==========================================
+    // V2 查询舱 KNN 模式（蓝本 mini-results + 相似度阈值）：
+    // TQL 的 SEARCH 管线不在结果行投影 score（_.score 仅可用于 WHERE 谓词），
+    // 相似度分数走专用端点 POST /v1/search/vector（二进制 LE f32 + min_score）。
+    // 命中节点并入图并打 _sim 标记，供结果抽屉「相似度」列与命中列表共用。
+    // ==========================================
+    function parseCockpitSearchQuery(query) {
+      const m = /^\s*SEARCH\s+VECTOR\s*\[([^\]]*)\]/i.exec(query || '');
+      if (!m) return null;
+      const parts = m[1].split(',').map(s => s.trim()).filter(s => s.length > 0);
+      if (!parts.length) return null;
+      const vector = parts.map(Number);
+      if (vector.some(n => !Number.isFinite(n))) return null;
+      const topM = /\bTOP\s+(\d+)/i.exec(query);
+      return { vector, topK: topM ? Math.min(Number(topM[1]), 200) : 10 };
+    }
+
+    async function runCockpitVectorSearch(parsed) {
+      const params = new URLSearchParams({ top_k: String(parsed.topK) });
+      const res = await fetch(`${API_BASE}/v1/search/vector?${params}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/vnd.triviumdb.vector+f32' },
+        body: new Float32Array(parsed.vector),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ title: t('err.request'), detail: res.statusText }));
+        throw new Error(t('gt.err.fail', { title: err.title || t('err.request'), detail: err.detail || '' }));
+      }
+      const data = await res.json();
+      return (data.hits || []).map(h => ({
+        id: String(h.id),
+        score: Number.isFinite(Number(h.score)) ? Number(h.score) : 0,
+        payload: h.payload || {},
+      }));
+    }
+
+    // 命中列表渲染：hits 为空时回落空态/摘要文案（双字典）
+    function renderCockpitHits(state) {
+      const box = document.getElementById('graphCockpitHits');
+      if (!box) return;
+      const hits = state && state.hits;
+      if (!hits || !hits.length) {
+        box.className = 'v2-cockpit-empty';
+        box.textContent = (state && state.summary) || t('graph.cockpit.empty');
+        return;
+      }
+      box.className = 'v2-cockpit-hits';
+      box.textContent = '';
+      hits.slice(0, 8).forEach(hit => {
+        const item = document.createElement('div');
+        item.className = 'v2-cockpit-hit';
+        const label = hit.label || hit.id;
+        const type = String(hit.typeKey || hit.payload?.type || '');
+        item.innerHTML =
+          `<div class="v2-hit-id"><span title="${escapeHtml(String(hit.id))}">${escapeHtml(String(label))}</span>` +
+          `<span class="v2-hit-sim">${hit.score.toFixed(2)}</span></div>` +
+          (type ? `<div class="v2-hit-chips"><span class="v2-hit-chip">${escapeHtml(type)}</span></div>` : '');
+        item.addEventListener('click', () => {
+          const n = nodeMap.get(String(hit.id));
+          if (n) { selectedNode = n; jumpToNode(n.id); }
+        });
+        box.appendChild(item);
+      });
+    }
+
+    // KNN 命中并入图：清旧分数 → mergeRowsIntoGraph（内部已刷新抽屉）→ 打归一 _sim → 命中列表 + 二次刷新。
+    // 引擎分数是内部融合分（量纲不定），这里按本批最高分归一为 0~1 相对相似度（展示与条宽共用）。
+    function mergeSearchHitsIntoGraph(hits) {
+      const maxScore = hits.length ? Math.max(...hits.map(h => h.score)) : 0;
+      const normScore = (s) => (maxScore > 0 ? s / maxScore : 0);
+      graphNodes.forEach(n => { n._sim = null; });
+      const rows = hits.map(h => ({ hit: { id: h.id, payload: h.payload } }));
+      const added = mergeRowsIntoGraph(rows);
+      hits.forEach(h => {
+        const n = nodeMap.get(h.id);
+        if (n) n._sim = normScore(h.score);
+      });
+      renderCockpitHits({
+        hits: hits.map(h => ({
+          id: h.id, score: normScore(h.score), payload: h.payload,
+          label: h.payload?.name || h.payload?.title || h.id,
+          typeKey: h.payload?.type || '',
+        })),
+      });
+      renderGraphDock(); // 带上 _sim 列再刷一次
+      showToast(t('graph.cockpit.merged', { added, total: graphNodes.length }));
+      spawnGraphPulse(nodeMap.get(String(hits[0]?.id)) || selectedNode || graphNodes[graphNodes.length - 1]);
+      redrawGraph();
+    }
+
     async function runGraphTqlQuery() {
       const query = document.getElementById('graphTqlInput').value.trim();
       if (!query) { setGraphTqlError(t('gt.err.empty')); return; }
@@ -9153,6 +9431,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         return;
       }
       const seq = ++__graphTqlSeq;
+      graphNodes.forEach(n => { n._sim = null; }); // 一次查询一套分数：TQL 运行先清掉旧 KNN 分数
       const runBtn = document.getElementById('graphTqlRunBtn');
       const status = document.getElementById('graphTqlStatus');
       runBtn.disabled = true;
@@ -9176,6 +9455,10 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         const rows = data.rows || [];
         const added = mergeRowsIntoGraph(rows);
         status.textContent = t('gt.status', { rows: rows.length, added, total: graphNodes.length });
+        if (added > 0) {
+          spawnGraphPulse(selectedNode || graphNodes[graphNodes.length - 1]);
+          renderCockpitHits({ summary: status.textContent });
+        }
         showToast(added > 0
           ? t('gt.merged', { added, total: graphNodes.length })
           : t('gt.present'));
@@ -9741,6 +10024,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       pathHighlightEdges = new Set(keys);
       const clearBtn = document.getElementById('clearPathBtn');
       if (clearBtn) clearBtn.hidden = pathHighlightEdges.size === 0;
+      if (graphBackend === 'canvas' && pathHighlightEdges.size) spawnGraphPulse(selectedNode); // V2 蓝本：路径追踪成功从当前节点扩出脉冲环
       if (graphBackend === 'sigma') {
         const base = sigmaEdgeBaseColor();
         for (const viewId of ['query', 'standalone']) {
@@ -12865,6 +13149,66 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         } finally {
           html.setAttribute('data-theme', prevTheme || 'dark');
         }
+      });
+
+      addAssert('V2 图探索：查询舱 KNN 解析与命中列表/抽屉相似度列', 'V2 图探索', async () => {
+        const parsed6 = parseCockpitSearchQuery('SEARCH VECTOR [0.12, -0.45] TOP 6 RETURN *');
+        assert(parsed6 && parsed6.topK === 6 && parsed6.vector.length === 2, '应解析 TOP 6 与二维向量');
+        const parsedSci = parseCockpitSearchQuery('SEARCH VECTOR [1e-5, -4.8E-1] TOP 3');
+        assert(parsedSci && Math.abs(parsedSci.vector[1] + 0.48) < 1e-9, '应支持科学计数法分量');
+        assert(parseCockpitSearchQuery('FIND {type: "person"}') === null, '非 SEARCH 查询应返回 null');
+        assert(parseCockpitSearchQuery('SEARCH VECTOR [ ]') === null, '空向量应返回 null（防护）');
+        renderGraph(MATCH_ROWS);
+        mergeSearchHitsIntoGraph([
+          { id: '777', score: 0.90, payload: { type: 'person', name: 'SimHit' } },
+          { id: '778', score: 0.81, payload: { type: 'paper', title: 'SimPaper' } },
+        ]);
+        const hitA = nodeMap.get('777');
+        const hitB = nodeMap.get('778');
+        assert(hitA && Math.abs(hitA._sim - 1) < 1e-9, '命中节点应并入图，相对相似度应为 1（本批最高）');
+        assert(hitB && Math.abs(hitB._sim - 0.9) < 1e-9, '次高分应归一为 0.81/0.90=0.9');
+        const hitsBox = document.getElementById('graphCockpitHits');
+        assert(hitsBox.querySelectorAll('.v2-cockpit-hit').length === 2, '命中列表应渲染 2 条');
+        assert(hitsBox.textContent.includes('1.00') && hitsBox.textContent.includes('0.90'), '命中列表应显示归一相似度 1.00/0.90');
+        const dockHtml = document.getElementById('graphDockBody').innerHTML;
+        assert(dockHtml.includes('v2-dock-score') && dockHtml.includes('width:90%'), '抽屉应含 90% 宽度相似度条');
+        assert(dockHtml.includes('v2-dock-tag'), '抽屉类型列应为彩色胶囊');
+        assert(document.querySelectorAll('#graphDockTable th').length === 6, '抽屉表头应为 6 列（#/ID/类型/关联边/Payload/相似度）');
+        renderGraph(FIND_ROWS);
+      });
+
+      addAssert('V2 图探索：脉冲环时长与动效门禁（关闭时不生成）', 'V2 图探索', async () => {
+        assert(GRAPH_PULSE_MS === 1050, '脉冲时长应为 1050ms（V2 蓝本 1.05s）');
+        const saved = graphMotionEnabled;
+        const before = __graphPulses.length;
+        graphMotionEnabled = false;
+        spawnGraphPulse({ x: 0, y: 0 });
+        assert(__graphPulses.length === before, '动效关闭时不应生成脉冲');
+        graphMotionEnabled = true;
+        spawnGraphPulse({ x: 0, y: 0 });
+        assert(__graphPulses.length === before + 1, '动效开启时应生成脉冲');
+        graphMotionEnabled = saved;
+        __graphPulses = [];
+      });
+
+      addAssert('V2 图探索：查询舱语法高亮 overlay 与预览同步', 'V2 图探索', async () => {
+        const area = document.getElementById('graphCockpitQuery');
+        const hl = document.getElementById('graphCockpitQueryHl');
+        const preview = document.getElementById('graphCockpitPreview');
+        assert(area && hl && preview, 'overlay 与预览元素应存在');
+        area.value = 'SEARCH VECTOR [0.1] TOP 3';
+        area.dispatchEvent(new Event('input', { bubbles: true }));
+        assert(hl.innerHTML.includes('tk-keyword'), 'overlay 应含关键字高亮 span（tk-keyword）');
+        assert(preview.textContent.replace(/\s+/g, ' ').includes('SEARCH VECTOR [0.1] TOP 3'), '预览栏应同步当前查询');
+      });
+
+      addAssert('V2 图探索：聚类布局分组标记与星云环清除', 'V2 图探索', async () => {
+        renderGraph(MATCH_ROWS);
+        setGraphLayoutMode('cluster');
+        await waitFor(() => graphNodes.length > 0 && graphNodes.every(n => n._cluster != null), 4000, '聚类分组标记');
+        setGraphLayoutMode('force');
+        assert(graphNodes.every(n => n._cluster == null), '切回力导向应清除全部分组标记');
+        renderGraph(FIND_ROWS);
       });
 
       addAssert('观感与导航：度数统计与 nodeRadius 枢纽缩放', '观感与导航', async () => {

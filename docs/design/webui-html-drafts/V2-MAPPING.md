@@ -125,3 +125,14 @@
 | 4 详情四卡 | ✅ | Payload / Vector / Edges / **投影**（PCA 3D：`POST /v1/nodes/batch-get` 一次取自身 + 1 跳邻居，固定轴测投影，点击投影点可跳转节点；无向量时显示空态） |
 | 5 响应式 / i18n / 降级 / 动效开关 | ✅ | i18n、断点（1280/1100/900/700）、动效开关（`graphMotionBtn`）已完成；2026-10-24 实机复核：1440/1024/390 无横向溢出（390 修复工具栏提示逐字竖排缺陷）、prefers-reduced-motion 默认关闭+按钮禁用+不误写持久化、动效关闭 0 漂移、1k 节点 glow 按规模降级（选中 15/枢纽 6/普通 0）且可交互（力学护栏生效，重绘 20ms） |
 | 6 selftest / ui-smoke / 视觉基线 | ✅ | 2026-10-24 全绿：页内 selftest **127/127**；`cargo test -p triviumdb-server` 11 单元 + 29 契约；`node scripts/ui-smoke.mjs` 全流程通过（Playwright）；视觉基线按 V2 重建（`visual-baseline.mjs --update`，复验差异 ≤0.02%） |
+
+### V2 细节收敛（2026-10-25 第三轮，对照 v2-hybrid-explorer 蓝本逐项补齐）
+
+- **查询舱 KNN 模式**：`SEARCH VECTOR [...] TOP k` 查询改走 `POST /v1/search/vector`（二进制 LE f32，`application/vnd.triviumdb.vector+f32`）取回带分数命中；引擎分数为内部融合分（非 0~1 余弦），UI 按本批最高分归一为相对相似度；阈值滑杆（0.70~0.95）做客户端过滤（`graph.cockpit.filtered` 空态文案 zh/en）
+- **命中列表**：`graphCockpitHits` 空态 → 真实命中（ID + 青色相似度 + 类型 chip，点击跳转节点）；TQL 运行后显示结果摘要
+- **结果抽屉 6 列**：`# / 节点 ID / 类型（getNodeColor 彩色胶囊）/ 关联边（最高频边标签）/ Payload 摘要 / 相似度（青→金渐变条 + 数值，来自 _sim）`；表头 zh/en 双字典（`graph.dock.index/edges/sim`）
+- **脉冲扩散环**：运行（KNN/TQL 新增>0）与路径追踪成功后从锚点扩出 r18→220 青色环（1.05s ease-out）；动效关闭或 reduced-motion 不触发（不改坐标，0 漂移门禁不受影响）
+- **边标签沿边旋转**：atan2 角度 + 倒置翻转 180°，Halo 保留
+- **查询舱语法高亮**：textarea 透明字 + `graphCockpitQueryHl` overlay（复用 `highlightTql`，tk-* 类配色）；预览栏实时同步当前查询
+- **聚类星云虚线环**：聚类布局每簇（≥3 节点）画青色外环+紫色内环虚线椭圆+柔填充（暗/浅两套色）；分组标记 `_cluster` 与摆位同源（社区→类型回退），切出聚类即清除
+- selftest 新增 4 组断言（**127→132**）：KNN 解析/命中/相似度列、脉冲时长与动效门禁、高亮 overlay 与预览同步、聚类分组标记
