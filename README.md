@@ -47,7 +47,7 @@ TriviumDB 是一个用纯 Rust 编写的**嵌入式三模数据库引擎**，将
 - 🧠 **为 AI 而生** —— 可选启用“AC自动机+BM25稀疏文本”与“Dense Vector稠密向量”的**多路召回**来触发图谱扩散检索，并内置多层认知管线（FISTA / DPP / PPR）
 - 🛡️ **四层数据安全保障** —— 原子替换 + WAL日志 + 事务干跑验证（Dry-Run）+ Mmap COW 隔离，`.flush_ok` v3 绑定 `.tdb/.vec/.pld`，发布前旧代备份与撤销日志支持中断恢复；备份增加磁盘读写与临时空间，损坏输入仍 fail-closed，详见[恢复协议](docs/security.md#8-mmap-三文件一致性标记flush_ok-v3)
 - 🐍 **Python / Node.js 原生** —— `pip install` 或 `npm install` 后直接使用，类 MongoDB 查询语法
-- ⚡ **高性能检索** —— rayon 并行暴力搜索（小规模 100% 精确）+ 自研 ANN 索引 **QuIVer**；当前源码默认采用无训练 SM-L2 导航与余弦精排，按向量工作量动态触发（2,500–10,000 节点）
+- ⚡ **高性能检索** —— rayon 并行暴力搜索（小规模 100% 精确）+ 自研 ANN 索引 **QuIVer**；默认采用无训练 SM-L2 导航与余弦精排，按向量工作量动态触发（2,500–10,000 节点）
 - 💾 **SSD 友好** —— Append-Only WAL + 后台 Compaction 线程 + QuIVer 索引独立持久化，杜绝随机写入磨损
 - 🔒 **共享只读打开** —— 多进程 Reader 共享锁并发查询已完成代际，Writer 继续保持排他锁与 WAL 安全边界
 - 🧩 **类型化访问能力** —— Rust `DatabaseReader` 在编译期隐藏写 API，`DatabaseWriter` 保留完整嵌入式写能力
@@ -107,7 +107,7 @@ flowchart TD
         App2((Agent App)):::app
         TV[(TriviumDB<br/>单一引擎 / 单一文件 / 单一 ID 空间)]:::new
 
-        App2 ==`insert()` 向量+文本+元数据+图关系原子写入==> TV
+        App2 ==事务写入向量+文档+图关系==> TV
         TV ==`search_hybrid()` 双路混合归一锚定+图谱扩散一次返回==> App2
         TV -.`flush()` Mmap零拷贝极速热启动.-> TV
     end
@@ -218,7 +218,7 @@ const batchResults = await db.searchBatch(queryVectors, 10, 0, 0.0)
 
 ## 一次存储，多种查询
 
-TriviumDB 中的一个节点可以同时拥有**向量、JSON 文档、稀疏文本和图关系**。这些数据共享同一个 NodeId、事务、WAL 与生命周期，因此无需在向量库、文档库和图库之间同步副本。同一份数据写入一次，即可按业务问题选择不同的查询路径。
+TriviumDB 中的一个节点可以同时拥有**向量、JSON 文档、稀疏文本和图关系**，通过同一个 NodeId 按业务问题选择不同的查询路径。向量、文档与关系变更共享事务和 WAL；独立登记的稀疏文本通过 `flush()` 或可写句柄的 `close()` 持久化，应用应保留正文与别名来源以便重建。
 
 ### TQL：自由 DIY 的统一查询语言
 
@@ -332,13 +332,9 @@ Rust / Python / Node.js 三语言共享同一套 TQL、Prepared、四类属性�
 
 ## 向量索引策略：QuIVer
 
-**QuIVer**（Quantized Index for Vector Retrieval）是 TriviumDB 自研的近似最近邻（ANN）图索引。当前源码使用 **BQ 快速构图 + 无训练 SM-L2 导航 + 原始向量余弦精排**；导航结合两位编码与每向量幅值信息计算重建平方 L2，召回和吞吐取决于数据、参数与精排预算。
+**QuIVer**（Quantized Index for Vector Retrieval）是 TriviumDB 自研的近似最近邻（ANN）图索引。使用 **BQ 快速构图 + 无训练 SM-L2 导航 + 原始向量余弦精排**；导航结合两位编码与每向量幅值信息计算重建平方 L2，召回和吞吐取决于数据、参数与精排预算。
 
-> 📄 **投稿状态**：重构版本以 **ICDE** 为投稿目标，尚不作录用或发表声明。[旧版 arXiv 预印本](https://arxiv.org/abs/2605.02171)记录历史方法与实验。
->
-> 🔬 **实现与复现**：[当前架构、模式边界及实验口径](docs/quiver.md) · [数据与实验指南](README_QUIVER.md)。当前源码版本为 `0.8.10`，包含构图连通性保护；正式制品状态以发布流水线与各包仓库为准；[变更说明](docs/changes-0.8.10.md)。默认 SM-L2 已在 `0.8.9` 中引入；旧 `0.8.8` 发布包不含这些变更。
->
-> 旧预印本的 12 库 Recall/QPS 与热内存数字不直接代表当前重构版本。当前评估按实现、图、度量、预算及数据身份分别报告；SM-L2 余弦任务、显式原生 L2 和历史 BQ 结果不可混标。
+> 📖 [QuIVer 架构与配置](docs/quiver.md) · [基准测试指南](benches/README.md) · [0.8.11 变更说明](docs/changes-0.8.11.md)
 
 > ⚠️ **维度建议：强烈建议数据库向量维度不超过 3072。** TriviumDB 的通用存储与精确 BruteForce 检索允许更高维度，但 QuIVer 的 BQ 签名安全上限是 3072 维。超过该维度时引擎不会自动构建 QuIVer，检索会稳定回退到 BruteForce；手动构建 QuIVer 会返回明确错误。高维数据库仍可使用，但无法获得 QuIVer ANN 加速，内存和计算开销也会显著增加。
 
@@ -616,7 +612,7 @@ TriviumDB 的认知检索管线借鉴并实现了以下学术成果（均为本�
 
 以下为本项目自研的数据结构与算法命名：
 
-- **QuIVer**（Quantized Index for Vector Retrieval）：自研 ANN 图索引，当前源码采用 BQ 快速构图、无训练 SM-L2 导航与余弦精排；重构版本目标为 ICDE
+- **QuIVer**（Quantized Index for Vector Retrieval）：自研 ANN 图索引，采用 BQ 快速构图、无训练 SM-L2 导航与余弦精排
 - **TSNG**（Tri-Signal Navigation Graph）：三信号（向量 / 属性 / 图）联合导航的混合检索研究线，提供多 AccessPath 执行策略与 exact ground truth 评测
 - **Parallel Bit-Tag Array**（行级布隆特征阵列）：基于布隆过滤器思想的 JSON 快速过滤机制
 - **Reverse Hash Net**（双向哈希边表）：O(1) 反向边查找的哈希索引结构

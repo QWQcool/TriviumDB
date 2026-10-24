@@ -36,6 +36,22 @@
       "tql": "FIND {kind: \"alpha\"} AS seed WITH seed RETURN seed, $required AS value",
       "parameters": {},
       "expected": {"error_contains_any": ["缺少参数", "missing parameter"]}
+    },
+    {
+      "name": "text_lifecycle",
+      "operation": "text_lifecycle",
+      "parameters": {"old_text": "oldtoken 苏晚", "new_text": "newtoken 林川", "keyword": "personanchor"},
+      "expected": {
+        "before_delete": [
+          {"query": "TEXT BM25 \"oldtoken\" TOP 10 AS hits WITH hits RETURN hits", "count": 0},
+          {"query": "TEXT BM25 \"newtoken\" TOP 10 AS hits WITH hits RETURN hits", "count": 1},
+          {"query": "TEXT AC \"personanchor\" TOP 10 AS hits WITH hits RETURN hits", "count": 2}
+        ],
+        "after_delete": [
+          {"query": "TEXT BM25 \"newtoken\" TOP 10 AS hits WITH hits RETURN hits", "count": 0},
+          {"query": "TEXT AC \"personanchor\" TOP 10 AS hits WITH hits RETURN hits", "count": 1}
+        ]
+      }
     }
   ],
   "ffi_cases": [

@@ -141,7 +141,41 @@ fn 共享json契约由rust适配器完整执行() {
                         .any(|needle| error.contains(needle.as_str().unwrap()))
                 );
             }
+            "text_lifecycle" => {
+                let keyword = case.parameters["keyword"].as_str().unwrap();
+                database
+                    .index_text(1, case.parameters["old_text"].as_str().unwrap())
+                    .unwrap();
+                database.index_keyword(1, keyword).unwrap();
+                database.index_keyword(1, keyword).unwrap();
+                database.index_keyword(2, keyword).unwrap();
+                database.build_text_index().unwrap();
+                database
+                    .index_text(1, case.parameters["new_text"].as_str().unwrap())
+                    .unwrap();
+                for phase in ["before_delete", "after_delete"] {
+                    if phase == "after_delete" {
+                        database.delete(1).unwrap();
+                    }
+                    for check in case.expected[phase].as_array().unwrap() {
+                        let rows = database
+                            .tql_values(check["query"].as_str().unwrap())
+                            .unwrap();
+                        assert_eq!(
+                            rows.len() as u64,
+                            check["count"].as_u64().unwrap(),
+                            "{}",
+                            case.name
+                        );
+                    }
+                }
+            }
             other => panic!("未知共享契约操作：{other}"),
         }
     }
+    database.close().unwrap();
+    assert!(
+        database.build_text_index().is_err(),
+        "关闭后的文本构建错误必须透传"
+    );
 }

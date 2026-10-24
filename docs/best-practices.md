@@ -2,7 +2,7 @@
 
 > 高效使用 TriviumDB 的实战指南：从项目集成到性能调优，从数据建模到避坑指南。
 >
-> 当前文档对应 `0.8.10` 版本源码。下方版本依赖示例适用于对应包发布后；当前验证使用本地源码。见[变更说明](changes-0.8.10.md)。
+> 当前文档对应 `0.8.11` 版本。见[变更说明](changes-0.8.11.md)。
 
 ---
 
@@ -67,7 +67,7 @@ cargo add triviumdb
 
 ```toml
 [dependencies]
-triviumdb = "0.8.10"
+triviumdb = "0.8.11"
 ```
 
 ### 30 秒入门模板
@@ -633,6 +633,14 @@ results = db.search_advanced(
 
 ## 避坑指南
 
+### 全文正文与别名的维护
+
+需要打开后立即进行文本检索时，设置 `load_text_index=True`。默认 `False` 会省略加载；0.8.11 会在普通保存时保留旧文本文件，显式文本修改或预热再加载合并。批量登记后可调用 `build_text_index()` 提前编译关键词自动机。
+
+同一节点的 `index_text()` 会替换旧正文，多字段内容应拼接后一次登记；传入空字符串仅清除 BM25 正文。`index_keyword()` 可以登记多个别名，同节点重复登记同一规范化关键词不重复加分。删除节点会清理正文和关键词；修改 Payload 不会自动更新独立登记的正文。
+
+正文与别名登记不在事务 WAL 中，应保留权威来源以便重建，并通过 `flush()` 或可写句柄的 `close()` 持久化。两个汉字的名字可使用 BM25 或 `CONTAINS` 扫描回退，不能使用要求至少三个字符的 N-gram 查询。
+
 ### ❌ 坑 1：维度不匹配
 
 ```python
@@ -745,7 +753,7 @@ with triviumdb.TriviumDB("knowledge_v2.tdb", dim=NEW_DIM) as new_db:
 
 TriviumDB 使用自研的 **QuIVer**（Quantized Index for Vector Retrieval）ANN 图索引。常规查询会按配置和数据规模自动选择、构建与维护索引；Rust Core 也提供显式 `build_quiver_index()`，nightly Server 提供 `/v1/indexes/quiver` 管理入口。显式构建仍受访问模式、维度、generation 和内存预算约束。
 
-本节描述 `0.8.10` 源码（包含 `461855e` / `619dd7b`）；旧 `0.8.8` 发布包不含这些变更。QuIVer 重构以 **ICDE** 为投稿目标，旧预印本的数字不直接代表新内核。架构、模式和复现边界统一见 [QuIVer 说明](quiver.md)。
+SM-L2 导航从 `0.8.9` 起默认启用，`0.8.10` 增加构图连通性保护。架构与配置见 [QuIVer 说明](quiver.md)。
 
 普通 QuIVer 向量查询默认使用无训练 **SM-L2**：以两位重建向量的平方L2评分导航，最终从原始向量计算余弦相似度。支持1–3072维及非完整尾块，无需调用 `enable_quiver_sm_l2()`。BQ 构图在最终剪枝时保护签名多样性，并在收尾保证入口可达；搜索召回仍取决于数据和预算。
 

@@ -233,7 +233,7 @@ fn QuIVer交错_构建期间向量变化会拒绝过期索引() {
 }
 
 #[test]
-fn MergedCache交错_发布前搜索阻塞释放后结果完整() {
+fn 显式连续视图交错_发布前读取阻塞释放后结果完整() {
     let _serial = test_serial_guard();
     let path = tmp_db("merged_cache_publish");
     cleanup(&path);
@@ -246,38 +246,34 @@ fn MergedCache交错_发布前搜索阻塞释放后结果完整() {
         db.flush().unwrap();
     }
 
-    // 重开后向量位于 mmap 基础层，强制暴力搜索会首次物化 merged cache。
-    let db = Database::<f32>::open(&path, DIM).unwrap();
+    // 正式查询已使用分段读取；保留显式连续接口的独占发布交错验证。
+    let mut pool = triviumdb::storage::vec_pool::VecPool::<f32>::open(
+        std::path::Path::new(&format!("{path}.vec")),
+        DIM,
+        32,
+    )
+    .unwrap();
+    pool.push(&[33.0, 1.0, 0.0, 0.0]);
+    let pool = std::sync::Arc::new(std::sync::RwLock::new(pool));
+    let writer = std::sync::Arc::clone(&pool);
     let waiter = pause_at(ConcurrencyPoint::BeforeMergedCachePublish);
     let (done_tx, done_rx) = mpsc::channel();
     let thread = std::thread::spawn(move || {
-        let hits = db
-            .search_advanced(
-                &[32.0, 1.0, 0.0, 0.0],
-                &SearchConfig {
-                    top_k: 4,
-                    recall_k: 4,
-                    rerank_k: 4,
-                    expand_depth: 0,
-                    min_score: -1.0,
-                    force_brute_force: true,
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-        done_tx.send(hits.len()).unwrap();
-        db
+        writer.write().unwrap().ensure_cache();
+        done_tx.send(()).unwrap();
     });
     waiter.wait_until_arrived();
-    assert!(
-        done_rx.try_recv().is_err(),
-        "merged cache 标记有效前搜索不得继续"
-    );
-
+    assert!(done_rx.try_recv().is_err(), "合并视图尚未发布");
+    assert!(pool.try_read().is_err(), "显式合并期间不能读取半成品");
     waiter.release();
-    assert_eq!(done_rx.recv_timeout(Duration::from_secs(2)).unwrap(), 4);
-    let db = thread.join().unwrap();
-    drop(db);
+    done_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    thread.join().unwrap();
+    {
+        let reader = pool.read().unwrap();
+        assert_eq!(reader.flat_vectors().len(), 33 * DIM);
+        assert_eq!(&reader.flat_vectors()[32 * DIM..], &[33.0, 1.0, 0.0, 0.0]);
+    }
+    drop(pool);
     cleanup(&path);
 }
 
