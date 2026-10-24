@@ -106,27 +106,27 @@
       --text-faint: #70766f;
     }
 
-    /* 暖白浅色主题：同一套三模色，降低饱和、提高纸感（不是纯白后台） */
+    /* 暖石浅色（C 阶段，蓝本 warm-stone-light.html）：暖石底 + 实线边 + 足饱和三模色 */
     [data-theme="light"] {
-      --bg-app: #f4f1ea;
-      --bg-ink: #eae5da;
-      --bg-surface: #fbf9f5;
+      --bg-app: #f3efe6;
+      --bg-ink: #eee9dd;
+      --bg-surface: #fbf9f4;
       --bg-surface-secondary: #f0ece3;
       --bg-inset: #e7e1d6;
-      --shell-bg: #f4f1ea;
-      --shell-bg-strong: #eae5da;
+      --shell-bg: #f3efe6;
+      --shell-bg-strong: #eee9dd;
       --star-opacity: 0;
-      --border-color: rgba(60, 52, 40, 0.14);
-      --border-strong: rgba(60, 52, 40, 0.28);
-      --border-focus: #3f6f6b;
-      --text-main: #1b1915;
-      --text-muted: #5c574d;
+      --border-color: #ddd5c4;
+      --border-strong: #c8c0ad;
+      --border-focus: #4d7c78;
+      --text-main: #242018;
+      --text-muted: #5d574c;
       --text-light: #6f6a5f;
-      --text-faint: #9a9488;
-      --primary: #1b1915;
+      --text-faint: #8a8374;
+      --primary: #242018;
       --primary-hover: #000000;
-      --primary-bg: rgba(27, 25, 21, 0.06);
-      --accent: #3f6f6b;
+      --primary-bg: rgba(36, 32, 24, 0.06);
+      --accent: #4d7c78;
       --success: #4f6b3a;
       --success-bg: rgba(79, 107, 58, 0.10);
       --warning: #8a6d3b;
@@ -136,7 +136,7 @@
       --tri-doc: #8c764e;
       --tri-graph: #645680;
       --tri-vector: #4d7c78;
-      --accent-gold: #8a6d3b;
+      --accent-gold: #9e7f47;
       --shadow-sm: none;
       --shadow-md: 0 10px 26px rgba(60, 52, 40, 0.10);
       --shadow-lg: 0 24px 60px rgba(60, 52, 40, 0.16);
@@ -1408,6 +1408,16 @@
       inset: 0;
       z-index: 2;
       background: var(--bg-surface);
+    }
+    [data-theme="light"] .graph-sigma-container {
+      /* 浅色 C（暖石）：Sigma 容器铺暖石网格底，与 Canvas 后端 drawSpaceBackground 保持一致 */
+      background:
+        linear-gradient(rgba(221, 213, 196, 0.6) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(221, 213, 196, 0.6) 1px, transparent 1px),
+        linear-gradient(180deg, #f3efe6 0%, #ece7da 100%);
+      background-size: 34px 34px, 34px 34px, 100% 100%;
+      background-position: center center;
+      background-color: #f3efe6;
     }
     /* Graph Aurora：WebGL 容器也铺深空底与星点，避免 Sigma 透出暖黑卡片色 */
     [data-theme="dark"] .graph-sigma-container {
@@ -6848,7 +6858,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     // 未知类型不再一律回退 person 色（多类型图会全部同色、失去辨识度）：
     // 用稳定哈希落到 6 色扩展盘，保证同类型跨会话同色、不同类型尽量分散。
     const GRAPH_EXTRA_COLORS_DARK = ['#4ade80', '#60a5fa', '#f472b6', '#fbbf24', '#a78bfa', '#5eead4'];
-    const GRAPH_EXTRA_COLORS_LIGHT = ['#5f8a63', '#5b7ba6', '#b06a7f', '#a8863f', '#7d6a9e', '#4d7c78'];
+    const GRAPH_EXTRA_COLORS_LIGHT = ['#557a52', '#4f6f8f', '#9e5a6d', '#a8863f', '#7d6a9e', '#3f6f6b'];
     function graphTypeHash(type) {
       const s = String(type || '');
       let h = 0;
@@ -6858,7 +6868,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
 
     function getNodeColor(type) {
       const dark = document.documentElement.getAttribute('data-theme') === 'dark';
-      // 暗色图舞台用 B 派高亮三模色；浅色仍保持暖石低饱和色。
+      // 暗色图舞台用 B 派高亮三模色；浅色 C（暖石）用足饱和三模色，
+      // 标签有面板色 Halo 描边保可读，不再退粉彩。
       const colors = dark ? {
         person: '#5eead4',
         paper: '#fbbf24',
@@ -6869,14 +6880,14 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         design: '#f472b6',
         product: '#4ade80'
       } : {
-        person: '#8fb3b0',
-        paper: '#c6b9a0',
-        topic: '#9589ad',
-        user: '#d6b881',
-        event: '#c77777',
-        project: '#5b7ba6',
-        design: '#b06a7f',
-        product: '#5f8a63'
+        person: '#4d7c78',
+        paper: '#8c764e',
+        topic: '#645680',
+        user: '#9e7f47',
+        event: '#9e5a6d',
+        project: '#4f6f8f',
+        design: '#8f5a77',
+        product: '#557a52'
       };
       if (colors[type]) return colors[type];
       const extra = dark ? GRAPH_EXTRA_COLORS_DARK : GRAPH_EXTRA_COLORS_LIGHT;
@@ -8300,12 +8311,27 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         grad.addColorStop(0.58, '#050812');
         grad.addColorStop(1, '#04060d');
       } else {
-        grad.addColorStop(0, '#f7f4ee');
-        grad.addColorStop(1, '#eae5da');
+        grad.addColorStop(0, '#f3efe6');
+        grad.addColorStop(1, '#ece7da');
       }
       ctx.fillStyle = grad;
       ctx.fillRect(0, 0, w, h);
-      if (!dark) return;
+      if (!dark) {
+        // 浅色 C（暖石）：34px 方格网底，以画布中心对齐；线色 #ddd5c4@0.6，
+        // 与 Sigma 容器 CSS 网格保持一致
+        ctx.save();
+        ctx.strokeStyle = 'rgba(221, 213, 196, 0.6)';
+        ctx.lineWidth = 1;
+        const step = 34;
+        const ox = (w / 2) % step;
+        const oy = (h / 2) % step;
+        ctx.beginPath();
+        for (let x = ox; x <= w; x += step) { ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, h); }
+        for (let y = oy; y <= h; y += step) { ctx.moveTo(0, y + 0.5); ctx.lineTo(w, y + 0.5); }
+        ctx.stroke();
+        ctx.restore();
+        return;
+      }
       // 两团低透明度星云，制造“深空舞台”而不是纯黑画布
       const nebulaA = ctx.createRadialGradient(w * 0.24, h * 0.28, 0, w * 0.24, h * 0.28, Math.max(w, h) * 0.42);
       nebulaA.addColorStop(0, 'rgba(99, 242, 231, 0.10)');
@@ -8410,8 +8436,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       const edgeBase = dark ? '159, 183, 180' : '95, 82, 59';    // 边线：暗底青灰 / 浅底深金棕
       const edgeAlpha = dark ? graphEdgeAlpha(graphNodes.length) : lightGraphEdgeAlpha(graphNodes.length);
       const nodeStroke = dark ? 'rgba(184, 176, 160, 0.35)' : 'rgba(60, 52, 40, 0.30)';
-      const nodeLabel = dark ? '#eee7dc' : '#1b1915';
-      const selectedStroke = dark ? '#d6b881' : '#8a6d3b';
+      const nodeLabel = dark ? '#eee7dc' : '#242018';
+      const selectedStroke = dark ? '#d6b881' : '#9e7f47';
 
       // 绘制连线（过滤器生效：隐藏类型/label 的元素整体跳过）
       ctx.lineCap = 'round';
@@ -8498,7 +8524,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           ctx.stroke();
           ctx.beginPath();
           ctx.arc(node.x, node.y, r + 10, 0, Math.PI * 2);
-          ctx.strokeStyle = dark ? 'rgba(99, 242, 231, 0.32)' : 'rgba(138, 109, 59, 0.30)';
+          ctx.strokeStyle = dark ? 'rgba(99, 242, 231, 0.32)' : 'rgba(158, 127, 71, 0.30)';
           ctx.lineWidth = 1;
           ctx.stroke();
         }
@@ -8511,9 +8537,9 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         if (labelMode === 'normal') {
           ctx.save();
           ctx.font = '11px ' + CANVAS_FONT_FAMILY;
-          // Text Halo：浅色图边线加深后，标签需要背景色描边才能保持可读
+          // Text Halo：浅色 C 蓝本 4px 面板色描边（11px 字号下取 3.4），暗色用深空底
           ctx.strokeStyle = dark ? 'rgba(5, 8, 18, 0.94)' : 'rgba(251, 249, 245, 0.96)';
-          ctx.lineWidth = dark ? 3.2 : 3;
+          ctx.lineWidth = dark ? 3.2 : 3.4;
           ctx.strokeText(node.label, node.x, node.y + 28);
           ctx.fillStyle = nodeLabel;
           ctx.fillText(node.label, node.x, node.y + 28);
@@ -12819,6 +12845,26 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         assert(lightGraphEdgeAlpha(600) >= lightGraphEdgeAlpha(1200), '浅色边线应随密度单调不增');
         assert(alphaToHexByte(0.35) === '59', '0.35 → hex 59（与既有 #94a3b859 一致）');
         assert(alphaToHexByte(0) === '00' && alphaToHexByte(1) === 'ff', 'alpha 越界值应夹取');
+      });
+
+      addAssert('观感与导航：浅色 C 暖石——足饱和三模色与暖石底 token', '观感与导航', async () => {
+        const html = document.documentElement;
+        const prevTheme = html.getAttribute('data-theme');
+        html.setAttribute('data-theme', 'light');
+        try {
+          assert(getNodeColor('person') === '#4d7c78', '浅色 person 应为暖石青 #4d7c78');
+          assert(getNodeColor('paper') === '#8c764e', '浅色 paper 应为暖石赭 #8c764e');
+          assert(getNodeColor('topic') === '#645680', '浅色 topic 应为暖石紫 #645680');
+          assert(getNodeColor('user') === '#9e7f47', '浅色 user 应为暖石金 #9e7f47');
+          assert(GRAPH_EXTRA_COLORS_LIGHT.length === 6 && new Set(GRAPH_EXTRA_COLORS_LIGHT).size === 6,
+            '浅色扩展盘应为 6 色且互不重复');
+          assert(getComputedStyle(document.body).getPropertyValue('--bg-app').trim() === '#f3efe6',
+            '浅色底应为暖石 #f3efe6');
+          assert(getComputedStyle(document.body).getPropertyValue('--accent-gold').trim() === '#9e7f47',
+            '浅色选中金应为 #9e7f47');
+        } finally {
+          html.setAttribute('data-theme', prevTheme || 'dark');
+        }
       });
 
       addAssert('观感与导航：度数统计与 nodeRadius 枢纽缩放', '观感与导航', async () => {
