@@ -815,6 +815,10 @@
       align-items: center;
       gap: 8px;
     }
+    /* 窄视口下工具栏按钮占满宽度，辅助提示会被挤成逐字竖排——直接隐藏 */
+    @media (max-width: 700px) {
+      .toolbar-left [data-i18n="graph.hint.drag"] { display: none; }
+    }
     .checkbox-label {
       display: inline-flex;
       align-items: center;
