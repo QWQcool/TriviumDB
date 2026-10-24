@@ -1494,6 +1494,7 @@
     .node-detail-drawer .inspector-plane:nth-of-type(1) { --plane-accent: var(--tri-doc); }
     .node-detail-drawer .inspector-plane:nth-of-type(2) { --plane-accent: var(--tri-vector); }
     .node-detail-drawer .inspector-plane:nth-of-type(3) { --plane-accent: var(--tri-graph); }
+    .node-detail-drawer .inspector-plane:nth-of-type(4) { --plane-accent: var(--tri-vector); }
     .inspector-plane-title {
       position: sticky;
       top: -14px;
@@ -3016,6 +3017,13 @@
           <div class="ai-ctx-size" id="pathHint"></div>
           <button class="btn" id="clearPathBtn" type="button" hidden style="margin-top: 6px;" data-i18n="detail.clearPath">清除路径高亮</button>
         </section>
+        <!-- 平面 4: 向量空间投影（PCA 3D：当前节点 + 1 跳邻居） -->
+        <section class="inspector-plane" id="projectionCard">
+          <div class="inspector-plane-title"><span class="inspector-dot" style="background: var(--tri-vector);"></span><span data-i18n="detail.projection">投影</span></div>
+          <canvas id="drawerProjection" class="drawer-mini-map" width="300" height="170"
+            aria-label="当前节点与邻居的向量空间投影" title="点击投影点跳转到对应节点"></canvas>
+          <div class="ai-ctx-size" id="projectionHint" data-i18n="detail.projectionHint">PCA · 前 3 主成分</div>
+        </section>
       </div>
     </div>
     <!-- tab 3：过滤器（原两视图浮动面板合并为一份，状态本就共享） -->
@@ -3514,6 +3522,12 @@
         'detail.title': '节点详情',
         'detail.node': '节点: #{id} ({label})',
         'detail.noVector': '无向量',
+        'detail.projection': '投影',
+        'detail.projectionHint': 'PCA · 前 3 主成分',
+        'detail.projectionMeta': 'PCA · {points} 点 · {dims} 维',
+        'detail.projectionLoading': '投影计算中…',
+        'detail.projectionEmpty': '暂无可投影向量',
+        'detail.projectionFail': '投影加载失败',
         'detail.expandPayload': '展开全部',
         'detail.collapsePayload': '收起',
         'detail.allDims': '全部 {count} 维数值',
@@ -3818,6 +3832,12 @@
         'detail.title': 'Node details',
         'detail.node': 'Node: #{id} ({label})',
         'detail.noVector': 'No vector attached',
+        'detail.projection': 'Projection',
+        'detail.projectionHint': 'PCA · top 3 components',
+        'detail.projectionMeta': 'PCA · {points} pts · {dims} dims',
+        'detail.projectionLoading': 'Computing projection…',
+        'detail.projectionEmpty': 'No vectors to project',
+        'detail.projectionFail': 'Projection failed to load',
         'detail.expandPayload': 'Expand all',
         'detail.collapsePayload': 'Collapse',
         'detail.allDims': 'Show all {count} dimensions',
@@ -9166,6 +9186,9 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       // 平面 3: Edges（异步拉取 GET /v1/nodes/{id} 的 edgeVersions）
       loadNodeEdges(node.id);
 
+      // 平面 4: 向量空间投影（PCA 3D，自身 + 1 跳邻居）
+      loadNodeProjection(node.id);
+
       document.getElementById('nodeDrawer').classList.add('open');
       setUnifiedPanelTab('detail'); // PR-19：详情内容迁入统一面板，打开即切详情 tab
       syncGraphDockSelection();
@@ -9403,6 +9426,221 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     }
 
     // 从边列表跳转到目标节点：拉取完整节点数据后重新渲染抽屉（同一序号守卫）
+    // ==========================================
+    // 平面 4: 向量空间投影（V2 第四卡）
+    // 数据源：POST /v1/nodes/batch-get 一次取回自身 + 1 跳邻居的 vector，
+    // 纯前端 PCA 3D + 固定轴测投影，不引入三维库、不改动服务端契约。
+    // ==========================================
+    let __projectionSeq = 0;
+    let __projectionPoints = []; // 点击命中测试缓存 {x,y,id,r}
+
+    // PCA 三维投影：与 pca2d 同源的均值中心化 + 幂迭代（逐轴正交化），
+    // 输出归一化到半径 1 的 {x,y,z}；维度 <3 或不同维的向量不参与（保证退化不崩）
+    function pca3d(items) {
+      const positions = new Map();
+      const valid = items.filter(it => Array.isArray(it.vector) && it.vector.length >= 3);
+      if (!valid.length) return positions;
+      const dims = valid[0].vector.length;
+      const uniform = valid.filter(it => it.vector.length === dims);
+      if (!uniform.length) return positions;
+      const mean = new Array(dims).fill(0);
+      uniform.forEach(it => { for (let d = 0; d < dims; d++) mean[d] += it.vector[d]; });
+      for (let d = 0; d < dims; d++) mean[d] /= uniform.length;
+      const centered = uniform.map(it => {
+        const v = new Array(dims);
+        for (let d = 0; d < dims; d++) v[d] = it.vector[d] - mean[d];
+        return { id: it.id, vec: v };
+      });
+      const project = (vec, axis) => { let s = 0; for (let d = 0; d < dims; d++) s += vec[d] * axis[d]; return s; };
+      const normalize = (a) => {
+        let s = 0; for (let d = 0; d < dims; d++) s += a[d] * a[d];
+        const n = Math.sqrt(s) || 1;
+        for (let d = 0; d < dims; d++) a[d] /= n;
+        return a;
+      };
+      const axes = [];
+      for (let k = 0; k < 3; k++) {
+        let axis = new Array(dims).fill(0);
+        if (k === 0) axis.fill(1 / Math.sqrt(dims)); else axis[k % dims] = 1;
+        for (let iter = 0; iter < 40; iter++) {
+          const next = new Array(dims).fill(0);
+          for (const it of centered) {
+            const p = project(it.vec, axis);
+            for (let d = 0; d < dims; d++) next[d] += it.vec[d] * p;
+          }
+          axes.forEach(prev => {
+            const comp = project(next, prev);
+            for (let d = 0; d < dims; d++) next[d] -= comp * prev[d];
+          });
+          axis = normalize(next);
+        }
+        axes.push(axis);
+      }
+      let maxR = 0;
+      const raw = centered.map(it => {
+        const p = { id: it.id, x: project(it.vec, axes[0]), y: project(it.vec, axes[1]), z: project(it.vec, axes[2]) };
+        maxR = Math.max(maxR, Math.hypot(p.x, p.y, p.z));
+        return p;
+      });
+      const scale = maxR > 1e-6 ? 1 / maxR : 0;
+      raw.forEach(p => positions.set(p.id, { x: p.x * scale, y: p.y * scale, z: p.z * scale }));
+      return positions;
+    }
+
+    function drawProjection(items, positions, selectedId) {
+      const canvas = document.getElementById('drawerProjection');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      const dpr = window.devicePixelRatio || 1;
+      const w = 300, h = 170;
+      if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+        canvas.width = Math.round(w * dpr);
+        canvas.height = Math.round(h * dpr);
+      }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+      __projectionPoints = [];
+      const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+      const cx = w / 2, cy = h / 2 + 4;
+      const scale = Math.min(w, h) / 2 - 24;
+      const yaw = 0.6, pitch = 0.5;
+      const project = (p) => {
+        const x1 = p.x * Math.cos(yaw) - p.z * Math.sin(yaw);
+        const z1 = p.x * Math.sin(yaw) + p.z * Math.cos(yaw);
+        const y1 = p.y * Math.cos(pitch) - z1 * Math.sin(pitch);
+        const z2 = p.y * Math.sin(pitch) + z1 * Math.cos(pitch);
+        return { sx: cx + x1 * scale, sy: cy + y1 * scale, depth: z2 };
+      };
+      const entries = [];
+      items.forEach(it => {
+        const p = positions.get(it.id);
+        if (p) entries.push({ it, pr: project(p) });
+      });
+      if (!entries.length) {
+        ctx.fillStyle = dark ? 'rgba(238,231,220,0.45)' : 'rgba(27,25,21,0.45)';
+        ctx.font = '11px ' + CANVAS_FONT_FAMILY;
+        ctx.textAlign = 'center';
+        ctx.fillText(t('detail.projectionEmpty'), cx, cy);
+        return;
+      }
+      // 单位立方体骨架：提供三维空间参照（不随数据变化）
+      const corners = [];
+      [-1, 1].forEach(x => [-1, 1].forEach(y => [-1, 1].forEach(z => corners.push({ x, y, z }))));
+      const cubeEdges = [];
+      corners.forEach((a, i) => corners.forEach((b, j) => {
+        if (j <= i) return;
+        const diff = (a.x !== b.x) + (a.y !== b.y) + (a.z !== b.z);
+        if (diff === 1) cubeEdges.push([a, b]);
+      }));
+      ctx.strokeStyle = dark ? 'rgba(159,183,180,0.16)' : 'rgba(95,82,59,0.14)';
+      ctx.lineWidth = 1;
+      cubeEdges.forEach(([a, b]) => {
+        const pa = project(a), pb = project(b);
+        ctx.beginPath(); ctx.moveTo(pa.sx, pa.sy); ctx.lineTo(pb.sx, pb.sy); ctx.stroke();
+      });
+
+      const self = entries.find(e => e.it.id === String(selectedId));
+      entries.forEach(e => {
+        if (!self || e === self) return;
+        ctx.strokeStyle = dark ? 'rgba(159,183,180,0.30)' : 'rgba(95,82,59,0.24)';
+        ctx.beginPath(); ctx.moveTo(self.pr.sx, self.pr.sy); ctx.lineTo(e.pr.sx, e.pr.sy); ctx.stroke();
+      });
+      // 远的先画、近的后画（简化画家算法）
+      entries.sort((a, b) => a.pr.depth - b.pr.depth);
+      entries.forEach(e => {
+        const isSelf = self && e.it.id === self.it.id;
+        const r = isSelf ? 6 : 3.4;
+        const alpha = Math.min(1, Math.max(0.35, 0.55 + e.pr.depth * 0.3));
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = e.it.color || getNodeColor(e.it.typeKey);
+        ctx.beginPath(); ctx.arc(e.pr.sx, e.pr.sy, r, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 1;
+        if (isSelf) {
+          ctx.strokeStyle = '#f4cf6a';
+          ctx.lineWidth = 1.6;
+          ctx.beginPath(); ctx.arc(e.pr.sx, e.pr.sy, r + 3, 0, Math.PI * 2); ctx.stroke();
+        }
+        __projectionPoints.push({ x: e.pr.sx, y: e.pr.sy, id: e.it.id, r: Math.max(r, 7) });
+      });
+      if (self) {
+        ctx.fillStyle = dark ? '#eee7dc' : '#1b1915';
+        ctx.font = '10px ' + CANVAS_FONT_FAMILY;
+        ctx.textAlign = 'center';
+        ctx.fillText('#' + self.it.id, self.pr.sx, self.pr.sy - 12);
+      }
+    }
+
+    async function loadNodeProjection(nodeId) {
+      const hint = document.getElementById('projectionHint');
+      const seq = ++__projectionSeq;
+      const self = String(nodeId);
+      const neighbors = new Set();
+      graphEdges.forEach(e => {
+        if (String(e.source) === self && String(e.target) !== self) neighbors.add(String(e.target));
+        else if (String(e.target) === self && String(e.source) !== self) neighbors.add(String(e.source));
+      });
+      // 上限 20 点（自身 + 19 邻居），避免大图抽屉卡顿；id 以十进制字符串拼接，
+      // 避免 u64 超过 2^53 时 JSON 数值精度丢失（与路径追踪 batch-get 同法）
+      const ids = [self].concat(Array.from(neighbors).slice(0, 19));
+      if (hint) hint.textContent = t('detail.projectionLoading');
+      // 进入加载态立即清空上一节点的投影与命中点（不画空态文案，避免与 loading 文案冲突）
+      __projectionPoints = [];
+      const pc = document.getElementById('drawerProjection');
+      if (pc) pc.getContext('2d').clearRect(0, 0, pc.width, pc.height);
+      try {
+        const res = await fetch(`${API_BASE}/v1/nodes/batch-get`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{"ids":[' + ids.join(',') + ']}'
+        });
+        if (seq !== __projectionSeq) return;
+        if (!res.ok) throw new Error('batch-get http ' + res.status);
+        const data = await res.json();
+        if (seq !== __projectionSeq) return;
+        const items = (data.nodes || []).map(n => {
+          const id = String(n.id);
+          const gn = nodeMap.get(id);
+          const typeKey = (gn && gn.typeKey) || (n.payload && n.payload.type) || 'person';
+          return {
+            id,
+            typeKey,
+            vector: Array.isArray(n.vector) ? n.vector : [],
+            color: (gn && gn.color) || getNodeColor(typeKey)
+          };
+        });
+        if (!items.some(it => it.id === self)) {
+          const gn = nodeMap.get(self);
+          if (gn) items.unshift({ id: self, typeKey: gn.typeKey, vector: gn.vector || [], color: gn.color });
+        }
+        const positions = pca3d(items);
+        drawProjection(items, positions, self);
+        const withVector = items.filter(it => Array.isArray(it.vector) && it.vector.length >= 3);
+        if (hint) {
+          hint.textContent = positions.size
+            ? t('detail.projectionMeta', { points: positions.size, dims: withVector.length ? withVector[0].vector.length : 0 })
+            : t('detail.projectionEmpty');
+        }
+      } catch (err) {
+        if (seq !== __projectionSeq) return;
+        drawProjection([], new Map(), self);
+        if (hint) hint.textContent = t('detail.projectionFail');
+      }
+    }
+
+    // 投影点点击跳转（复用迷你图的 jumpToNode 语义，坐标按 CSS 逻辑尺寸归一）
+    (function bindProjectionClick() {
+      const canvas = document.getElementById('drawerProjection');
+      if (!canvas) return;
+      canvas.addEventListener('click', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        if (!rect.width) return;
+        const mx = (e.clientX - rect.left) * (300 / rect.width);
+        const my = (e.clientY - rect.top) * (170 / rect.height);
+        const hit = __projectionPoints.find(p => Math.hypot(p.x - mx, p.y - my) < p.r + 4);
+        if (hit) jumpToNode(hit.id);
+      });
+    })();
+
     async function jumpToNode(nodeId) {
       const seq = ++__drawerFetchSeq;
       const container = document.getElementById('drawerNodeEdges');
@@ -11328,6 +11566,18 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         assert(container.textContent.includes('dim = 4') && container.textContent.includes('L2'), '应显示 dim 与 L2 范数');
         assert(container.querySelector('details'), '精确数值应折叠在 details');
         renderDrawerVector(NODE_ALICE.vector); // 恢复抽屉向量平面状态
+      });
+
+      addAssert('节点抽屉：投影卡 PCA 3D 渲染与空态清理', '节点抽屉', async () => {
+        openNodeDrawer({ id: '1', label: 'Alice', payload: NODE_ALICE.payload, vector: NODE_ALICE.vector });
+        await waitFor(() => __projectionPoints.length > 0
+          && document.getElementById('projectionHint').textContent.includes('PCA'), 4000, '投影点与 PCA 摘要应就绪');
+        assert(document.getElementById('drawerProjection'), '投影 canvas 应存在');
+        assert(document.getElementById('projectionHint').textContent.includes('PCA'), '提示应含 PCA 摘要');
+        assert(document.getElementById('projectionHint').textContent.includes('4'), '提示应含向量维度');
+        // 空态：无可投影向量时必须清空命中点与画布，不残留上一个节点的投影
+        drawProjection([], new Map(), '1');
+        assert(__projectionPoints.length === 0, '空态应清空命中点');
       });
 
       // 力导向收敛

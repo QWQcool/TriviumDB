@@ -121,6 +121,6 @@
 | 1 壳层 / 侧栏 / token | ✅ | 星尘侧栏、B 版选中态、暗浅 token 已落地 |
 | 2 图舞台 / HUD / 查询舱 / 抽屉骨架 | ✅ | id 以上表「实现名」列为准 |
 | 3 Canvas 视觉 → Sigma 对齐 | 🟡 | Canvas：未知类型哈希配色、边可见度、光晕、首屏自动适配已调；Sigma：节点尺寸/选中尺寸/边宽已与 Canvas 对齐并加切换后 fit。**已知差异**：Sigma WebGL 单色边无法复刻 Canvas 源→目标渐变、无节点描边程序 |
-| 4 详情四卡 | 🟡 | Payload / Vector / Edges 三卡已就绪；第 4 卡「向量空间投影」未实现 |
+| 4 详情四卡 | ✅ | Payload / Vector / Edges / **投影**（PCA 3D：`POST /v1/nodes/batch-get` 一次取自身 + 1 跳邻居，固定轴测投影，点击投影点可跳转节点；无向量时显示空态） |
 | 5 响应式 / i18n / 降级 / 动效开关 | 🟡 | i18n、断点（1280/1100/900/700）、动效开关（`graphMotionBtn`）已完成；390 宽度实机复核未做 |
-| 6 selftest / ui-smoke / 视觉基线 | 🟡 | 页内 selftest 126/126 通过；`ui-smoke` 因本机缺 Playwright 未执行；视觉基线待 Phase 3 定稿后重建 |
+| 6 selftest / ui-smoke / 视觉基线 | 🟡 | 页内 selftest **127/127** 通过（含新增投影卡断言，2026-10-24 实测）；`cargo test -p triviumdb-server` 11 单元 + 29 契约全绿；`ui-smoke` 因本机缺 Playwright 未执行；视觉基线待 Phase 3 定稿后重建 |
