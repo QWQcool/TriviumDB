@@ -1253,7 +1253,9 @@
     body.graph-dock-open .v2-graph-controls { bottom: 210px; }
     body.graph-dock-open .v2-more-menu { bottom: 256px; }
     @media (max-width: 1280px) {
-      .v2-hud.left { display: none; }
+      /* 加载入口迁入 HUD 后窄屏也必须可达；辅助入口沿用原隐藏策略。 */
+      .v2-hud.left { top: 56px; max-width: calc(100% - 24px); flex-wrap: wrap; }
+      .v2-hud.left > :not(#loadWholeGraphBtn):not(#graphTqlBtn) { display: none; }
       .v2-cockpit { width: calc(100% - 300px); min-width: 340px; }
     }
     @media (max-width: 900px) {
