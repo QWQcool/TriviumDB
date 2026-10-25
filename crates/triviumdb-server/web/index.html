@@ -6865,16 +6865,26 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     // ==========================================
     function startSimulation(alpha) {
       stopGraphAuroraMotion();
+      simulationAlpha = Math.max(simulationAlpha, alpha);
       // prefers-reduced-motion：跳过布局动画，同步收敛到静态布局后直接绘制
       //（引擎坐标不变，WebGL 后端同样受益；物理锁定的静态布局本就不进动画）
       if (prefersReducedMotion() && graphNodes.length > 0 && !physicsLockedByScale) {
-        for (let i = 0; i < 60; i++) tickPhysics();
+        if (simulationRafId !== null) cancelAnimationFrame(simulationRafId);
+        simulationRafId = null;
+        if (graphNodes.length < 60) {
+          // 小图与动画路径使用同一冷却序列，重复查询不继承上次已冷却的强度。
+          while (simulationAlpha > 0.005) {
+            tickPhysics();
+            simulationAlpha *= 0.95;
+          }
+        } else {
+          for (let i = 0; i < 60; i++) tickPhysics();
+        }
         simulationAlpha = 0.005; // 视为已收敛
         consumePendingAutoFit();
         redrawGraph();
         return;
       }
-      simulationAlpha = Math.max(simulationAlpha, alpha);
       if (simulationRafId === null) {
         simulationRafId = requestAnimationFrame(simulationStep);
       }
@@ -6900,18 +6910,65 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       if (!cameraTouchedByUser) fitAllGraphViews(false);
     }
 
+    function smallGraphPhysics(nodeCount) {
+      const scale = Math.max(0, Math.min(1, (60 - nodeCount) / 48));
+      return { scale, repulsion: 9000 + 15000 * scale, springLength: 130 + 90 * scale };
+    }
+
+    function smallGraphFitArea(canvas, nodes = graphNodes) {
+      const parent = canvas.parentElement;
+      const width = parent.clientWidth, height = parent.clientHeight;
+      const rect = parent.getBoundingClientRect();
+      const radius = Math.max(16, ...nodes.map(nodeRadius));
+      const labelBottom = Math.max(30, ...nodes.map(nodeLabelOffset));
+      const pad = Math.max(48, radius + 12);
+      let top = pad, bottom = height - Math.max(pad, labelBottom + 4);
+      // 中心区避开当前浮层，节点本体和标签都不穿进查询舱 / 布局条 / dock。
+      parent.querySelectorAll('.v2-hud, .v2-cockpit, .graph-float-toolbar').forEach(el => {
+        const box = el.getBoundingClientRect();
+        if (box.width && box.height) top = Math.max(top, box.bottom - rect.top + radius + 8);
+      });
+      parent.querySelectorAll('.graph-controls, .v2-dock').forEach(el => {
+        const box = el.getBoundingClientRect();
+        if (box.width && box.height) bottom = Math.min(bottom, box.top - rect.top - labelBottom - 8);
+      });
+      const panel = document.getElementById('unifiedSidePanel');
+      const reserve = window.innerWidth > 900 && document.body.classList.contains('panel-open') && panel
+        ? parseFloat(getComputedStyle(panel).width) + 16 : 0;
+      const left = Math.min(pad, width / 2);
+      return { x: left, y: Math.min(top, height / 2),
+        width: Math.max(1, width - reserve - pad - left),
+        height: Math.max(1, bottom - Math.min(top, height / 2)) };
+    }
+
+    function smallGraphPhysicsBounds() {
+      // 独立探索时查询画布可能为 0×0；尺寸来自可见容器，不依赖上次绘制。
+      const canvas = ['standaloneGraphCanvas', 'graphCanvas']
+        .map(id => document.getElementById(id))
+        .find(el => el && el.parentElement.clientWidth > 0 && el.parentElement.clientHeight > 0);
+      const width = canvas ? canvas.parentElement.clientWidth : 800;
+      const height = canvas ? canvas.parentElement.clientHeight : 600;
+      const area = canvas ? smallGraphFitArea(canvas) : { width, height };
+      return { halfW: Math.max(80, width / 2 - 70), halfH: Math.max(80, height / 2 - 70),
+        aspect: Math.max(1, Math.min(1.8, area.width / area.height)) };
+    }
+
     function tickPhysics() {
       const nodes = graphNodes;
       const count = nodes.length;
       if (count === 0) return;
       // 库仑斥力 + 最小间距约束：避免节点堆叠
-      const repulsion = 9000;
+      const params = smallGraphPhysics(count);
+      const repulsion = params.repulsion;
+      const smallBounds = count < 60 ? smallGraphPhysicsBounds() : null;
+      // 在适合舞台的椭圆度量中计算小图力学；60+ 保持原各向同性力学。
+      const aspect = smallBounds ? 1 + (smallBounds.aspect - 1) * params.scale : 1;
       const minDist = 56;
       for (let i = 0; i < count; i++) {
         for (let j = i + 1; j < count; j++) {
           const a = nodes[i];
           const b = nodes[j];
-          let dx = a.x - b.x;
+          let dx = (a.x - b.x) / aspect;
           let dy = a.y - b.y;
           let distSq = dx * dx + dy * dy;
           if (distSq < 1) {
@@ -6921,7 +6978,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           }
           const dist = Math.sqrt(distSq);
           const force = repulsion / distSq + (dist < minDist ? (minDist - dist) * 0.8 : 0);
-          const fx = (dx / dist) * force;
+          const fx = (dx / dist) * force * aspect;
           const fy = (dy / dist) * force;
           a.vx += fx;
           a.vy += fy;
@@ -6930,17 +6987,17 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         }
       }
       // 弹簧力：有边相连的节点向理想长度聚拢（对应官网风格中关系紧密节点彼此靠近）
-      const springLength = 130;
+      const springLength = params.springLength;
       const stiffness = 0.015;
       for (const edge of graphEdges) {
         const s = nodeMap.get(edge.source);
         const t = nodeMap.get(edge.target);
         if (!s || !t) continue;
-        const dx = t.x - s.x;
+        const dx = (t.x - s.x) / aspect;
         const dy = t.y - s.y;
         const dist = Math.hypot(dx, dy) || 0.1;
         const force = (dist - springLength) * stiffness;
-        const fx = (dx / dist) * force;
+        const fx = (dx / dist) * force * aspect;
         const fy = (dy / dist) * force;
         s.vx += fx;
         s.vy += fy;
@@ -6949,8 +7006,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       }
       // 向心力 + 阻尼积分：整体收拢在视口中心附近并逐渐静止
       const canvas = document.getElementById('graphCanvas');
-      const halfW = (canvas ? canvas.width : 800) / 2 - 70;
-      const halfH = (canvas ? canvas.height : 600) / 2 - 70;
+      const halfW = smallBounds ? smallBounds.halfW : (canvas ? canvas.width : 800) / 2 - 70;
+      const halfH = smallBounds ? smallBounds.halfH : (canvas ? canvas.height : 600) / 2 - 70;
       for (const node of nodes) {
         node.vx -= node.x * 0.002;
         node.vy -= node.y * 0.002;
@@ -7041,6 +7098,20 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       return 16 * (1 + Math.min(node.degree || 0, GRAPH_DEGREE_RADIUS_CAP) * 0.06);
     }
 
+    function clampGraphZoom(k) {
+      return Number.isFinite(k) ? Math.min(20, Math.max(0.05, k)) : 1;
+    }
+
+    function nodeLabelOffset(node) {
+      return nodeRadius(node) + (selectedNode === node ? 26 : 14);
+    }
+
+    function hitGraphNode(x, y, k) {
+      const invK = 1 / clampGraphZoom(k);
+      return graphNodes.find(n => isNodeVisible(n)
+        && Math.hypot(n.x - x, n.y - y) < (nodeRadius(n) + 4) * invK);
+    }
+
     // 遍历边统计 source/target 出现次数写入 node.degree（图数据变化入口统一调用）
     function recomputeDegrees() {
       graphNodes.forEach(n => { n.degree = 0; });
@@ -7053,7 +7124,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     }
 
     // 节点包围盒；空图返回 null（调用方兜底，selftest 覆盖不崩）
-    function computeGraphBBox(nodes) {
+    function computeGraphBBox(nodes, margin = 26) {
       if (!nodes || !nodes.length) return null;
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       nodes.forEach(n => {
@@ -7063,7 +7134,6 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         if (n.y > maxY) maxY = n.y;
       });
       // 预留节点半径 + 选中双环余量：只按圆心包围盒 fit 会导致节点边缘/环溢出舞台
-      const margin = 26;
       return { minX: minX - margin, minY: minY - margin, maxX: maxX + margin, maxY: maxY + margin };
     }
 
@@ -7073,9 +7143,8 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       if (!bbox) return { x: canvasW / 2, y: canvasH / 2, k: 1 };
       const w = Math.max(bbox.maxX - bbox.minX, 1);
       const h = Math.max(bbox.maxY - bbox.minY, 1);
-      // 上限 1.6：小图（几十个节点）按圆心包围盒算出的 k 可达 3~4，
-      // 会把 11px 标签放大到 30px+、节点圆溢出舞台（V2 对照验收问题）。
-      const k = Math.min(1.6, Math.max(0.05,
+      // 标签/节点已使用屏幕尺寸，fit 可放大至 3；手动缩放仍可到 20。
+      const k = Math.min(3, Math.max(0.05,
         Math.min((canvasW - pad * 2) / w, (canvasH - pad * 2) / h)));
       return {
         x: canvasW / 2 - ((bbox.minX + bbox.maxX) / 2) * k,
@@ -7378,7 +7447,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         const my = (e.clientY - rect.top - transform.y) / transform.k;
 
         // 碰撞测试（PR-17：命中半径随节点度数半径缩放）
-        const clickedNode = graphNodes.find(n => Math.hypot(n.x - mx, n.y - my) < nodeRadius(n) + 4);
+        const clickedNode = hitGraphNode(mx, my, transform.k);
         if (clickedNode) {
           draggedNode = clickedNode;
           selectedNode = clickedNode;
@@ -7417,7 +7486,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       canvas.addEventListener('wheel', (e) => {
         e.preventDefault();
         const zoom = e.deltaY < 0 ? 1.1 : 0.9;
-        transform.k *= zoom;
+        transform.k = clampGraphZoom(transform.k * zoom);
         redrawGraph();
       });
 
@@ -7628,7 +7697,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         return;
       }
       const t = viewId === 'query' ? transform : standaloneTransform;
-      t.k = Math.min(20, Math.max(0.05, t.k * factor));
+      t.k = clampGraphZoom(t.k * factor);
       redrawGraph();
     }
 
@@ -7671,9 +7740,12 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       const canvas = document.getElementById(viewId === 'query' ? 'graphCanvas' : 'standaloneGraphCanvas');
       if (!canvas || canvas.clientWidth === 0) return; // 隐藏视图不做伪 fit
       syncCanvasSize(canvas);
-      const fit = fitTransformToBBox(computeGraphBBox(nodes), canvas.width, canvas.height, 80);
+      // 小图用圆心 bbox + 屏幕余量，避免 26 世界单位余量随 k 重复放大。
+      const small = graphNodes.length < 60;
+      const area = small ? smallGraphFitArea(canvas, nodes) : { x: 0, y: 0, width: canvas.width, height: canvas.height };
+      const fit = fitTransformToBBox(computeGraphBBox(nodes, small ? 0 : 26), area.width, area.height, small ? 0 : 80);
       const t = viewId === 'query' ? transform : standaloneTransform;
-      t.x = fit.x; t.y = fit.y; t.k = fit.k;
+      t.x = fit.x + area.x; t.y = fit.y + area.y; t.k = fit.k;
       redrawGraph();
     }
 
@@ -8702,14 +8774,16 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     function drawGraphScene(ctx, t, canvas) {
       drawSpaceBackground(ctx, canvas);
 
+      const k = clampGraphZoom(t.k);
+      const invK = 1 / k;
       ctx.save();
       ctx.translate(t.x, t.y);
-      ctx.scale(t.k, t.k);
+      ctx.scale(k, k);
 
       drawClusterRings(ctx);
       drawGraphPulses(ctx, performance.now());
 
-      const labelMode = graphLabelMode(graphNodes.length, t.k);
+      const labelMode = graphLabelMode(graphNodes.length, k);
       // 配色跟随主题（PR-20 评审定版）：深色主题暗底浅线；浅色主题用户定版
       // 浅蓝色调（#6b8cae 钢青蓝）+ 固定 0.4 透明度（两轮复评收敛：slate-600×0.35
       // 太浅、slate-700×0.45 过强）
@@ -8746,24 +8820,24 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           ctx.strokeStyle = onPath ? 'rgba(244, 207, 106, 0.96)' : grad;
           // 深空底上 0.53 的复合透明度实测过淡（V2 对照边几乎不可见），提到 ~0.63
           ctx.globalAlpha = onPath ? 1 : Math.min(0.78, edgeAlpha + 0.28);
-          ctx.lineWidth = onPath ? 3.2 : 1.5;
+          ctx.lineWidth = (onPath ? 3.2 : 1.5) * invK;
           ctx.stroke();
           ctx.globalAlpha = 1;
           // 有向箭头：靠近目标节点边缘，不覆盖节点本体
           const angle = Math.atan2(t.y - cy, t.x - cx);
-          const headX = t.x - Math.cos(angle) * (nodeRadius(t) + 2);
-          const headY = t.y - Math.sin(angle) * (nodeRadius(t) + 2);
-          drawArrowHead(ctx, headX, headY, angle, onPath ? 10 : 7.5,
+          const headX = t.x - Math.cos(angle) * (nodeRadius(t) + 2) * invK;
+          const headY = t.y - Math.sin(angle) * (nodeRadius(t) + 2) * invK;
+          drawArrowHead(ctx, headX, headY, angle, (onPath ? 10 : 7.5) * invK,
             onPath ? '#f4cf6a' : (t.color || '#aebad4'), onPath ? 0.96 : 0.78);
         } else {
           ctx.strokeStyle = onPath ? 'rgba(214, 184, 129, 0.95)' : 'rgba(' + edgeBase + ', ' + edgeAlpha + ')';
-          ctx.lineWidth = onPath ? 3 : 1.4;
+          ctx.lineWidth = (onPath ? 3 : 1.4) * invK;
           ctx.stroke();
         }
 
         if (edge.label) {
           ctx.save();
-          ctx.font = '10px ' + CANVAS_FONT_FAMILY;
+          ctx.font = (10 * invK) + 'px ' + CANVAS_FONT_FAMILY;
           ctx.textAlign = 'center';
           // V2 蓝本：标签沿边方向旋转贴合；倒置角度翻转 180° 保证始终可读
           let labelAngle = Math.atan2(dy, dx);
@@ -8773,12 +8847,12 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           ctx.rotate(labelAngle);
           // 标签 Halo：与边线交叉时仍可读（浅色用暖白，暗色用深空底）
           ctx.strokeStyle = dark ? 'rgba(5, 8, 18, 0.92)' : 'rgba(251, 249, 245, 0.95)';
-          ctx.lineWidth = dark ? 3 : 2.8;
-          ctx.strokeText(edge.label, 0, -4);
+          ctx.lineWidth = (dark ? 3 : 2.8) * invK;
+          ctx.strokeText(edge.label, 0, -4 * invK);
           ctx.fillStyle = dark
             ? 'rgba(214, 228, 255, ' + Math.min(edgeAlpha + 0.42, 0.86) + ')'
             : 'rgba(' + edgeBase + ', ' + Math.min(edgeAlpha + 0.25, 0.9) + ')';
-          ctx.fillText(edge.label, 0, -4);
+          ctx.fillText(edge.label, 0, -4 * invK);
           ctx.restore();
         }
       });
@@ -8786,7 +8860,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       // 绘制节点；暗色图舞台使用 B 派径向 glow / 选中双环
       graphNodes.forEach(node => {
         if (!isNodeVisible(node)) return;
-        const r = nodeRadius(node);
+        const r = nodeRadius(node) * invK;
         const glow = graphAuroraGlow(node);
         ctx.save();
         if (glow > 0) {
@@ -8801,18 +8875,18 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         ctx.beginPath();
         ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
         ctx.strokeStyle = selectedNode === node ? selectedStroke : nodeStroke;
-        ctx.lineWidth = selectedNode === node ? 3 : 1;
+        ctx.lineWidth = (selectedNode === node ? 3 : 1) * invK;
         ctx.stroke();
         if (selectedNode === node) {
           ctx.beginPath();
-          ctx.arc(node.x, node.y, r + 6, 0, Math.PI * 2);
+          ctx.arc(node.x, node.y, r + 6 * invK, 0, Math.PI * 2);
           ctx.strokeStyle = dark ? 'rgba(244, 207, 106, 0.92)' : selectedStroke;
-          ctx.lineWidth = 2.2;
+          ctx.lineWidth = 2.2 * invK;
           ctx.stroke();
           ctx.beginPath();
-          ctx.arc(node.x, node.y, r + 10, 0, Math.PI * 2);
+          ctx.arc(node.x, node.y, r + 10 * invK, 0, Math.PI * 2);
           ctx.strokeStyle = dark ? 'rgba(99, 242, 231, 0.32)' : 'rgba(158, 127, 71, 0.30)';
-          ctx.lineWidth = 1;
+          ctx.lineWidth = invK;
           ctx.stroke();
         }
       });
@@ -8823,32 +8897,33 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         ctx.textAlign = 'center';
         if (labelMode === 'normal') {
           ctx.save();
-          ctx.font = '11px ' + CANVAS_FONT_FAMILY;
+          ctx.font = (11 * invK) + 'px ' + CANVAS_FONT_FAMILY;
           // Text Halo：浅色 C 蓝本 4px 面板色描边（11px 字号下取 3.4），暗色用深空底
           ctx.strokeStyle = dark ? 'rgba(5, 8, 18, 0.94)' : 'rgba(251, 249, 245, 0.96)';
-          ctx.lineWidth = dark ? 3.2 : 3.4;
-          ctx.strokeText(node.label, node.x, node.y + 28);
+          ctx.lineWidth = (dark ? 3.2 : 3.4) * invK;
+          const labelY = node.y + nodeLabelOffset(node) * invK;
+          ctx.strokeText(node.label, node.x, labelY);
           ctx.fillStyle = nodeLabel;
-          ctx.fillText(node.label, node.x, node.y + 28);
+          ctx.fillText(node.label, node.x, labelY);
           ctx.restore();
         } else {
           let text = node.label;
           if (text.length > GRAPH_PILL_MAX_CHARS) text = text.slice(0, GRAPH_PILL_MAX_CHARS) + '…';
-          ctx.font = '10px ' + CANVAS_FONT_FAMILY;
+          ctx.font = (10 * invK) + 'px ' + CANVAS_FONT_FAMILY;
           const tw = ctx.measureText(text).width;
-          const pw = tw + 12;
-          const ph = 16;
+          const pw = tw + 12 * invK;
+          const ph = 16 * invK;
           const px = node.x - pw / 2;
-          const py = node.y - 30;
-          drawPillRect(ctx, px, py, pw, ph, 8);
+          const py = node.y - (nodeRadius(node) + (selectedNode === node ? 10 : 0) + 22) * invK;
+          drawPillRect(ctx, px, py, pw, ph, 8 * invK);
           // pill 底色随主题：暗底深药丸 / 浅底白药丸（文字对比度各自成立）
           ctx.fillStyle = dark ? 'rgba(7, 11, 22, 0.88)' : 'rgba(251, 249, 245, 0.94)';
           ctx.fill();
           ctx.strokeStyle = dark ? 'rgba(190, 214, 255, 0.24)' : 'rgba(60, 52, 40, 0.22)';
-          ctx.lineWidth = 1;
+          ctx.lineWidth = invK;
           ctx.stroke();
           ctx.fillStyle = nodeLabel;
-          ctx.fillText(text, node.x, py + 11.5);
+          ctx.fillText(text, node.x, py + 11.5 * invK);
         }
       });
 
@@ -9357,7 +9432,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         const rect = saCanvas.getBoundingClientRect();
         const mx = (e.clientX - rect.left - standaloneTransform.x) / standaloneTransform.k;
         const my = (e.clientY - rect.top - standaloneTransform.y) / standaloneTransform.k;
-        const hit = graphNodes.find(n => Math.hypot(n.x - mx, n.y - my) < nodeRadius(n) + 4);
+        const hit = hitGraphNode(mx, my, standaloneTransform.k);
         if (hit) {
           openNodeDrawer(hit);
         } else {
@@ -9375,7 +9450,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       window.addEventListener('mouseup', () => { saDragging = false; });
       saCanvas.addEventListener('wheel', (e) => {
         e.preventDefault();
-        standaloneTransform.k *= e.deltaY < 0 ? 1.1 : 0.9;
+        standaloneTransform.k = clampGraphZoom(standaloneTransform.k * (e.deltaY < 0 ? 1.1 : 0.9));
         redrawGraph();
       });
 
@@ -13370,6 +13445,82 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         collapseUnifiedPanel();
         assert(Math.abs(csNum(dock, 'right') - beforeRight) < 2, '收起面板后 dock 应回到原位');
         renderGraph(FIND_ROWS);
+      });
+
+      addAssert('V3 小图：实际 Canvas 字号、节点与选中环保持屏幕尺寸', 'V3 收敛', async () => {
+        renderGraph(MATCH_ROWS);
+        const previousSelection = selectedNode;
+        selectedNode = graphNodes[0];
+        const canvas = document.createElement('canvas');
+        canvas.width = 800; canvas.height = 600;
+        const ctx = canvas.getContext('2d');
+        const fillText = ctx.fillText;
+        const strokeText = ctx.strokeText;
+        const arc = ctx.arc;
+        let texts = [], circles = [];
+        const screenScale = () => {
+          const m = ctx.getTransform();
+          return Math.hypot(m.a, m.b);
+        };
+        ['fillText', 'strokeText'].forEach(method => {
+          const original = ctx[method];
+          ctx[method] = function(text, ...args) {
+            texts.push({ text, size: parseFloat(this.font) * screenScale() });
+            return original.call(this, text, ...args);
+          };
+        });
+        ctx.arc = function(x, y, radius, ...args) {
+          if (x === selectedNode.x && y === selectedNode.y) circles.push(radius * screenScale());
+          return arc.call(this, x, y, radius, ...args);
+        };
+        try {
+          const edgeLabels = new Set(graphEdges.map(e => e.label).filter(Boolean));
+          for (const k of [0.5, 1, 3, 20]) {
+            texts = []; circles = [];
+            drawGraphScene(ctx, { x: 400, y: 300, k }, canvas);
+            const nodeLabels = new Set(graphNodes.map(n => k < GRAPH_PILL_ZOOM_THRESHOLD && n.label.length > GRAPH_PILL_MAX_CHARS
+              ? n.label.slice(0, GRAPH_PILL_MAX_CHARS) + '…' : n.label));
+            const nodeTexts = texts.filter(item => nodeLabels.has(item.text));
+            const edgeTexts = texts.filter(item => edgeLabels.has(item.text));
+            const expectedFont = k < GRAPH_PILL_ZOOM_THRESHOLD ? 10 : 11;
+            assert(nodeTexts.length >= graphNodes.length, `k=${k} 应实际画出节点标签`);
+            assert(nodeTexts.every(item => Math.abs(item.size - expectedFont) < 0.02), `k=${k} 节点字号应恒为 ${expectedFont}px`);
+            assert(edgeTexts.length > 0 && edgeTexts.every(item => Math.abs(item.size - 10) < 0.02), `k=${k} 边字号应恒为 10px`);
+            for (const gap of [0, 6, 10]) {
+              assert(circles.some(r => Math.abs(r - nodeRadius(selectedNode) - gap) < 0.02), `k=${k} 半径/选中环 ${gap}px 不应随缩放改变`);
+            }
+          }
+        } finally {
+          ctx.fillText = fillText; ctx.strokeText = strokeText; ctx.arc = arc;
+          selectedNode = previousSelection;
+          renderGraph(FIND_ROWS);
+        }
+      });
+
+      addAssert('V3 小图：屏幕命中容差、隐藏节点与缩放边界一致', 'V3 收敛', async () => {
+        const previousNodes = graphNodes;
+        const previousHidden = graphFilters.hiddenTypes;
+        const node = { id: 'screen-hit', typeKey: 'screen-test', x: 0, y: 0, degree: 0 };
+        graphNodes = [node];
+        graphFilters.hiddenTypes = new Set();
+        try {
+          for (const k of [0.05, 0.5, 3, 20]) {
+            assert(hitGraphNode(19 / k, 0, k) === node, `k=${k} 4px 容差内应命中`);
+            assert(!hitGraphNode(21 / k, 0, k), `k=${k} 容差外不应命中`);
+          }
+          graphFilters.hiddenTypes.add(node.typeKey);
+          assert(!hitGraphNode(0, 0, 1), '过滤隐藏节点后圆心也不可命中');
+          assert(clampGraphZoom(100) === 20 && clampGraphZoom(0) === 0.05, '手动缩放边界为 0.05…20');
+          assert(clampGraphZoom(NaN) === 1, '非法倍率应回落到有效值');
+          assert(fitTransformToBBox({ minX: -1, minY: -1, maxX: 1, maxY: 1 }, 800, 600).k === 3, 'fit 上限应为 3');
+          for (const count of [60, 300, 1000]) {
+            const params = smallGraphPhysics(count);
+            assert(params.springLength === 130 && params.repulsion === 9000, '小图参数不得改变 60+ 节点路径');
+          }
+        } finally {
+          graphNodes = previousNodes;
+          graphFilters.hiddenTypes = previousHidden;
+        }
       });
 
       addAssert('观感与导航：度数统计与 nodeRadius 枢纽缩放', '观感与导航', async () => {
