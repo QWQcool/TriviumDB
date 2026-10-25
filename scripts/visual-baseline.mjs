@@ -174,6 +174,38 @@ const SEED_QUERIES = [
   'CREATE ({name: "Tri-Model DB", type: "topic"})',
 ];
 
+// 浅色浮层使用真实种子数据；复位教程、详情面板和另一浮层，避免顺序污染。
+async function prepareLightOverlay(page, target) {
+  await page.evaluate(() => {
+    document.getElementById('closeTutorialBtn').click();
+    collapseUnifiedPanel();
+    applyThemeAttributes('light');
+    document.querySelector('[data-tab="graphExplorePane"]').click();
+  });
+  const response = page.waitForResponse(res => res.url().endsWith('/v1/tql') && res.request().method() === 'POST');
+  await page.click('#loadWholeGraphBtn');
+  if (!(await response).ok()) throw new Error('浅色浮层截图的拓扑查询失败');
+  // MATCH 拓扑只含 Alice/Bob 关系的两个端点；另外两个种子是孤立节点。
+  await page.waitForFunction(() => graphNodes.length === 2 && graphEdges.length === 1, null, { timeout: 10000 });
+  await page.evaluate(target => {
+    const cockpit = document.getElementById('graphCockpit');
+    const dock = document.getElementById('graphDock');
+    if (cockpit.classList.contains('open') !== (target === 'cockpit')) {
+      document.getElementById('graphCockpitToggle').click();
+    }
+    if (dock.classList.contains('open') !== (target === 'dock')) {
+      document.getElementById('graphDockToggle').click();
+    }
+    const query = document.getElementById('graphCockpitQuery');
+    query.value = 'MATCH (a)-[r]->(b)\nRETURN a, r, b\nLIMIT 20';
+    query.dispatchEvent(new Event('input', { bubbles: true }));
+    renderCockpitHits(null); // 同时钉住 V3-F「未运行」空态。
+    setGraphLayoutMode('radial');
+  }, target);
+  await sleep(900);
+  await page.evaluate(() => fitGraphView('standalone'));
+}
+
 // ---------- 截图清单（全部确定性；Sigma 需 --with-sigma） ----------
 const SHOTS = [
   {
@@ -242,10 +274,12 @@ const SHOTS = [
       await sleep(600);
     },
   },
+  { name: '07-light-cockpit', setup: page => prepareLightOverlay(page, 'cockpit') },
+  { name: '08-light-dock', setup: page => prepareLightOverlay(page, 'dock') },
 ];
 if (WITH_SIGMA) {
   SHOTS.push({
-    name: '07-sigma-radial',
+    name: '09-sigma-radial',
     setup: async (page) => {
       await page.evaluate(() => { document.getElementById('closeTutorialBtn').click(); });
       await page.evaluate(() => { document.getElementById('toggleWebGLBtn').click(); });

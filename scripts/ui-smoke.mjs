@@ -443,10 +443,15 @@ try {
   // 冒烟 5.7：星云模式（PR-18）—— 真实 server 702 节点：单查询 MATCH 上限 10000 拉全图，
   // Sigma 专属 + 物理必关 + 静态聚类布局；WebGL 库不可达时星云中止 + toast（与 WebGL 冒烟同双路径）。
   // PR-20：退出改为恢复进入前快照——先摆 2 个种子节点作为快照源
-  await page.evaluate(() => renderGraph([
-    { a: { type: 'node', id: 's1', payload: { name: 'PreNebula A', type: 'person' }, vector: [] },
-      b: { type: 'node', id: 's2', payload: { name: 'PreNebula B', type: 'person' }, vector: [] } }
-  ]));
+  await page.evaluate(() => {
+    // 后续会真实打开详情并请求邻域；快照必须引用库内节点，不能用非法的 s1/s2 ID。
+    const ids = ['Smoke Alice', 'Smoke Bob'].map(name => graphNodes.find(n => n.label === name)?.id);
+    if (ids.some(id => id == null)) throw new Error('星云快照缺少库内种子节点');
+    renderGraph([
+      { a: { type: 'node', id: ids[0], payload: { name: 'PreNebula A', type: 'person' }, vector: [] },
+        b: { type: 'node', id: ids[1], payload: { name: 'PreNebula B', type: 'person' }, vector: [] } }
+    ]);
+  });
   // 清空前序步骤残留 toast：避免「任一 toast 存在」的等待条件被旧 toast 瞬间满足
   await page.evaluate(() => { const s = document.getElementById('toastStack'); if (s) s.textContent = ''; });
   await page.click('#nebulaModeBtn');
