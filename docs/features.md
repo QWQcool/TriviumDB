@@ -1,15 +1,17 @@
 # TriviumDB 支持特性详解
 
-> 深入剖析 TriviumDB 的架构设计、核心能力与技术实现细节。本文以 v0.8.11 版本源码和公共 API 为准；见[变更说明](changes/0.8.11.md)。
+> TriviumDB `0.9.0-beta.1` 的架构、核心能力与技术实现。版本记录见[变更说明](changes/0.9.0-beta.1.md)。
 
 ## 当前能力快照
 
 - **持久化索引**：QuIVer ANN、Hash、Ordered ART、Composite ART、Roaring Bitmap、AC+BM25 TextIndex、业务图块索引。
-- **自由 DIY 混合查询**：TQL 不是几条固定的“混合搜索模板”，而是一套可编排执行管线。开发者可将向量召回、BM25/AC 文本召回、属性过滤、图扩展、图算法、FISTA 残差召回、DPP 多样化、NMF 主题分配、路径、集合代数、迭代、聚合和重排按业务语义自由串联，并由 Cascades 在预算内选择物理计划。
+- **自由 DIY 混合查询**：TQL 提供可编排执行管线。开发者可将向量召回、BM25/AC 文本召回、属性过滤、图扩展、图算法、FISTA 残差召回、DPP 多样化、NMF 主题分配、路径、集合代数、迭代、聚合和重排按业务语义自由串联，并由 Cascades 在预算内选择物理计划。
 - **双形态认知检索**：`search_advanced()` 保留组件可开关、顺序固定的官方模板；TQL 复用相同 BM25、AC、FISTA、DPP、NMF 与图扩散底层实现，允许自由编排无状态组件。疲劳不应期仍仅属于有状态 API。
 - **统一查询底座**：TQL Parser/AST、WITH 管线、Cascades 优化、Prepared TQL、Path 与一等值结果共同支撑上述自由组合；数字字面量支持科学计数法，MATCH 属性/ID 投影按实际值去重，`SET VECTOR` 通过原子 mutation 更新向量。
 - **系统保证**：确定性执行、查询/遍历/内存/并行预算、ReadOnly/Immutable 零写、generation 原子发布。
 - **跨语言能力**：Rust、Python、Node 同步提供四类属性索引管理、Prepared TQL、一等查询值和存储格式观测。
+- **多实例运行管理**：共享 `ResourceRuntime` 统一登记数据库配额和工作区，管理工作线程及前台/维护任务名额；共享与实例诊断提供预算余额、维护延期和故障详情。
+- **生命周期与状态迁移**：关闭请求、排空、限时等待、目录快照、校验及恢复，Rust/Python/Node 接口同步提供。
 - **严格升级策略**：历史静默 API 已移除；误用返回迁移错误。主文件保留有限读取窗口，可重建 sidecar 独立版本化。
 
 ---
@@ -18,15 +20,16 @@
 
 - [架构总览](#架构总览)
 - [三位一体数据模型](#三位一体数据模型)
-- [存储引擎](#存储引擎)
+- [存储引擎与双模式切换](#存储引擎与双模式切换)
 - [向量索引策略](#向量索引策略)
 - [图谱扩散检索](#图谱扩散检索)
 - [认知检索管线](#认知检索管线)
 - [TQL 统一查询语言](#tql-统一查询语言)
 - [持久化属性索引体系](#持久化属性索引体系)
 - [崩溃恢复机制](#崩溃恢复机制)
-- [并发安全模型](#并发安全模型)
-- [多语言绑定架构](#多语言绑定架构)
+- [多实例资源与生命周期](#多实例资源与生命周期)
+- [并发安全与零开销事务](#并发安全与零开销事务)
+- [Python 与 Node.js 绑定](#python-绑定架构)
 - [跨架构 SIMD 加速](#跨架构-simd-加速)
 
 ---
@@ -55,7 +58,8 @@ flowchart TD
         direction LR
         C1[事务控制 Dry-Run]:::module
         C2[WAL 编排]:::module
-        C3[内存预算 & Compaction调度]:::module
+        C3[共享资源与维护调度]:::module
+        C4[实例生命周期与快照]:::module
     end
     Layer2:::layer
 
@@ -111,7 +115,7 @@ flowchart TD
 | **元数据层** (Payload) | `HashMap<u64, JSON>` | 任意 JSON Key-Value | 条件过滤、业务数据 |
 | **图谱层** (Graph) | `HashMap<u64, Vec<Edge>>` | 有向带权边邻接表 | 关系遍历、扩散激活 |
 
-### 为什么选择 SoA 而不是 AoS？
+### SoA 数据布局
 
 **AoS (Array of Structures)**：每个节点的 `{vector, payload, edges}` 紧挨存放。
 - ❌ 向量检索时 CPU 缓存被无用的 payload 数据污染
@@ -144,7 +148,7 @@ TriviumDB 提供两种互斥的存储模式（`StorageMode`），且**系统支�
 
 Mmap 的能力边界必须明确：它降低启动和复制成本，但不把 SSD 变成内存。非驻留页首次访问仍需要磁盘 fault-in；当随机访问工作集超过可用 PageCache 时，可能出现持续回收、Major Fault 和尾延迟上升。`Config.memory_limit` 只约束 TDB 可估算的堆分配，不包含 mmap 映射的驻留页、OS PageCache、pagefile/swap 和其他进程占用。
 
-QuIVer 的 BQ、SM 位码与幅值、图拓扑和工作区位于匿名堆内存，原始向量位于 mmap 冷层。前者不会作为文件 PageCache 页被直接丢弃，但在启用 swap/pagefile 的系统上仍可能被换出。TDB 不承诺超内存随机工作集下的固定 QPS；应结合查询上下文中的阶段耗时、候选数和进程/系统缺页指标持续观测。
+QuIVer 的 BQ、SM 位码与幅值、图拓扑和工作区位于匿名堆内存，原始向量位于 mmap 冷层。匿名堆页由系统内存和 swap/pagefile 策略管理，冷向量页通过映射文件读取。查询性能与工作集驻留和设备随机读取能力相关，可结合阶段耗时、候选数和进程/系统缺页指标观测。
 
 ### 向量存储与按需视图
 
@@ -191,15 +195,11 @@ QuIVer 按 slot 流式读取 FP16/FP32/mmap 向量，准备 BQ 编码与默认 S
 
 事务和 Python/Node `batch_insert` 在 Dry-Run 后、WAL 前按整批预留。容量预算、算术溢出或 allocator 拒绝时，节点、ID、generation 和 WAL 均不变。
 
-### 压实架构的极致安全取舍（Compaction Trade-off）
+### 压实与维护调度
 
-由于 TriviumDB 坚持“纯正极简的单文件与单 WAL”架构，没有引入复杂的 LSM-Tree 多段日志（Segmented WAL）机制，为了保证 **100% 的绝对崩溃一致性（Crash Consistency）与 ACID 持久性**，在执行“全量重写路径”时，必须短暂阻塞（Lock）前台并发读写。
+全进程共享一个维护计时线程，周期压实按登记的间隔进入数据库所属 `ResourceRuntime`。后台任务先取得维护名额，再尝试获取 MemTable 写锁。写锁繁忙或资源不足时延期，执行情况通过实例维护诊断报告。
 
-- **为什么不采用快照（Snapshot）无锁后台重写？**
-  如果释放锁在后台缓慢重写 6GB 的向量数据，在此期间前台的新写入将进入 WAL 的末尾。当后台写盘完成并清空旧 WAL（截断）重组新 WAL 时，由于 OS 文件截断与重写的非原子性，**在断电瞬间会导致该时间窗口内的前台数据发生物理级永久丢失（静默丢失）**。
-- **作为一款嵌入式 AI 引擎的解法**：
-  鉴于 99% 的纯插入 AI 记忆场景走的是无感知的“追加路径（Append Path）”，TriviumDB 将掌控权完全交给了开发者。
-  开发者可以通过 `disable_auto_compaction()` 关闭不可控的后台压实，并在业务低峰期（如凌晨 3 点）主动调用 `compact()` 方法进行手动全量落盘，以此换取系统结构在严苛环境下的绝对健壮与零数据败坏风险。
+压实在持有 MemTable 写锁期间保存数据，并在保存成功后按 `MemTable → WAL` 锁顺序清理日志。宿主可配置周期维护，或使用 `disable_auto_compaction()` 撤销登记，在选定时段调用同步 `compact()`。关闭任务在已有操作排空后优先调度。
 
 ### `.tdb` v9 与 Payload sidecar 布局
 
@@ -279,7 +279,7 @@ flat_vectors
 
 - **激活条件**：维度在 `1..=3072` 且达到动态阈值；包含非完整尾块维度。
 - **构图与表示**：BQ 批量并行构图在最终剪枝时保护签名多样性，收尾连接入口不可达区域；默认查询另保存紧凑 SM 位码、幅值和重建范数。
-- **导航**：利用位计数、每向量幅值及重建范数计算平方 L2 评分，并沿图扩展；评分不是纯 Hamming 距离。
+- **导航**：利用位计数、每向量幅值及重建范数计算平方 L2 评分，并沿图扩展。
 - **精排**：普通查询仍按原始向量余弦相似度排序，按有效预算读取冷向量，最后按需 hydrate Payload。
 - **执行与维护**：SIMD/标量与尾部处理、线程工作区、增量追加和墓碑屏蔽共同维护；数据库重载时自动恢复默认 SM。
 - **拓扑边界**：增量剪枝保护导航树；旧索引通过重建应用修复。入口全可达仅保证拓扑可遍历，有限搜索宽度与精排预算下的召回需另行测量。
@@ -571,6 +571,28 @@ WAL 文件以 `TVWL + u16 version` 版本头开场；历史无头 WAL 不再猜�
 
 ---
 
+## 多实例资源与生命周期
+
+多个独立数据库可共享同一 `ResourceRuntime`，分别保存租户、会话或 Agent 的向量、图与文档。Rust 公共 API 定义资源与生命周期语义，Python/Node 绑定提供对应配置、错误映射和类型声明。
+
+| 能力 | 实现与调用方式 |
+| --- | --- |
+| 共享准入 | 数据库打开时登记完整实例配额，工作区在执行前预留；配额调整失败时保持原值 |
+| 维护保护 | 在总预算内保护维护工作区，前台和维护根任务单独计数 |
+| 工作线程 | 扫描、构图、TQL 与后台维护共用运行时工作池，缓存池的线程总数受 `max_threads` 约束 |
+| 共享诊断 | `runtime.stats()` / `db.resource_stats()` 提供账本、线程、任务、维护计数及可用预算余额 |
+| 实例诊断 | `db.instance_stats()` 提供本库路径、配额、内存采样、活动操作数、关闭与压实状态 |
+| 受控关闭 | `request_shutdown()` 发起排空，`close_timeout()` 限时等待，`shutdown_status()` 报告阶段及故障 |
+| 状态迁移 | 活动 Writer 创建一致快照，独立接口校验后恢复到新目录，宿主选择访问模式打开 |
+
+资源不足时，内核返回携带 `resource/requested/used/limit` 的预算错误。维护诊断区分排空等待、准入延期、写锁繁忙与执行失败。内存采样遇到 MemTable 写锁时返回暂不可用状态，任务名额用满时仍可读取诊断。
+
+关闭按 `open → draining → flushing → closed` 推进；失败状态保存结构化原因供重试。目录快照通过有界复制、逐文件同步、manifest 校验、目录 rename 和父目录同步发布，包含主文件、向量、冷载荷与所需索引制品。
+
+配置示例与统计口径见[共享资源运行时](resource-runtime.md)，关闭与目录协议见[生命周期和快照](lifecycle-snapshots.md)。
+
+---
+
 ## 并发安全与零开销事务
 
 TriviumDB 通过四层机制保障并发安全与数据完整性：
@@ -701,16 +723,21 @@ for stage, ms in ctx.timings.items():
 
 ---
 
-## 模块化架构 (v0.6.0 重构)
+## 模块化架构
 
-原 1815 行的 `database.rs` 已按职责拆分为 4 个独立模块，提高可维护性和可测试性：
+数据库入口、资源运行时和持久化按职责拆分：
 
-| 模块 | 行数 | 职责 |
-|------|------|------|
-| `database/mod.rs` | ~560 | Database 结构体、CRUD 操作、生命周期管理 |
-| `database/config.rs` | ~110 | StorageMode、Config、SearchConfig 配置类型 |
-| `database/pipeline.rs` | ~620 | 检索管线 L0-L9 + 6 个 Hook 注入点（拆为 8 个独立子函数） |
-| `database/transaction.rs` | ~460 | 事务系统（TxOp、Transaction）+ WAL 崩溃恢复 |
+| 模块 | 职责 |
+| --- | --- |
+| `database/mod.rs` | Database、CRUD、操作准入与持久化编排 |
+| `database/config.rs` | StorageMode、Config、SearchConfig 配置类型 |
+| `database/facade.rs` | DatabaseReader / DatabaseWriter 类型化接口 |
+| `database/lifecycle.rs` | 关闭状态机、限时等待、实例诊断 |
+| `database/pipeline.rs` | 混合检索管线与六阶段 Hook |
+| `database/transaction.rs` | 事务预检、提交与 WAL 回放 |
+| `resources.rs` | 共享配额、任务名额、工作池与运行时统计 |
+| `storage/compaction.rs` | 共享计时调度、周期压实与维护诊断 |
+| `storage/snapshot.rs` / `storage/snapshot/transfer.rs` | generation manifest、目录快照创建、校验与恢复 |
 
 ### pipeline.rs 内部子函数
 
@@ -725,7 +752,7 @@ for stage, ms in ctx.timings.items():
 | `aggregate_seeds()` | seed_map 聚合 + 排序 |
 | `apply_dpp()` | L9: DPP 多样性采样 |
 
-> 公共 API 不承诺保留历史静默入口。已移除的调用会在编译期失败，或返回 `ApiMigrationRequired` / `TDB_API_MIGRATION_REQUIRED` 并给出替代入口。
+> 已移除的公共调用在编译期报错，或返回 `ApiMigrationRequired` / `TDB_API_MIGRATION_REQUIRED` 并给出替代入口。
 
 ---
 

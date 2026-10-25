@@ -91,8 +91,25 @@ pub mod python {
             crate::error::TriviumError::SnapshotDestinationExists { .. } => {
                 pyo3::exceptions::PyFileExistsError::new_err(error.to_string())
             }
-            crate::error::TriviumError::ResourceBudgetExceeded { .. } => {
-                ResourceBudgetError::new_err(error.to_string())
+            crate::error::TriviumError::ResourceBudgetExceeded {
+                resource,
+                requested,
+                used,
+                limit,
+            } => {
+                let exception = ResourceBudgetError::new_err(error.to_string());
+                Python::with_gil(|py| {
+                    let value = exception.value(py);
+                    let attributes = value
+                        .setattr("resource", resource)
+                        .and_then(|_| value.setattr("requested", requested))
+                        .and_then(|_| value.setattr("used", used))
+                        .and_then(|_| value.setattr("limit", limit));
+                    match attributes {
+                        Ok(()) => exception,
+                        Err(error) => error,
+                    }
+                })
             }
             crate::error::TriviumError::ReadOnlyViolation { .. } => {
                 ReadOnlyError::new_err(error.to_string())
@@ -983,7 +1000,7 @@ pub mod python {
                     py.allow_threads(|| db.search_hybrid_grouped(None, Some(&vector), &config))
                 }
             }
-            .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
+            .map_err(to_py_error)?;
             Ok(PyGroupedSearchResult {
                 semantic_hits: result
                     .semantic_hits
@@ -1046,7 +1063,7 @@ pub mod python {
                     py.allow_threads(|| db.search_batch(&queries, &config, &batch_config))
                 }
             }
-            .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
+            .map_err(to_py_error)?;
 
             Ok(results
                 .into_iter()
@@ -1614,8 +1631,8 @@ pub mod python {
                 max_frontier_size: 10_000,
                 exhaustion_policy: crate::graph::budget::BudgetExhaustionPolicy::Partial,
             };
-            let output = dispatch!(self, db => db.reachable_detailed(id, &config))
-                .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
+            let output =
+                dispatch!(self, db => db.reachable_detailed(id, &config)).map_err(to_py_error)?;
             let value = serde_json::to_value(output)
                 .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
             Ok(json_to_pyobject(py, &value))
@@ -1655,8 +1672,8 @@ pub mod python {
                 max_frontier_size: 10_000,
                 exhaustion_policy: crate::graph::budget::BudgetExhaustionPolicy::Partial,
             };
-            let output = dispatch!(self, db => db.query_subgraph(id, &config))
-                .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
+            let output =
+                dispatch!(self, db => db.query_subgraph(id, &config)).map_err(to_py_error)?;
             let value = serde_json::to_value(output)
                 .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
             Ok(json_to_pyobject(py, &value))
@@ -1687,7 +1704,7 @@ pub mod python {
                     db.search_graph_first(&query, &anchor_ids, top_k, max_anchor_nodes)
                 }
             }
-            .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
+            .map_err(to_py_error)?;
             Ok(hits
                 .into_iter()
                 .map(|hit| PySearchHit {
@@ -1721,7 +1738,7 @@ pub mod python {
                     db.search_exact(&query, top_k)
                 }
             }
-            .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
+            .map_err(to_py_error)?;
             Ok(hits
                 .into_iter()
                 .map(|hit| PySearchHit {
@@ -1745,8 +1762,8 @@ pub mod python {
         }
 
         fn repair_graph_indexes(&mut self, py: Python<'_>) -> PyResult<PyObject> {
-            let report = dispatch!(self, mut db => db.repair_graph_indexes())
-                .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
+            let report =
+                dispatch!(self, mut db => db.repair_graph_indexes()).map_err(to_py_error)?;
             let value = serde_json::to_value(report)
                 .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
             Ok(json_to_pyobject(py, &value))
@@ -1762,7 +1779,7 @@ pub mod python {
 
         fn publish_generation_manifest(&mut self, generation_id: &str) -> PyResult<PyObject> {
             let manifest = dispatch!(self, mut db => db.publish_generation_manifest(generation_id))
-                .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
+                .map_err(to_py_error)?;
             let value = serde_json::to_value(manifest)
                 .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
             Ok(Python::with_gil(|py| json_to_pyobject(py, &value)))
@@ -1811,7 +1828,10 @@ pub mod python {
         #[pyo3(signature = (interval_secs=7200))]
         fn enable_auto_compaction(&mut self, interval_secs: u64) -> PyResult<()> {
             dispatch!(self, mut db => db.enable_auto_compaction(std::time::Duration::from_secs(interval_secs)))
-                .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+                .map_err(|error| match error {
+                    crate::error::TriviumError::ResourceBudgetExceeded { .. } => to_py_error(error),
+                    _ => pyo3::exceptions::PyValueError::new_err(error.to_string()),
+                })
         }
 
         fn set_auto_build_quiver(&mut self, enabled: bool) -> PyResult<()> {
@@ -1833,6 +1853,7 @@ pub mod python {
         /// 为后续插入主动预留额外节点容量。
         fn reserve_nodes(&mut self, additional: usize) -> PyResult<()> {
             dispatch!(self, db => db.reserve_nodes(additional)).map_err(|error| match error {
+                crate::error::TriviumError::ResourceBudgetExceeded { .. } => to_py_error(error),
                 crate::error::TriviumError::CapacityReservationRejected { .. }
                 | crate::error::TriviumError::CapacityAllocationFailed { .. } => {
                     pyo3::exceptions::PyMemoryError::new_err(error.to_string())
@@ -1853,6 +1874,13 @@ pub mod python {
         /// 读取多个数据库共享的配额、工作线程和任务统计。
         fn resource_stats(&self, py: Python<'_>) -> PyResult<PyObject> {
             let stats = dispatch!(self, db => db.resource_stats());
+            let value = serde_json::to_value(stats)
+                .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
+            Ok(json_to_pyobject(py, &value))
+        }
+
+        fn instance_stats(&self, py: Python<'_>) -> PyResult<PyObject> {
+            let stats = dispatch!(self, db => db.instance_stats());
             let value = serde_json::to_value(stats)
                 .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
             Ok(json_to_pyobject(py, &value))

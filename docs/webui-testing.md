@@ -1,6 +1,6 @@
 # Web Console（WebUI）测试与验收
 
-WebUI 位于 `crates/triviumdb-server/web/index.html`，由 Server 通过 `include_str!` 内嵌，修改页面后必须重新构建 Server。当前文档对应 0.8.11 集成与发布验收。
+WebUI 位于 `crates/triviumdb-server/web/index.html`，由 Server 通过 `include_str!` 内嵌，修改页面后必须重新构建 Server。当前文档对应 0.9.0-beta.1 集成与发布验收。
 
 ## 验证范围
 

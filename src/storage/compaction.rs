@@ -9,6 +9,46 @@ use crate::storage::{file_format, memtable::MemTable, wal::Wal};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, RwLock, Weak};
 use std::time::{Duration, Instant};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MaintenancePhase {
+    Scheduled,
+    Running,
+    Stopped,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MaintenanceDeferReason {
+    NotReady,
+    ResourceBudget,
+    DatabaseBusy,
+}
+
+/// 单个维护登记的诊断，不包含其他实例的任务，也不触发资源准入。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct MaintenanceStatus {
+    pub phase: MaintenancePhase,
+    pub deferred_runs: u64,
+    pub completed_runs: u64,
+    pub failed_runs: u64,
+    pub last_defer_reason: Option<MaintenanceDeferReason>,
+    pub last_failure: Option<crate::resources::ResourceFailure>,
+}
+
+impl Default for MaintenanceStatus {
+    fn default() -> Self {
+        Self {
+            phase: MaintenancePhase::Scheduled,
+            deferred_runs: 0,
+            completed_runs: 0,
+            failed_runs: 0,
+            last_defer_reason: None,
+            last_failure: None,
+        }
+    }
+}
+
 fn lock<T>(value: &Mutex<T>) -> MutexGuard<'_, T> {
     value.lock().unwrap_or_else(|error| error.into_inner())
 }
@@ -18,6 +58,7 @@ struct JobState {
     running: bool,
     cancelled: bool,
     registered: bool,
+    diagnostics: MaintenanceStatus,
 }
 
 struct Job {
@@ -32,8 +73,31 @@ struct Job {
 }
 
 impl Job {
+    fn status(&self) -> MaintenanceStatus {
+        let state = lock(&self.state);
+        let mut status = state.diagnostics.clone();
+        status.phase = if state.running {
+            MaintenancePhase::Running
+        } else if state.cancelled {
+            MaintenancePhase::Stopped
+        } else {
+            MaintenancePhase::Scheduled
+        };
+        status
+    }
+
     fn dispatch(self: &Arc<Self>, now: Instant) {
+        {
+            let state = lock(&self.state);
+            if state.cancelled || state.running || state.next > now {
+                return;
+            }
+        }
         if self.ready.as_ref().is_some_and(|ready| !ready()) {
+            let mut state = lock(&self.state);
+            state.next = now.checked_add(self.interval).unwrap_or(now);
+            state.diagnostics.deferred_runs = state.diagnostics.deferred_runs.saturating_add(1);
+            state.diagnostics.last_defer_reason = Some(MaintenanceDeferReason::NotReady);
             return;
         }
         {
@@ -74,6 +138,31 @@ impl Job {
                             Err(_) => job.runtime.record_maintenance(false),
                             Ok(false) => {}
                         }
+                        {
+                            let mut state = lock(&job.state);
+                            let diagnostics = &mut state.diagnostics;
+                            match &result {
+                                Ok(true) => {
+                                    diagnostics.completed_runs =
+                                        diagnostics.completed_runs.saturating_add(1);
+                                    diagnostics.last_defer_reason = None;
+                                    diagnostics.last_failure = None;
+                                }
+                                Ok(false) => {
+                                    diagnostics.deferred_runs =
+                                        diagnostics.deferred_runs.saturating_add(1);
+                                    diagnostics.last_defer_reason =
+                                        Some(MaintenanceDeferReason::DatabaseBusy);
+                                }
+                                Err(error) => {
+                                    diagnostics.failed_runs =
+                                        diagnostics.failed_runs.saturating_add(1);
+                                    diagnostics.last_defer_reason = None;
+                                    diagnostics.last_failure =
+                                        Some(crate::resources::ResourceFailure::from_error(error));
+                                }
+                            }
+                        }
                         if let Err(error) = result {
                             tracing::error!(%error, "维护任务失败，保留未完成状态以便重试");
                         }
@@ -88,7 +177,15 @@ impl Job {
                 );
             }
             Err(error) => {
-                lock(&self.state).running = false;
+                let mut state = lock(&self.state);
+                state.running = false;
+                state.diagnostics.deferred_runs = state.diagnostics.deferred_runs.saturating_add(1);
+                state.diagnostics.last_defer_reason =
+                    crate::resources::ResourceBudgetDetails::from_error(&error)
+                        .map(|_| MaintenanceDeferReason::ResourceBudget);
+                state.diagnostics.last_failure =
+                    Some(crate::resources::ResourceFailure::from_error(&error));
+                drop(state);
                 self.idle.notify_all();
                 tracing::debug!(%error, "后台压实资源不足，延期到下一周期");
             }
@@ -229,6 +326,7 @@ impl CompactionThread {
                 running: false,
                 cancelled: false,
                 registered: true,
+                diagnostics: MaintenanceStatus::default(),
             }),
             idle: Condvar::new(),
             ready: None,
@@ -269,6 +367,10 @@ impl CompactionThread {
         lock(&self.job.state).running
     }
 
+    pub fn status(&self) -> MaintenanceStatus {
+        self.job.status()
+    }
+
     pub fn stop(&mut self) {
         self.job.stop();
         self.scheduler.notify();
@@ -303,6 +405,7 @@ impl ScheduledMaintenance {
                 running: false,
                 cancelled: false,
                 registered: true,
+                diagnostics: MaintenanceStatus::default(),
             }),
             idle: Condvar::new(),
             ready: Some(Box::new(ready)),
@@ -315,11 +418,104 @@ impl ScheduledMaintenance {
         scheduler.notify();
         Ok(Self { job, scheduler })
     }
+
+    pub(crate) fn status(&self) -> MaintenanceStatus {
+        self.job.status()
+    }
 }
 
 impl Drop for ScheduledMaintenance {
     fn drop(&mut self) {
         self.job.request_stop();
         self.scheduler.notify();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    #[test]
+    fn 维护诊断区分排空延期资源拒绝锁忙失败和恢复() {
+        let runtime = ResourceRuntime::new(crate::resources::ResourceLimits {
+            max_threads: 1,
+            ..Default::default()
+        })
+        .unwrap();
+        let ready = Arc::new(AtomicBool::new(false));
+        let ready_check = ready.clone();
+        let mode = Arc::new(AtomicUsize::new(0));
+        let operation_mode = mode.clone();
+        let (sent, received) = std::sync::mpsc::channel();
+        let job = Arc::new(Job {
+            runtime: runtime.clone(),
+            interval: Duration::from_millis(2),
+            state: Mutex::new(JobState {
+                next: Instant::now(),
+                running: false,
+                cancelled: false,
+                registered: false,
+                diagnostics: MaintenanceStatus::default(),
+            }),
+            idle: Condvar::new(),
+            repeat: true,
+            ready: Some(Box::new(move || ready_check.load(Ordering::SeqCst))),
+            completed: Some(Box::new(move || {
+                sent.send(()).unwrap();
+            })),
+            operation: Box::new(move || match operation_mode.load(Ordering::SeqCst) {
+                0 => Ok(true),
+                1 => Ok(false),
+                _ => Err(TriviumError::Io(std::io::Error::other("模拟维护失败"))),
+            }),
+        });
+        job.dispatch(Instant::now());
+        assert_eq!(
+            job.status().last_defer_reason,
+            Some(MaintenanceDeferReason::NotReady)
+        );
+        assert_eq!(runtime.stats().active_maintenance_tasks, 0);
+        ready.store(true, Ordering::SeqCst);
+        let mut occupied = runtime.enter_maintenance_task().unwrap();
+        occupied.detach();
+        lock(&job.state).next = Instant::now();
+        job.dispatch(Instant::now());
+        let status = job.status();
+        assert_eq!(status.deferred_runs, 2);
+        assert_eq!(
+            status.last_defer_reason,
+            Some(MaintenanceDeferReason::ResourceBudget)
+        );
+        let failure = status.last_failure.unwrap();
+        assert_eq!(failure.kind, "resource_budget");
+        assert_eq!(failure.budget.unwrap().resource, "maintenance_tasks");
+        drop(occupied);
+        for outcome in [1, 2, 0] {
+            mode.store(outcome, Ordering::SeqCst);
+            lock(&job.state).next = Instant::now();
+            job.dispatch(Instant::now());
+            received.recv_timeout(Duration::from_secs(10)).unwrap();
+            let status = job.status();
+            assert_eq!(status.phase, MaintenancePhase::Scheduled);
+            match outcome {
+                1 => assert_eq!(
+                    status.last_defer_reason,
+                    Some(MaintenanceDeferReason::DatabaseBusy)
+                ),
+                2 => {
+                    assert_eq!(status.failed_runs, 1);
+                    assert_eq!(status.last_failure.unwrap().kind, "io");
+                }
+                _ => {
+                    assert_eq!(status.completed_runs, 1);
+                    assert!(status.last_failure.is_none());
+                    assert!(status.last_defer_reason.is_none());
+                }
+            }
+            assert_eq!(runtime.stats().active_maintenance_tasks, 0);
+        }
+        job.stop();
+        assert_eq!(job.status().phase, MaintenancePhase::Stopped);
     }
 }

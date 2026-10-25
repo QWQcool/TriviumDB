@@ -19,15 +19,62 @@ pub struct ShutdownStatus {
     pub phase: ShutdownPhase,
     pub active_operations: usize,
     pub last_error: Option<String>,
+    pub last_failure: Option<crate::resources::ResourceFailure>,
+    pub maintenance: Option<crate::storage::compaction::MaintenanceStatus>,
+}
+
+/// 本实例的内存估算和准入配额，不含共享运行时中其他实例。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct InstanceMemoryStats {
+    pub reserved_database_bytes: usize,
+    pub estimated_memory_bytes: usize,
+    pub node_count: usize,
+}
+
+/// 可在过载或关闭期间读取；写锁繁忙时 memory 为 None，不等待刷盘或构图。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct InstanceStats {
+    pub database_path: String,
+    pub memory_limit_bytes: usize,
+    pub memory: Option<InstanceMemoryStats>,
+    pub shutdown: ShutdownStatus,
+    pub compaction: Option<crate::storage::compaction::MaintenanceStatus>,
 }
 
 impl<T: VectorType> Database<T> {
+    pub fn instance_stats(&self) -> InstanceStats {
+        let shutdown = self.shutdown_status();
+        // 不持有生命周期锁去获取 MemTable 锁，避免与完成回调形成锁序环。
+        let memory = match self.memtable.try_read() {
+            Ok(guard) => Some(guard),
+            Err(std::sync::TryLockError::Poisoned(error)) => Some(error.into_inner()),
+            Err(std::sync::TryLockError::WouldBlock) => None,
+        }
+        .map(|mt| InstanceMemoryStats {
+            reserved_database_bytes: mt.reserved_database_bytes(),
+            estimated_memory_bytes: mt.estimated_memory_bytes(),
+            node_count: mt.node_count(),
+        });
+        InstanceStats {
+            database_path: self.db_path.clone(),
+            memory_limit_bytes: self.memory_limit,
+            memory,
+            shutdown,
+            compaction: self.compaction.as_ref().map(CompactionThread::status),
+        }
+    }
+
     pub fn shutdown_status(&self) -> ShutdownStatus {
         let state = lock_or_recover(&self.lifecycle.0);
         ShutdownStatus {
             phase: state.shutdown_phase,
             active_operations: state.active_operations,
             last_error: state.shutdown_last_error.clone(),
+            last_failure: state.shutdown_last_failure.clone(),
+            maintenance: state
+                .shutdown_job
+                .as_ref()
+                .map(ScheduledMaintenance::status),
         }
     }
 
@@ -46,6 +93,7 @@ impl<T: VectorType> Database<T> {
         state.lifecycle = DatabaseLifecycle::Closing;
         state.shutdown_phase = ShutdownPhase::Draining;
         state.shutdown_last_error = None;
+        state.shutdown_last_failure = None;
         if let Some(background) = &self.compaction {
             background.request_stop();
         }
@@ -193,6 +241,8 @@ impl<T: VectorType> CloseWork<T> {
             Err(error) => {
                 state.shutdown_phase = ShutdownPhase::Failed;
                 state.shutdown_last_error = Some(error.to_string());
+                state.shutdown_last_failure =
+                    Some(crate::resources::ResourceFailure::from_error(&error));
                 state.shutdown_error = Some(error);
             }
         }
@@ -241,6 +291,53 @@ mod tests {
         entered: mpsc::Sender<()>,
         release: Mutex<mpsc::Receiver<()>>,
     }
+
+    #[test]
+    fn 实例诊断在写锁占用时返回未知内存且不消耗准入名额() {
+        let (mut db, runtime) = open();
+        let task = runtime.enter_task().unwrap();
+        let mt = write_or_recover(&db.memtable);
+        let stats = db.instance_stats();
+        assert!(stats.memory.is_none());
+        assert_eq!(stats.memory_limit_bytes, 8 * 1024 * 1024);
+        assert_eq!(runtime.stats().active_tasks, 1);
+        drop(mt);
+        drop(task);
+        let stats = db.instance_stats();
+        assert_eq!(stats.memory.unwrap().node_count, 1);
+        db.close().unwrap();
+        let stats = db.instance_stats();
+        assert_eq!(stats.shutdown.phase, ShutdownPhase::Closed);
+        assert_eq!(stats.memory.unwrap().reserved_database_bytes, 0);
+    }
+
+    #[test]
+    fn 关闭等待预算名额时可观测原因且释放后完成() {
+        let (mut db, runtime) = open();
+        let mut occupied = runtime.enter_maintenance_task().unwrap();
+        occupied.detach();
+        db.request_shutdown().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let status = db.shutdown_status();
+            assert_eq!(status.phase, ShutdownPhase::Draining);
+            if let Some(failure) = status.maintenance.and_then(|status| status.last_failure) {
+                assert_eq!(failure.kind, "resource_budget");
+                assert_eq!(failure.budget.unwrap().resource, "maintenance_tasks");
+                break;
+            }
+            assert!(Instant::now() < deadline, "关闭延期原因未及时发布");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert!(!db.close_timeout(Duration::from_millis(10)).unwrap());
+        assert_eq!(
+            db.instance_stats().memory.unwrap().reserved_database_bytes,
+            8 * 1024 * 1024
+        );
+        drop(occupied);
+        assert!(db.close_timeout(Duration::from_secs(5)).unwrap());
+        assert_eq!(runtime.stats().attached_databases, 0);
+    }
     impl SearchHook for Gate {
         fn on_pre_search(&self, _: &mut Vec<f32>, _: &mut SearchConfig, _: &mut HookContext) {
             self.entered.send(()).unwrap();
@@ -277,6 +374,7 @@ mod tests {
         arrived.recv_timeout(Duration::from_secs(10)).unwrap();
         assert!(!db.close_timeout(Duration::from_millis(10)).unwrap());
         assert_eq!(db.shutdown_status().phase, ShutdownPhase::Draining);
+        assert_eq!(db.instance_stats().shutdown.active_operations, 1);
         assert!(matches!(
             db.insert(&[0.0, 1.0, 0.0], serde_json::json!({})),
             Err(TriviumError::DatabaseClosed)

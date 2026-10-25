@@ -78,25 +78,56 @@ function runResourceContract(root) {
     )
     const first = open('first', test.database.memory_limit_mb)
     const second = open('second', test.database.memory_limit_mb)
+    const checkInstance = (db, phase) => {
+      const stats = db.instanceStats()
+      const expected = test.instances[phase]
+      assert.equal(stats.memory_limit_bytes, expected.memory_limit_bytes)
+      assert.equal(stats.memory.reserved_database_bytes, expected.reserved_database_bytes)
+      assert.equal(stats.memory.node_count, expected.node_count)
+      assert.equal(stats.shutdown.phase, expected.phase)
+      assert.equal(stats.shutdown.active_operations, 0)
+      assert.equal(stats.shutdown.last_failure, null)
+      assert.ok(path.isAbsolute(stats.database_path))
+    }
+    const checkBudget = phase => error => {
+      assert.equal(error.code, 'QueueFull')
+      for (const [key, value] of Object.entries(test.budget_errors[phase])) {
+        assert.equal(error[key], value, `${phase}/${key}`)
+      }
+      return true
+    }
     check('opened')
-    assert.throws(() => open('rejected', test.overbook_mb), error => error.code === 'QueueFull')
+    checkInstance(first, 'opened')
+    checkInstance(second, 'opened')
+    assert.throws(() => open('rejected', test.overbook_mb), checkBudget('open'))
     assert.ok(!fs.existsSync(path.join(root, `resource-${dtype}-rejected.tdb`)))
     first.setMemoryLimit(test.resize_mb)
     check('resized')
-    assert.throws(() => second.setMemoryLimit(test.failed_resize_mb), error => error.code === 'QueueFull')
+    checkInstance(first, 'resized')
+    assert.throws(() => second.setMemoryLimit(test.failed_resize_mb), checkBudget('resize'))
     check('resized')
+    checkInstance(second, 'opened')
     first.setMemoryLimit(test.database.memory_limit_mb)
     first.insertWithId(101, test.vector, { owner: 'first' })
     second.insertWithId(202, test.vector, { owner: 'second' })
     assert.equal(Number(first.searchExact(test.vector, 1)[0].id), 101)
     assert.equal(Number(second.searchExact(test.vector, 1)[0].id), 202)
+    first.enableAutoCompaction(3600)
+    assert.equal(first.instanceStats().compaction.phase, 'scheduled')
+    first.disableAutoCompaction()
+    assert.equal(first.instanceStats().compaction, null)
     first.close()
+    checkInstance(first, 'closed')
     check('closed_one')
     const replacement = open('replacement', test.replacement_mb)
     check('replaced')
     second.close()
     replacement.close()
     check('closed_all')
+  }
+  const unlimited = new ResourceRuntime().stats()
+  for (const key of ['available_foreground_bytes', 'available_maintenance_bytes', 'available_task_slots']) {
+    assert.equal(unlimited[key], null)
   }
   for (const maxThreads of [-1, 0.5, 65, NaN, Infinity]) {
     assert.throws(() => new ResourceRuntime({ maxThreads }))
@@ -165,128 +196,167 @@ function runSharedContract(root) {
   assert.throws(() => db.buildTextIndex(), /closed|关闭/i)
 }
 
-try {
-  runLifecycleContract(root)
-  runResourceContract(root)
-  runSharedContract(root)
-  assert.throws(
-    () => new TriviumDB(file, 2),
-    /object|对象|options/i,
-    '旧位置参数构造器必须明确拒绝',
-  )
-
-  const db = new TriviumDB(file, { dim: 2 })
-  db.insertWithId(1, [1, 0], { kind: 'a', score: 1, tenant: 't', region: 'r' })
-  db.insertWithId(2, [0.9, 0.1], { kind: 'b', score: 2, tenant: 't', region: 'r' })
-  db.link(1, 2, 'next', 1)
-
-  const stages = []
-  db.setHook({
-    onPreSearch(query) {
-      stages.push('pre')
-      return query
-    },
-    onCustomRecall() {
-      stages.push('custom')
-      return null
-    },
-    onPostRecall(hits) {
-      stages.push('postRecall')
-      return hits
-    },
-    onPreGraphExpand(hits) {
-      stages.push('preGraph')
-      return hits
-    },
-    onRerank(hits) {
-      stages.push('rerank')
-      return hits
-    },
-    onPostSearch(hits) {
-      stages.push('post')
-      return hits.slice(0, 1)
-    },
-  })
-  const hooked = db.searchWithContext([1, 0], {
-    topK: 2,
-    expandDepth: 1,
-    minScore: 0,
-  })
-  assert.equal(hooked.hits.length, 1)
-  assert.deepEqual(new Set(stages), new Set([
-    'pre', 'custom', 'postRecall', 'preGraph', 'rerank', 'post',
-  ]))
-  db.clearHook()
-
-  db.setHook({
-    onPreSearch() {
-      throw new Error('node-hook-failure')
-    },
-  })
-  assert.throws(
-    () => db.searchWithContext([1, 0], { topK: 2 }),
-    /TDB_HOOK_EXECUTION|node-hook-failure/,
-  )
-  db.clearHook()
-
-  db.createIndex('kind')
-  db.createOrderedIndex('score')
-  db.createCompositeIndex(['tenant', 'region'])
-  db.createBitmapIndex('region')
-  const indexes = db.indexInfo()
-  assert.equal(indexes.length, 4)
-  assert.deepEqual(indexes.find(item => item.kind === 'composite').fields, ['tenant', 'region'])
-
-  const storage = db.storageInfo()
-  assert.equal(storage.database_format_current, 9)
-  assert.equal(storage.property_index_format, 6)
-  assert.equal(storage.node_count, 2)
-
-  const vectorPrepared = db.prepareTql('SEARCH VECTOR [$x, $y] TOP 1 RETURN *')
-  assert.deepEqual(vectorPrepared.parameterNames(), ['x', 'y'])
-  const vectorRows = db.executePreparedTql(vectorPrepared, { x: 1, y: 0 })
-  assert.equal(vectorRows[0]._.id, '1')
-
-  const prepared = db.prepareTql('FIND {kind: "a"} AS seed WITH seed RETURN seed, $bonus + 1 AS score')
-  assert.deepEqual(prepared.parameterNames(), ['bonus'])
-  const preparedRows = db.executePreparedTql(prepared, { bonus: 4 })
-  assert.equal(preparedRows.length, 1)
-  assert.equal(preparedRows[0].score, 5)
-  assert.throws(() => db.executePreparedTql(prepared, {}), /missing parameter|缺少参数/)
-
-  const pathRows = db.tql('SEARCH VECTOR [1, 0] TOP 1 AS seed WITH seed shortest_paths seed TO [2] LABEL next AS route WITH route RETURN path(route) AS path')
-  assert.deepEqual(pathRows[0].path, ['1', '2'])
-
-  const advancedFiltered = db.searchAdvanced([1, 0], {
-    topK: 2,
-    minScore: 0,
-    payloadFilter: { kind: 'b' },
-  })
-  assert.equal(advancedFiltered.length, 1)
-  assert.equal(advancedFiltered[0].payload.kind, 'b')
-
-  const contextFiltered = db.searchWithContext([1, 0], {
-    topK: 2,
-    minScore: 0,
-    payloadFilter: { kind: 'b' },
-  })
-  assert.equal(contextFiltered.hits.length, 1)
-  assert.equal(contextFiltered.hits[0].payload.kind, 'b')
-
-  const basicFiltered = db.search([1, 0], 2, 0, 0, { kind: 'b' })
-  assert.equal(basicFiltered.length, 1)
-  assert.equal(basicFiltered[0].payload.kind, 'b')
-
-  assert.throws(
-    () => db.searchAdvanced([1, 0], { payloadFilter: { score: { $gt: true } } }),
-    /payloadFilter|过滤器|Filter/i,
-  )
-
-  assert.throws(
-    () => db.tqlMut('FIND {kind: "a"} RETURN *'),
-    /TDB_API_MIGRATION_REQUIRED/,
-  )
-  db.close()
-} finally {
-  fs.rmSync(root, { recursive: true, force: true })
+async function runAsyncResourceContract(root) {
+  const test = require('../contracts/resource_cases.json')
+  const mb = 1024 * 1024
+  for (const dtype of test.dtypes) {
+    const runtime = new ResourceRuntime({ memoryLimitMb: 40, maintenanceMemoryLimitMb: 8,
+      maxThreads: 2, maxActiveTasks: 1 })
+    const db = new TriviumDB(path.join(root, `async-budget-${dtype}.tdb`), {
+      dim: 3, dtype, memoryLimitMb: 8, autoBuildQuiver: false, runtime,
+    })
+    try {
+      db.insertWithId(1, test.vector, {})
+      db.setMemoryLimit(32)
+      const checkError = error => {
+        assert.equal(error.code, 'QueueFull')
+        assert.equal(error.resource, 'memory_bytes')
+        assert.equal(error.used, 32 * mb)
+        assert.equal(error.limit, 32 * mb)
+        assert.ok(error.requested > 0)
+        return true
+      }
+      assert.throws(() => db.searchExact(test.vector, 1), checkError)
+      await assert.rejects(() => db.searchBatch([test.vector], 1, 1, 0), checkError)
+      assert.equal(runtime.stats().active_tasks, 0)
+      db.setMemoryLimit(8)
+      assert.equal((await db.searchBatch([test.vector], 1, 1, 0))[0][0].id, 1)
+    } finally {
+      db.close()
+    }
+  }
 }
+
+async function main() {
+  try {
+    runLifecycleContract(root)
+    runResourceContract(root)
+    runSharedContract(root)
+    await runAsyncResourceContract(root)
+    assert.throws(
+      () => new TriviumDB(file, 2),
+      /object|对象|options/i,
+      '旧位置参数构造器必须明确拒绝',
+    )
+
+    const db = new TriviumDB(file, { dim: 2 })
+    db.insertWithId(1, [1, 0], { kind: 'a', score: 1, tenant: 't', region: 'r' })
+    db.insertWithId(2, [0.9, 0.1], { kind: 'b', score: 2, tenant: 't', region: 'r' })
+    db.link(1, 2, 'next', 1)
+
+    const stages = []
+    db.setHook({
+      onPreSearch(query) {
+        stages.push('pre')
+        return query
+      },
+      onCustomRecall() {
+        stages.push('custom')
+        return null
+      },
+      onPostRecall(hits) {
+        stages.push('postRecall')
+        return hits
+      },
+      onPreGraphExpand(hits) {
+        stages.push('preGraph')
+        return hits
+      },
+      onRerank(hits) {
+        stages.push('rerank')
+        return hits
+      },
+      onPostSearch(hits) {
+        stages.push('post')
+        return hits.slice(0, 1)
+      },
+    })
+    const hooked = db.searchWithContext([1, 0], {
+      topK: 2,
+      expandDepth: 1,
+      minScore: 0,
+    })
+    assert.equal(hooked.hits.length, 1)
+    assert.deepEqual(new Set(stages), new Set([
+      'pre', 'custom', 'postRecall', 'preGraph', 'rerank', 'post',
+    ]))
+    db.clearHook()
+
+    db.setHook({
+      onPreSearch() {
+        throw new Error('node-hook-failure')
+      },
+    })
+    assert.throws(
+      () => db.searchWithContext([1, 0], { topK: 2 }),
+      /TDB_HOOK_EXECUTION|node-hook-failure/,
+    )
+    db.clearHook()
+
+    db.createIndex('kind')
+    db.createOrderedIndex('score')
+    db.createCompositeIndex(['tenant', 'region'])
+    db.createBitmapIndex('region')
+    const indexes = db.indexInfo()
+    assert.equal(indexes.length, 4)
+    assert.deepEqual(indexes.find(item => item.kind === 'composite').fields, ['tenant', 'region'])
+
+    const storage = db.storageInfo()
+    assert.equal(storage.database_format_current, 9)
+    assert.equal(storage.property_index_format, 6)
+    assert.equal(storage.node_count, 2)
+
+    const vectorPrepared = db.prepareTql('SEARCH VECTOR [$x, $y] TOP 1 RETURN *')
+    assert.deepEqual(vectorPrepared.parameterNames(), ['x', 'y'])
+    const vectorRows = db.executePreparedTql(vectorPrepared, { x: 1, y: 0 })
+    assert.equal(vectorRows[0]._.id, '1')
+
+    const prepared = db.prepareTql('FIND {kind: "a"} AS seed WITH seed RETURN seed, $bonus + 1 AS score')
+    assert.deepEqual(prepared.parameterNames(), ['bonus'])
+    const preparedRows = db.executePreparedTql(prepared, { bonus: 4 })
+    assert.equal(preparedRows.length, 1)
+    assert.equal(preparedRows[0].score, 5)
+    assert.throws(() => db.executePreparedTql(prepared, {}), /missing parameter|缺少参数/)
+
+    const pathRows = db.tql('SEARCH VECTOR [1, 0] TOP 1 AS seed WITH seed shortest_paths seed TO [2] LABEL next AS route WITH route RETURN path(route) AS path')
+    assert.deepEqual(pathRows[0].path, ['1', '2'])
+
+    const advancedFiltered = db.searchAdvanced([1, 0], {
+      topK: 2,
+      minScore: 0,
+      payloadFilter: { kind: 'b' },
+    })
+    assert.equal(advancedFiltered.length, 1)
+    assert.equal(advancedFiltered[0].payload.kind, 'b')
+
+    const contextFiltered = db.searchWithContext([1, 0], {
+      topK: 2,
+      minScore: 0,
+      payloadFilter: { kind: 'b' },
+    })
+    assert.equal(contextFiltered.hits.length, 1)
+    assert.equal(contextFiltered.hits[0].payload.kind, 'b')
+
+    const basicFiltered = db.search([1, 0], 2, 0, 0, { kind: 'b' })
+    assert.equal(basicFiltered.length, 1)
+    assert.equal(basicFiltered[0].payload.kind, 'b')
+
+    assert.throws(
+      () => db.searchAdvanced([1, 0], { payloadFilter: { score: { $gt: true } } }),
+      /payloadFilter|过滤器|Filter/i,
+    )
+
+    assert.throws(
+      () => db.tqlMut('FIND {kind: "a"} RETURN *'),
+      /TDB_API_MIGRATION_REQUIRED/,
+    )
+    db.close()
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+}
+
+main().catch(error => {
+  console.error('公共接口契约验证失败：', error)
+  process.exitCode = 1
+})

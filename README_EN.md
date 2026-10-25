@@ -19,7 +19,7 @@
 
 > _Trivium_: Latin for "the crossroads of three paths."
 
-> "_TriviumDB_ is an embedded database for AI applications, designed to solve the pain points of complex context and multimodal memory weaving for Agents on a single machine. For high-availability distributed backends supporting tens of millions of concurrent connections, please use large-scale clustered components!"
+> TriviumDB provides in-process vector, graph, and document storage for Agent, RAG, and knowledge-graph applications. The host application manages database instances, queries, and persistence through Rust, Python, or Node.js APIs.
 
 [![Rust](https://img.shields.io/badge/Rust-stable-orange?logo=rust)](https://www.rust-lang.org/)
 [![Python](https://img.shields.io/badge/Python-3.9+-blue?logo=python)](https://pypi.org/)
@@ -52,6 +52,7 @@ Our goal: **SQLite for AI applications.**
 - 🔒 **Shared read-only opens** — Multiple reader processes can query a completed generation under shared locks while writers retain exclusive WAL ownership
 - 🧩 **Typed access capabilities** — Rust `DatabaseReader` hides mutation APIs at compile time while `DatabaseWriter` retains the complete embedded write surface
 - 🔄 **Immutable generation switching** — `GenerationStore` atomically publishes current generations and uses cross-process runtime leases to protect safe reclamation without modifying read-only artifacts
+- 🧰 **Multi-instance management (0.9.0-beta.1)** — A shared `ResourceRuntime` manages quotas, worker threads, and task slots, with instance diagnostics, controlled shutdown, and directory snapshots for applications running directly on a machine or inside containers
 
 ---
 
@@ -143,7 +144,7 @@ Suppose you're building an **AI conversation memory system** and the user says "
 
 **QuIVer** (Quantized Index for Vector Retrieval) is TriviumDB's in-house ANN graph index. QuIVer combines **fast BQ graph construction, training-free SM-L2 navigation, and cosine reranking of original vectors**. Navigation uses two-bit codes and per-vector magnitudes to score reconstructed squared L2; recall and throughput depend on the workload, parameters, and reranking budget.
 
-> 📖 [QuIVer architecture and configuration](docs/quiver.md) · [Benchmark guide](benches/README.md) · [0.8.11 changes](docs/changes/0.8.11.md)
+> 📖 [QuIVer architecture and configuration](docs/quiver.md) · [Benchmark guide](benches/README.md) · [0.9.0-beta.1 changes](docs/changes/0.9.0-beta.1.md)
 
 > ⚠️ **Dimension guidance: keeping database vectors at or below 3072 dimensions is strongly recommended.** TriviumDB storage and exact BruteForce retrieval support higher dimensions, but QuIVer's BQ signature safety limit is 3072 dimensions. Above this limit, automatic QuIVer construction is disabled and search safely falls back to BruteForce; manual QuIVer construction returns an explicit error. Higher-dimensional databases remain usable, but do not receive QuIVer ANN acceleration and incur substantially higher memory and compute costs.
 
@@ -160,7 +161,7 @@ For example, 384/768 dimensions trigger at 10,000 nodes, 1024 at about 7,813, 15
 
 **Hot/cold memory separation**: Original vectors remain in the cold vector pool and are read within the reranking budget. Hot memory includes retained BQ, SM codes and magnitudes, graph topology, ID/slot mappings, and thread workspaces. Measure savings for the evaluated configuration instead of reusing a historical fixed ratio.
 
-> Mmap removes eager full loading and duplicate copies; it does not remove storage I/O. Non-resident cold-vector pages still cause major page faults. When a random-access working set exceeds physical memory, throughput and tail latency depend on page-cache hit rate, storage random-read capability, and reclaim pressure. QuIVer's hot index is anonymous heap memory rather than file page cache, and the configured memory budget does not include OS page cache.
+> Mmap maps cold-vector pages on demand, with page faults fetching non-resident data. When a random-access working set exceeds physical memory, throughput and tail latency depend on page-cache hit rate, storage random-read capability, and reclaim pressure. QuIVer's hot index uses anonymous heap memory; capacity planning accounts separately for kernel heap, mmap residency, and OS page cache.
 
 **Incremental graph maintenance**: Unlike traditional HNSW, QuIVer supports true incremental operations:
 
@@ -201,11 +202,11 @@ let result = db.search_tsng(&query, config)?;   // every hit carries the signal 
 Its research value lies in **measurable retrieval quality**:
 
 - **Multiple execution strategies**: `search_tsng_post_filter` / `search_tsng_graph_union` / `search_tsng_industrial` — six hybrid-search access paths selected by budget and statistics
-- **Explainable signals**: `TsngHit` returns `vector_similarity` / `property_signal` / `graph_signal` decompositions, not a black-box score
+- **Explainable signals**: `TsngHit` returns `vector_similarity` / `property_signal` / `graph_signal` decompositions
 - **Built-in ground truth**: `tsng_ground_truth` produces exact answers with Recall@K / NDCG@K quality metrics — paper-grade experiments are directly reproducible
 - **Bounded budgets**: candidates, visited nodes, examined edges, and frontier size all fail closed
 
-> ⚠️ TSNG is currently an **experimental research track**: the default production paths remain TQL and the `search*` family. The TSNG API may evolve with research findings and is not semantically frozen.
+> TSNG is an **experimental research track**, with APIs evolving alongside research findings. TQL and the `search*` family provide the default query entry points.
 
 ```toml
 # Enable Python bindings
@@ -254,6 +255,16 @@ Use as a library dependency:
 cargo add triviumdb
 ```
 
+Install the Beta packages to use the shared resources, controlled shutdown, and directory snapshots introduced in `0.9.0-beta.1`:
+
+```bash
+pip install "triviumdb==0.9.0b1"
+npm install triviumdb@0.9.0-beta.1
+cargo add triviumdb@0.9.0-beta.1
+```
+
+See [0.9.0-beta.1 changes](docs/changes/0.9.0-beta.1.md) (Chinese).
+
 > 🧪 **Early Preview: HTTP Server Edition (nightly)** — TriviumDB's primary product form remains an **embedded database** (an in-process library, no deployment required). The optional `triviumdb-server` crate in this repository adds an HTTP shell (multi-client concurrent reads/writes, OCC, streaming NDJSON, etc.) and is currently in **nightly preview**: the protocol may change at any time, so it is for experimentation only — do not use it in production. See [Server Guide (nightly)](docs/server.md) (Chinese); all API and usage documentation remains authoritative for the embedded edition.
 
 ### 30-Second Demo
@@ -297,7 +308,7 @@ Every TriviumDB node can carry a **vector, JSON document, sparse text, and graph
 
 ### TQL: A DIY-Composable Unified Query Language
 
-**TQL (Trivium Query Language)** is not three syntaxes glued together — it is a **freely composable tri-modal execution pipeline**. Every `WITH` stage produces a named NodeSet; vectors, BM25/AC text recall, property indexes, graph expansion, graph algorithms, FISTA, DPP, NMF, paths, and set algebra can be chained according to application semantics, while Cascades picks a physical plan within budget:
+**TQL (Trivium Query Language)** provides a **freely composable tri-modal execution pipeline**. Every `WITH` stage produces a named NodeSet; vectors, BM25/AC text recall, property indexes, graph expansion, graph algorithms, FISTA, DPP, NMF, paths, and set algebra can be chained according to application semantics, while Cascades picks a physical plan within budget:
 
 ```sql
 -- Document query: filter JSON fields (property indexes skip full scans when hit)
@@ -349,7 +360,7 @@ RETURN path(route) AS nodes, path_length(route) AS hops
 
 A query can also use `TEXT BM25/AC/HYBRID` for sparse recall, `RESIDUAL` for FISTA residual recall, `DIVERSIFY` for DPP diversification, `TOPICS` for bounded NMF topic assignment, and `SA_PPR_CONFIG` for parameterized diffusion. `union` / `intersect` / `except`, fixed-point `iterate`, and `COUNT/SUM/AVG/MIN/MAX/COLLECT` remain composable with them. `text_score()`, `residual_score()`, `diversity_score()`, `topic()`, and `topic_score()` are first-class expressions. `EXPLAIN` exposes physical operators, estimated rows, temporary bytes, and budget slices.
 
-TQL does not replace `search_advanced()`: `SearchConfig` still independently toggles hybrid text, FISTA, SA-PPR, DPP, and refractory fatigue inside the official fixed-order template. TQL reuses the same underlying algorithms while allowing advanced users to reorder the stateless operators.
+`search_advanced()` uses `SearchConfig` to toggle hybrid text, FISTA, SA-PPR, DPP, and refractory fatigue inside the official fixed-order template. TQL reuses the underlying algorithms and allows developers to reorder stateless operators.
 
 ```python
 # Prepared TQL: safely rebind business parameters on the same pipeline
@@ -376,7 +387,7 @@ Rust, Python, and Node.js share the same TQL, Prepared queries, four property-in
 | **Set algebra (UNION / INTERSECT / EXCEPT)** | Deterministic union / intersection / difference over multi-way candidate NodeSets | Multi-way recall fusion, candidate convergence |
 | **Prepared TQL** | Parameterized queries; missing / extra / invalid parameters fail closed | Safe reuse of high-frequency business queries |
 
-These modes are complementary rather than interchangeable: **Reachability answers “is it structurally reachable?”**, **GraphFirst answers “which item is most similar within this structural constraint?”**, and **SA-PPR answers “which related nodes deserve more relevance?”** Applications can choose among them over the same `.tdb` data or combine document, graph, and vector conditions in one TQL query.
+**Reachability answers “is it structurally reachable?”**, **GraphFirst answers “which item is most similar within this structural constraint?”**, and **SA-PPR answers “which related nodes deserve more relevance?”** Applications can choose among them over the same `.tdb` data or combine document, graph, and vector conditions in one TQL query.
 
 ---
 
@@ -400,8 +411,45 @@ These modes are complementary rather than interchangeable: **Reachability answer
 | 📝 **Graph queries**             | Built-in Cypher-like query engine: `MATCH (a)-[:knows]->(b) WHERE b.age > 18 RETURN b`                                     |
 | 🐍 **Python native**             | PyO3 bindings, `pip install` then `import triviumdb`                                                                       |
 | 🌐 **Node.js native**            | napi-rs bindings, `npm install` then `require('triviumdb')`                                                                |
+| 🧰 **Shared resources & diagnostics** | 0.9.0-beta.1: database quotas, protected maintenance memory, thread/task limits, available budgets, and instance/maintenance status |
+| 📸 **Controlled shutdown & snapshots** | 0.9.0-beta.1: shutdown requests, bounded waits, consistent snapshots, verification, and restore to a new directory across Rust/Python/Node |
 
 > 📖 Deep dive into architecture and technical details: **[Feature Details](docs/features.md)**
+
+---
+
+## Multi-Instance Resources and State Transfer
+
+These capabilities are available starting with `0.9.0-beta.1`, with aligned Rust, Python, and Node.js APIs.
+
+Each tenant, session, or Agent can use an independent database while sharing one `ResourceRuntime`. The runtime accounts for database quotas and temporary workspaces and manages compute workers, foreground tasks, and maintenance tasks. Applications running directly on a machine or inside containers use the same embedded APIs.
+
+- **Shared resources**: configure a total memory budget, protected maintenance memory, worker limits, and foreground root-task slots. Operations undergo admission checks before starting work.
+- **Instance diagnostics**: use `runtime.stats()` for shared accounting and available budgets, and `db.instance_stats()` for the database quota, estimated memory, active-operation count, and maintenance status.
+- **Controlled shutdown**: `request_shutdown()` stops new operations and drains existing work; `close_timeout()` bounds the caller's wait, and `shutdown_status()` reports progress.
+- **Consistent snapshots**: `create_snapshot()` captures a complete database directory, `verify_snapshot()` checks its artifacts, and `restore_snapshot()` restores it into a new directory.
+
+```python
+from triviumdb import ResourceRuntime, TriviumDB
+
+runtime = ResourceRuntime(
+    memory_limit_mb=256, maintenance_memory_limit_mb=32,
+    max_threads=4, max_active_tasks=8,
+)
+first = TriviumDB("agent-a.tdb", dim=3, memory_limit_mb=64, runtime=runtime)
+second = TriviumDB("agent-b.tdb", dim=3, memory_limit_mb=64, runtime=runtime)
+try:
+    first.insert([1.0, 0.0, 0.0], {"text": "会话记忆"})
+    print(runtime.stats())
+    print(first.instance_stats())
+finally:
+    first.close()
+    second.close()
+```
+
+Memory admission accounts for declared quotas and integrated workspace reservations. Process or container sizing also includes mmap residency, page cache, thread stacks, and language-runtime overhead. Python budget exceptions and Node `QueueFull` errors expose `resource`, `requested`, `used`, and `limit` for throttling, backoff, and instance eviction decisions.
+
+See [Shared Resources and Diagnostics](docs/resource-runtime.md) and [Shutdown, Snapshots, and Restore](docs/lifecycle-snapshots.md) (Chinese).
 
 ---
 
@@ -436,6 +484,7 @@ TriviumDB/
 │   ├── database/           # Core database module (v0.7.0 modular refactor)
 │   │   ├── mod.rs          # Database struct, CRUD, lifecycle management
 │   │   ├── config.rs       # StorageMode / Config / SearchConfig
+│   │   ├── lifecycle.rs    # 受控关闭、实例诊断与关闭状态
 │   │   ├── pipeline.rs     # Hybrid search pipeline (L0-L9 + 6 hook injection points)
 │   │   └── transaction.rs  # Transaction system (TxOp / WAL replay + QuIVer separated timeline)
 │   ├── hook.rs             # 🔌 Hook extension system (SearchHook trait + FFI dynamic library)
@@ -445,6 +494,7 @@ TriviumDB/
 │   ├── filter.rs           # Advanced filter engine ($gt/$lt/$in/$and/$or/$startsWith/$contains)
 │   ├── tsng.rs             # 🔬 TSNG tri-signal hybrid retrieval research track (6 access paths + ground truth)
 │   ├── error.rs            # Unified error types (incl. ApiMigrationRequired / sidecar version gates)
+│   ├── resources.rs        # 共享配额、工作线程池与资源统计
 │   ├── query/              # 🧪 TQL query subsystem (v0.8 query engine refactor)
 │   │   ├── tql_lexer.rs    #   Lexer (tokens / parameters / positional diagnostics)
 │   │   ├── tql_parser.rs   #   Recursive-descent parser + scope & semantic validation
@@ -458,7 +508,9 @@ TriviumDB/
 │   │   ├── wal.rs          # Write-Ahead Log (crash recovery)
 │   │   ├── file_format.rs  # .tdb single-file reader/writer (BQ metadata + QuIVer persistence)
 │   │   ├── vec_pool.rs     # Layered vector pool (mmap base + delta incremental)
-│   │   └── compaction.rs   # Background compaction daemon (with auto BQ rebuild)
+│   │   ├── snapshot.rs     # 代际清单与快照入口
+│   │   ├── snapshot/      # 目录快照创建、校验与恢复
+│   │   └── compaction.rs   # 共享计时调度、压实与维护诊断
 │   ├── index/
 │   │   ├── brute_force.rs  # rayon parallel exact search
 │   │   ├── bq.rs           # BQ binary quantization signatures (QuIVer foundation)
@@ -500,6 +552,8 @@ TriviumDB/
 │   ├── api-reference.md    # Full API reference
 │   ├── features.md         # Feature details
 │   ├── best-practices.md   # Best practices guide
+│   ├── resource-runtime.md # 多实例共享资源与诊断
+│   ├── lifecycle-snapshots.md # 实例关闭、快照与恢复
 │   ├── hook-guide.md       # Hook development guide (C++ FFI / Rust Hook)
 │   ├── tql-reference.md    # TQL query language reference
 │   ├── testing.md          # Testing practices
@@ -565,6 +619,7 @@ TriviumDB/
 - [x] **Production-grade storage and safety**: `.flush_ok` v3 binds `.tdb/.vec/.pld` generation, sizes, and CRCs; no production-reachable panic, byte-level zero writes in ReadOnly/Immutable modes, WAL/generation atomicity, fail-closed query/traversal/memory/Payload budgets, and bounded real fault injection
 - [x] **Payload tiering phase 1**: generation-scoped `.pld` mmap raw base, in-memory delta/tombstones, bounded LRU parsed cache, late materialization, `ColdPayloadScan`, and cross-language cache configuration
 - [x] **Aligned Rust/Python/Node capabilities**: first-class TQL values, four property indexes, Prepared TQL, six-stage Hooks, FFI ABI v2, and explicit migration errors instead of silent legacy compatibility
+- [x] **Multi-instance management (0.9.0-beta.1)**: shared budgets and worker pools, protected maintenance memory, instance/maintenance diagnostics, controlled shutdown, consistent snapshots and restore, with aligned APIs and type declarations
 - [x] **Tools and nightly Server**: CLI/REPL/TUI plus a dependency-isolated HTTP Server with Writer Actor, Group Commit, OCC/idempotency, health supervision, index management, NDJSON import, binary vectors, and cross-platform releases
 
 
@@ -573,11 +628,11 @@ TriviumDB/
 ## Design Philosophy
 
 1. **Trinity atomicity** — One `u64` ID maps to vector, payload, and edge table simultaneously. Insert atomic, delete atomic, never inconsistent.
-2. **Embedded-first** — No server, no port, no config file. `import triviumdb` is everything.
+2. **Embedded-first** — The database runs as a library inside the host process. Rust, Python, and Node.js APIs manage data and instance lifecycles.
 3. **Auto performance routing** — Uses an approximately 8M-component workload to select a dynamic threshold between 2,500 and 10,000 nodes; exact BruteForce runs below it and QuIVer builds automatically once reached.
 4. **Predictable performance** — Sequential I/O only (WAL append + compaction sequential rewrite). SSD-safe.
 5. **Index as acceleration layer** — QuIVer is disposable derived data (`.tdb.quiver` file); auto-rebuilds on first query if missing.
-6. **Rust safety boundary** — Internal unsafe paths include mmap, SIMD, raw pointers, and manual `Send/Sync`. Their length, alignment, lifetime, and concurrency contracts require review. ASan, TSan, and Miri check exercised paths and do not prove every unsafe contract; see [security boundaries](docs/security.md) and [testing scope](docs/testing.md).
+6. **Rust safety contracts** — mmap, SIMD, raw-pointer, and manual `Send/Sync` paths are reviewed for length, alignment, lifetime, and concurrency requirements, with ASan, TSan, and Miri validation. See [security design](docs/security.md) and [testing scope](docs/testing.md).
 7. **Zero-panic policy** — No `panic!` / `unreachable!()` in the engine. Thousands of test cases (unit / property / fuzz / mutation / three-language public API alignment), with an enforced 80% line-coverage CI gate (see coverage artifacts for measured values).
 
 ---
@@ -589,6 +644,8 @@ TriviumDB/
 | **[API Reference](docs/api-reference.md)**   | Full Python / Node.js / Rust API, parameters, return types       |
 | **[Feature Details](docs/features.md)**      | Architecture, storage engine, indexing strategy, crash recovery  |
 | **[Best Practices](docs/best-practices.md)** | Data modeling, performance tuning, Hook usage guide              |
+| **[Shared Resources and Diagnostics](docs/resource-runtime.md)** | Quotas, maintenance memory, worker pools, available budgets, and structured errors |
+| **[Shutdown, Snapshots, and Restore](docs/lifecycle-snapshots.md)** | Shutdown requests, bounded waits, consistent snapshots, verification, and directory restore |
 | **[TQL Reference](docs/tql-reference.md)**   | MATCH / FIND / SEARCH syntax, DML operations, property index     |
 | **[Hook Guide](docs/hook-guide.md)**         | C/C++ FFI plugin development, Rust Hook implementation           |
 | **[Testing Practices](docs/testing.md)**     | 4-layer testing, property testing, mutation testing, coverage    |
@@ -604,7 +661,7 @@ TriviumDB's cognitive retrieval pipeline implements the following academic works
 
 1. **FISTA**: Beck & Teboulle, 2009, _SIAM J. Imaging Sciences_
 2. **DPP**: Kulesza & Taskar, 2012, _Foundations and Trends in ML_
-3. **SA-PPR**: finite-depth Spreading Activation with Personalized Restart; it does not iterate to PageRank convergence
+3. **SA-PPR**: finite-depth Spreading Activation with Personalized Restart
 4. **Spreading Activation**: Anderson, 1983, _The Architecture of Cognition_
 5. **BM25**: Robertson & Zaragoza, 2009
 6. **Vamana Graph**: Subramanya et al., 2019, _DiskANN_, NeurIPS 2019

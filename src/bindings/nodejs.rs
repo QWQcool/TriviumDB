@@ -169,8 +169,21 @@ pub mod nodejs {
         })
     }
 
+    fn to_resource_error(env: Env, error: crate::error::TriviumError) -> napi::Error {
+        if matches!(
+            error,
+            crate::error::TriviumError::ResourceBudgetExceeded { .. }
+        ) {
+            to_extended_error(env, error)
+        } else {
+            to_napi_error(error)
+        }
+    }
+
     fn to_extended_error(env: Env, error: crate::error::TriviumError) -> napi::Error {
+        let budget = crate::resources::ResourceBudgetDetails::from_error(&error);
         let code = match &error {
+            crate::error::TriviumError::ResourceBudgetExceeded { .. } => "QueueFull",
             crate::error::TriviumError::ImmutableArtifactInvalid { .. } => "TDB_SNAPSHOT_INVALID",
             crate::error::TriviumError::SnapshotDestinationExists { .. } => "TDB_SNAPSHOT_EXISTS",
             crate::error::TriviumError::SnapshotPublicationUncertain { .. } => {
@@ -183,6 +196,12 @@ pub mod nodejs {
             .create_error(to_napi_error(error))
             .and_then(|mut object| {
                 object.set_named_property("code", code)?;
+                if let Some(budget) = budget {
+                    object.set_named_property("resource", budget.resource)?;
+                    object.set_named_property("requested", budget.requested as f64)?;
+                    object.set_named_property("used", budget.used as f64)?;
+                    object.set_named_property("limit", budget.limit as f64)?;
+                }
                 Ok(napi::Error::from(object.into_unknown()))
             }) {
             Ok(error) | Err(error) => error,
@@ -333,11 +352,11 @@ pub mod nodejs {
     }
 
     impl napi::Task for BatchSearchTask {
-        type Output = Vec<Vec<crate::node::SearchHit>>;
+        type Output = crate::Result<Vec<Vec<crate::node::SearchHit>>>;
         type JsValue = Vec<Vec<JsSearchHit>>;
 
         fn compute(&mut self) -> napi::Result<Self::Output> {
-            match &self.backend {
+            Ok(match &self.backend {
                 SearchBackendHandle::F32(db) => {
                     let queries = self
                         .queries
@@ -367,16 +386,12 @@ pub mod nodejs {
                         .collect::<Vec<Vec<u64>>>();
                     db.search_batch(&queries, &self.search_config, &self.batch_config)
                 }
-            }
-            .map_err(|error| napi::Error::from_reason(error.to_string()))
+            })
         }
 
-        fn resolve(
-            &mut self,
-            _env: napi::Env,
-            output: Self::Output,
-        ) -> napi::Result<Self::JsValue> {
+        fn resolve(&mut self, env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
             Ok(output
+                .map_err(|error| to_resource_error(env, error))?
                 .into_iter()
                 .map(|hits| {
                     hits.into_iter()
@@ -562,7 +577,7 @@ pub mod nodejs {
                     "maxActiveTasks",
                 )?,
             })
-            .map_err(to_napi_error)?;
+            .map_err(|error| to_resource_error(env, error))?;
             // 使用带类型标记的外部句柄，避免把其他原生类的指针误解为资源运行时。
             let handle = env.create_external(inner.clone(), None)?;
             this.define_properties(&[
@@ -952,6 +967,7 @@ pub mod nodejs {
         /// ```
         #[napi(constructor)]
         pub fn new(
+            env: Env,
             path: String,
             options: Option<napi::bindgen_prelude::Either<u32, JsDatabaseOptions>>,
         ) -> napi::Result<Self> {
@@ -1032,15 +1048,15 @@ pub mod nodejs {
             let inner = match dtype_str {
                 "f32" => DbBackend::F32(
                     GenericDatabase::<f32>::open_with_runtime(&path, config, runtime.clone())
-                        .map_err(to_napi_error)?,
+                        .map_err(|error| to_resource_error(env, error))?,
                 ),
                 "f16" => DbBackend::F16(
                     GenericDatabase::<half::f16>::open_with_runtime(&path, config, runtime.clone())
-                        .map_err(to_napi_error)?,
+                        .map_err(|error| to_resource_error(env, error))?,
                 ),
                 "u64" => DbBackend::U64(
                     GenericDatabase::<u64>::open_with_runtime(&path, config, runtime.clone())
-                        .map_err(to_napi_error)?,
+                        .map_err(|error| to_resource_error(env, error))?,
                 ),
                 _ => return Err(napi::Error::from_reason("dtype 必须是 f32 / f16 / u64")),
             };
@@ -1099,6 +1115,7 @@ pub mod nodejs {
         #[napi]
         pub fn search_with_context(
             &self,
+            env: Env,
             query_vector: Vec<f64>,
             config: Option<JsSearchConfig>,
         ) -> napi::Result<JsSearchWithContextResult> {
@@ -1186,7 +1203,7 @@ pub mod nodejs {
                     db.search_hybrid_with_context(q_text, Some(&v), &core_config)
                 }
             }
-            .map_err(to_napi_error)?;
+            .map_err(|error| to_resource_error(env, error))?;
 
             // 转换 hits
             let hits: Vec<JsSearchHit> = results
@@ -1235,6 +1252,7 @@ pub mod nodejs {
         #[napi]
         pub fn insert(
             &mut self,
+            env: Env,
             vector: Vec<f64>,
             payload: serde_json::Value,
         ) -> napi::Result<f64> {
@@ -1243,20 +1261,20 @@ pub mod nodejs {
                     let v: Vec<f32> = vector.iter().map(|&x| x as f32).collect();
                     db.insert(&v, payload)
                         .map(|id| id as f64)
-                        .map_err(to_napi_error)
+                        .map_err(|error| to_resource_error(env, error))
                 }
                 DbBackend::F16(db) => {
                     let v: Vec<half::f16> =
                         vector.iter().map(|&x| half::f16::from_f64(x)).collect();
                     db.insert(&v, payload)
                         .map(|id| id as f64)
-                        .map_err(to_napi_error)
+                        .map_err(|error| to_resource_error(env, error))
                 }
                 DbBackend::U64(db) => {
                     let v: Vec<u64> = vector.iter().map(|&x| x as u64).collect();
                     db.insert(&v, payload)
                         .map(|id| id as f64)
-                        .map_err(to_napi_error)
+                        .map_err(|error| to_resource_error(env, error))
                 }
             }
         }
@@ -1265,6 +1283,7 @@ pub mod nodejs {
         #[napi]
         pub fn batch_insert(
             &mut self,
+            env: Env,
             vectors: Vec<Vec<f64>>,
             payloads: Vec<serde_json::Value>,
         ) -> napi::Result<Vec<f64>> {
@@ -1283,7 +1302,7 @@ pub mod nodejs {
                     }
                     db.commit_tx(tx)
                         .map(|ids| ids.into_iter().map(|id| id as f64).collect())
-                        .map_err(|error| napi::Error::from_reason(error.to_string()))
+                        .map_err(|error| to_resource_error(env, error))
                 }
                 DbBackend::F16(db) => {
                     let converted: Vec<Vec<half::f16>> = vectors
@@ -1296,7 +1315,7 @@ pub mod nodejs {
                     }
                     db.commit_tx(tx)
                         .map(|ids| ids.into_iter().map(|id| id as f64).collect())
-                        .map_err(|error| napi::Error::from_reason(error.to_string()))
+                        .map_err(|error| to_resource_error(env, error))
                 }
                 DbBackend::U64(db) => {
                     let converted: Vec<Vec<u64>> = vectors
@@ -1309,7 +1328,7 @@ pub mod nodejs {
                     }
                     db.commit_tx(tx)
                         .map(|ids| ids.into_iter().map(|id| id as f64).collect())
-                        .map_err(|error| napi::Error::from_reason(error.to_string()))
+                        .map_err(|error| to_resource_error(env, error))
                 }
             }
         }
@@ -1318,6 +1337,7 @@ pub mod nodejs {
         #[napi]
         pub fn batch_insert_with_ids(
             &mut self,
+            env: Env,
             ids: Vec<f64>,
             vectors: Vec<Vec<f64>>,
             payloads: Vec<serde_json::Value>,
@@ -1343,7 +1363,7 @@ pub mod nodejs {
                     }
                     db.commit_tx(tx)
                         .map(|_| ())
-                        .map_err(|error| napi::Error::from_reason(error.to_string()))
+                        .map_err(|error| to_resource_error(env, error))
                 }
                 DbBackend::F16(db) => {
                     let converted: Vec<Vec<half::f16>> = vectors
@@ -1358,7 +1378,7 @@ pub mod nodejs {
                     }
                     db.commit_tx(tx)
                         .map(|_| ())
-                        .map_err(|error| napi::Error::from_reason(error.to_string()))
+                        .map_err(|error| to_resource_error(env, error))
                 }
                 DbBackend::U64(db) => {
                     let converted: Vec<Vec<u64>> = vectors
@@ -1373,7 +1393,7 @@ pub mod nodejs {
                     }
                     db.commit_tx(tx)
                         .map(|_| ())
-                        .map_err(|error| napi::Error::from_reason(error.to_string()))
+                        .map_err(|error| to_resource_error(env, error))
                 }
             }
         }
@@ -1382,6 +1402,7 @@ pub mod nodejs {
         #[napi]
         pub fn insert_with_id(
             &mut self,
+            env: Env,
             id: f64,
             vector: Vec<f64>,
             payload: serde_json::Value,
@@ -1390,16 +1411,19 @@ pub mod nodejs {
             match &mut self.inner {
                 DbBackend::F32(db) => {
                     let v: Vec<f32> = vector.iter().map(|&x| x as f32).collect();
-                    db.insert_with_id(id, &v, payload).map_err(to_napi_error)
+                    db.insert_with_id(id, &v, payload)
+                        .map_err(|error| to_resource_error(env, error))
                 }
                 DbBackend::F16(db) => {
                     let v: Vec<half::f16> =
                         vector.iter().map(|&x| half::f16::from_f64(x)).collect();
-                    db.insert_with_id(id, &v, payload).map_err(to_napi_error)
+                    db.insert_with_id(id, &v, payload)
+                        .map_err(|error| to_resource_error(env, error))
                 }
                 DbBackend::U64(db) => {
                     let v: Vec<u64> = vector.iter().map(|&x| x as u64).collect();
-                    db.insert_with_id(id, &v, payload).map_err(to_napi_error)
+                    db.insert_with_id(id, &v, payload)
+                        .map_err(|error| to_resource_error(env, error))
                 }
             }
         }
@@ -1408,6 +1432,7 @@ pub mod nodejs {
         #[napi]
         pub fn upsert_with_id(
             &mut self,
+            env: Env,
             id: f64,
             vector: Vec<f64>,
             payload: serde_json::Value,
@@ -1436,13 +1461,14 @@ pub mod nodejs {
                     db.upsert_with_id(id, &vector, payload)
                 }
             }
-            .map_err(|error| napi::Error::from_reason(error.to_string()))
+            .map_err(|error| to_resource_error(env, error))
         }
 
         /// 按 ID 获取节点，不存在时返回 null
         #[napi]
         pub fn commit_transaction(
             &mut self,
+            env: Env,
             operations: Vec<serde_json::Value>,
         ) -> napi::Result<Vec<f64>> {
             let ids = match &mut self.inner {
@@ -1456,7 +1482,7 @@ pub mod nodejs {
                     db.commit_tx(build_transaction(&operations, |value| value as u64)?)
                 }
             }
-            .map_err(|error| napi::Error::from_reason(error.to_string()))?;
+            .map_err(|error| to_resource_error(env, error))?;
             Ok(ids.into_iter().map(|id| id as f64).collect())
         }
 
@@ -1473,9 +1499,9 @@ pub mod nodejs {
         }
 
         #[napi]
-        pub fn repair_graph_indexes(&mut self) -> napi::Result<serde_json::Value> {
+        pub fn repair_graph_indexes(&mut self, env: Env) -> napi::Result<serde_json::Value> {
             let report = dispatch!(self, mut db => db.repair_graph_indexes())
-                .map_err(|error| napi::Error::from_reason(error.to_string()))?;
+                .map_err(|error| to_resource_error(env, error))?;
             serde_json::to_value(report)
                 .map_err(|error| napi::Error::from_reason(error.to_string()))
         }
@@ -1549,8 +1575,14 @@ pub mod nodejs {
 
         /// 更新节点元数据
         #[napi]
-        pub fn update_payload(&mut self, id: f64, payload: serde_json::Value) -> napi::Result<()> {
-            dispatch!(self, mut db => db.update_payload(id as u64, payload)).map_err(to_napi_error)
+        pub fn update_payload(
+            &mut self,
+            env: Env,
+            id: f64,
+            payload: serde_json::Value,
+        ) -> napi::Result<()> {
+            dispatch!(self, mut db => db.update_payload(id as u64, payload))
+                .map_err(|error| to_resource_error(env, error))
         }
 
         /// 部分更新节点 Payload（$set / $inc / $unset）
@@ -1564,55 +1596,66 @@ pub mod nodejs {
         /// db.patchPayload(id, { name: "Bob" })  // 简写，等价于 $set
         /// ```
         #[napi]
-        pub fn patch_payload(&mut self, id: f64, patch: serde_json::Value) -> napi::Result<()> {
-            dispatch!(self, mut db => db.patch_payload(id as u64, patch)).map_err(to_napi_error)
+        pub fn patch_payload(
+            &mut self,
+            env: Env,
+            id: f64,
+            patch: serde_json::Value,
+        ) -> napi::Result<()> {
+            dispatch!(self, mut db => db.patch_payload(id as u64, patch))
+                .map_err(|error| to_resource_error(env, error))
         }
 
         /// 更新节点向量
         #[napi]
-        pub fn update_vector(&mut self, id: f64, vector: Vec<f64>) -> napi::Result<()> {
+        pub fn update_vector(&mut self, env: Env, id: f64, vector: Vec<f64>) -> napi::Result<()> {
             let id = id as u64;
             match &mut self.inner {
                 DbBackend::F32(db) => {
                     let v: Vec<f32> = vector.iter().map(|&x| x as f32).collect();
-                    db.update_vector(id, &v).map_err(to_napi_error)
+                    db.update_vector(id, &v)
+                        .map_err(|error| to_resource_error(env, error))
                 }
                 DbBackend::F16(db) => {
                     let v: Vec<half::f16> =
                         vector.iter().map(|&x| half::f16::from_f64(x)).collect();
-                    db.update_vector(id, &v).map_err(to_napi_error)
+                    db.update_vector(id, &v)
+                        .map_err(|error| to_resource_error(env, error))
                 }
                 DbBackend::U64(db) => {
                     let v: Vec<u64> = vector.iter().map(|&x| x as u64).collect();
-                    db.update_vector(id, &v).map_err(to_napi_error)
+                    db.update_vector(id, &v)
+                        .map_err(|error| to_resource_error(env, error))
                 }
             }
         }
 
         #[napi]
-        pub fn delete_many_atomic(&mut self, ids: Vec<f64>) -> napi::Result<u32> {
+        pub fn delete_many_atomic(&mut self, env: Env, ids: Vec<f64>) -> napi::Result<u32> {
             let ids = ids.into_iter().map(|id| id as u64).collect::<Vec<_>>();
-            let deleted =
-                dispatch!(self, mut db => db.delete_many_atomic(&ids)).map_err(to_napi_error)?;
+            let deleted = dispatch!(self, mut db => db.delete_many_atomic(&ids))
+                .map_err(|error| to_resource_error(env, error))?;
             u32::try_from(deleted).map_err(|_| napi::Error::from_reason("删除数量超出 u32"))
         }
 
         #[napi]
         pub fn compare_and_set_payload_field(
             &mut self,
+            env: Env,
             id: f64,
             field: String,
             expected: serde_json::Value,
             replacement: serde_json::Value,
         ) -> napi::Result<()> {
             dispatch!(self, mut db => db.compare_and_set_payload_field(id as u64, &field, &expected, replacement))
-                .map_err(to_napi_error)
+                .map_err(|error| to_resource_error(env, error))
         }
 
         /// 删除节点（三层原子联删：向量 + Payload + 所有关联边）
         #[napi]
-        pub fn delete(&mut self, id: f64) -> napi::Result<()> {
-            dispatch!(self, mut db => db.delete(id as u64)).map_err(to_napi_error)
+        pub fn delete(&mut self, env: Env, id: f64) -> napi::Result<()> {
+            dispatch!(self, mut db => db.delete(id as u64))
+                .map_err(|error| to_resource_error(env, error))
         }
 
         // ── 图谱操作 ──
@@ -1621,6 +1664,7 @@ pub mod nodejs {
         #[napi]
         pub fn link(
             &mut self,
+            env: Env,
             src: f64,
             dst: f64,
             label: Option<String>,
@@ -1629,7 +1673,7 @@ pub mod nodejs {
             let label = label.as_deref().unwrap_or("related");
             let weight = weight.unwrap_or(1.0) as f32;
             dispatch!(self, mut db => db.link(src as u64, dst as u64, label, weight))
-                .map_err(to_napi_error)
+                .map_err(|error| to_resource_error(env, error))
         }
 
         #[napi]
@@ -1645,6 +1689,7 @@ pub mod nodejs {
         #[napi]
         pub fn upsert_edge(
             &mut self,
+            env: Env,
             src: f64,
             dst: f64,
             label: String,
@@ -1658,12 +1703,13 @@ pub mod nodejs {
                 weight as f32,
                 metadata.unwrap_or(serde_json::Value::Null),
             ))
-            .map_err(|error| napi::Error::from_reason(error.to_string()))
+            .map_err(|error| to_resource_error(env, error))
         }
 
         #[napi]
         pub fn update_edge(
             &mut self,
+            env: Env,
             src: f64,
             dst: f64,
             label: String,
@@ -1677,19 +1723,25 @@ pub mod nodejs {
                 weight.map(|value| value as f32),
                 metadata,
             ))
-            .map_err(|error| napi::Error::from_reason(error.to_string()))
+            .map_err(|error| to_resource_error(env, error))
         }
 
         /// 断开两节点间的边；提供 label 时仅删除该标签。
         #[napi]
-        pub fn unlink(&mut self, src: f64, dst: f64, label: Option<String>) -> napi::Result<()> {
+        pub fn unlink(
+            &mut self,
+            env: Env,
+            src: f64,
+            dst: f64,
+            label: Option<String>,
+        ) -> napi::Result<()> {
             match label {
                 Some(label) => {
                     dispatch!(self, mut db => db.unlink_label(src as u64, dst as u64, &label))
                 }
                 None => dispatch!(self, mut db => db.unlink(src as u64, dst as u64)),
             }
-            .map_err(to_napi_error)
+            .map_err(|error| to_resource_error(env, error))
         }
 
         /// 获取 N 跳邻居节点 ID 列表，可按标签白名单遍历。
@@ -1710,24 +1762,26 @@ pub mod nodejs {
         #[napi]
         pub fn reachable(
             &self,
+            env: Env,
             id: f64,
             options: Option<JsReachabilityOptions>,
         ) -> napi::Result<Vec<JsReachabilityResult>> {
             let config = parse_reachability_options(options)?;
             dispatch!(self, db => db.reachable(id as u64, &config))
                 .map(|results| results.into_iter().map(to_js_reachability).collect())
-                .map_err(|error| napi::Error::from_reason(error.to_string()))
+                .map_err(|error| to_resource_error(env, error))
         }
 
         #[napi]
         pub fn reachable_detailed(
             &self,
+            env: Env,
             id: f64,
             options: Option<JsReachabilityOptions>,
         ) -> napi::Result<JsReachabilityOutput> {
             let config = parse_reachability_options(options)?;
             let output = dispatch!(self, db => db.reachable_detailed(id as u64, &config))
-                .map_err(|error| napi::Error::from_reason(error.to_string()))?;
+                .map_err(|error| to_resource_error(env, error))?;
             Ok(JsReachabilityOutput {
                 results: output.results.into_iter().map(to_js_reachability).collect(),
                 visited_nodes: output.visited_nodes as f64,
@@ -1739,12 +1793,13 @@ pub mod nodejs {
         #[napi]
         pub fn query_subgraph(
             &self,
+            env: Env,
             id: f64,
             options: Option<JsReachabilityOptions>,
         ) -> napi::Result<JsSubgraphResult> {
             let config = parse_reachability_options(options)?;
             let output = dispatch!(self, db => db.query_subgraph(id as u64, &config))
-                .map_err(|error| napi::Error::from_reason(error.to_string()))?;
+                .map_err(|error| to_resource_error(env, error))?;
             Ok(JsSubgraphResult {
                 nodes: output
                     .nodes
@@ -1774,6 +1829,7 @@ pub mod nodejs {
         #[napi]
         pub fn search_graph_first(
             &self,
+            env: Env,
             query_vector: Vec<f64>,
             anchor_ids: Vec<f64>,
             top_k: u32,
@@ -1804,7 +1860,7 @@ pub mod nodejs {
                     db.search_graph_first(&query, &anchors, top_k as usize, max_anchor_nodes)
                 }
             }
-            .map_err(|error| napi::Error::from_reason(error.to_string()))?;
+            .map_err(|error| to_resource_error(env, error))?;
             Ok(hits
                 .into_iter()
                 .map(|hit| JsSearchHit {
@@ -1818,6 +1874,7 @@ pub mod nodejs {
         #[napi]
         pub fn search_exact(
             &self,
+            env: Env,
             query_vector: Vec<f64>,
             top_k: u32,
         ) -> napi::Result<Vec<JsSearchHit>> {
@@ -1838,7 +1895,7 @@ pub mod nodejs {
                     db.search_exact(&query, top_k as usize)
                 }
             }
-            .map_err(|error| napi::Error::from_reason(error.to_string()))?;
+            .map_err(|error| to_resource_error(env, error))?;
             Ok(hits
                 .into_iter()
                 .map(|hit| JsSearchHit {
@@ -1858,6 +1915,7 @@ pub mod nodejs {
         #[napi]
         pub fn leiden_cluster(
             &self,
+            env: Env,
             config: Option<JsLeidenConfig>,
         ) -> napi::Result<JsClusterResult> {
             let cfg = config.unwrap_or(JsLeidenConfig {
@@ -1870,7 +1928,7 @@ pub mod nodejs {
             let with_cent = cfg.with_centroids;
 
             let result = dispatch!(self, db => db.leiden_cluster(min_c, max_iter, with_cent))
-                .map_err(to_napi_error)?;
+                .map_err(|error| to_resource_error(env, error))?;
 
             // 排序确保确定性输出
             let mut sorted_nodes: Vec<_> = result.node_to_cluster.into_iter().collect();
@@ -1917,6 +1975,7 @@ pub mod nodejs {
         #[napi]
         pub fn search(
             &self,
+            env: Env,
             query_vector: Vec<f64>,
             top_k: Option<i64>,
             expand_depth: Option<u32>,
@@ -1960,7 +2019,7 @@ pub mod nodejs {
                     db.search_hybrid(None, Some(&v), &search_config)
                 }
             }
-            .map_err(to_napi_error)?;
+            .map_err(|error| to_resource_error(env, error))?;
 
             Ok(hits
                 .into_iter()
@@ -1975,6 +2034,7 @@ pub mod nodejs {
         #[napi]
         pub fn search_grouped(
             &self,
+            env: Env,
             query_vector: Vec<f64>,
             top_k: Option<i64>,
             expand_depth: Option<u32>,
@@ -2012,7 +2072,7 @@ pub mod nodejs {
                     db.search_hybrid_grouped(None, Some(&vector), &config)
                 }
             }
-            .map_err(|error| napi::Error::from_reason(error.to_string()))?;
+            .map_err(|error| to_resource_error(env, error))?;
             Ok(JsGroupedSearchResult {
                 semantic_hits: result
                     .semantic_hits
@@ -2066,6 +2126,7 @@ pub mod nodejs {
         #[napi]
         pub fn search_advanced(
             &self,
+            env: Env,
             query_vector: Vec<f64>,
             config: Option<JsSearchConfig>,
         ) -> napi::Result<Vec<JsSearchHit>> {
@@ -2153,7 +2214,7 @@ pub mod nodejs {
                     db.search_hybrid(q_text, Some(&v), &core_config)
                 }
             }
-            .map_err(to_napi_error)?;
+            .map_err(|error| to_resource_error(env, error))?;
 
             Ok(hits
                 .into_iter()
@@ -2169,6 +2230,7 @@ pub mod nodejs {
         #[napi]
         pub fn search_hybrid(
             &self,
+            env: Env,
             query_vector: Vec<f64>,
             query_text: String,
             top_k: Option<i64>,
@@ -2218,7 +2280,7 @@ pub mod nodejs {
                     db.search_hybrid(Some(&query_text), Some(&v), &core_config)
                 }
             }
-            .map_err(to_napi_error)?;
+            .map_err(|error| to_resource_error(env, error))?;
 
             Ok(hits
                 .into_iter()
@@ -2234,20 +2296,23 @@ pub mod nodejs {
 
         /// 对节点建立用于双路召回的长文本 BM25 索引
         #[napi]
-        pub fn index_text(&mut self, id: f64, text: String) -> napi::Result<()> {
-            dispatch!(self, mut db => db.index_text(id as u64, &text)).map_err(to_napi_error)
+        pub fn index_text(&mut self, env: Env, id: f64, text: String) -> napi::Result<()> {
+            dispatch!(self, mut db => db.index_text(id as u64, &text))
+                .map_err(|error| to_resource_error(env, error))
         }
 
         /// 对节点建立用于精确命中的 AC自动机 高级关键词索引
         #[napi]
-        pub fn index_keyword(&mut self, id: f64, keyword: String) -> napi::Result<()> {
-            dispatch!(self, mut db => db.index_keyword(id as u64, &keyword)).map_err(to_napi_error)
+        pub fn index_keyword(&mut self, env: Env, id: f64, keyword: String) -> napi::Result<()> {
+            dispatch!(self, mut db => db.index_keyword(id as u64, &keyword))
+                .map_err(|error| to_resource_error(env, error))
         }
 
         /// 预热关键词自动机；损坏或缺失的延期索引会返回错误。
         #[napi]
-        pub fn build_text_index(&mut self) -> napi::Result<()> {
-            dispatch!(self, mut db => db.build_text_index()).map_err(to_napi_error)
+        pub fn build_text_index(&mut self, env: Env) -> napi::Result<()> {
+            dispatch!(self, mut db => db.build_text_index())
+                .map_err(|error| to_resource_error(env, error))
         }
 
         // ── 属性二级索引 ──
@@ -2260,6 +2325,7 @@ pub mod nodejs {
         #[napi]
         pub fn indexed_lookup(
             &self,
+            env: Env,
             equalities: serde_json::Value,
             max_results: Option<u32>,
         ) -> napi::Result<Vec<f64>> {
@@ -2272,40 +2338,48 @@ pub mod nodejs {
                 .collect::<Vec<_>>();
             dispatch!(self, db => db.indexed_lookup(&equalities, max_results.unwrap_or(10_000) as usize))
                 .map(|ids| ids.into_iter().map(|id| id as f64).collect())
-                .map_err(to_napi_error)
+                .map_err(|error| to_resource_error(env, error))
         }
 
         #[napi]
-        pub fn create_ngram_index(&mut self, field: String) -> napi::Result<()> {
-            dispatch!(self, mut db => db.create_ngram_index(&field)).map_err(to_napi_error)
+        pub fn create_ngram_index(&mut self, env: Env, field: String) -> napi::Result<()> {
+            dispatch!(self, mut db => db.create_ngram_index(&field))
+                .map_err(|error| to_resource_error(env, error))
         }
 
         #[napi]
-        pub fn drop_ngram_index(&mut self, field: String) -> napi::Result<()> {
-            dispatch!(self, mut db => db.drop_ngram_index(&field)).map_err(to_napi_error)
+        pub fn drop_ngram_index(&mut self, env: Env, field: String) -> napi::Result<()> {
+            dispatch!(self, mut db => db.drop_ngram_index(&field))
+                .map_err(|error| to_resource_error(env, error))
         }
 
         #[napi]
         pub fn substring_lookup(
             &self,
+            env: Env,
             field: String,
             needle: String,
             max_results: Option<u32>,
         ) -> napi::Result<Vec<f64>> {
             dispatch!(self, db => db.substring_lookup(&field, &needle, max_results.unwrap_or(10_000) as usize))
                 .map(|ids| ids.into_iter().map(|id| id as f64).collect())
-                .map_err(to_napi_error)
+                .map_err(|error| to_resource_error(env, error))
         }
 
         #[napi]
-        pub fn create_unique_index(&mut self, field: String) -> napi::Result<()> {
-            dispatch!(self, mut db => db.create_unique_index(&field)).map_err(to_napi_error)
+        pub fn create_unique_index(&mut self, env: Env, field: String) -> napi::Result<()> {
+            dispatch!(self, mut db => db.create_unique_index(&field))
+                .map_err(|error| to_resource_error(env, error))
         }
 
         #[napi]
-        pub fn create_unique_composite_index(&mut self, fields: Vec<String>) -> napi::Result<()> {
+        pub fn create_unique_composite_index(
+            &mut self,
+            env: Env,
+            fields: Vec<String>,
+        ) -> napi::Result<()> {
             dispatch!(self, mut db => db.create_unique_composite_index(&fields))
-                .map_err(to_napi_error)
+                .map_err(|error| to_resource_error(env, error))
         }
 
         #[napi]
@@ -2314,44 +2388,56 @@ pub mod nodejs {
         }
 
         #[napi]
-        pub fn create_index(&mut self, field: String) -> napi::Result<()> {
-            dispatch!(self, mut db => db.create_index(&field)).map_err(to_napi_error)
+        pub fn create_index(&mut self, env: Env, field: String) -> napi::Result<()> {
+            dispatch!(self, mut db => db.create_index(&field))
+                .map_err(|error| to_resource_error(env, error))
         }
 
         #[napi]
-        pub fn create_ordered_index(&mut self, field: String) -> napi::Result<()> {
-            dispatch!(self, mut db => db.create_ordered_index(&field)).map_err(to_napi_error)
+        pub fn create_ordered_index(&mut self, env: Env, field: String) -> napi::Result<()> {
+            dispatch!(self, mut db => db.create_ordered_index(&field))
+                .map_err(|error| to_resource_error(env, error))
         }
 
         #[napi]
-        pub fn create_composite_index(&mut self, fields: Vec<String>) -> napi::Result<()> {
-            dispatch!(self, mut db => db.create_composite_index(&fields)).map_err(to_napi_error)
+        pub fn create_composite_index(
+            &mut self,
+            env: Env,
+            fields: Vec<String>,
+        ) -> napi::Result<()> {
+            dispatch!(self, mut db => db.create_composite_index(&fields))
+                .map_err(|error| to_resource_error(env, error))
         }
 
         #[napi]
-        pub fn create_bitmap_index(&mut self, field: String) -> napi::Result<()> {
-            dispatch!(self, mut db => db.create_bitmap_index(&field)).map_err(to_napi_error)
+        pub fn create_bitmap_index(&mut self, env: Env, field: String) -> napi::Result<()> {
+            dispatch!(self, mut db => db.create_bitmap_index(&field))
+                .map_err(|error| to_resource_error(env, error))
         }
 
         /// 删除属性索引（查询仍可用，退化为全扫描）
         #[napi]
-        pub fn drop_index(&mut self, field: String) -> napi::Result<()> {
-            dispatch!(self, mut db => db.drop_index(&field)).map_err(to_napi_error)
+        pub fn drop_index(&mut self, env: Env, field: String) -> napi::Result<()> {
+            dispatch!(self, mut db => db.drop_index(&field))
+                .map_err(|error| to_resource_error(env, error))
         }
 
         #[napi]
-        pub fn drop_ordered_index(&mut self, field: String) -> napi::Result<()> {
-            dispatch!(self, mut db => db.drop_ordered_index(&field)).map_err(to_napi_error)
+        pub fn drop_ordered_index(&mut self, env: Env, field: String) -> napi::Result<()> {
+            dispatch!(self, mut db => db.drop_ordered_index(&field))
+                .map_err(|error| to_resource_error(env, error))
         }
 
         #[napi]
-        pub fn drop_composite_index(&mut self, fields: Vec<String>) -> napi::Result<()> {
-            dispatch!(self, mut db => db.drop_composite_index(&fields)).map_err(to_napi_error)
+        pub fn drop_composite_index(&mut self, env: Env, fields: Vec<String>) -> napi::Result<()> {
+            dispatch!(self, mut db => db.drop_composite_index(&fields))
+                .map_err(|error| to_resource_error(env, error))
         }
 
         #[napi]
-        pub fn drop_bitmap_index(&mut self, field: String) -> napi::Result<()> {
-            dispatch!(self, mut db => db.drop_bitmap_index(&field)).map_err(to_napi_error)
+        pub fn drop_bitmap_index(&mut self, env: Env, field: String) -> napi::Result<()> {
+            dispatch!(self, mut db => db.drop_bitmap_index(&field))
+                .map_err(|error| to_resource_error(env, error))
         }
 
         #[napi]
@@ -2416,33 +2502,34 @@ pub mod nodejs {
         /// const rows = db.tql('FIND {type: "event", heat: {$gte: 0.7}} RETURN *')
         /// ```
         #[napi]
-        pub fn tql(&self, query: String) -> napi::Result<Vec<serde_json::Value>> {
+        pub fn tql(&self, env: Env, query: String) -> napi::Result<Vec<serde_json::Value>> {
             match &self.inner {
                 DbBackend::F32(db) => db
                     .tql_values(&query)
-                    .map_err(to_napi_error)
+                    .map_err(|error| to_resource_error(env, error))
                     .map(|rows| rows.into_iter().map(node_tql_row_to_json).collect()),
                 DbBackend::F16(db) => db
                     .tql_values(&query)
-                    .map_err(to_napi_error)
+                    .map_err(|error| to_resource_error(env, error))
                     .map(|rows| rows.into_iter().map(node_tql_row_to_json).collect()),
                 DbBackend::U64(db) => db
                     .tql_values(&query)
-                    .map_err(to_napi_error)
+                    .map_err(|error| to_resource_error(env, error))
                     .map(|rows| rows.into_iter().map(node_tql_row_to_json).collect()),
             }
         }
 
         #[napi]
-        pub fn prepare_tql(&self, query: String) -> napi::Result<JsPreparedTql> {
+        pub fn prepare_tql(&self, env: Env, query: String) -> napi::Result<JsPreparedTql> {
             dispatch!(self, db => db.prepare_tql(&query))
                 .map(|inner| JsPreparedTql { inner })
-                .map_err(to_napi_error)
+                .map_err(|error| to_resource_error(env, error))
         }
 
         #[napi]
         pub fn execute_prepared_tql(
             &self,
+            env: Env,
             prepared: &JsPreparedTql,
             parameters: serde_json::Value,
         ) -> napi::Result<Vec<serde_json::Value>> {
@@ -2456,7 +2543,7 @@ pub mod nodejs {
                 values.insert(
                     name.clone(),
                     crate::query::tql_prepared::TqlParamValue::from_json(value)
-                        .map_err(to_napi_error)?,
+                        .map_err(|error| to_resource_error(env, error))?,
                 );
             }
             match &self.inner {
@@ -2470,7 +2557,7 @@ pub mod nodejs {
                     .execute_prepared_tql(&prepared.inner, &values)
                     .map(|rows| rows.into_iter().map(node_tql_row_to_json).collect()),
             }
-            .map_err(to_napi_error)
+            .map_err(|error| to_resource_error(env, error))
         }
 
         /// 执行 TQL 写操作（CREATE / SET / DELETE / DETACH DELETE）
@@ -2486,8 +2573,9 @@ pub mod nodejs {
         /// db.tqlMut('MATCH (a {name: "Alice"}) DELETE a')
         /// ```
         #[napi]
-        pub fn tql_mut(&mut self, query: String) -> napi::Result<serde_json::Value> {
-            let result = dispatch!(self, mut db => db.tql_mut(&query)).map_err(to_napi_error)?;
+        pub fn tql_mut(&mut self, env: Env, query: String) -> napi::Result<serde_json::Value> {
+            let result = dispatch!(self, mut db => db.tql_mut(&query))
+                .map_err(|error| to_resource_error(env, error))?;
             Ok(serde_json::json!({
                 "affected": result.affected,
                 "createdIds": result.created_ids,
@@ -2498,42 +2586,47 @@ pub mod nodejs {
 
         /// 手动落盘
         #[napi]
-        pub fn flush(&mut self) -> napi::Result<()> {
-            dispatch!(self, mut db => db.flush()).map_err(to_napi_error)
+        pub fn flush(&mut self, env: Env) -> napi::Result<()> {
+            dispatch!(self, mut db => db.flush()).map_err(|error| to_resource_error(env, error))
         }
 
         #[napi]
         pub fn publish_generation_manifest(
             &mut self,
+            env: Env,
             generation_id: String,
         ) -> napi::Result<serde_json::Value> {
             let manifest =
                 dispatch!(self, mut db => db.publish_generation_manifest(&generation_id))
-                    .map_err(|error| napi::Error::from_reason(error.to_string()))?;
+                    .map_err(|error| to_resource_error(env, error))?;
             serde_json::to_value(manifest)
                 .map_err(|error| napi::Error::from_reason(error.to_string()))
         }
 
         /// 运行时切换 WAL 同步模式
         #[napi]
-        pub fn set_sync_mode(&mut self, mode: String) -> napi::Result<()> {
+        pub fn set_sync_mode(&mut self, env: Env, mode: String) -> napi::Result<()> {
             let sm = parse_sync_mode(&mode)?;
             dispatch!(self, mut db => db.set_sync_mode(sm))
-                .map_err(|error| napi::Error::from_reason(error.to_string()))
+                .map_err(|error| to_resource_error(env, error))
         }
 
         /// 启动后台自动压缩（每 interval_secs 秒落盘一次，默认 2 小时=7200秒）
         #[napi]
-        pub fn enable_auto_compaction(&mut self, interval_secs: Option<u32>) -> napi::Result<()> {
+        pub fn enable_auto_compaction(
+            &mut self,
+            env: Env,
+            interval_secs: Option<u32>,
+        ) -> napi::Result<()> {
             let secs = interval_secs.unwrap_or(7200);
             dispatch!(self, mut db => db.enable_auto_compaction(std::time::Duration::from_secs(secs as u64)))
-                .map_err(|error| napi::Error::from_reason(error.to_string()))
+                .map_err(|error| to_resource_error(env, error))
         }
 
         #[napi]
-        pub fn set_auto_build_quiver(&mut self, enabled: bool) -> napi::Result<()> {
+        pub fn set_auto_build_quiver(&mut self, env: Env, enabled: bool) -> napi::Result<()> {
             dispatch!(self, mut db => db.set_auto_build_quiver(enabled))
-                .map_err(|error| napi::Error::from_reason(error.to_string()))
+                .map_err(|error| to_resource_error(env, error))
         }
 
         /// 停止后台自动压缩
@@ -2549,32 +2642,39 @@ pub mod nodejs {
 
         /// 手动触发全量压实（阻塞当前线程）
         #[napi]
-        pub fn compact(&mut self) -> napi::Result<()> {
-            dispatch!(self, mut db => db.compact()).map_err(to_napi_error)
+        pub fn compact(&mut self, env: Env) -> napi::Result<()> {
+            dispatch!(self, mut db => db.compact()).map_err(|error| to_resource_error(env, error))
         }
 
         /// 为后续插入主动预留额外节点容量。
         #[napi]
-        pub fn reserve_nodes(&self, additional: f64) -> napi::Result<()> {
+        pub fn reserve_nodes(&self, env: Env, additional: f64) -> napi::Result<()> {
             let additional = parse_safe_usize(additional, "additional")?;
             dispatch!(self, db => db.reserve_nodes(additional))
-                .map_err(|error| napi::Error::from_reason(error.to_string()))
+                .map_err(|error| to_resource_error(env, error))
         }
 
         /// 设置内存上限（MiB），0 = 无限制。
         #[napi]
-        pub fn set_memory_limit(&mut self, mb: f64) -> napi::Result<()> {
+        pub fn set_memory_limit(&mut self, env: Env, mb: f64) -> napi::Result<()> {
             let mb = parse_safe_usize(mb, "memoryLimitMb")?;
             let bytes = mb
                 .checked_mul(1024 * 1024)
                 .ok_or_else(|| napi::Error::from_reason("memoryLimitMb 换算字节时溢出"))?;
-            dispatch!(self, mut db => db.set_memory_limit(bytes)).map_err(to_napi_error)
+            dispatch!(self, mut db => db.set_memory_limit(bytes))
+                .map_err(|error| to_resource_error(env, error))
         }
 
         /// 读取多个数据库共享的配额、工作线程和任务统计。
         #[napi]
         pub fn resource_stats(&self) -> napi::Result<serde_json::Value> {
             serde_json::to_value(dispatch!(self, db => db.resource_stats()))
+                .map_err(|error| napi::Error::from_reason(error.to_string()))
+        }
+
+        #[napi]
+        pub fn instance_stats(&self) -> napi::Result<serde_json::Value> {
+            serde_json::to_value(dispatch!(self, db => db.instance_stats()))
                 .map_err(|error| napi::Error::from_reason(error.to_string()))
         }
 
@@ -2607,24 +2707,24 @@ pub mod nodejs {
 
         /// 维度迁移：结构复制到新维度数据库，返回需要更新向量的节点 ID 列表
         #[napi]
-        pub fn migrate(&self, new_path: String, new_dim: u32) -> napi::Result<Vec<f64>> {
+        pub fn migrate(&self, env: Env, new_path: String, new_dim: u32) -> napi::Result<Vec<f64>> {
             match &self.inner {
                 DbBackend::F32(db) => {
                     let (_, ids) = db
                         .migrate_to(&new_path, new_dim as usize)
-                        .map_err(to_napi_error)?;
+                        .map_err(|error| to_resource_error(env, error))?;
                     Ok(ids.into_iter().map(|id| id as f64).collect())
                 }
                 DbBackend::F16(db) => {
                     let (_, ids) = db
                         .migrate_to(&new_path, new_dim as usize)
-                        .map_err(to_napi_error)?;
+                        .map_err(|error| to_resource_error(env, error))?;
                     Ok(ids.into_iter().map(|id| id as f64).collect())
                 }
                 DbBackend::U64(db) => {
                     let (_, ids) = db
                         .migrate_to(&new_path, new_dim as usize)
-                        .map_err(to_napi_error)?;
+                        .map_err(|error| to_resource_error(env, error))?;
                     Ok(ids.into_iter().map(|id| id as f64).collect())
                 }
             }
@@ -2677,10 +2777,10 @@ pub mod nodejs {
 
         /// 显式关闭数据库（落盘后释放资源）
         #[napi]
-        pub fn close(&mut self) -> napi::Result<()> {
+        pub fn close(&mut self, env: Env) -> napi::Result<()> {
             match dispatch!(self, mut db => db.close()) {
                 Ok(()) | Err(crate::error::TriviumError::DatabaseClosed) => Ok(()),
-                Err(error) => Err(to_napi_error(error)),
+                Err(error) => Err(to_resource_error(env, error)),
             }
         }
     } // impl TriviumDB

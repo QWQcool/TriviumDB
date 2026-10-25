@@ -20,6 +20,7 @@ Run locally:
 """
 
 from typing_extensions import assert_type
+from typing import Any
 
 import triviumdb
 from triviumdb import Edge, EdgeDirection, NodeView, SearchHit, Transaction, TriviumDB
@@ -44,6 +45,14 @@ assert_type(hits[0].score, float)
 assert_type(db.get(1), NodeView | None)
 assert_type(db.get_edges(1), list[Edge])
 assert_type(db.node_count(), int)
+assert_type(db.instance_stats(), dict[str, Any])
+
+# 资源异常保留内核预算字段。
+def check_resource_error(error: triviumdb.ResourceBudgetError) -> None:
+    assert_type(error.resource, str)
+    assert_type(error.requested, int)
+    assert_type(error.used, int)
+    assert_type(error.limit, int)
 
 # ── graph edge fields ──
 edge = db.get_edges(1)[0]

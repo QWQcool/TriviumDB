@@ -132,6 +132,11 @@ fn 关闭等待超时不释放正在刷盘的锁与配额() {
     pause.wait_until_arrived();
     let status = db.shutdown_status();
     assert_eq!(status.phase, ShutdownPhase::Flushing);
+    assert_eq!(
+        status.maintenance.unwrap().phase,
+        triviumdb::MaintenancePhase::Running
+    );
+    assert!(db.instance_stats().memory.is_none());
     assert!(matches!(
         Database::<f32>::open(&path, 3),
         Err(TriviumError::DatabaseLocked(_))
@@ -156,10 +161,12 @@ fn 异步关闭继承故障注入并保留可重试状态() {
     drop(failure);
     assert_eq!(db.shutdown_status().phase, ShutdownPhase::Failed);
     assert!(db.shutdown_status().last_error.is_some());
+    assert_eq!(db.shutdown_status().last_failure.unwrap().kind, "io");
     assert!(matches!(
         Database::<f32>::open(&path, 3),
         Err(TriviumError::DatabaseLocked(_))
     ));
     assert!(db.close_timeout(Duration::from_secs(5)).unwrap());
     assert_eq!(db.shutdown_status().phase, ShutdownPhase::Closed);
+    assert!(db.shutdown_status().last_failure.is_none());
 }

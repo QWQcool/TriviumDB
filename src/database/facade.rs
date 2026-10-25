@@ -119,6 +119,10 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> DatabaseRea
         self.inner.resource_stats()
     }
 
+    pub fn instance_stats(&self) -> super::InstanceStats {
+        self.inner.instance_stats()
+    }
+
     pub fn index_memory_stats(&self) -> crate::observability::IndexMemoryStats {
         self.inner.index_memory_stats()
     }

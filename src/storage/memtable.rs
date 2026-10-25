@@ -2815,6 +2815,12 @@ impl<T: VectorType> MemTable<T> {
         Ok(())
     }
 
+    pub(crate) fn reserved_database_bytes(&self) -> usize {
+        self.resource_reservation
+            .as_ref()
+            .map_or(0, |reservation| reservation.bytes())
+    }
+
     pub(crate) fn release_resource_storage(&mut self) {
         let runtime = self.resource_runtime.clone();
         *self = Self::new(self.dim);

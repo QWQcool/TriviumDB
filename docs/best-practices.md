@@ -2,19 +2,20 @@
 
 > 高效使用 TriviumDB 的实战指南：从项目集成到性能调优，从数据建模到避坑指南。
 >
-> 当前文档对应 `0.8.11` 版本。见[变更说明](changes/0.8.11.md)。
+> 本文按 `0.9.0-beta.1` 编写，见[变更说明](changes/0.9.0-beta.1.md)。
 
 ---
 
 ## 目录
 
 - [快速集成](#快速集成)
+- [多实例资源与生命周期](#多实例资源与生命周期)
 - [选择存储模式](#选择存储模式)
 - [数据建模范式](#数据建模范式)
 - [性能调优](#性能调优)
 - [可靠性保障](#可靠性保障)
 - [事务最佳实践](#事务最佳实践)
-- [Cypher 查询最佳实践](#cypher-查询最佳实践)
+- [TQL 查询最佳实践](#tql-查询最佳实践)
 - [常见使用模式](#常见使用模式)
 - [避坑指南](#避坑指南)
 - [模型升级与维度迁移](#模型升级与维度迁移)
@@ -26,7 +27,7 @@
 
 ## 快速集成
 
-同一进程运行多个 Agent 数据库时，开发中源码可使用[共享资源运行时](resource-runtime.md)统一登记数据库配额、限制活动任务和计算线程。为保存与构图留出工作区余量，并处理资源拒绝后重试；这些额度不等于容器 RSS 硬上限。
+同一进程运行多个 Agent 数据库时，使用[共享资源运行时](resource-runtime.md)统一登记数据库配额、管理活动任务和计算线程。容量规划同时计入维护工作区、mmap 驻留、页缓存及语言运行时开销。
 
 TriviumDB 核心使用极致性能的 Rust 编写，但官方已经为各类平台环境预先编译并发布了底层扩展包。**无需在本地配置和折腾任何编译工具链！**
 
@@ -69,7 +70,7 @@ cargo add triviumdb
 
 ```toml
 [dependencies]
-triviumdb = "0.8.11"
+triviumdb = "0.9.0-beta.1"
 ```
 
 ### 30 秒入门模板
@@ -94,6 +95,58 @@ with triviumdb.TriviumDB("my_app.tdb", dim=768) as db:
 
 ---
 
+## 多实例资源与生命周期
+
+### 配置共享预算
+
+为一组数据库创建一个 `ResourceRuntime`，按租户、会话或 Agent 分配实例配额。总额中预留维护保护额度，并为查询、构图、保存和快照留出工作区。
+
+```python
+from triviumdb import ResourceRuntime, TriviumDB
+
+runtime = ResourceRuntime(memory_limit_mb=256, maintenance_memory_limit_mb=32,
+                          max_threads=4, max_active_tasks=8)
+db = TriviumDB("agent-a.tdb", dim=3, memory_limit_mb=64, runtime=runtime)
+```
+
+这组配置保护 32 MiB 维护额度，前台数据库配额与工作区可使用 224 MiB。运行时按显式配额与已接入工作区核算准入；宿主按部署环境配置进程或容器限额。
+
+### 采样实例与维护状态
+
+```python
+shared = runtime.stats()
+instance = db.instance_stats()
+print("前台可用预算：", shared["available_foreground_bytes"])
+if instance["memory"] is not None:
+    print("实例估算内存：", instance["memory"]["estimated_memory_bytes"])
+print("周期维护：", instance["compaction"])
+```
+
+`memory=None` 表示写锁占用期间暂时无法采样，可在下一次轮询重试。宿主通过 `last_defer_reason` 和 `last_failure` 区分维护等待、资源拒绝、锁忙与执行故障。预算错误使用 `resource/requested/used/limit` 字段分类，释放闲置实例或调整额度后重试。
+
+### 统一退出等待期限
+
+宿主收到退出信号后，先向全部实例发出关闭请求，再按同一个截止时间等待：
+
+```python
+import time
+
+instances = [db]
+for instance in instances:
+    instance.request_shutdown()
+deadline = time.monotonic() + 5
+for instance in instances:
+    remaining_ms = max(0, int((deadline - time.monotonic()) * 1000))
+    if not instance.close_timeout(remaining_ms):
+        print("关闭进度：", instance.shutdown_status())
+```
+
+等待超时后，关闭任务继续持有资源并推进。宿主管理已有任务的完成、协作取消与进程退出期限。Node 事件循环需要继续执行时，结合 `requestShutdown()`、`closeTimeout(0)` 与定时器轮询。
+
+### 保存与迁移实例状态
+
+使用 `create_snapshot()` 捕获活动 Writer 的一致状态，校验后通过 `restore_snapshot()` 恢复到新目录。为每次快照选择新的目标目录，保留 manifest 作为该次捕获的制品清单。恢复后按原 dtype、manifest 维度和目标访问模式打开 `database.tdb`。完整示例见[关闭、快照与恢复](lifecycle-snapshots.md#创建校验恢复与打开)。
+
 ## 图查询预算与维护
 
 确定性图查询应优先调用 `reachable_detailed/reachableDetailed`，并始终检查 `truncated`。同时设置 `max_visited_nodes`、`max_results` 和 `max_edges`，避免高出度节点或环图占用无界 CPU/内存。需要结构快照时使用 `query_subgraph/querySubgraph`，不要用概率扩散检索代替确定性遍历。
@@ -115,7 +168,7 @@ TriviumDB v0.4 引入了 **Rom / Mmap 双存储引擎**，在打开数据库时�
 
 Mmap 发布前会流式备份旧主文件、向量与 marker，再写 `.publish` 撤销日志；临时空间和额外磁盘读写随旧主文件与向量文件大小增长。中断后先由 ReadWrite 打开恢复，再执行 flush/close 后迁移或复制完整提交代。保存崩溃现场时须保留 `.publish`、`.publish.0/1/2`、WAL 与相关 Payload 文件；不要手动删除恢复日志或只复制半发布的正式文件。ReadOnly/Immutable 只返回待恢复错误，不修复现场。
 
-> 表中的“工作集”由 OS PageCache 管理，不受 `memory_limit` 直接控制。数据文件大于 RAM 并不等于不可用，但均匀随机访问可能形成 Major Fault 和 SSD 队列压力。生产容量评估应同时观察 p99/p999、主缺页速率、RSS/RssFile、swap/pagefile 和磁盘 `await`，不能只看平均 QPS。
+> 表中的映射工作集由 OS PageCache 管理。均匀随机访问的性能与工作集驻留、缺页读取和 SSD 队列压力相关。生产容量评估同时采集 p99/p999、主缺页速率、RSS/RssFile、swap/pagefile、磁盘 `await` 和平均 QPS。
 
 ```rust
 use triviumdb::database::{Database, Config, StorageMode};
@@ -258,7 +311,7 @@ with triviumdb.TriviumDB(
         db.batch_insert(vectors, payloads)
 ```
 
-- `expected_nodes` 是目标总量提示，不是硬上限，也不会写入数据库文件。
+- `expected_nodes` 为本次打开提供目标总量提示，实际容量可按预算继续增长。
 - 未知最终规模时可分阶段调用 `db.reserve_nodes(200_000)`。
 - `batch_insert` 会在写 WAL 前为整批预留并全量验证，失败不会留下半批数据。
 - 容量预留只覆盖核心节点容器，不提前分配图边、文本索引、BQ 或 QuIVer。
@@ -294,7 +347,7 @@ print(db.storage_info())
 print(db.index_info())
 ```
 
-该限制不是整个进程的 RSS 硬上限。达到预算后的普通写入仍按现有策略触发 flush；显式容量预留和 QuIVer 大分配则会在操作前返回错误。
+预算覆盖本实例的内核内存估算及已接入的操作工作区。新增负载在执行前检查，超额返回结构化错误；共享运行时配额调整失败时保留原值。通过 `instance_stats()` 查看本库状态，结合 `runtime.stats()` 的余额安排后续操作。
 
 ### 搜索参数调优
 
@@ -370,8 +423,8 @@ results = db.search_advanced(
 
 - `TEXT`：限制查询文本长度和 token 数，`TOP` 不超过查询节点预算；长自然语言应先在应用侧清洗。
 - `DIVERSIFY`：候选池最多 512，先用属性或向量召回收窄池；DPP 不适合直接作用于全库。
-- `RESIDUAL`：候选最多 512、迭代最多 256；Gram 矩阵为平方复杂度，应优先减小候选池而不是提高预算。
-- `TOPICS`：候选最多 512、主题最多 32、迭代最多 256；它用于小型候选集分析，不是离线全库主题训练。
+- `RESIDUAL`：候选最多 512、迭代最多 256；Gram 矩阵为平方复杂度，可通过缩小候选池控制工作区。
+- `TOPICS`：候选最多 512、主题最多 32、迭代最多 256，适用于查询候选集内的主题分析。
 - `SA_PPR_CONFIG`：同时限制 `DEPTH` 和 `MAX_EDGES`，不要只靠最终 `LIMIT` 控制扩散成本。
 - 所有认知分数都通过一等表达式读取；不要把 `text_score`、余弦相似度和 DPP 次序分数当作天然同量纲值直接相加。
 
@@ -379,7 +432,7 @@ results = db.search_advanced(
 
 ## 可靠性保障
 
-Agent 实例在宿主收到退出信号后，可使用开发中新增的[可控关闭协议](lifecycle-snapshots.md)停止准入并排空已有任务；超时只结束等待。需要保存和迁移状态时，应使用独立快照目录，校验后恢复到新目录，再显式打开。
+Agent 实例在宿主收到退出信号后，通过[受控关闭协议](lifecycle-snapshots.md)停止准入并排空已有任务。宿主通过状态采样和限时等待管理退出流程；快照、校验与恢复接口负责实例状态捕获和目录迁移。
 
 ### 数据安全等级选择
 
@@ -447,7 +500,7 @@ RuntimeError: Database 'data.tdb' is already opened by another process.
 
 相比引入重型的跨进程内存通信与多版本控制架构，TriviumDB 选择 Writer 全文件级独占锁定：同一数据库同一时刻只允许一个 Writer。ReadOnly 使用共享锁并允许多个独立 Reader 并发；Immutable 用于经过 manifest 校验、生命周期内绝不原地修改的不可变 generation。
 
-同一 Python 或 Node 数据库实例被多个线程调用时，v0.8.7 已不会再暴露 `Already borrowed` 之类的绑定层借用冲突，但这**不等于支持真正的并行多写者提交**。调用方仍应把所有写操作汇聚到单一写队列，并在应用层用 `Lock` / `Mutex` / actor / 单消费者任务进行串行化；读查询可以交给 ReadOnly/Immutable Reader 并发执行。不要把“多个线程调用成功”误解为多个 Writer 能并行修改同一数据库。
+同一 Python 或 Node 数据库实例采用单写多读模型。调用方将写操作汇聚到单一队列，通过 `Lock` / `Mutex` / actor / 单消费者任务串行执行；ReadOnly/Immutable Reader 负责并发查询。
 
 **如果确实存在多端读写或高并发共享的需求，请遵循嵌入式数据库的最佳实践：多线程调度、读写仲裁、锁的抢占等复杂机制，应由外部业务逻辑或应用服务进行设计（如通过单例模式封装连接池，或在应用程序外层架设统一的 RESTful API 网关代理）。存储引擎本身的职责是坚守绝对的数据一致性边界。**
 
@@ -546,6 +599,8 @@ db.tql_mut('MATCH (a {type: "temp"}) DETACH DELETE a')
 
 ---
 
+
+## 常见使用模式
 
 ### 模式一：AI Agent 长期记忆
 
@@ -977,7 +1032,7 @@ let (results, ctx) = db.search_hybrid_with_context(
 
 ## 架构边界认知与规避策略
 
-TriviumDB 是一款经过深度取舍、专为 AI 嵌入式记忆场景设计的存储引擎，而不是通用数据库。理解下面这些固有的架构边界，并采用合适的应用层手段对冲，是生产环境稳定运行的前提。
+TriviumDB 面向 AI 应用的进程内记忆存储。下面按内存、索引、查询、WAL 与 Payload 类型组织容量规划和使用方法。
 
 ---
 
@@ -1019,7 +1074,7 @@ db = triviumdb.TriviumDB(
 
 Rust 使用 `Config.payload_cache_bytes` 和 `Config.payload_cache_entry_bytes`；Node.js 使用 `payloadCacheMb` 和 `payloadCacheEntryMb`。
 
-3. **使用 `set_memory_limit()` 设置内核堆预算**。超限时引擎会 fail-closed 拒绝新增负载，不会依靠频繁全量 flush 伪装成 RSS 上限；该预算不包含 mmap 驻留页和 OS PageCache：
+3. **使用 `set_memory_limit()` 设置内核预算**。新增负载在执行前检查，超额返回错误。结合共享运行时统计、mmap 驻留与页缓存观测配置整体进程容量：
 
 ```python
 db.set_memory_limit(mb=512)
@@ -1061,11 +1116,11 @@ node = db.get(known_id)
 
 ### 三、TQL：自由 DIY 的三模混合查询管线
 
-TQL 的核心价值不是“兼容另一种查询语言”，而是允许开发者围绕自己的 RAG、Agent、知识图谱、权限链、推荐或风控语义，自由组装向量、属性、业务图、图算法、路径、集合、迭代、聚合与重排。它不是只能选择 `vector-first` 或 `graph-first` 的固定模板：同一查询可以生成多个命名 NodeSet，逐阶段过滤、扩展、求交、寻路、计算图分数并再次排名。
+TQL 支持开发者围绕 RAG、Agent、知识图谱、权限链、推荐或风控语义，组合向量、属性、业务图、图算法、路径、集合、迭代、聚合与重排。同一查询可以生成多个命名 NodeSet，逐阶段过滤、扩展、求交、寻路、计算图分数并再次排名。
 
-TQL 已支持 OPTIONAL MATCH、WITH 管线、聚合、图算法、Path/Shortest、集合代数、Prepared 参数和统计感知 Cascades。它不承诺完整 SQL、Cypher 或 GQL 语法兼容；定位是把这些能力作为同一嵌入式执行器中的可组合算子，同时用作用域检查、预算和确定性约束守住自由编排的工程边界。
+TQL 支持 OPTIONAL MATCH、WITH 管线、聚合、图算法、Path/Shortest、集合代数、Prepared 参数和统计感知 Cascades。语法和算子以 [TQL 参考](tql-reference.md) 为准，由同一嵌入式执行器完成作用域检查、预算分配和确定性执行。
 
-优化器是确定性、有界、统计感知且成本驱动的 Cascades，不宣称数学意义上的全局最优。复杂查询应检查 EXPLAIN 的物理算子、预计行数、预算切片和边界语义。
+优化器采用确定性、有界、统计感知且成本驱动的 Cascades。复杂查询通过 EXPLAIN 查看物理算子、预计行数、预算切片和执行语义。
 
 ```python
 # TriviumDB TQL 的正确用法：向量找锚，TQL 做图谱扩散导航
@@ -1097,9 +1152,8 @@ results = db.search_advanced(
 这个问题在现有机制下**完全可以消除**，关键在于让 WAL 不要堆积太多：
 
 ```python
-# ✅ 方案 A：默认开启的后台自动压实（推荐）
-# 默认每 2 小时自动落盘，WAL 记录永远保持在可控范围
-# 若写入量极高，可调整 db.enable_auto_compaction(interval_secs=1800)
+# 方案 A：登记周期压实，按写入速率选择间隔
+db.enable_auto_compaction(interval_secs=60)
 
 # ✅ 方案 B：对延迟敏感的服务（关闭自动，在低峰期手动触发）
 db.disable_auto_compaction()
@@ -1112,9 +1166,9 @@ db.set_memory_limit(mb=256)  # 超限拒绝新增负载，由宿主管理额度
 
 | 场景 | 推荐方案 | 启动 WAL 回放量 |
 |------|----------|----------------|
-| 实时 AI 服务 | 方案 A（60s 自动压实） | ≤ 60 秒写入量 |
+| 实时 AI 服务 | 方案 A（60s 自动压实） | 由周期、执行耗时及维护延期情况共同决定 |
 | 批量导入 + 夜间维护 | 方案 B（手动 compact） | 几乎为零 |
-| 持续内存受限写入 | 方案 C（内存上限触发） | 极小 |
+| 持续内存受限写入 | 方案 C 配合周期或手动持久化 | 由宿主选择的持久化周期决定 |
 
 ---
 
@@ -1124,7 +1178,7 @@ db.set_memory_limit(mb=256)  # 超限拒绝新增负载，由宿主管理额度
 
 **规避策略**：
 
-Schema 约束的正确位置是**应用层调用 API 之前**，而不是数据库引擎层。建议定义一套简单的插入辅助函数作为统一入口，在其中强制类型校验：
+应用在调用写入 API 前校验业务 Payload 字段的类型。可通过统一的插入辅助函数执行校验：
 
 ```python
 from typing import Any
@@ -1145,7 +1199,7 @@ def insert_memory(db, vec: list[float], text: str, metadata: dict[str, Any] = No
             payload[k] = v
     return db.insert(vec, payload)
 
-# 所有写入都通过这个统一入口，而不是直接调用 db.insert
+# 业务写入统一通过该入口校验
 node_id = insert_memory(db, embedding, "今天和小红喝了咖啡", {"importance": 0.8})
 ```
 

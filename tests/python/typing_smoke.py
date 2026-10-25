@@ -15,6 +15,7 @@ hits: list[SearchHit] = db.search_advanced(
 transaction: Transaction = db.transaction()
 transaction.rollback()
 state: dict[str, Any] = db.shutdown_status()
+instance: dict[str, Any] = db.instance_stats()
 manifest: dict[str, Any] = db.create_snapshot("typing-snapshot", "typing-generation")
 verified: dict[str, Any] = verify_snapshot("typing-snapshot", runtime)
 restored: dict[str, Any] = restore_snapshot("typing-snapshot", "typing-restored", runtime)

@@ -140,7 +140,7 @@ for _ret, _quals in {
     "list[QueryRow]": "TriviumDB.tql TriviumDB.execute_prepared_tql",
     "list[str]": "PreparedTql.parameter_names",
     "PreparedTql": "TriviumDB.prepare_tql",
-    "dict[str, Any]": "verify_snapshot restore_snapshot TriviumDB.create_snapshot TriviumDB.request_shutdown TriviumDB.shutdown_status ResourceRuntime.stats TriviumDB.resource_stats TriviumDB.tql_mut TriviumDB.leiden_cluster TriviumDB.graph_stats "
+    "dict[str, Any]": "verify_snapshot restore_snapshot TriviumDB.create_snapshot TriviumDB.request_shutdown TriviumDB.shutdown_status ResourceRuntime.stats TriviumDB.resource_stats TriviumDB.instance_stats TriviumDB.tql_mut TriviumDB.leiden_cluster TriviumDB.graph_stats "
                       "TriviumDB.index_info TriviumDB.storage_info "
                       "TriviumDB.validate_graph TriviumDB.repair_graph_indexes "
                       "TriviumDB.reachable_detailed TriviumDB.query_subgraph",
@@ -248,7 +248,9 @@ def build_stub(mod) -> str:
         "__all__ = [\n" + "".join(f'    "{n}",\n'
                                   for n in EXCEPTIONS + CLASS_ORDER + FUNCTIONS) + "]",
         "# Exceptions",
-        *(f"class {e}({getattr(mod, e).__bases__[0].__name__}): ..." for e in EXCEPTIONS),
+        *(f"class {e}({getattr(mod, e).__bases__[0].__name__}):"
+          + ("\n    resource: str\n    requested: int\n    used: int\n    limit: int"
+             if e == "ResourceBudgetError" else " ...") for e in EXCEPTIONS),
         "# Classes",
         *(render_class(mod, c) for c in CLASS_ORDER),
         "# Functions",

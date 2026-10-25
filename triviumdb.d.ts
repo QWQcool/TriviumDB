@@ -336,6 +336,50 @@ export interface ResourceStats {
   maintenance_jobs: number;
   maintenance_completed: number;
   maintenance_failed: number;
+  /** 账本余额；null 表示不限。两个内存余额共享总额，不能相加。 */
+  available_foreground_bytes: number | null;
+  available_maintenance_bytes: number | null;
+  available_task_slots: number | null;
+}
+
+/** QueueFull 错误上的附加字段；内存单位为字节，任务和线程单位为个数。 */
+export interface ResourceBudgetDetails {
+  resource: string;
+  requested: number;
+  used: number;
+  limit: number;
+}
+
+export interface ResourceBudgetError extends Error, ResourceBudgetDetails {
+  code: 'QueueFull';
+}
+
+export interface ResourceFailure {
+  kind: 'resource_budget' | 'io' | 'capacity' | 'database_closed' | 'shutdown' | 'other';
+  message: string;
+  budget: ResourceBudgetDetails | null;
+}
+
+export interface MaintenanceStatus {
+  phase: 'scheduled' | 'running' | 'stopped';
+  deferred_runs: number;
+  completed_runs: number;
+  failed_runs: number;
+  last_defer_reason: 'not_ready' | 'resource_budget' | 'database_busy' | null;
+  last_failure: ResourceFailure | null;
+}
+
+export interface InstanceStats {
+  database_path: string;
+  memory_limit_bytes: number;
+  /** 写锁繁忙时为 null；已关闭实例的预留配额和节点数为 0。 */
+  memory: {
+    reserved_database_bytes: number;
+    estimated_memory_bytes: number;
+    node_count: number;
+  } | null;
+  shutdown: ShutdownStatus;
+  compaction: MaintenanceStatus | null;
 }
 
 /** 多实例共享的配额与计算运行时；额度不等于进程 RSS。 */
@@ -348,6 +392,8 @@ export interface ShutdownStatus {
   phase: 'open' | 'draining' | 'flushing' | 'failed' | 'closed';
   active_operations: number;
   last_error: string | null;
+  last_failure: ResourceFailure | null;
+  maintenance: MaintenanceStatus | null;
 }
 
 export interface SnapshotManifest {
@@ -816,6 +862,8 @@ export class TriviumDB {
   estimatedMemory(): number;
   /** 所属共享运行时的资源统计；资源拒绝的 error.code 为 QueueFull */
   resourceStats(): ResourceStats;
+  /** 本实例诊断；不获取任务名额，也不等待 MemTable 写锁。 */
+  instanceStats(): InstanceStats;
   requestShutdown(): ShutdownStatus;
   shutdownStatus(): ShutdownStatus;
   /** 超时返回 false；后台继续持有数据和文件锁，true 表示关闭已完成 */

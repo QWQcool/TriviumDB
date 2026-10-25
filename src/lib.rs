@@ -32,7 +32,10 @@ pub mod cognitive;
 pub mod bindings;
 
 pub use database::{BatchSearchConfig, EdgeDirection, SearchConfig};
-pub use database::{Database, DatabaseReader, DatabaseWriter, ShutdownPhase, ShutdownStatus};
+pub use database::{
+    Database, DatabaseReader, DatabaseWriter, InstanceMemoryStats, InstanceStats, ShutdownPhase,
+    ShutdownStatus,
+};
 pub use error::{Result, TriviumError};
 pub use filter::Filter;
 pub use graph::reachability::{
@@ -41,7 +44,10 @@ pub use graph::reachability::{
 };
 pub use hook::{CompositeHook, FfiHook, HookContext, NoopHook, SearchHook};
 pub use node::{Edge, GroupedSearchResult, NodeId, NodeView, SearchHit};
-pub use resources::{ResourceLimits, ResourceRuntime, ResourceStats};
+pub use resources::{
+    ResourceBudgetDetails, ResourceFailure, ResourceLimits, ResourceRuntime, ResourceStats,
+};
+pub use storage::compaction::{MaintenanceDeferReason, MaintenancePhase, MaintenanceStatus};
 pub use storage::generation::{CurrentGeneration, GenerationReader, GenerationStore};
 pub use storage::memtable::{GraphIntegrityReport, GraphRepairReport, GraphStats};
 pub use tsng::{

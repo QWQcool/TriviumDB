@@ -81,31 +81,55 @@ def run_resource_contract(root: str) -> None:
                 auto_build_quiver=False, runtime=runtime,
             )
 
+        def check_instance(db, phase):
+            stats = db.instance_stats()
+            expected = case["instances"][phase]
+            assert stats["memory_limit_bytes"] == expected["memory_limit_bytes"]
+            assert stats["memory"]["reserved_database_bytes"] == expected["reserved_database_bytes"]
+            assert stats["memory"]["node_count"] == expected["node_count"]
+            assert stats["shutdown"]["phase"] == expected["phase"]
+            assert stats["shutdown"]["active_operations"] == 0
+            assert stats["shutdown"]["last_failure"] is None
+            assert os.path.isabs(stats["database_path"])
+
+        def check_budget(error, phase):
+            for key, value in case["budget_errors"][phase].items():
+                assert getattr(error, key) == value, (phase, key)
+
         first = open_db("first", case["database"]["memory_limit_mb"])
         second = open_db("second", case["database"]["memory_limit_mb"])
         check("opened")
+        check_instance(first, "opened")
+        check_instance(second, "opened")
         try:
             open_db("rejected", case["overbook_mb"])
-        except triviumdb.ResourceBudgetError:
-            pass
+        except triviumdb.ResourceBudgetError as error:
+            check_budget(error, "open")
         else:
             raise AssertionError("超额开库必须返回资源异常")
         assert not os.path.exists(os.path.join(root, f"resource-{dtype}-rejected.tdb"))
         first.set_memory_limit(case["resize_mb"])
         check("resized")
+        check_instance(first, "resized")
         try:
             second.set_memory_limit(case["failed_resize_mb"])
-        except triviumdb.ResourceBudgetError:
-            pass
+        except triviumdb.ResourceBudgetError as error:
+            check_budget(error, "resize")
         else:
             raise AssertionError("扩容失败必须保留原配额")
         check("resized")
+        check_instance(second, "opened")
         first.set_memory_limit(case["database"]["memory_limit_mb"])
         first.insert_with_id(101, case["vector"], {"owner": "first"})
         second.insert_with_id(202, case["vector"], {"owner": "second"})
         assert first.search_exact(case["vector"], 1)[0].id == 101
         assert second.search_exact(case["vector"], 1)[0].id == 202
+        first.enable_auto_compaction(3600)
+        assert first.instance_stats()["compaction"]["phase"] == "scheduled"
+        first.disable_auto_compaction()
+        assert first.instance_stats()["compaction"] is None
         first.close()
+        check_instance(first, "closed")
         check("closed_one")
         replacement = open_db("replacement", case["replacement_mb"])
         check("replaced")
@@ -113,6 +137,9 @@ def run_resource_contract(root: str) -> None:
         replacement.close()
         check("closed_all")
         assert runtime.stats()["peak_reserved_bytes"] <= case["runtime"]["memory_limit_mb"] * mb
+    unlimited = triviumdb.ResourceRuntime().stats()
+    for key in ["available_foreground_bytes", "available_maintenance_bytes", "available_task_slots"]:
+        assert unlimited[key] is None
     for options in [{"max_threads": 65}, {"max_threads": -1}]:
         try:
             triviumdb.ResourceRuntime(**options)
@@ -184,11 +211,38 @@ def run_shared_contract(root: str) -> None:
         raise AssertionError("关闭后的文本构建错误必须透传")
 
 
+def run_query_budget_contract(root: str) -> None:
+    for dtype in ["f32", "f16", "u64"]:
+        runtime = triviumdb.ResourceRuntime(memory_limit_mb=40, maintenance_memory_limit_mb=8,
+            max_threads=2, max_active_tasks=1)
+        db = triviumdb.TriviumDB(os.path.join(root, f"query-budget-{dtype}.tdb"), dim=3,
+            dtype=dtype, memory_limit_mb=8, auto_build_quiver=False, runtime=runtime)
+        try:
+            db.insert_with_id(1, [1, 2, 3], {})
+            db.set_memory_limit(32)
+            for operation in [lambda: db.search_exact([1, 2, 3], 1),
+                              lambda: db.search_batch([[1, 2, 3]], top_k=1)]:
+                try:
+                    operation()
+                except triviumdb.ResourceBudgetError as error:
+                    assert error.resource == "memory_bytes"
+                    assert error.requested > 0
+                    assert error.used == error.limit == 32 * 1024 * 1024
+                else:
+                    raise AssertionError("查询工作区必须在预算耗尽时被拒绝")
+            assert runtime.stats()["active_tasks"] == 0
+            db.set_memory_limit(8)
+            assert db.search_batch([[1, 2, 3]], top_k=1)[0][0].id == 1
+        finally:
+            db.close()
+
+
 def main() -> None:
     with tempfile.TemporaryDirectory(prefix="triviumdb-python-public-api-") as root:
         run_lifecycle_contract(root)
         run_resource_contract(root)
         run_shared_contract(root)
+        run_query_budget_contract(root)
         path = os.path.join(root, "api.tdb")
         db = triviumdb.TriviumDB(path, dim=2)
         db.insert_with_id(1, [1.0, 0.0], {"kind": "a", "score": 1, "tenant": "t", "region": "r"})

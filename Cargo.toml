@@ -8,7 +8,7 @@ resolver = "2"
 
 [package]
 name = "triviumdb"
-version = "0.8.11"
+version = "0.9.0-beta.1"
 edition = "2024"
 authors = ["YoKONCy <2752026184@qq.com>"]
 description = "A high-performance memory-mmap hybrid search engine built for AI, combining dense vector, sparse text, graph relations, and JSON metadata."
@@ -18,7 +18,7 @@ keywords = ["vector-database", "graph-database", "hybrid-search", "rag", "mmap"]
 categories = ["database", "data-structures", "algorithms"]
 readme = "README.md"
 autobenches = false
-exclude = ["docs/TEMP-todo/**"]
+exclude = ["docs/TEMP-TODO/**"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]

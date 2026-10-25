@@ -11,7 +11,7 @@
 pub mod config;
 pub mod facade;
 mod lifecycle;
-pub use lifecycle::{ShutdownPhase, ShutdownStatus};
+pub use lifecycle::{InstanceMemoryStats, InstanceStats, ShutdownPhase, ShutdownStatus};
 pub(crate) mod pipeline;
 pub mod transaction;
 
@@ -277,6 +277,7 @@ struct LifecycleState {
     shutdown_phase: ShutdownPhase,
     shutdown_error: Option<TriviumError>,
     shutdown_last_error: Option<String>,
+    shutdown_last_failure: Option<crate::resources::ResourceFailure>,
     shutdown_job: Option<crate::storage::compaction::ScheduledMaintenance>,
 }
 
@@ -725,6 +726,7 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                     shutdown_phase: ShutdownPhase::Open,
                     shutdown_error: None,
                     shutdown_last_error: None,
+                    shutdown_last_failure: None,
                     shutdown_job: None,
                 }),
                 Condvar::new(),
@@ -2809,6 +2811,8 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
             }
             state.lifecycle = DatabaseLifecycle::Closing;
             state.shutdown_phase = ShutdownPhase::Draining;
+            state.shutdown_last_error = None;
+            state.shutdown_last_failure = None;
         }
 
         self.compaction.take();
@@ -2830,6 +2834,9 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                 let mut state = lock_or_recover(&self.lifecycle.0);
                 state.lifecycle = DatabaseLifecycle::Open;
                 state.shutdown_phase = ShutdownPhase::Open;
+                state.shutdown_last_error = Some(error.to_string());
+                state.shutdown_last_failure =
+                    Some(crate::resources::ResourceFailure::from_error(&error));
                 self.lifecycle.1.notify_all();
                 return Err(error);
             }
@@ -2842,6 +2849,8 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
             state.lifecycle = DatabaseLifecycle::Open;
             state.shutdown_phase = ShutdownPhase::Open;
             state.shutdown_last_error = Some(error.to_string());
+            state.shutdown_last_failure =
+                Some(crate::resources::ResourceFailure::from_error(&error));
             self.lifecycle.1.notify_all();
             return Err(error);
         }

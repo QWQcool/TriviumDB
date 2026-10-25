@@ -49,6 +49,65 @@ pub struct ResourceStats {
     pub maintenance_jobs: usize,
     pub maintenance_completed: u64,
     pub maintenance_failed: u64,
+    /// 当前账本可准入的前台字节；None 表示未设置共享内存上限。
+    pub available_foreground_bytes: Option<usize>,
+    /// 当前账本可准入的维护字节；与前台余额共享总预算，不能相加。
+    pub available_maintenance_bytes: Option<usize>,
+    pub available_task_slots: Option<usize>,
+}
+
+/// 一次预算拒绝的结构化字段，单位由 resource 标识。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ResourceBudgetDetails {
+    pub resource: &'static str,
+    pub requested: usize,
+    pub used: usize,
+    pub limit: usize,
+}
+
+impl ResourceBudgetDetails {
+    pub(crate) fn from_error(error: &TriviumError) -> Option<Self> {
+        match error {
+            TriviumError::ResourceBudgetExceeded {
+                resource,
+                requested,
+                used,
+                limit,
+            } => Some(Self {
+                resource,
+                requested: *requested,
+                used: *used,
+                limit: *limit,
+            }),
+            _ => None,
+        }
+    }
+}
+
+/// 后台故障的可序列化诊断；宿主按 kind 和 budget 分类，不解析 message。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ResourceFailure {
+    pub kind: &'static str,
+    pub message: String,
+    pub budget: Option<ResourceBudgetDetails>,
+}
+
+impl ResourceFailure {
+    pub(crate) fn from_error(error: &TriviumError) -> Self {
+        let kind = match error {
+            TriviumError::ResourceBudgetExceeded { .. } => "resource_budget",
+            TriviumError::Io(_) => "io",
+            TriviumError::CapacityAllocationFailed { .. } => "capacity",
+            TriviumError::DatabaseClosed => "database_closed",
+            TriviumError::ShutdownFailed { .. } => "shutdown",
+            _ => "other",
+        };
+        Self {
+            kind,
+            message: error.to_string(),
+            budget: ResourceBudgetDetails::from_error(error),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -171,6 +230,9 @@ impl ResourceRuntime {
 
     pub fn stats(&self) -> ResourceStats {
         let state = lock(&self.0.state);
+        let foreground = state.database_bytes.saturating_add(state.workspace_bytes);
+        let active_tasks = state.tasks.len() - state.maintenance_tasks.len();
+        let memory_limit = self.0.limits.memory_limit;
         ResourceStats {
             memory_limit: self.0.limits.memory_limit,
             maintenance_memory_limit: self.0.limits.maintenance_memory_limit,
@@ -193,6 +255,23 @@ impl ResourceRuntime {
             maintenance_jobs: state.maintenance_jobs,
             maintenance_completed: state.maintenance_completed,
             maintenance_failed: state.maintenance_failed,
+            available_foreground_bytes: (memory_limit > 0).then(|| {
+                memory_limit
+                    .saturating_sub(
+                        self.0
+                            .limits
+                            .maintenance_memory_limit
+                            .max(state.maintenance_bytes),
+                    )
+                    .saturating_sub(foreground)
+            }),
+            available_maintenance_bytes: (memory_limit > 0).then(|| {
+                memory_limit
+                    .saturating_sub(foreground)
+                    .saturating_sub(state.maintenance_bytes)
+            }),
+            available_task_slots: (self.0.limits.max_active_tasks > 0)
+                .then(|| self.0.limits.max_active_tasks.saturating_sub(active_tasks)),
         }
     }
 
@@ -535,6 +614,10 @@ pub(crate) struct DatabaseReservation {
 }
 
 impl DatabaseReservation {
+    pub(crate) fn bytes(&self) -> usize {
+        self.bytes.load(Ordering::Relaxed)
+    }
+
     pub(crate) fn resize(&self, bytes: usize) -> Result<()> {
         if self.runtime.0.limits.memory_limit > 0 && bytes == 0 {
             return Err(TriviumError::InvalidInput(
@@ -688,7 +771,10 @@ mod tests {
         })
         .unwrap();
         let _database = runtime.reserve_database(448).unwrap();
+        assert_eq!(runtime.stats().available_foreground_bytes, Some(0));
+        assert_eq!(runtime.stats().available_maintenance_bytes, Some(64));
         let _foreground = runtime.enter_task().unwrap();
+        assert_eq!(runtime.stats().available_task_slots, Some(0));
         assert!(runtime.reserve_workspace(1).is_err());
         let maintenance = runtime.enter_maintenance_task().unwrap();
         let workspace = runtime.reserve_maintenance_workspace(64).unwrap();
@@ -696,10 +782,21 @@ mod tests {
         assert_eq!(runtime.stats().active_tasks, 1);
         assert_eq!(runtime.stats().active_maintenance_tasks, 1);
         assert_eq!(runtime.stats().peak_reserved_bytes, 512);
+        assert_eq!(runtime.stats().available_maintenance_bytes, Some(0));
         drop(workspace);
         drop(maintenance);
         assert_eq!(runtime.stats().reserved_maintenance_bytes, 0);
         assert_eq!(runtime.stats().active_maintenance_tasks, 0);
+        assert_eq!(runtime.stats().available_maintenance_bytes, Some(64));
+    }
+
+    #[test]
+    fn 无上限余额使用空值而不是伪造零余额() {
+        let runtime = ResourceRuntime::new(ResourceLimits::default()).unwrap();
+        let stats = runtime.stats();
+        assert_eq!(stats.available_foreground_bytes, None);
+        assert_eq!(stats.available_maintenance_bytes, None);
+        assert_eq!(stats.available_task_slots, None);
     }
 
     #[test]

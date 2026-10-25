@@ -17,6 +17,36 @@ fn check(stats: ResourceStats, expected: &Value) {
     assert!(actual["peak_worker_threads"].as_u64().unwrap() <= 2);
 }
 
+fn check_instance<T: VectorType>(db: &Database<T>, expected: &Value) {
+    let stats = serde_json::to_value(db.instance_stats()).unwrap();
+    assert_eq!(stats["memory_limit_bytes"], expected["memory_limit_bytes"]);
+    assert_eq!(
+        stats["memory"]["reserved_database_bytes"],
+        expected["reserved_database_bytes"]
+    );
+    assert_eq!(stats["memory"]["node_count"], expected["node_count"]);
+    assert_eq!(stats["shutdown"]["phase"], expected["phase"]);
+    assert_eq!(stats["shutdown"]["active_operations"], 0);
+    assert_eq!(stats["shutdown"]["last_failure"], Value::Null);
+    assert!(std::path::Path::new(stats["database_path"].as_str().unwrap()).is_absolute());
+}
+
+fn check_budget(error: TriviumError, expected: &Value) {
+    let TriviumError::ResourceBudgetExceeded {
+        resource,
+        requested,
+        used,
+        limit,
+    } = error
+    else {
+        panic!("应返回预算拒绝：{error}");
+    };
+    assert_eq!(
+        json!({"resource":resource,"requested":requested,"used":used,"limit":limit}),
+        *expected
+    );
+}
+
 fn run<T: VectorType + serde::Serialize + serde::de::DeserializeOwned>(case: &Value, dtype: &str) {
     let dir = std::env::temp_dir().join(format!(
         "triviumdb_resource_contract_{}_{dtype}",
@@ -64,17 +94,17 @@ fn run<T: VectorType + serde::Serialize + serde::de::DeserializeOwned>(case: &Va
     )
     .unwrap();
     check(runtime.stats(), &case["expected"]["opened"]);
-    assert!(matches!(
-        Database::<T>::open_with_runtime(
-            &path("rejected"),
-            config(&case["overbook_mb"]),
-            runtime.clone()
-        ),
-        Err(TriviumError::ResourceBudgetExceeded {
-            resource: "memory_bytes",
-            ..
-        })
-    ));
+    check_instance(&first, &case["instances"]["opened"]);
+    check_instance(&second, &case["instances"]["opened"]);
+    let error = match Database::<T>::open_with_runtime(
+        &path("rejected"),
+        config(&case["overbook_mb"]),
+        runtime.clone(),
+    ) {
+        Err(error) => error,
+        Ok(_) => panic!("超额打开必须失败"),
+    };
+    check_budget(error, &case["budget_errors"]["open"]);
     assert!(!std::path::Path::new(&path("rejected")).exists());
     assert!(!std::path::Path::new(&format!("{}.lock", path("rejected"))).exists());
     check(runtime.stats(), &case["expected"]["opened"]);
@@ -82,10 +112,14 @@ fn run<T: VectorType + serde::Serialize + serde::de::DeserializeOwned>(case: &Va
         .set_memory_limit(case["resize_mb"].as_u64().unwrap() as usize * mb)
         .unwrap();
     check(runtime.stats(), &case["expected"]["resized"]);
-    assert!(matches!(
-        second.set_memory_limit(case["failed_resize_mb"].as_u64().unwrap() as usize * mb),
-        Err(TriviumError::ResourceBudgetExceeded { .. })
-    ));
+    check_instance(&first, &case["instances"]["resized"]);
+    check_budget(
+        second
+            .set_memory_limit(case["failed_resize_mb"].as_u64().unwrap() as usize * mb)
+            .unwrap_err(),
+        &case["budget_errors"]["resize"],
+    );
+    check_instance(&second, &case["instances"]["opened"]);
     check(runtime.stats(), &case["expected"]["resized"]);
     first
         .set_memory_limit(case["database"]["memory_limit_mb"].as_u64().unwrap() as usize * mb)
@@ -98,7 +132,17 @@ fn run<T: VectorType + serde::Serialize + serde::de::DeserializeOwned>(case: &Va
         .unwrap();
     assert_eq!(first.search_exact(&vector, 1).unwrap()[0].id, 101);
     assert_eq!(second.search_exact(&vector, 1).unwrap()[0].id, 202);
+    first
+        .enable_auto_compaction(std::time::Duration::from_secs(3600))
+        .unwrap();
+    assert_eq!(
+        first.instance_stats().compaction.unwrap().phase,
+        triviumdb::MaintenancePhase::Scheduled
+    );
+    first.disable_auto_compaction();
+    assert!(first.instance_stats().compaction.is_none());
     first.close().unwrap();
+    check_instance(&first, &case["instances"]["closed"]);
     check(runtime.stats(), &case["expected"]["closed_one"]);
     assert!(matches!(
         first.insert(&vector, json!({})),
