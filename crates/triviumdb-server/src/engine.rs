@@ -1905,7 +1905,7 @@ mod tests {
                 .insert_with_id(id, &[id as f32], serde_json::Value::Null)
                 .unwrap();
         }
-        database.set_memory_limit(1);
+        database.set_memory_limit(1).unwrap();
         let error = database
             .quiver_build_handle()
             .prepare_auto_build()

@@ -303,7 +303,115 @@ export interface JsSearchWithContextResult {
  * TriviumDB 实例。
  * 读写实例使用排他锁；多个只读实例可使用共享锁并发打开。
  */
+export interface ResourceLimits {
+  /** 总预算内保护的维护额度（MiB），0 自动保护总预算的八分之一 */
+  maintenanceMemoryLimitMb?: number;
+  /** 数据库配额与临时工作区总额（MiB），0 表示不限 */
+  memoryLimitMb?: number;
+  /** 工作线程总上限，0 自动，最大 64 */
+  maxThreads?: number;
+  /** 同时准入的根任务数，0 表示不限 */
+  maxActiveTasks?: number;
+}
+
+export interface ResourceStats {
+  maintenance_memory_limit: number;
+  reserved_maintenance_bytes: number;
+  active_maintenance_tasks: number;
+  memory_limit: number;
+  reserved_database_bytes: number;
+  reserved_workspace_bytes: number;
+  peak_reserved_bytes: number;
+  attached_databases: number;
+  max_threads: number;
+  allocated_worker_threads: number;
+  live_worker_threads: number;
+  peak_worker_threads: number;
+  max_active_tasks: number;
+  active_tasks: number;
+  peak_active_tasks: number;
+  rejected_memory_requests: number;
+  rejected_task_requests: number;
+  rejected_thread_requests: number;
+  maintenance_jobs: number;
+  maintenance_completed: number;
+  maintenance_failed: number;
+  /** 账本余额；null 表示不限。两个内存余额共享总额，不能相加。 */
+  available_foreground_bytes: number | null;
+  available_maintenance_bytes: number | null;
+  available_task_slots: number | null;
+}
+
+/** QueueFull 错误上的附加字段；内存单位为字节，任务和线程单位为个数。 */
+export interface ResourceBudgetDetails {
+  resource: string;
+  requested: number;
+  used: number;
+  limit: number;
+}
+
+export interface ResourceBudgetError extends Error, ResourceBudgetDetails {
+  code: 'QueueFull';
+}
+
+export interface ResourceFailure {
+  kind: 'resource_budget' | 'io' | 'capacity' | 'database_closed' | 'shutdown' | 'other';
+  message: string;
+  budget: ResourceBudgetDetails | null;
+}
+
+export interface MaintenanceStatus {
+  phase: 'scheduled' | 'running' | 'stopped';
+  deferred_runs: number;
+  completed_runs: number;
+  failed_runs: number;
+  last_defer_reason: 'not_ready' | 'resource_budget' | 'database_busy' | null;
+  last_failure: ResourceFailure | null;
+}
+
+export interface InstanceStats {
+  database_path: string;
+  memory_limit_bytes: number;
+  /** 写锁繁忙时为 null；已关闭实例的预留配额和节点数为 0。 */
+  memory: {
+    reserved_database_bytes: number;
+    estimated_memory_bytes: number;
+    node_count: number;
+  } | null;
+  shutdown: ShutdownStatus;
+  compaction: MaintenanceStatus | null;
+}
+
+/** 多实例共享的配额与计算运行时；额度不等于进程 RSS。 */
+export class ResourceRuntime {
+  constructor(options?: ResourceLimits);
+  stats(): ResourceStats;
+}
+
+export interface ShutdownStatus {
+  phase: 'open' | 'draining' | 'flushing' | 'failed' | 'closed';
+  active_operations: number;
+  last_error: string | null;
+  last_failure: ResourceFailure | null;
+  maintenance: MaintenanceStatus | null;
+}
+
+export interface SnapshotManifest {
+  format_version: number;
+  generation_id: string;
+  dtype: string;
+  dim: number;
+  node_count: number;
+  complete: boolean;
+  files: Array<{ suffix: string; size: number; crc32: number }>;
+}
+
+export function verifySnapshot(directory: string, runtime?: ResourceRuntime): SnapshotManifest;
+export function restoreSnapshot(source: string, destination: string, runtime?: ResourceRuntime): SnapshotManifest;
+
 export interface TriviumDBOptions {
+  /** 共享运行时，省略时复用进程默认运行时 */
+  runtime?: ResourceRuntime;
   /** 向量维度，默认 1536 */
   dim?: number;
   /** 向量数据类型，默认 f32 */
@@ -752,6 +860,16 @@ export class TriviumDB {
 
   /** 查询估算的内存占用总量 Bytes */
   estimatedMemory(): number;
+  /** 所属共享运行时的资源统计；资源拒绝的 error.code 为 QueueFull */
+  resourceStats(): ResourceStats;
+  /** 本实例诊断；不获取任务名额，也不等待 MemTable 写锁。 */
+  instanceStats(): InstanceStats;
+  requestShutdown(): ShutdownStatus;
+  shutdownStatus(): ShutdownStatus;
+  /** 超时返回 false；后台继续持有数据和文件锁，true 表示关闭已完成 */
+  closeTimeout(timeoutMs: number): boolean;
+  /** 创建新的独立快照目录；已有目标返回 TDB_SNAPSHOT_EXISTS */
+  createSnapshot(destination: string, generationId: string): SnapshotManifest;
 
   /** 所有被存入库里的所有 ID 的乱序数组 */
   allNodeIds(): number[];

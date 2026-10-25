@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "dimension": 3,
+  "dtypes": ["f32", "f16", "u64"],
+  "runtime": { "memory_limit_mb": 64, "maintenance_memory_limit_mb": 8, "max_threads": 2, "max_active_tasks": 1 },
+  "database_memory_limit_mb": 8,
+  "vector": [1, 2, 3],
+  "node_id": 101,
+  "later_node_id": 102,
+  "original_payload": { "state": "before", "tenant": "agent-a" },
+  "later_payload": { "state": "after", "tenant": "agent-a" },
+  "generation_id": "agent-state-1",
+  "database_file": "database.tdb",
+  "close_timeout_ms": 5000
+}

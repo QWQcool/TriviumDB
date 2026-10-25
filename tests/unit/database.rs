@@ -321,7 +321,7 @@ fn set_sync_mode() {
 #[test]
 fn set_memory_limit_和_estimated_memory() {
     let mut db = open_db("mem_limit");
-    db.set_memory_limit(1024 * 1024 * 100);
+    db.set_memory_limit(1024 * 1024 * 100).unwrap();
     db.insert(&[1.0, 0.0, 0.0], json!({})).unwrap();
     assert!(db.estimated_memory() > 0);
 }

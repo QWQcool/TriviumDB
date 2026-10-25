@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "runtime": {
+    "memory_limit_mb": 40,
+    "max_threads": 2,
+    "max_active_tasks": 1,
+    "maintenance_memory_limit_mb": 8
+  },
+  "database": {
+    "dim": 3,
+    "memory_limit_mb": 8
+  },
+  "dtypes": [
+    "f32",
+    "f16",
+    "u64"
+  ],
+  "vector": [
+    1,
+    2,
+    3
+  ],
+  "overbook_mb": 24,
+  "resize_mb": 24,
+  "failed_resize_mb": 16,
+  "replacement_mb": 16,
+  "expected": {
+    "opened": {
+      "reserved_database_bytes": 16777216,
+      "attached_databases": 2,
+      "available_foreground_bytes": 16777216,
+      "available_maintenance_bytes": 25165824,
+      "available_task_slots": 1
+    },
+    "resized": {
+      "reserved_database_bytes": 33554432,
+      "attached_databases": 2,
+      "available_foreground_bytes": 0,
+      "available_maintenance_bytes": 8388608,
+      "available_task_slots": 1
+    },
+    "closed_one": {
+      "reserved_database_bytes": 8388608,
+      "attached_databases": 1,
+      "available_foreground_bytes": 25165824,
+      "available_maintenance_bytes": 33554432,
+      "available_task_slots": 1
+    },
+    "replaced": {
+      "reserved_database_bytes": 25165824,
+      "attached_databases": 2,
+      "available_foreground_bytes": 8388608,
+      "available_maintenance_bytes": 16777216,
+      "available_task_slots": 1
+    },
+    "closed_all": {
+      "reserved_database_bytes": 0,
+      "attached_databases": 0,
+      "available_foreground_bytes": 33554432,
+      "available_maintenance_bytes": 41943040,
+      "available_task_slots": 1
+    }
+  },
+  "budget_errors": {
+    "open": {
+      "resource": "memory_bytes",
+      "requested": 25165824,
+      "used": 16777216,
+      "limit": 33554432
+    },
+    "resize": {
+      "resource": "memory_bytes",
+      "requested": 8388608,
+      "used": 33554432,
+      "limit": 33554432
+    }
+  },
+  "instances": {
+    "opened": {
+      "memory_limit_bytes": 8388608,
+      "reserved_database_bytes": 8388608,
+      "node_count": 0,
+      "phase": "open"
+    },
+    "resized": {
+      "memory_limit_bytes": 25165824,
+      "reserved_database_bytes": 25165824,
+      "node_count": 0,
+      "phase": "open"
+    },
+    "closed": {
+      "memory_limit_bytes": 8388608,
+      "reserved_database_bytes": 0,
+      "node_count": 0,
+      "phase": "closed"
+    }
+  }
+}

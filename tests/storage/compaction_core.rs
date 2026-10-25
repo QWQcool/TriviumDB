@@ -448,7 +448,7 @@ fn COV_07_memory_limit_rejects_without_auto_flush() {
     let path = tmp_db("mem_limit");
 
     let mut db = Database::<f32>::open(&path, DIM).unwrap();
-    db.set_memory_limit(1024);
+    db.set_memory_limit(1024).unwrap();
     let wal_before = std::fs::metadata(format!("{path}.wal"))
         .map(|metadata| metadata.len())
         .unwrap_or_default();

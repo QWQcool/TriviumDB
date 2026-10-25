@@ -1,13 +1,10 @@
 //! 查询级 Rayon 线程池缓存与并行预算。
 //!
-//! 每个并发度复用一个独立线程池，避免修改 Rayon 全局池并防止嵌套查询互相污染。
+//! 线程池由共享运行时统一管理，缓存池的总工作线程也必须服从运行时额度。
 //! `max_threads=0` 表示自动，但始终受 64 线程硬上限约束；小输入保持串行。调用者
 //! 负责在并行前完成内存/遍历预算检查，并在分片后执行确定性归并。
 
-use crate::error::{Result, TriviumError};
-use rayon::ThreadPool;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use crate::error::Result;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct QueryParallelismBudget {
@@ -42,27 +39,10 @@ impl QueryParallelismBudget {
     }
 }
 
-/// 按线程数复用查询线程池，避免每个算子重复创建工作线程。
-pub(crate) fn query_pool(threads: usize) -> Result<Arc<ThreadPool>> {
-    static POOLS: OnceLock<Mutex<HashMap<usize, Arc<ThreadPool>>>> = OnceLock::new();
-    let pools = POOLS.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut pools = pools
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if let Some(pool) = pools.get(&threads) {
-        return Ok(Arc::clone(pool));
-    }
-    let pool = Arc::new(
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(threads.clamp(1, 64))
-            .thread_name(move |index| format!("triviumdb-query-{threads}-{index}"))
-            .build()
-            .map_err(|error| {
-                TriviumError::QueryExecution(format!(
-                    "创建查询并行线程池失败：{error} (Failed to create query parallel thread pool: {error})"
-                ))
-            })?,
-    );
-    pools.insert(threads, Arc::clone(&pool));
-    Ok(pool)
+/// 查询池与扫描、构建和维护任务共用运行时线程额度。
+pub(crate) fn query_pool(
+    runtime: &crate::resources::ResourceRuntime,
+    threads: usize,
+) -> Result<crate::resources::ResourcePool> {
+    runtime.pool(threads)
 }
