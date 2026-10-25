@@ -145,8 +145,9 @@ pub(crate) fn execute_pipeline_with_limit<T: VectorType>(
     config: &SearchConfig,
     ctx: &mut HookContext,
 ) -> Result<PipelineOutput> {
+    let runtime = read_or_recover(memtable).resource_runtime().clone();
     let quiver_config = crate::index::quiver::QuIVerConfig::default();
-    let auto_build_snapshot = {
+    let (auto_build_snapshot, _build_workspace) = {
         let mt = read_or_recover(memtable);
         if mt.auto_quiver_build_needed() {
             let projected = mt
@@ -159,21 +160,26 @@ pub(crate) fn execute_pipeline_with_limit<T: VectorType>(
                     memory_limit / (1024 * 1024)
                 )));
             }
-            mt.quiver_build_snapshot()
+            let workspace =
+                runtime.reserve_workspace(mt.quiver_build_peak_bytes(&quiver_config))?;
+            (mt.quiver_build_snapshot(), Some(workspace))
         } else {
-            None
+            (None, None)
         }
     };
     if let Some(snapshot) = auto_build_snapshot
         && let Some(_build_guard) = try_start_quiver_build(quiver_builds, snapshot.generation)
     {
         let source_generation = snapshot.generation;
-        let index = MemTable::<T>::build_quiver_snapshot(snapshot, &quiver_config);
+        let index = runtime
+            .pool(runtime.parallelism())?
+            .install(|| MemTable::<T>::build_quiver_snapshot(snapshot, &quiver_config));
         #[cfg(feature = "test-hooks")]
         crate::test_hooks::hit(crate::test_hooks::ConcurrencyPoint::BeforeQuiverPublish);
         let _ = write_or_recover(memtable).publish_quiver_if_current(source_generation, index);
     }
 
+    drop(_build_workspace);
     let mt = read_or_recover(memtable);
     #[cfg(feature = "test-hooks")]
     crate::test_hooks::hit(crate::test_hooks::ConcurrencyPoint::SearchLockAcquired);
@@ -223,6 +229,14 @@ pub(crate) fn execute_pipeline_with_limit<T: VectorType>(
     }
 
     sanitize_config(&mut safe_cfg, dim)?;
+    let candidate_bytes = mt
+        .internal_slot_count()
+        .checked_mul(std::mem::size_of::<SearchHit>() + 32)
+        .and_then(|bytes| bytes.checked_mul(2))
+        .ok_or_else(|| crate::error::TriviumError::CapacityAllocationFailed {
+            reason: "混合查询工作区估算溢出".into(),
+        })?;
+    let _query_workspace = runtime.reserve_workspace(candidate_bytes)?;
     if query_vector.is_some() {
         validate_hooked_query(&query_vec_f32, dim)?;
     }
@@ -277,7 +291,9 @@ pub(crate) fn execute_pipeline_with_limit<T: VectorType>(
         } else {
             0
         };
-        recall_vector_ranked(&mt, config, query_vector, &mut dense_ranking);
+        runtime.pool(runtime.parallelism())?.install(|| {
+            recall_vector_ranked(&mt, config, query_vector, &mut dense_ranking);
+        });
         ctx.record_timing("vector_recall", vector_recall_started.elapsed());
         ctx.record_observation("vector_route_quiver", route);
         ctx.record_observation("vector_recall_candidates", dense_ranking.len() as u64);
@@ -292,7 +308,27 @@ pub(crate) fn execute_pipeline_with_limit<T: VectorType>(
             &sparse_ranking,
             config.text_boost,
         );
-        recall_residual(&mt, config, query_vector, &mut seed_map);
+        let _residual_workspace =
+            if config.enable_advanced_pipeline && config.enable_sparse_residual {
+                let n = seed_map.len();
+                let cells = n
+                    .checked_mul(n)
+                    .and_then(|gram| {
+                        n.checked_mul(dim + 8)
+                            .and_then(|vectors| gram.checked_add(vectors))
+                    })
+                    .and_then(|cells| cells.checked_add(dim.saturating_mul(4)))
+                    .and_then(|cells| cells.checked_mul(std::mem::size_of::<f32>()))
+                    .ok_or_else(|| crate::error::TriviumError::CapacityAllocationFailed {
+                        reason: "残差查询工作区估算溢出".into(),
+                    })?;
+                Some(runtime.reserve_workspace(cells)?)
+            } else {
+                None
+            };
+        runtime.pool(runtime.parallelism())?.install(|| {
+            recall_residual(&mt, config, query_vector, &mut seed_map);
+        });
     }
 
     // 内置召回已在分支内完成 RRF；自定义召回保留调用方给出的原始分数。
@@ -387,6 +423,19 @@ pub(crate) fn execute_pipeline_with_limit<T: VectorType>(
     // ═══════════════════════════════════════════════════════
     //  L9: DPP 多样性采样
     // ═══════════════════════════════════════════════════════
+    let _dpp_workspace =
+        if config.enable_advanced_pipeline && config.enable_dpp && expanded.len() > config.top_k {
+            let n = expanded.len().min(config.top_k.saturating_mul(3));
+            let cells = n
+                .checked_mul(dim.saturating_add(config.top_k).saturating_add(8))
+                .and_then(|cells| cells.checked_mul(std::mem::size_of::<f32>()))
+                .ok_or_else(|| crate::error::TriviumError::CapacityAllocationFailed {
+                    reason: "DPP 查询工作区估算溢出".into(),
+                })?;
+            Some(runtime.reserve_workspace(cells)?)
+        } else {
+            None
+        };
     if config.enable_advanced_pipeline
         && config.enable_dpp
         && expanded.len() > config.top_k

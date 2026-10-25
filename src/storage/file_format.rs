@@ -414,6 +414,27 @@ pub fn save<T: VectorType>(
     path: &str,
     mode: StorageMode,
 ) -> Result<()> {
+    let runtime = memtable.resource_runtime().clone();
+    let peak = memtable
+        .estimated_memory_bytes()
+        .checked_mul(2)
+        .and_then(|bytes| bytes.checked_add(1024 * 1024))
+        .ok_or_else(|| TriviumError::CapacityAllocationFailed {
+            reason: "保存工作区估算溢出".into(),
+        })?;
+    let _workspace = if runtime.is_maintenance_task() {
+        runtime.reserve_maintenance_workspace(peak)?
+    } else {
+        runtime.reserve_workspace(peak)?
+    };
+    save_inner(memtable, path, mode)
+}
+
+fn save_inner<T: VectorType>(
+    memtable: &mut MemTable<T>,
+    path: &str,
+    mode: StorageMode,
+) -> Result<()> {
     // 在主文件发布前处理延期操作；失败时保留原 sidecar 与所有待合并记录。
     let release_text_after_save =
         memtable.text_index_is_deferred() && memtable.text_index_has_pending_changes();
@@ -1618,6 +1639,32 @@ fn load_quiver_index<T: VectorType>(
                 });
             }
         }
+    }
+    Ok(())
+}
+
+/// 复用正式头部常量与解析函数，核对快照声明的基础事实，不物化数据库。
+pub(crate) fn validate_snapshot_metadata(
+    path: &std::path::Path,
+    expected_dim: usize,
+    expected_nodes: usize,
+) -> Result<()> {
+    use std::io::Read;
+    let mut bytes = [0u8; HEADER_SIZE as usize];
+    std::fs::File::open(path)?.read_exact(&mut bytes)?;
+    let version = read_u16_le(&bytes, 4, "快照头部版本")?;
+    let dim = read_u32_le(&bytes, 6, "快照头部维度")? as usize;
+    let nodes = read_u64_le(&bytes, 18, "快照头部节点数")?;
+    if &bytes[..4] != MAGIC
+        || !(MINIMUM_SUPPORTED_VERSION..=CURRENT_VERSION).contains(&version)
+        || dim != expected_dim
+        || nodes != expected_nodes as u64
+        || dim == 0
+        || dim > 65536
+    {
+        return Err(TriviumError::ImmutableArtifactInvalid {
+            reason: "快照主文件头与 manifest 不匹配".into(),
+        });
     }
     Ok(())
 }

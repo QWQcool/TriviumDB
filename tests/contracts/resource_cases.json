@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "runtime": {
+    "memory_limit_mb": 40,
+    "max_threads": 2,
+    "max_active_tasks": 1,
+    "maintenance_memory_limit_mb": 8
+  },
+  "database": {
+    "dim": 3,
+    "memory_limit_mb": 8
+  },
+  "dtypes": [
+    "f32",
+    "f16",
+    "u64"
+  ],
+  "vector": [
+    1,
+    2,
+    3
+  ],
+  "overbook_mb": 24,
+  "resize_mb": 24,
+  "failed_resize_mb": 16,
+  "replacement_mb": 16,
+  "expected": {
+    "opened": {
+      "reserved_database_bytes": 16777216,
+      "attached_databases": 2
+    },
+    "resized": {
+      "reserved_database_bytes": 33554432,
+      "attached_databases": 2
+    },
+    "closed_one": {
+      "reserved_database_bytes": 8388608,
+      "attached_databases": 1
+    },
+    "replaced": {
+      "reserved_database_bytes": 25165824,
+      "attached_databases": 2
+    },
+    "closed_all": {
+      "reserved_database_bytes": 0,
+      "attached_databases": 0
+    }
+  }
+}

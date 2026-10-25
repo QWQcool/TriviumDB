@@ -131,6 +131,25 @@ pub enum TriviumError {
     #[error("容量预留失败 (Capacity allocation failed): {reason}")]
     CapacityAllocationFailed { reason: String },
 
+    /// 共享运行时拒绝内存、任务或工作线程准入；调用方可根据维度决定重试策略。
+    #[error("共享资源预算耗尽：{resource}，请求 {requested}，已使用 {used}，上限 {limit}")]
+    ResourceBudgetExceeded {
+        resource: &'static str,
+        requested: usize,
+        used: usize,
+        limit: usize,
+    },
+
+    #[error("快照目标已经存在：{path}")]
+    SnapshotDestinationExists { path: String },
+
+    #[error("快照已重命名但目录同步未能确认：{path}，{reason}")]
+    SnapshotPublicationUncertain { path: String, reason: String },
+
+    /// 关闭工作任务未能正常完成，数据和锁仍由关闭状态持有。
+    #[error("关闭任务失败：{reason}")]
+    ShutdownFailed { reason: String },
+
     /// 数据库已经关闭或正在关闭。
     #[error("数据库已关闭 (Database closed)")]
     DatabaseClosed,

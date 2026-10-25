@@ -42,6 +42,10 @@ TriviumDB 采用 **五层防御式测试体系**，从函数级正确性到系�
 
 ## 快速运行
 
+生命周期和快照的定向检查：`cargo test --lib database::lifecycle::tests`、`cargo test --test contracts 快照恢复`、`cargo test --test storage snapshot`、`cargo test --test fault_io --features test-hooks snapshot_shutdown -- --test-threads=1`、`cargo test --test fault_power --features test-hooks snapshot -- --test-threads=1`。共享 `lifecycle_cases.json` 覆盖三端 f32/f16/u64；故障用例验证目录发布前失败、发布后同步不确定、真实强杀、超时锁保留及关闭失败重试。TSan 工作流也包含生命周期单元测试；本地 Windows 不执行 Linux TSan/Miri。
+
+开发中共享资源层的定向检查：`cargo test --lib resources::tests`、`cargo test --test concurrency resources`、`cargo test --test contracts 共享资源`。这组测试默认启用，覆盖配额回收、扩容回滚、写入前拒绝、回调线程、单线程维护以及实际工作线程峰值。`tests/contracts/resource_cases.json` 由 Rust、Python、Node 公共 API 测试共同执行，覆盖 f32/f16/u64。详见[资源运行时的语义与边界](resource-runtime.md)。
+
 ```bash
 # 运行全部测试（单元 + 集成 + 属性）
 cargo test

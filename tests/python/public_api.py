@@ -10,6 +10,124 @@ import tempfile
 import triviumdb
 
 
+def run_lifecycle_contract(root: str) -> None:
+    case_path = os.path.join(os.path.dirname(__file__), "..", "contracts", "lifecycle_cases.json")
+    with open(case_path, encoding="utf-8") as source:
+        case = json.load(source)
+    for dtype in case["dtypes"]:
+        runtime = triviumdb.ResourceRuntime(**case["runtime"])
+        db = triviumdb.TriviumDB(os.path.join(root, f"lifecycle-{dtype}.tdb"),
+            dim=case["dimension"], dtype=dtype, memory_limit_mb=case["database_memory_limit_mb"],
+            auto_build_quiver=False, runtime=runtime)
+        db.insert_with_id(case["node_id"], case["vector"], case["original_payload"])
+        snapshot = os.path.join(root, f"snapshot-{dtype}")
+        restored = os.path.join(root, f"restored-{dtype}")
+        manifest = db.create_snapshot(snapshot, case["generation_id"])
+        assert manifest["node_count"] == 1 and manifest["complete"]
+        db.update_payload(case["node_id"], case["later_payload"])
+        db.insert_with_id(case["later_node_id"], case["vector"], {})
+        try:
+            db.create_snapshot(snapshot, case["generation_id"])
+        except FileExistsError:
+            pass
+        else:
+            raise AssertionError("不得覆盖已有快照")
+        assert triviumdb.verify_snapshot(snapshot, runtime)["node_count"] == 1
+        assert triviumdb.restore_snapshot(snapshot, restored, runtime)["generation_id"] == case["generation_id"]
+        try:
+            triviumdb.restore_snapshot(snapshot, restored, runtime)
+        except FileExistsError:
+            pass
+        else:
+            raise AssertionError("不得覆盖已有恢复目标")
+        reader = triviumdb.TriviumDB(os.path.join(restored, case["database_file"]),
+            dim=case["dimension"], dtype=dtype, access_mode="immutable",
+            memory_limit_mb=case["database_memory_limit_mb"], runtime=runtime)
+        assert reader.get_payload(case["node_id"]) == case["original_payload"]
+        assert case["later_node_id"] not in reader
+        assert reader.close_timeout(case["close_timeout_ms"])
+        assert triviumdb.verify_snapshot(restored, runtime)["node_count"] == 1
+        db.request_shutdown()
+        assert db.close_timeout(case["close_timeout_ms"])
+        assert db.shutdown_status()["phase"] == "closed"
+        assert db.close_timeout(0)
+        stats = runtime.stats()
+        assert stats["attached_databases"] == 0
+        assert stats["active_maintenance_tasks"] == 0
+        assert stats["reserved_maintenance_bytes"] == 0
+        assert stats["peak_reserved_bytes"] <= stats["memory_limit"]
+
+
+def run_resource_contract(root: str) -> None:
+    source_path = os.path.join(os.path.dirname(__file__), "..", "contracts", "resource_cases.json")
+    with open(source_path, encoding="utf-8") as source:
+        case = json.load(source)
+    mb = 1024 * 1024
+    for dtype in case["dtypes"]:
+        runtime = triviumdb.ResourceRuntime(**case["runtime"])
+
+        def check(phase):
+            stats = runtime.stats()
+            for field, expected in case["expected"][phase].items():
+                assert stats[field] == expected, (dtype, phase, field, stats)
+            assert stats["active_tasks"] == 0
+            assert stats["reserved_workspace_bytes"] == 0
+            assert stats["peak_worker_threads"] <= case["runtime"]["max_threads"]
+
+        def open_db(name, memory):
+            return triviumdb.TriviumDB(
+                os.path.join(root, f"resource-{dtype}-{name}.tdb"), dtype=dtype,
+                dim=case["database"]["dim"], memory_limit_mb=memory,
+                auto_build_quiver=False, runtime=runtime,
+            )
+
+        first = open_db("first", case["database"]["memory_limit_mb"])
+        second = open_db("second", case["database"]["memory_limit_mb"])
+        check("opened")
+        try:
+            open_db("rejected", case["overbook_mb"])
+        except triviumdb.ResourceBudgetError:
+            pass
+        else:
+            raise AssertionError("超额开库必须返回资源异常")
+        assert not os.path.exists(os.path.join(root, f"resource-{dtype}-rejected.tdb"))
+        first.set_memory_limit(case["resize_mb"])
+        check("resized")
+        try:
+            second.set_memory_limit(case["failed_resize_mb"])
+        except triviumdb.ResourceBudgetError:
+            pass
+        else:
+            raise AssertionError("扩容失败必须保留原配额")
+        check("resized")
+        first.set_memory_limit(case["database"]["memory_limit_mb"])
+        first.insert_with_id(101, case["vector"], {"owner": "first"})
+        second.insert_with_id(202, case["vector"], {"owner": "second"})
+        assert first.search_exact(case["vector"], 1)[0].id == 101
+        assert second.search_exact(case["vector"], 1)[0].id == 202
+        first.close()
+        check("closed_one")
+        replacement = open_db("replacement", case["replacement_mb"])
+        check("replaced")
+        second.close()
+        replacement.close()
+        check("closed_all")
+        assert runtime.stats()["peak_reserved_bytes"] <= case["runtime"]["memory_limit_mb"] * mb
+    for options in [{"max_threads": 65}, {"max_threads": -1}]:
+        try:
+            triviumdb.ResourceRuntime(**options)
+        except (ValueError, OverflowError, RuntimeError):
+            pass
+        else:
+            raise AssertionError("无效线程额度必须被拒绝")
+    try:
+        triviumdb.TriviumDB(os.path.join(root, "bad-runtime.tdb"), runtime={})
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("运行时参数必须是原生资源句柄")
+
+
 def run_shared_contract(root: str) -> None:
     contract_path = os.path.join(os.path.dirname(__file__), "..", "contracts", "public_cases.json")
     with open(contract_path, encoding="utf-8") as source:
@@ -68,6 +186,8 @@ def run_shared_contract(root: str) -> None:
 
 def main() -> None:
     with tempfile.TemporaryDirectory(prefix="triviumdb-python-public-api-") as root:
+        run_lifecycle_contract(root)
+        run_resource_contract(root)
         run_shared_contract(root)
         path = os.path.join(root, "api.tdb")
         db = triviumdb.TriviumDB(path, dim=2)

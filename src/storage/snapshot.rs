@@ -7,8 +7,13 @@
 use crate::error::{Result, TriviumError};
 use crate::storage::fs::robust_rename_and_sync;
 use serde::{Deserialize, Serialize};
+mod transfer;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+pub(crate) use transfer::copy_database_snapshot;
+pub use transfer::{
+    restore_snapshot, restore_snapshot_with_runtime, verify_snapshot, verify_snapshot_with_runtime,
+};
 
 pub const MANIFEST_VERSION: u16 = 2;
 const GENERATION_SUFFIXES: [&str; 9] = [
@@ -90,8 +95,10 @@ pub fn write_manifest(
     dim: usize,
     node_count: usize,
 ) -> Result<GenerationManifest> {
-    if generation_id.trim().is_empty() {
-        return Err(TriviumError::InvalidInput("generation_id 不能为空".into()));
+    if generation_id.trim().is_empty() || generation_id.len() > 256 {
+        return Err(TriviumError::InvalidInput(
+            "generation_id 必须为 1 到 256 字节".into(),
+        ));
     }
     let files = generation_suffixes(db_path)
         .into_iter()
@@ -141,9 +148,10 @@ pub fn validate_manifest(
     expected_dim: usize,
 ) -> Result<GenerationManifest> {
     let path = manifest_path(db_path);
-    let bytes = std::fs::read(&path).map_err(|error| TriviumError::ImmutableArtifactInvalid {
-        reason: format!("无法读取 {}: {error}", path.display()),
-    })?;
+    let bytes =
+        read_manifest_bytes(&path).map_err(|error| TriviumError::ImmutableArtifactInvalid {
+            reason: format!("无法读取 {}: {error}", path.display()),
+        })?;
     let manifest: GenerationManifest =
         serde_json::from_slice(&bytes).map_err(|error| TriviumError::ImmutableArtifactInvalid {
             reason: format!("manifest JSON 无效: {error}"),
@@ -224,4 +232,17 @@ pub fn validate_manifest_for_generation(
         });
     }
     validate_manifest(db_path, &declared.dtype, declared.dim)
+}
+
+fn read_manifest_bytes(path: &Path) -> std::io::Result<Vec<u8>> {
+    let file = std::fs::File::open(path)?;
+    let mut bytes = Vec::new();
+    file.take(64 * 1024 + 1).read_to_end(&mut bytes)?;
+    if bytes.len() > 64 * 1024 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "manifest 超过 64 KiB 上限",
+        ));
+    }
+    Ok(bytes)
 }

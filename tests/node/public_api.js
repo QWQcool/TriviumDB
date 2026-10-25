@@ -8,10 +8,109 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const contract = require('../contracts/public_cases.json')
-const { TriviumDB } = require('../../index.js')
+const { TriviumDB, ResourceRuntime, verifySnapshot, restoreSnapshot } = require('../../index.js')
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'triviumdb-node-public-api-'))
 const file = path.join(root, 'api.tdb')
+
+function runLifecycleContract(root) {
+  const test = require('../contracts/lifecycle_cases.json')
+  for (const dtype of test.dtypes) {
+    const runtime = new ResourceRuntime({ memoryLimitMb: test.runtime.memory_limit_mb,
+      maintenanceMemoryLimitMb: test.runtime.maintenance_memory_limit_mb,
+      maxThreads: test.runtime.max_threads, maxActiveTasks: test.runtime.max_active_tasks })
+    const db = new TriviumDB(path.join(root, `lifecycle-${dtype}.tdb`), { dim: test.dimension,
+      dtype, memoryLimitMb: test.database_memory_limit_mb, autoBuildQuiver: false, runtime })
+    db.insertWithId(test.node_id, test.vector, test.original_payload)
+    const snapshot = path.join(root, `snapshot-${dtype}`)
+    const restored = path.join(root, `restored-${dtype}`)
+    const manifest = db.createSnapshot(snapshot, test.generation_id)
+    assert.equal(manifest.node_count, 1)
+    assert.equal(manifest.complete, true)
+    db.updatePayload(test.node_id, test.later_payload)
+    db.insertWithId(test.later_node_id, test.vector, {})
+    assert.throws(() => db.createSnapshot(snapshot, test.generation_id), error => error.code === 'TDB_SNAPSHOT_EXISTS')
+    assert.equal(verifySnapshot(snapshot, runtime).node_count, 1)
+    assert.equal(restoreSnapshot(snapshot, restored, runtime).generation_id, test.generation_id)
+    assert.throws(() => restoreSnapshot(snapshot, restored, runtime), error => error.code === 'TDB_SNAPSHOT_EXISTS')
+    const reader = new TriviumDB(path.join(restored, test.database_file), { dim: test.dimension,
+      dtype, accessMode: 'immutable', memoryLimitMb: test.database_memory_limit_mb, runtime })
+    assert.deepEqual(reader.getPayload(test.node_id), test.original_payload)
+    assert.equal(reader.contains(test.later_node_id), false)
+    assert.equal(reader.closeTimeout(test.close_timeout_ms), true)
+    assert.equal(verifySnapshot(restored, runtime).node_count, 1)
+    for (const milliseconds of [-1, 0.5, NaN, Infinity]) {
+      assert.throws(() => db.closeTimeout(milliseconds))
+    }
+    db.requestShutdown()
+    assert.equal(db.closeTimeout(test.close_timeout_ms), true)
+    assert.equal(db.shutdownStatus().phase, 'closed')
+    assert.equal(db.closeTimeout(0), true)
+    const stats = runtime.stats()
+    assert.equal(stats.attached_databases, 0)
+    assert.equal(stats.active_maintenance_tasks, 0)
+    assert.equal(stats.reserved_maintenance_bytes, 0)
+    assert.ok(stats.peak_reserved_bytes <= stats.memory_limit)
+  }
+}
+
+function runResourceContract(root) {
+  const test = require('../contracts/resource_cases.json')
+  for (const dtype of test.dtypes) {
+    const runtime = new ResourceRuntime({
+      memoryLimitMb: test.runtime.memory_limit_mb,
+      maintenanceMemoryLimitMb: test.runtime.maintenance_memory_limit_mb,
+      maxThreads: test.runtime.max_threads,
+      maxActiveTasks: test.runtime.max_active_tasks,
+    })
+    const check = phase => {
+      const stats = runtime.stats()
+      for (const [key, value] of Object.entries(test.expected[phase])) {
+        assert.equal(stats[key], value, `${dtype}/${phase}/${key}`)
+      }
+      assert.equal(stats.active_tasks, 0)
+      assert.equal(stats.reserved_workspace_bytes, 0)
+      assert.ok(stats.peak_worker_threads <= test.runtime.max_threads)
+    }
+    const open = (name, memoryLimitMb) => new TriviumDB(
+      path.join(root, `resource-${dtype}-${name}.tdb`),
+      { dim: test.database.dim, dtype, memoryLimitMb, autoBuildQuiver: false, runtime },
+    )
+    const first = open('first', test.database.memory_limit_mb)
+    const second = open('second', test.database.memory_limit_mb)
+    check('opened')
+    assert.throws(() => open('rejected', test.overbook_mb), error => error.code === 'QueueFull')
+    assert.ok(!fs.existsSync(path.join(root, `resource-${dtype}-rejected.tdb`)))
+    first.setMemoryLimit(test.resize_mb)
+    check('resized')
+    assert.throws(() => second.setMemoryLimit(test.failed_resize_mb), error => error.code === 'QueueFull')
+    check('resized')
+    first.setMemoryLimit(test.database.memory_limit_mb)
+    first.insertWithId(101, test.vector, { owner: 'first' })
+    second.insertWithId(202, test.vector, { owner: 'second' })
+    assert.equal(Number(first.searchExact(test.vector, 1)[0].id), 101)
+    assert.equal(Number(second.searchExact(test.vector, 1)[0].id), 202)
+    first.close()
+    check('closed_one')
+    const replacement = open('replacement', test.replacement_mb)
+    check('replaced')
+    second.close()
+    replacement.close()
+    check('closed_all')
+  }
+  for (const maxThreads of [-1, 0.5, 65, NaN, Infinity]) {
+    assert.throws(() => new ResourceRuntime({ maxThreads }))
+  }
+  assert.throws(() => new TriviumDB(path.join(root, 'bad-runtime.tdb'), { runtime: {} }))
+  const wrong = new TriviumDB(path.join(root, 'wrong-class.tdb'), { dim: 3 })
+  assert.throws(() => new TriviumDB(path.join(root, 'bad-class.tdb'), { runtime: wrong }))
+  const forged = Object.create(ResourceRuntime.prototype)
+  assert.throws(() => new TriviumDB(path.join(root, 'bad-prototype.tdb'), { runtime: forged }))
+  assert.throws(() => new TriviumDB(path.join(root, 'bad-handle.tdb'), {
+    runtime: { __tdbResourceRuntime: {} },
+  }))
+  wrong.close()
+}
 
 function runSharedContract(root) {
   assert.equal(contract.schema_version, 1)
@@ -67,6 +166,8 @@ function runSharedContract(root) {
 }
 
 try {
+  runLifecycleContract(root)
+  runResourceContract(root)
   runSharedContract(root)
   assert.throws(
     () => new TriviumDB(file, 2),

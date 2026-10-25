@@ -10,5 +10,6 @@ mod property_index_persistence;
 mod publication_recovery;
 mod read_only;
 mod recovery;
+mod snapshot;
 mod text_index_lifecycle;
 mod vector_memory;

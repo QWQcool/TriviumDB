@@ -346,6 +346,8 @@ pub struct MemTable<T: VectorType> {
 
     // 附设文本倒排引擎 (完全可选，纯碎占用独立内存不干扰底座)
     text_index: TextIndex,
+    resource_runtime: crate::resources::ResourceRuntime,
+    resource_reservation: Option<crate::resources::DatabaseReservation>,
     // 未加载的 sidecar 与待合并操作分开保存，避免把“未加载”解释为“空索引”。
     deferred_text_path: Option<String>,
     deferred_text_meta: Option<[u8; 28]>,
@@ -442,6 +444,8 @@ impl<T: VectorType> MemTable<T> {
             vec_pool: VecPool::new(dim),
             bq_signatures: std::sync::OnceLock::new(),
             text_index: TextIndex::new(),
+            resource_runtime: crate::resources::ResourceRuntime::shared_default(),
+            resource_reservation: None,
             deferred_text_path: None,
             deferred_text_meta: None,
             pending_text_mutations: Vec::new(),
@@ -489,6 +493,8 @@ impl<T: VectorType> MemTable<T> {
             vec_pool,
             bq_signatures: std::sync::OnceLock::new(),
             text_index: TextIndex::new(),
+            resource_runtime: crate::resources::ResourceRuntime::shared_default(),
+            resource_reservation: None,
             deferred_text_path: None,
             deferred_text_meta: None,
             pending_text_mutations: Vec::new(),
@@ -2779,6 +2785,40 @@ impl<T: VectorType> MemTable<T> {
             + quiver_bytes
             + text_bytes
             + property_index_bytes
+    }
+
+    pub(crate) fn resource_runtime(&self) -> &crate::resources::ResourceRuntime {
+        &self.resource_runtime
+    }
+
+    pub(crate) fn attach_resources(
+        &mut self,
+        runtime: crate::resources::ResourceRuntime,
+        reservation: crate::resources::DatabaseReservation,
+    ) {
+        self.resource_runtime = runtime;
+        self.resource_reservation = Some(reservation);
+    }
+
+    pub(crate) fn resize_resource_reservation(&self, bytes: usize) -> Result<()> {
+        if self.resource_runtime.stats().memory_limit > 0 && bytes < self.estimated_memory_bytes() {
+            return Err(TriviumError::ResourceBudgetExceeded {
+                resource: "database_heap_bytes",
+                requested: self.estimated_memory_bytes(),
+                used: 0,
+                limit: bytes,
+            });
+        }
+        if let Some(reservation) = &self.resource_reservation {
+            reservation.resize(bytes)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn release_resource_storage(&mut self) {
+        let runtime = self.resource_runtime.clone();
+        *self = Self::new(self.dim);
+        self.resource_runtime = runtime;
     }
 
     pub(crate) fn advise_cold_vectors_dontneed(&self) {

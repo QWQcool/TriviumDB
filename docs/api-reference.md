@@ -4,6 +4,8 @@
 > **语言**: Rust 核心 + Python 绑定 (PyO3) + Node.js 绑定 (napi-rs)  
 > **许可**: Apache-2.0
 
+开发中新增的共享资源入口见[多实例共享资源运行时](resource-runtime.md)，尚未包含在已发布的 0.8.11 包中。Rust `set_memory_limit` 在开发中源码里返回 `Result<()>`，应处理配额调整失败。
+
 ---
 
 ## 目录
@@ -28,6 +30,8 @@
 ---
 
 ## 数据库生命周期
+
+开发中新增的维护额度、`request_shutdown` / `close_timeout` / `shutdown_status`、独立目录快照及校验恢复入口，见[生命周期与快照](lifecycle-snapshots.md)。三端均已提供；尚未包含在已发布的 0.8.11 包中。
 
 ### Python
 

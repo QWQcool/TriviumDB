@@ -153,7 +153,78 @@ pub mod nodejs {
         }
     }
 
+    fn parse_runtime(runtime: Option<JsObject>) -> napi::Result<crate::resources::ResourceRuntime> {
+        Ok(if let Some(object) = runtime {
+            if !object.has_own_property("__tdbResourceRuntime")? {
+                return Err(napi::Error::new(
+                    napi::Status::InvalidArg,
+                    "runtime 必须是有效的 ResourceRuntime 句柄",
+                ));
+            }
+            let handle: napi::bindgen_prelude::External<crate::resources::ResourceRuntime> =
+                object.get_named_property("__tdbResourceRuntime")?;
+            (*handle).clone()
+        } else {
+            crate::resources::ResourceRuntime::shared_default()
+        })
+    }
+
+    fn to_extended_error(env: Env, error: crate::error::TriviumError) -> napi::Error {
+        let code = match &error {
+            crate::error::TriviumError::ImmutableArtifactInvalid { .. } => "TDB_SNAPSHOT_INVALID",
+            crate::error::TriviumError::SnapshotDestinationExists { .. } => "TDB_SNAPSHOT_EXISTS",
+            crate::error::TriviumError::SnapshotPublicationUncertain { .. } => {
+                "TDB_SNAPSHOT_PUBLICATION_UNCERTAIN"
+            }
+            crate::error::TriviumError::ShutdownFailed { .. } => "TDB_SHUTDOWN_FAILED",
+            _ => return to_napi_error(error),
+        };
+        match env
+            .create_error(to_napi_error(error))
+            .and_then(|mut object| {
+                object.set_named_property("code", code)?;
+                Ok(napi::Error::from(object.into_unknown()))
+            }) {
+            Ok(error) | Err(error) => error,
+        }
+    }
+
+    #[napi]
+    pub fn verify_snapshot(
+        env: Env,
+        directory: String,
+        runtime: Option<JsObject>,
+    ) -> napi::Result<serde_json::Value> {
+        let runtime = parse_runtime(runtime)?;
+        let manifest = crate::storage::snapshot::verify_snapshot_with_runtime(&directory, &runtime)
+            .map_err(|e| to_extended_error(env, e))?;
+        serde_json::to_value(manifest).map_err(|e| napi::Error::from_reason(e.to_string()))
+    }
+
+    #[napi]
+    pub fn restore_snapshot(
+        env: Env,
+        source: String,
+        destination: String,
+        runtime: Option<JsObject>,
+    ) -> napi::Result<serde_json::Value> {
+        let runtime = parse_runtime(runtime)?;
+        let manifest = crate::storage::snapshot::restore_snapshot_with_runtime(
+            &source,
+            &destination,
+            &runtime,
+        )
+        .map_err(|e| to_extended_error(env, e))?;
+        serde_json::to_value(manifest).map_err(|e| napi::Error::from_reason(e.to_string()))
+    }
+
     fn to_napi_error(error: crate::error::TriviumError) -> napi::Error {
+        if matches!(
+            error,
+            crate::error::TriviumError::ResourceBudgetExceeded { .. }
+        ) {
+            return napi::Error::new(napi::Status::QueueFull, error.to_string());
+        }
         let code = match &error {
             crate::error::TriviumError::ReadOnlyViolation { .. } => "TDB_READ_ONLY",
             crate::error::TriviumError::RecoveryRequired { .. } => "TDB_RECOVERY_REQUIRED",
@@ -441,9 +512,76 @@ pub mod nodejs {
         pub max_edges: Option<f64>,
     }
 
+    /// 多个数据库共享的运行时资源配置，字节统计不等于进程 RSS。
+    #[napi(object)]
+    pub struct JsResourceLimits {
+        pub maintenance_memory_limit_mb: Option<f64>,
+        pub memory_limit_mb: Option<f64>,
+        pub max_threads: Option<f64>,
+        pub max_active_tasks: Option<f64>,
+    }
+
+    #[napi(js_name = "ResourceRuntime")]
+    pub struct JsResourceRuntime {
+        inner: crate::resources::ResourceRuntime,
+    }
+
+    #[napi]
+    impl JsResourceRuntime {
+        #[napi(constructor)]
+        pub fn new(
+            env: Env,
+            mut this: napi::bindgen_prelude::This<JsObject>,
+            options: Option<JsResourceLimits>,
+        ) -> napi::Result<Self> {
+            let options = options.unwrap_or(JsResourceLimits {
+                maintenance_memory_limit_mb: None,
+                memory_limit_mb: None,
+                max_threads: None,
+                max_active_tasks: None,
+            });
+            let memory_limit =
+                parse_safe_usize(options.memory_limit_mb.unwrap_or(0.0), "memoryLimitMb")?
+                    .checked_mul(1024 * 1024)
+                    .filter(|bytes| (*bytes as u128) <= 9_007_199_254_740_991)
+                    .ok_or_else(|| {
+                        napi::Error::from_reason("memoryLimitMb 换算后超过安全整数范围")
+                    })?;
+            let inner = crate::resources::ResourceRuntime::new(crate::resources::ResourceLimits {
+                memory_limit,
+                maintenance_memory_limit: parse_safe_usize(
+                    options.maintenance_memory_limit_mb.unwrap_or(0.0),
+                    "maintenanceMemoryLimitMb",
+                )?
+                .checked_mul(1024 * 1024)
+                .filter(|bytes| (*bytes as u128) <= 9_007_199_254_740_991)
+                .ok_or_else(|| napi::Error::from_reason("维护额度换算超过安全整数范围"))?,
+                max_threads: parse_safe_usize(options.max_threads.unwrap_or(0.0), "maxThreads")?,
+                max_active_tasks: parse_safe_usize(
+                    options.max_active_tasks.unwrap_or(0.0),
+                    "maxActiveTasks",
+                )?,
+            })
+            .map_err(to_napi_error)?;
+            // 使用带类型标记的外部句柄，避免把其他原生类的指针误解为资源运行时。
+            let handle = env.create_external(inner.clone(), None)?;
+            this.define_properties(&[
+                napi::Property::new("__tdbResourceRuntime")?.with_value(&handle)
+            ])?;
+            Ok(Self { inner })
+        }
+
+        #[napi]
+        pub fn stats(&self) -> napi::Result<serde_json::Value> {
+            serde_json::to_value(self.inner.stats())
+                .map_err(|error| napi::Error::from_reason(error.to_string()))
+        }
+    }
+
     /// 数据库打开与容量规划配置。
     #[napi(object)]
     pub struct JsDatabaseOptions {
+        pub runtime: Option<JsObject>,
         pub dim: Option<u32>,
         pub dtype: Option<String>,
         pub sync_mode: Option<String>,
@@ -825,6 +963,7 @@ pub mod nodejs {
                 }
                 Some(napi::bindgen_prelude::Either::B(options)) => options,
                 None => JsDatabaseOptions {
+                    runtime: None,
                     dim: None,
                     dtype: None,
                     sync_mode: None,
@@ -887,19 +1026,20 @@ pub mod nodejs {
                 max_query_rows,
                 row_overflow: parse_row_overflow(options.row_overflow.as_deref())?,
             };
+            let runtime = parse_runtime(options.runtime)?;
             let dtype_str = dtype.as_str();
 
             let inner = match dtype_str {
                 "f32" => DbBackend::F32(
-                    GenericDatabase::<f32>::open_with_config(&path, config)
+                    GenericDatabase::<f32>::open_with_runtime(&path, config, runtime.clone())
                         .map_err(to_napi_error)?,
                 ),
                 "f16" => DbBackend::F16(
-                    GenericDatabase::<half::f16>::open_with_config(&path, config)
+                    GenericDatabase::<half::f16>::open_with_runtime(&path, config, runtime.clone())
                         .map_err(to_napi_error)?,
                 ),
                 "u64" => DbBackend::U64(
-                    GenericDatabase::<u64>::open_with_config(&path, config)
+                    GenericDatabase::<u64>::open_with_runtime(&path, config, runtime.clone())
                         .map_err(to_napi_error)?,
                 ),
                 _ => return Err(napi::Error::from_reason("dtype 必须是 f32 / f16 / u64")),
@@ -1103,20 +1243,20 @@ pub mod nodejs {
                     let v: Vec<f32> = vector.iter().map(|&x| x as f32).collect();
                     db.insert(&v, payload)
                         .map(|id| id as f64)
-                        .map_err(|e| napi::Error::from_reason(e.to_string()))
+                        .map_err(to_napi_error)
                 }
                 DbBackend::F16(db) => {
                     let v: Vec<half::f16> =
                         vector.iter().map(|&x| half::f16::from_f64(x)).collect();
                     db.insert(&v, payload)
                         .map(|id| id as f64)
-                        .map_err(|e| napi::Error::from_reason(e.to_string()))
+                        .map_err(to_napi_error)
                 }
                 DbBackend::U64(db) => {
                     let v: Vec<u64> = vector.iter().map(|&x| x as u64).collect();
                     db.insert(&v, payload)
                         .map(|id| id as f64)
-                        .map_err(|e| napi::Error::from_reason(e.to_string()))
+                        .map_err(to_napi_error)
                 }
             }
         }
@@ -1250,19 +1390,16 @@ pub mod nodejs {
             match &mut self.inner {
                 DbBackend::F32(db) => {
                     let v: Vec<f32> = vector.iter().map(|&x| x as f32).collect();
-                    db.insert_with_id(id, &v, payload)
-                        .map_err(|e| napi::Error::from_reason(e.to_string()))
+                    db.insert_with_id(id, &v, payload).map_err(to_napi_error)
                 }
                 DbBackend::F16(db) => {
                     let v: Vec<half::f16> =
                         vector.iter().map(|&x| half::f16::from_f64(x)).collect();
-                    db.insert_with_id(id, &v, payload)
-                        .map_err(|e| napi::Error::from_reason(e.to_string()))
+                    db.insert_with_id(id, &v, payload).map_err(to_napi_error)
                 }
                 DbBackend::U64(db) => {
                     let v: Vec<u64> = vector.iter().map(|&x| x as u64).collect();
-                    db.insert_with_id(id, &v, payload)
-                        .map_err(|e| napi::Error::from_reason(e.to_string()))
+                    db.insert_with_id(id, &v, payload).map_err(to_napi_error)
                 }
             }
         }
@@ -1413,8 +1550,7 @@ pub mod nodejs {
         /// 更新节点元数据
         #[napi]
         pub fn update_payload(&mut self, id: f64, payload: serde_json::Value) -> napi::Result<()> {
-            dispatch!(self, mut db => db.update_payload(id as u64, payload))
-                .map_err(|e| napi::Error::from_reason(e.to_string()))
+            dispatch!(self, mut db => db.update_payload(id as u64, payload)).map_err(to_napi_error)
         }
 
         /// 部分更新节点 Payload（$set / $inc / $unset）
@@ -1429,8 +1565,7 @@ pub mod nodejs {
         /// ```
         #[napi]
         pub fn patch_payload(&mut self, id: f64, patch: serde_json::Value) -> napi::Result<()> {
-            dispatch!(self, mut db => db.patch_payload(id as u64, patch))
-                .map_err(|e| napi::Error::from_reason(e.to_string()))
+            dispatch!(self, mut db => db.patch_payload(id as u64, patch)).map_err(to_napi_error)
         }
 
         /// 更新节点向量
@@ -1440,19 +1575,16 @@ pub mod nodejs {
             match &mut self.inner {
                 DbBackend::F32(db) => {
                     let v: Vec<f32> = vector.iter().map(|&x| x as f32).collect();
-                    db.update_vector(id, &v)
-                        .map_err(|e| napi::Error::from_reason(e.to_string()))
+                    db.update_vector(id, &v).map_err(to_napi_error)
                 }
                 DbBackend::F16(db) => {
                     let v: Vec<half::f16> =
                         vector.iter().map(|&x| half::f16::from_f64(x)).collect();
-                    db.update_vector(id, &v)
-                        .map_err(|e| napi::Error::from_reason(e.to_string()))
+                    db.update_vector(id, &v).map_err(to_napi_error)
                 }
                 DbBackend::U64(db) => {
                     let v: Vec<u64> = vector.iter().map(|&x| x as u64).collect();
-                    db.update_vector(id, &v)
-                        .map_err(|e| napi::Error::from_reason(e.to_string()))
+                    db.update_vector(id, &v).map_err(to_napi_error)
                 }
             }
         }
@@ -1480,8 +1612,7 @@ pub mod nodejs {
         /// 删除节点（三层原子联删：向量 + Payload + 所有关联边）
         #[napi]
         pub fn delete(&mut self, id: f64) -> napi::Result<()> {
-            dispatch!(self, mut db => db.delete(id as u64))
-                .map_err(|e| napi::Error::from_reason(e.to_string()))
+            dispatch!(self, mut db => db.delete(id as u64)).map_err(to_napi_error)
         }
 
         // ── 图谱操作 ──
@@ -1498,7 +1629,7 @@ pub mod nodejs {
             let label = label.as_deref().unwrap_or("related");
             let weight = weight.unwrap_or(1.0) as f32;
             dispatch!(self, mut db => db.link(src as u64, dst as u64, label, weight))
-                .map_err(|e| napi::Error::from_reason(e.to_string()))
+                .map_err(to_napi_error)
         }
 
         #[napi]
@@ -1558,7 +1689,7 @@ pub mod nodejs {
                 }
                 None => dispatch!(self, mut db => db.unlink(src as u64, dst as u64)),
             }
-            .map_err(|e| napi::Error::from_reason(e.to_string()))
+            .map_err(to_napi_error)
         }
 
         /// 获取 N 跳邻居节点 ID 列表，可按标签白名单遍历。
@@ -1739,7 +1870,7 @@ pub mod nodejs {
             let with_cent = cfg.with_centroids;
 
             let result = dispatch!(self, db => db.leiden_cluster(min_c, max_iter, with_cent))
-                .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+                .map_err(to_napi_error)?;
 
             // 排序确保确定性输出
             let mut sorted_nodes: Vec<_> = result.node_to_cluster.into_iter().collect();
@@ -1829,7 +1960,7 @@ pub mod nodejs {
                     db.search_hybrid(None, Some(&v), &search_config)
                 }
             }
-            .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+            .map_err(to_napi_error)?;
 
             Ok(hits
                 .into_iter()
@@ -2022,7 +2153,7 @@ pub mod nodejs {
                     db.search_hybrid(q_text, Some(&v), &core_config)
                 }
             }
-            .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+            .map_err(to_napi_error)?;
 
             Ok(hits
                 .into_iter()
@@ -2087,7 +2218,7 @@ pub mod nodejs {
                     db.search_hybrid(Some(&query_text), Some(&v), &core_config)
                 }
             }
-            .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+            .map_err(to_napi_error)?;
 
             Ok(hits
                 .into_iter()
@@ -2104,22 +2235,19 @@ pub mod nodejs {
         /// 对节点建立用于双路召回的长文本 BM25 索引
         #[napi]
         pub fn index_text(&mut self, id: f64, text: String) -> napi::Result<()> {
-            dispatch!(self, mut db => db.index_text(id as u64, &text))
-                .map_err(|e| napi::Error::from_reason(e.to_string()))
+            dispatch!(self, mut db => db.index_text(id as u64, &text)).map_err(to_napi_error)
         }
 
         /// 对节点建立用于精确命中的 AC自动机 高级关键词索引
         #[napi]
         pub fn index_keyword(&mut self, id: f64, keyword: String) -> napi::Result<()> {
-            dispatch!(self, mut db => db.index_keyword(id as u64, &keyword))
-                .map_err(|e| napi::Error::from_reason(e.to_string()))
+            dispatch!(self, mut db => db.index_keyword(id as u64, &keyword)).map_err(to_napi_error)
         }
 
         /// 预热关键词自动机；损坏或缺失的延期索引会返回错误。
         #[napi]
         pub fn build_text_index(&mut self) -> napi::Result<()> {
-            dispatch!(self, mut db => db.build_text_index())
-                .map_err(|e| napi::Error::from_reason(e.to_string()))
+            dispatch!(self, mut db => db.build_text_index()).map_err(to_napi_error)
         }
 
         // ── 属性二级索引 ──
@@ -2292,15 +2420,15 @@ pub mod nodejs {
             match &self.inner {
                 DbBackend::F32(db) => db
                     .tql_values(&query)
-                    .map_err(|e| napi::Error::from_reason(e.to_string()))
+                    .map_err(to_napi_error)
                     .map(|rows| rows.into_iter().map(node_tql_row_to_json).collect()),
                 DbBackend::F16(db) => db
                     .tql_values(&query)
-                    .map_err(|e| napi::Error::from_reason(e.to_string()))
+                    .map_err(to_napi_error)
                     .map(|rows| rows.into_iter().map(node_tql_row_to_json).collect()),
                 DbBackend::U64(db) => db
                     .tql_values(&query)
-                    .map_err(|e| napi::Error::from_reason(e.to_string()))
+                    .map_err(to_napi_error)
                     .map(|rows| rows.into_iter().map(node_tql_row_to_json).collect()),
             }
         }
@@ -2371,8 +2499,7 @@ pub mod nodejs {
         /// 手动落盘
         #[napi]
         pub fn flush(&mut self) -> napi::Result<()> {
-            dispatch!(self, mut db => db.flush())
-                .map_err(|e| napi::Error::from_reason(e.to_string()))
+            dispatch!(self, mut db => db.flush()).map_err(to_napi_error)
         }
 
         #[napi]
@@ -2423,8 +2550,7 @@ pub mod nodejs {
         /// 手动触发全量压实（阻塞当前线程）
         #[napi]
         pub fn compact(&mut self) -> napi::Result<()> {
-            dispatch!(self, mut db => db.compact())
-                .map_err(|e| napi::Error::from_reason(e.to_string()))
+            dispatch!(self, mut db => db.compact()).map_err(to_napi_error)
         }
 
         /// 为后续插入主动预留额外节点容量。
@@ -2442,8 +2568,14 @@ pub mod nodejs {
             let bytes = mb
                 .checked_mul(1024 * 1024)
                 .ok_or_else(|| napi::Error::from_reason("memoryLimitMb 换算字节时溢出"))?;
-            dispatch!(self, mut db => db.set_memory_limit(bytes));
-            Ok(())
+            dispatch!(self, mut db => db.set_memory_limit(bytes)).map_err(to_napi_error)
+        }
+
+        /// 读取多个数据库共享的配额、工作线程和任务统计。
+        #[napi]
+        pub fn resource_stats(&self) -> napi::Result<serde_json::Value> {
+            serde_json::to_value(dispatch!(self, db => db.resource_stats()))
+                .map_err(|error| napi::Error::from_reason(error.to_string()))
         }
 
         /// 估算当前内存占用（字节）
@@ -2480,19 +2612,19 @@ pub mod nodejs {
                 DbBackend::F32(db) => {
                     let (_, ids) = db
                         .migrate_to(&new_path, new_dim as usize)
-                        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+                        .map_err(to_napi_error)?;
                     Ok(ids.into_iter().map(|id| id as f64).collect())
                 }
                 DbBackend::F16(db) => {
                     let (_, ids) = db
                         .migrate_to(&new_path, new_dim as usize)
-                        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+                        .map_err(to_napi_error)?;
                     Ok(ids.into_iter().map(|id| id as f64).collect())
                 }
                 DbBackend::U64(db) => {
                     let (_, ids) = db
                         .migrate_to(&new_path, new_dim as usize)
-                        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+                        .map_err(to_napi_error)?;
                     Ok(ids.into_iter().map(|id| id as f64).collect())
                 }
             }
@@ -2508,6 +2640,39 @@ pub mod nodejs {
         #[napi]
         pub fn contains(&self, id: f64) -> bool {
             dispatch!(self, db => db.contains(id as u64))
+        }
+
+        #[napi]
+        pub fn request_shutdown(&mut self, env: Env) -> napi::Result<serde_json::Value> {
+            let status = dispatch!(self, mut db => db.request_shutdown())
+                .map_err(|e| to_extended_error(env, e))?;
+            serde_json::to_value(status).map_err(|e| napi::Error::from_reason(e.to_string()))
+        }
+
+        #[napi]
+        pub fn shutdown_status(&self) -> napi::Result<serde_json::Value> {
+            serde_json::to_value(dispatch!(self, db => db.shutdown_status()))
+                .map_err(|e| napi::Error::from_reason(e.to_string()))
+        }
+
+        #[napi]
+        pub fn close_timeout(&mut self, env: Env, timeout_ms: f64) -> napi::Result<bool> {
+            let milliseconds = parse_safe_usize(timeout_ms, "timeoutMs")?;
+            dispatch!(self, mut db => db.close_timeout(std::time::Duration::from_millis(milliseconds as u64)))
+                .map_err(|e| to_extended_error(env, e))
+        }
+
+        #[napi]
+        pub fn create_snapshot(
+            &mut self,
+            env: Env,
+            destination: String,
+            generation_id: String,
+        ) -> napi::Result<serde_json::Value> {
+            let manifest =
+                dispatch!(self, mut db => db.create_snapshot(&destination, &generation_id))
+                    .map_err(|e| to_extended_error(env, e))?;
+            serde_json::to_value(manifest).map_err(|e| napi::Error::from_reason(e.to_string()))
         }
 
         /// 显式关闭数据库（落盘后释放资源）
