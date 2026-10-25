@@ -1178,6 +1178,74 @@
     .v2-dock tr { cursor: pointer; }
     .v2-dock tr:hover td, .v2-dock tr.active td { background: rgba(99, 242, 231, 0.08); color: #eef4ff; }
     .v2-dock-json { margin: 0; padding: 8px 10px; border: 1px solid rgba(190, 214, 255, 0.14); border-radius: 9px; background: rgba(3, 6, 14, 0.7); color: #cfe6ff; font: 11px/1.65 var(--font-mono); white-space: pre-wrap; }
+
+    /* ===== 浅色 C（暖石）舞台浮层适配（v3-refinement §A，蓝本未覆盖部分按暖石 token 推导）：
+       浮层底 rgba(251,249,244,.94)+blur、边 #c8c0ad/#ddd5c4、文字 #242018/#5d574c/#8a8374、
+       active 反色胶囊（#242018 底 #fbf9f4 字）、暖色阴影；高亮色换深青/赭保对比度 ===== */
+    [data-theme="light"] .v2-hud .btn,
+    [data-theme="light"] .graph-float-toolbar .btn {
+      background: rgba(251, 249, 244, 0.94); border-color: #c8c0ad; color: #5d574c;
+      box-shadow: 0 6px 16px rgba(60, 52, 40, 0.10);
+    }
+    [data-theme="light"] .v2-hud .btn:hover,
+    [data-theme="light"] .graph-float-toolbar .btn:hover {
+      border-color: rgba(77, 124, 120, 0.55); background: rgba(77, 124, 120, 0.10); color: #242018;
+    }
+    [data-theme="light"] .v2-cockpit,
+    [data-theme="light"] .v2-dock,
+    [data-theme="light"] .v2-more-menu {
+      background: rgba(251, 249, 244, 0.94); border-color: #c8c0ad;
+      box-shadow: 0 12px 28px rgba(60, 52, 40, 0.12);
+    }
+    [data-theme="light"] .v2-cockpit-mode {
+      border-color: rgba(77, 124, 120, 0.40); background: rgba(77, 124, 120, 0.12); color: #4d7c78;
+    }
+    [data-theme="light"] .v2-cockpit-run { background: #242018; color: #fbf9f4; }
+    [data-theme="light"] .v2-cockpit-preview,
+    [data-theme="light"] .v2-cockpit-query { color: #242018; }
+    [data-theme="light"] .v2-cockpit-qhl { color: #242018; border-color: #ddd5c4; background: #fffdf8; }
+    [data-theme="light"] .v2-cockpit-body { border-top-color: #ddd5c4; }
+    [data-theme="light"] .v2-cockpit-field { color: #5d574c; }
+    [data-theme="light"] .v2-cockpit-field input[type="range"] { accent-color: #4d7c78; }
+    [data-theme="light"] .v2-cockpit-hits-head,
+    [data-theme="light"] .v2-cockpit-hits { color: #5d574c; }
+    [data-theme="light"] .v2-cockpit-empty { border-color: #ddd5c4; color: #8a8374; }
+    [data-theme="light"] .v2-cockpit-hit { border-color: #ddd5c4; background: rgba(36, 32, 24, 0.03); }
+    [data-theme="light"] .v2-cockpit-hit:hover,
+    [data-theme="light"] .v2-cockpit-hit.active { border-color: rgba(77, 124, 120, 0.45); background: rgba(77, 124, 120, 0.09); }
+    [data-theme="light"] .v2-hit-id { color: #242018; }
+    [data-theme="light"] .v2-hit-sim { color: #4d7c78; }
+    [data-theme="light"] .v2-hit-chip { border-color: #ddd5c4; color: #5d574c; }
+    [data-theme="light"] .v2-cockpit-qhl .tk-keyword { color: #4d7c78; }
+    [data-theme="light"] .v2-cockpit-qhl .tk-string,
+    [data-theme="light"] .v2-cockpit-qhl .tk-number { color: #8c764e; }
+    [data-theme="light"] .v2-cockpit-qhl .tk-comment { color: #8a8374; }
+    [data-theme="light"] .v2-cockpit-preview .kw,
+    [data-theme="light"] .v2-cockpit-preview .tk-keyword { color: #4d7c78; }
+    [data-theme="light"] .v2-cockpit-preview .str,
+    [data-theme="light"] .v2-cockpit-preview .tk-string,
+    [data-theme="light"] .v2-cockpit-preview .tk-number { color: #8c764e; }
+    [data-theme="light"] .v2-graph-controls {
+      background: rgba(251, 249, 244, 0.94); border-color: #c8c0ad;
+      box-shadow: 0 12px 28px rgba(60, 52, 40, 0.12);
+    }
+    [data-theme="light"] .v2-graph-controls .btn { color: #5d574c; }
+    [data-theme="light"] .v2-dock-bar { color: #5d574c; }
+    [data-theme="light"] .v2-dock-tab { color: #5d574c; }
+    [data-theme="light"] .v2-dock-tab.active { background: #242018; color: #fbf9f4; }
+    [data-theme="light"] .v2-dock-body { color: #5d574c; }
+    [data-theme="light"] .v2-dock-empty { border-color: #ddd5c4; color: #8a8374; }
+    [data-theme="light"] .v2-dock th { background: #eee9dd; color: #8a8374; border-bottom-color: #c8c0ad; }
+    [data-theme="light"] .v2-dock td { color: #5d574c; border-bottom-color: #ddd5c4; }
+    [data-theme="light"] .v2-dock tr:hover td,
+    [data-theme="light"] .v2-dock tr.active td { background: rgba(77, 124, 120, 0.09); color: #242018; }
+    [data-theme="light"] .v2-dock-json { border-color: #ddd5c4; background: rgba(255, 253, 248, 0.8); color: #4d463a; }
+    [data-theme="light"] .v2-dock-idx { color: #8a8374; }
+    [data-theme="light"] .v2-dock-score { color: #242018; }
+    [data-theme="light"] .v2-dock-bar { background: rgba(36, 32, 24, 0.10); }
+    [data-theme="light"] .v2-dock-bar i { background: linear-gradient(90deg, #4d7c78, #9e7f47); }
+    [data-theme="light"] .v2-more-menu .btn { color: #5d574c; }
+    [data-theme="light"] .v2-more-menu .btn:hover { background: rgba(36, 32, 24, 0.06); color: #242018; }
     body.graph-dock-open .v2-graph-controls { bottom: 210px; }
     body.graph-dock-open .v2-more-menu { bottom: 256px; }
     @media (max-width: 1280px) {
