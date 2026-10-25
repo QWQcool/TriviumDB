@@ -1,6 +1,6 @@
 # TriviumDB 安全特性详解
 
-> 基于 v0.8.11 版本源码，说明并发、数据完整性、格式版本门禁、预算、ReadOnly/Immutable 零写、输入验证与跨平台 I/O 的实现和验证边界；见[变更说明](changes-0.8.11.md)。
+> 本文说明 `0.9.0-beta.1` 的并发、数据完整性、格式校验、资源预算、ReadOnly/Immutable、输入验证与跨平台 I/O 实现。版本记录见[变更说明](changes/0.9.0-beta.1.md)。
 
 ---
 
@@ -9,8 +9,8 @@
 - [并发安全模型](#并发安全模型)
 - [数据完整性保障](#数据完整性保障)
 - [内存安全与 unsafe 边界](#内存安全与-unsafe-边界)
-- [输入验证与参数防御](#输入验证与参数防御)
-- [跨平台 IO 加固](#跨平台-io-加固)
+- [资源配额与输入验证](#资源配额与输入验证)
+- [跨平台 I/O 加固](#跨平台-io-加固windows-兼容性)
 
 ---
 
@@ -31,7 +31,7 @@ lock_file.try_lock_exclusive().map_err(|_| {
 })?;
 ```
 
-数据库先将现有主文件或其父目录规范化为绝对路径，再从该规范身份派生 `<db_path>.lock`。Writer 通过 `try_lock_exclusive` 获取排他锁，ReadOnly 通过 `try_lock_shared` 获取共享锁，Immutable 不创建锁文件。锁由 `_lock_file` 持有，`close()` 成功或对象 drop 后释放。
+数据库先将现有主文件或其父目录规范化为绝对路径，再从该规范身份派生 `<db_path>.lock`。Writer 通过 `try_lock_exclusive` 获取排他锁，ReadOnly 通过 `try_lock_shared` 获取共享锁，Immutable 验证代际后直接打开。文件锁由共享所有权句柄持有；显式关闭成功时释放，进行中的异步关闭继续持有它直到工作完成。
 
 **保证**：
 - 同一数据库文件**不可能**被两个进程同时写入
@@ -48,7 +48,7 @@ lock_file.try_lock_exclusive().map_err(|_| {
 
 `MemTable` 使用 `RwLock`：普通无状态查询共享读锁，写入、flush 和 compaction 获取写锁；`Wal` 使用独立 `Mutex`。两类锁均通过恢复封装处理 poison，避免单线程 panic 直接拖垮进程。
 
-完整查询 pipeline 持同一个 MemTable read guard，候选生成、Payload 过滤、QuIVer 精排和结果组装观察同一逻辑版本。开启 fatigue 的有状态查询额外经过 `stateful_search` 串行锁。Hook 在读锁作用域内禁止同线程重入写 API，直接返回错误而不是自锁。
+完整查询 pipeline 持同一个 MemTable read guard，候选生成、Payload 过滤、QuIVer 精排和结果组装观察同一逻辑版本。开启 fatigue 的有状态查询额外经过 `stateful_search` 串行锁。Hook 在读锁作用域内同线程重入写 API 时返回结构化错误。
 
 锁顺序不变量：
 
@@ -60,7 +60,7 @@ QuIVer 构建：不得持有 MemTable guard 等待 singleflight Condvar
 
 确定性交错测试验证了读读并发、读写隔离、QuIVer stale generation 拒绝、singleflight、fatigue 顺序和 compaction/WAL 边界。
 
-这些用例受 `test-hooks` 控制，CI 和发布验收显式启用该 feature；默认 `cargo test` 不包含它们。当前 TSan 任务检查 Linux 并发路径，Miri 检查无 mmap/FFI 的裸指针与邻接表子集，不等于所有线程交错均已证明安全。命令和范围见[测试实践](testing.md#threadsanitizer-与-miri)。
+确定性交错用例通过 `test-hooks` 启用，CI 和发布验收显式执行。TSan 检查 Linux 并发、实例生命周期与维护调度路径；Miri 执行裸指针和邻接表的内存安全子集。命令和执行范围见[测试实践](testing.md#threadsanitizer-与-miri)。
 
 ---
 
@@ -75,15 +75,19 @@ QuIVer 构建：不得持有 MemTable guard 等待 singleflight Condvar
 - 容量、维度、ID、Payload 等错误发生在 WAL 之前；
 - WAL 成功后内存应用只执行已经 Dry-Run 验证的操作。
 
-数据库关闭使用 `Open → Closing → Closed` 状态机和活动操作 RAII 计数。进入 `Closing` 后新操作立即收到 `DatabaseClosed`，close 无超时等待已进入操作结束；最终 flush 失败时恢复 `Open` 并保留文件锁，成功时才释放锁。绑定层不再暴露绕过 flush 的 `release_lock`。
+数据库关闭使用 `Open → Closing → Closed` 状态机和活动操作 RAII 计数。进入 `Closing` 后新操作返回 `DatabaseClosed`。同步 `close()` 等待已有操作结束并完成持久化；失败时恢复 `Open` 并保留文件锁，成功时释放锁与配额。
+
+受控关闭通过 `request_shutdown()` 登记排空与保存任务，`close_timeout()` 在期限内等待，`shutdown_status()` 提供阶段和结构化故障。等待超时后，任务继续持有数据、配额和文件锁。异步保存失败进入 `failed` 状态，调用方取得原始错误后可发起重试。详见[关闭协议](lifecycle-snapshots.md#关闭协议)。
 
 ---
 
-### 4. Compaction 线程的并发安全
+### 4. 共享维护调度
 
 **实现位置**：`storage/compaction.rs`
 
-后台 Compaction 线程通过 `Arc::clone` 共享 `RwLock<MemTable>` 和 `Mutex<Wal>`。准备和保存阶段获取 MemTable 写锁，因此不会与写入交错；保存成功后在同一锁顺序下清理 WAL。该设计优先保证崩溃一致性，compaction 期间前台读可能等待。
+全进程共享维护计时线程，实际任务进入数据库所属的 `ResourceRuntime` 工作池。周期压实尝试获取 MemTable 写锁；锁忙或准入失败时延期。保存阶段持有写锁，成功后按固定顺序取得 WAL 锁并清理日志。已排空的关闭任务优先于周期压实。
+
+维护根任务与前台根任务单独计数，工作区在保存前预留。每个维护登记记录成功、失败、延期次数以及最近原因。实例诊断通过尝试获取 MemTable 读锁采样内存，写锁占用时报告采样暂不可用。
 
 ---
 
@@ -242,6 +246,12 @@ pub enum SyncMode {
 
 ---
 
+### 目录快照发布与恢复
+
+独立目录快照在源库写锁下捕获已持久化代际，复制到同父目录的隐藏暂存目录，逐文件同步并校验 manifest，随后通过目录 rename 和父目录同步发布。恢复采用新的目标目录；目标已存在时返回专用错误。发布后父目录同步失败时保留完整目标，并返回发布状态不确定错误供调用方校验。文件集合、长度、CRC 和主文件头共同参与验证。协议见[一致快照](lifecycle-snapshots.md#一致快照)。
+
+---
+
 ## 内存安全与 unsafe 边界
 
 ### 13. mmap 的 unsafe 安全契约
@@ -320,7 +330,7 @@ if offset + dim <= vectors.len() {
 
 ---
 
-## 资源配额与恶意负载防御 (Anti-DoS & OOM)
+## 资源配额与输入验证
 
 ### 18. 四维查询预算与原子预留
 
@@ -331,7 +341,9 @@ if offset + dim <= vectors.len() {
 3. 超预算、溢出或 `try_reserve` 失败时返回结构化错误；
 4. 只有预留和全部 Dry-Run 验证成功后才写 WAL。
 
-逻辑原子性保证节点、ID、generation 和 WAL 在失败后不变。Rust 容器在后续容器失败前已经成功取得的空 capacity 可能保留，但不形成可见数据。内存预算不包含 Python/NumPy、V8、其他线程和 OS Page Cache，因此不是进程 RSS 的硬上限。
+逻辑原子性保证节点、ID、generation 和 WAL 在失败后保持原值。预留过程中已经取得的空 capacity 可能保留供后续操作使用。内核按实例内存估算和已接入工作区执行预算检查；进程容量评估另行记录 Python/NumPy、V8、其他线程、mmap 驻留与页缓存开销。
+
+共享 `ResourceRuntime` 在数据库打开时登记声明配额，并在操作前预留前台或维护工作区。维护保护额度属于总预算。调整配额失败保留原值，成功关闭归还本实例登记。预算错误包含 `resource/requested/used/limit`，Python 异常与 Node 同步/异步错误提供对应字段。配置与统计见[共享资源运行时](resource-runtime.md)。
 
 QuIVer 构建有独立峰值预算，流式准备 BQ2 与默认 SM 状态，避免 FP16 全库临时展开为 FP32。默认查询的紧凑状态与显式模式安装的临时峰值应分别核算，详见 [QuIVer 内存与重载说明](quiver.md#增量维护重载与内存)。纯 `flush()` 和 compaction 不会隐式触发 ANN 构建。
 
@@ -613,6 +625,6 @@ db.clear_hook()
 | `bindings/python.rs`、`bindings/nodejs.rs` | 回调包装的手工 Send/Sync | 对象跨线程访问及 Python/Node 运行时约束 |
 | `observability.rs` | Windows 外部系统调用 | API 参数、缓冲区布局与返回值检查 |
 
-上表是审核范围与所需契约，不是逐项完成证明。源码确有手工 `Send/Sync`，不能仅凭外层 `Arc/Mutex/RwLock` 推断其内部访问安全，也不能声称全部 unsafe 已有完备 SAFETY 注释。现有 `unsafe_audit` 是专项边界回归；ASan、TSan、Miri 各有执行范围与限制，实际结果以具体提交和平台的验收记录为准。
+上表列出各模块的审核范围与安全契约。手工 `Send/Sync` 按内部访问、所有权和同步条件逐项审核。`unsafe_audit` 执行专项回归，ASan、TSan、Miri 按各自范围运行；验收记录关联具体提交、平台和实际执行路径。
 
 

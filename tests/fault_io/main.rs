@@ -6,3 +6,6 @@ mod deterministic_failpoint;
 mod io_fault;
 mod sector_tearing;
 mod wal_midwrite;
+
+#[cfg(feature = "test-hooks")]
+mod snapshot_shutdown;

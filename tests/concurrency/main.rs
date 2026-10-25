@@ -5,3 +5,4 @@ mod concurrency_invariants;
 mod concurrent;
 mod deterministic;
 mod deterministic_interleaving;
+mod resources;

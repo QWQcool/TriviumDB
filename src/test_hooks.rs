@@ -10,6 +10,8 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ConcurrencyPoint {
+    BeforeSnapshotPublish,
+    AfterSnapshotPublish,
     BeforeStatefulSearchLock,
     StatefulSearchEntered,
     BeforeClearSearchStateLock,
@@ -38,6 +40,10 @@ pub enum ConcurrencyPoint {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IoPoint {
+    SnapshotCopy,
+    SnapshotSync,
+    SnapshotPublish,
+    SnapshotDirectorySync,
     MarkerCreate,
     MarkerWrite,
     MarkerSync,
@@ -67,6 +73,10 @@ impl Drop for IoFailureGuard {
     fn drop(&mut self) {
         IO_FAILURE.set(self.previous);
     }
+}
+
+pub(crate) fn current_io_failure() -> Option<IoPoint> {
+    IO_FAILURE.get()
 }
 
 pub fn fail_io_at(point: IoPoint) -> IoFailureGuard {

@@ -406,7 +406,7 @@ fn 容量规划_事务预留拒绝前后WAL与代际完全不变() {
     let path = tmp_db("reserve_wal_atomicity");
     cleanup(&path);
     let mut db = Database::<f32>::open(&path, DIM).unwrap();
-    db.set_memory_limit(1);
+    db.set_memory_limit(1).unwrap();
     let wal_before = std::fs::metadata(format!("{path}.wal"))
         .map(|meta| meta.len())
         .unwrap_or(0);
@@ -422,7 +422,7 @@ fn 容量规划_事务预留拒绝前后WAL与代际完全不变() {
         .unwrap_or(0);
     assert_eq!(wal_after, wal_before);
     assert_eq!(db.node_count(), 0);
-    db.set_memory_limit(0);
+    db.set_memory_limit(0).unwrap();
     assert_eq!(db.insert(&[1.0, 0.0, 0.0, 0.0], json!({})).unwrap(), 1);
     drop(db);
     cleanup(&path);
@@ -439,7 +439,7 @@ fn 容量规划_更新与图边增长在WAL前统一拒绝() {
     let second = db
         .insert(&[0.0, 1.0, 0.0, 0.0], json!({"name": "second"}))
         .unwrap();
-    db.set_memory_limit(1);
+    db.set_memory_limit(1).unwrap();
     let before = db.storage_write_stats();
 
     assert!(matches!(
@@ -457,7 +457,7 @@ fn 容量规划_更新与图边增长在WAL前统一拒绝() {
     assert_eq!(db.storage_write_stats(), before);
     assert!(db.get_edge(first, second, "blocked").is_none());
 
-    db.set_memory_limit(0);
+    db.set_memory_limit(0).unwrap();
     drop(db);
     cleanup(&path);
 }
@@ -542,7 +542,7 @@ fn QuIVer构建峰值预算_显式构建应在分配前拒绝() {
         db.insert_with_id(id, &[id as f32, 1.0, -1.0, 0.5], json!({"id": id}))
             .unwrap();
     }
-    db.set_memory_limit(1);
+    db.set_memory_limit(1).unwrap();
 
     let error = db.build_quiver_index(None).unwrap_err().to_string();
     assert!(error.contains("预计峰值"));
@@ -567,7 +567,7 @@ fn QuIVer导航树及遍历工作区必须提前计入构图预算() {
     }
     // a363bc8 对 128 个四维节点、默认参数的旧峰值估算为 85,120 字节。
     // 旧估算恰好能通过的上限，必须因新增父节点和遍历工作区而提前拒绝。
-    db.set_memory_limit(db.estimated_memory() + 85_120);
+    db.set_memory_limit(db.estimated_memory() + 85_120).unwrap();
     let error = db.build_quiver_index(None).unwrap_err().to_string();
     assert!(error.contains("预计峰值"));
     assert!(error.contains("内存上限"));
@@ -585,7 +585,7 @@ fn QuIVer构建峰值预算_自动构建应返回明确错误() {
         db.insert_with_id(id, &[id as f32, 1.0, -1.0, 0.5], json!({"id": id}))
             .unwrap();
     }
-    db.set_memory_limit(1);
+    db.set_memory_limit(1).unwrap();
 
     let error = db
         .search(&[1.0, 1.0, -1.0, 0.5], 10, 0, -1.0)

@@ -2,7 +2,7 @@
 
 > 从单元测试到属性测试、从覆盖率度量到变异测试：TriviumDB 的多层防御测试体系详解。
 >
-> 当前对应 `0.8.11` 版本源码；见[变更说明](changes-0.8.11.md)。
+> 本文说明 `0.9.0-beta.1` 的测试与验收方法，见[变更说明](changes/0.9.0-beta.1.md)。
 
 ---
 
@@ -41,6 +41,12 @@ TriviumDB 采用 **五层防御式测试体系**，从函数级正确性到系�
 ---
 
 ## 快速运行
+
+实例资源诊断还覆盖写锁占用时返回未知内存、共享余额与独立配额、维护延期/失败/恢复，以及 Python 异常和 Node 同步/异步错误上的预算字段。维护状态的定向检查为 `cargo test --lib storage::compaction::tests`；该测试也接入 Linux TSan。Rust、Python、Node 继续共用 `resource_cases.json`，绑定测试还验证预算释放后的查询重试。
+
+生命周期和快照的定向检查：`cargo test --lib database::lifecycle::tests`、`cargo test --test contracts 快照恢复`、`cargo test --test storage snapshot`、`cargo test --test fault_io --features test-hooks snapshot_shutdown -- --test-threads=1`、`cargo test --test fault_power --features test-hooks snapshot -- --test-threads=1`。共享 `lifecycle_cases.json` 覆盖三端 f32/f16/u64；故障用例验证目录发布前失败、发布后同步不确定、真实强杀、超时锁保留及关闭失败重试。TSan 工作流也包含生命周期单元测试；本地 Windows 不执行 Linux TSan/Miri。
+
+共享资源层的定向检查：`cargo test --lib resources::tests`、`cargo test --test concurrency resources`、`cargo test --test contracts 共享资源`。这组测试默认启用，覆盖配额回收、扩容回滚、写入前拒绝、回调线程、单线程维护以及实际工作线程峰值。`tests/contracts/resource_cases.json` 由 Rust、Python、Node 公共 API 测试共同执行，覆盖 f32/f16/u64。详见[资源运行时的配置与统计](resource-runtime.md)。
 
 ```bash
 # 运行全部测试（单元 + 集成 + 属性）
@@ -209,7 +215,7 @@ fn tx_insert_后_在同一事务link() {
 
 ### Filter 错误路径覆盖
 
-`from_json` 的每个操作符都有对应的类型不匹配错误测试，确保任何畸形输入都被优雅拒绝而不是 panic：
+`from_json` 的每个操作符都有对应的类型不匹配错误测试，验证畸形输入返回明确错误：
 
 ```rust
 #[test]
@@ -324,7 +330,7 @@ cargo fuzz run fuzz_wal_parse
 
 ## AddressSanitizer 内存安全检测
 
-CI 使用 nightly Rust 的 AddressSanitizer (ASan) 检查测试实际执行到的内存访问。它不是所有 unsafe 的完整审计：平台、CPU 指令集、feature 和测试输入都会限制执行路径，ASan 也不负责检测数据竞争。
+CI 使用 nightly Rust 的 AddressSanitizer (ASan) 检查测试执行路径中的内存访问，覆盖范围由平台、CPU 指令集、feature 和测试输入共同决定。数据竞争由独立的 TSan 任务检查。
 
 运行本地 ASan 测试（需要 Linux/macOS nightly 环境）：
 
@@ -336,13 +342,13 @@ ASan 能有效检测：堆栈溢出 (Buffer Overflow)、内存泄漏 (Memory Lea
 
 ## ThreadSanitizer 与 Miri
 
-`ci.yml` 为普通 PR/push 配置了独立的 TSan 和 Miri 任务，错误会使任务失败；是否通过以对应提交的 CI 结果为准。它们补充现有多平台测试和 ASan，不替代人工审核。
+`ci.yml` 为普通 PR/push 配置独立的 TSan 和 Miri 任务，与多平台测试、ASan 和代码审核共同构成验收流程。各项执行结果记录在对应提交的 CI 中。
 
 | 检查 | 当前执行范围 | 边界 |
 |---|---|---|
 | 默认测试 | 默认 feature 下的库与集成测试 | 不会隐式启用 `test-hooks` |
-| 确定性交错与故障注入 | 多平台显式启用 `test-hooks`，运行 concurrency、differential、fault_io、fault_power；规划器回归另行执行 | 覆盖预设交错，不穷举所有调度；强杀模拟进程中断，不等于真实物理断电 |
-| TSan | Linux x86_64 下启用 `test-hooks` 的 concurrency，以及 `memory_safety_` 库测试子集 | 数据竞争检测；标准库一起插桩，未覆盖其他平台、FFI 或全部图构建路径 |
+| 确定性交错与故障注入 | 多平台显式启用 `test-hooks`，运行 concurrency、differential、fault_io、fault_power；规划器回归另行执行 | 验证预设线程交错、定点故障和强杀进程中断场景 |
+| TSan | Linux x86_64 下启用 `test-hooks` 的 concurrency，以及 `memory_safety_`、`database::lifecycle::tests`、`storage::compaction::tests` 库测试子集 | 数据竞争检测；标准库一起插桩，未覆盖其他平台、FFI 或全部图构建路径 |
 | Miri | `memory_safety_` 库测试子集，随机种子 `0..4` | BQ 精确分配长度、尾部掩码、扩容后行偏移，以及并发邻接表锁保护、容量边界和冻结；不执行 mmap、FFI 或完整 SIMD 路径 |
 
 TSan 本地命令（Linux x86_64，nightly 与 rust-src）：
@@ -350,6 +356,8 @@ TSan 本地命令（Linux x86_64，nightly 与 rust-src）：
 ```bash
 RUSTFLAGS="-Zsanitizer=thread" TSAN_OPTIONS="halt_on_error=1" cargo +nightly test --locked -Zbuild-std --target x86_64-unknown-linux-gnu --features test-hooks --test concurrency -- --test-threads=1
 RUSTFLAGS="-Zsanitizer=thread" TSAN_OPTIONS="halt_on_error=1" cargo +nightly test --locked -Zbuild-std --target x86_64-unknown-linux-gnu --lib memory_safety_ -- --test-threads=1
+RUSTFLAGS="-Zsanitizer=thread" TSAN_OPTIONS="halt_on_error=1" cargo +nightly test --locked -Zbuild-std --target x86_64-unknown-linux-gnu --features test-hooks --lib database::lifecycle::tests -- --test-threads=1
+RUSTFLAGS="-Zsanitizer=thread" TSAN_OPTIONS="halt_on_error=1" cargo +nightly test --locked -Zbuild-std --target x86_64-unknown-linux-gnu --lib storage::compaction::tests -- --test-threads=1
 ```
 
 Miri 本地命令：
@@ -359,9 +367,9 @@ rustup component add --toolchain nightly miri rust-src
 MIRIFLAGS="-Zmiri-strict-provenance -Zmiri-many-seeds=0..4" cargo +nightly miri test --locked --lib memory_safety_ -- --test-threads=1
 ```
 
-Windows 可加 `--target x86_64-unknown-linux-gnu` 进行 Miri 跨目标解释执行；这不等于验证 Windows 特有的文件映射或锁语义。保留 Miri 默认的别名、数据竞争与泄漏检查，不使用关闭这些检查的参数来绕过失败。项目尚未接入 loom；当前 Miri 多种子运行也不等于 loom 的模型探索。
+Windows 主机可加 `--target x86_64-unknown-linux-gnu` 解释执行 Linux 目标的 Miri 用例；Windows 特有的文件映射和锁语义由 Windows 原生测试验证。Miri 配置保留默认的别名、数据竞争与泄漏检查，并使用多个随机种子。
 
-unsafe 审核按文件与安全契约记录范围，不使用固定总数作为完成指标。`bq.rs`、`vector.rs` 和 SM 相关模块包含标量裸指针或 SIMD 路径；`quiver.rs` 包含并发邻接表及其他构图路径；存储与属性索引包含 mmap；`hook.rs` 和 Python/Node 绑定包含外部调用或手工 Send/Sync。现有测试没有证明这些模块的所有长度、对齐、生命周期及并发契约均成立，后续扩展需要逐项验证实际执行范围。[Rust Sanitizer 说明](https://doc.rust-lang.org/unstable-book/compiler-flags/sanitizer.html)、[Miri 说明](https://github.com/rust-lang/miri)列出了工具能力与限制。
+unsafe 审核按文件、安全契约和实际执行路径记录。`bq.rs`、`vector.rs` 和 SM 相关模块包含标量裸指针或 SIMD 路径；`quiver.rs` 包含并发邻接表及其他构图路径；存储与属性索引包含 mmap；`hook.rs` 和 Python/Node 绑定包含外部调用或手工 Send/Sync。扩展测试时逐项核对长度、对齐、生命周期及并发条件，并记录对应输入和平台。[Rust Sanitizer 说明](https://doc.rust-lang.org/unstable-book/compiler-flags/sanitizer.html)、[Miri 说明](https://github.com/rust-lang/miri)列出了工具的适用范围。
 
 ### 运行属性测试
 
