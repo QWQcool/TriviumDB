@@ -814,12 +814,7 @@
       display: flex;
       align-items: center;
       gap: 8px;
-    }
-    /* 窄视口下工具栏按钮占满宽度，辅助提示会被挤成逐字竖排——直接隐藏 */
-    @media (max-width: 700px) {
-      .toolbar-left [data-i18n="graph.hint.drag"] { display: none; }
-    }
-    .checkbox-label {
+    }    .checkbox-label {
       display: inline-flex;
       align-items: center;
       gap: 5px;
@@ -1062,11 +1057,14 @@
       top: 12px;
       right: 20px;
       display: flex;
-      flex-direction: column;
+      flex-direction: row;
+      flex-wrap: wrap;
+      justify-content: flex-end;
       gap: 6px;
       z-index: 6;
+      max-width: 430px;
     }
-    .graph-float-toolbar .btn { justify-content: center; min-width: 84px; padding: 4px 10px; font-size: 12px; }
+    .graph-float-toolbar .btn { justify-content: center; min-width: 0; padding: 4px 12px; font-size: 12px; }
 
     /* V2 图探索覆盖层：HUD / 查询舱 / 底部布局条 / 结果抽屉 */
     .v2-graph-stage { position: relative; }
@@ -1109,6 +1107,8 @@
     .v2-cockpit-hits { display: flex; flex-direction: column; gap: 6px; }
     .v2-cockpit-hits-head { color: #72819f; font: 10px/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
     .v2-cockpit-empty { padding: 18px 10px; border: 1px dashed rgba(190, 214, 255, 0.16); border-radius: 10px; color: #72819f; font-size: 11.5px; text-align: center; }
+    /* V3-F 未运行空态：图标 + 一行说明（区别于已运行的无命中摘要） */
+    .v2-cockpit-empty--idle { display: flex; flex-direction: column; align-items: center; gap: 7px; opacity: .92; }
     /* 查询舱命中列表（V2 蓝本 mini-results：ID + 相似度 + 类型 chips） */
     .v2-cockpit-hit { padding: 8px 10px; border-radius: 11px; border: 1px solid rgba(190, 214, 255, 0.09); background: rgba(255, 255, 255, 0.025); cursor: pointer; }
     .v2-cockpit-hit:hover, .v2-cockpit-hit.active { border-color: rgba(99, 242, 231, 0.38); background: rgba(99, 242, 231, 0.09); }
@@ -1144,8 +1144,12 @@
     .v2-graph-controls .btn { font-size: 11.5px; padding-inline: 9px; }
     .v2-graph-controls--flat { bottom: 16px; }
     @media (min-width: 901px) {
-      body.panel-open .v2-graph-controls { right: auto; transform: translateX(calc(-50% - 170px)); }
-      body.panel-open .v2-more-menu { right: 376px; }
+      /* V3-E 面板让位（方案②）：浮层统一右让 376px（面板宽 360 + 边距 16），
+         中心类浮层左移半宽 188px，与工具栏 right:376px 同基准 */
+      body.panel-open .v2-graph-controls { right: auto; transform: translateX(calc(-50% - 188px)); }
+      body.panel-open .v2-more-menu { right: 388px; }
+      body.panel-open .v2-cockpit { left: calc(50% - 188px); width: min(560px, calc(100% - 916px)); min-width: min(380px, calc(100% - 916px)); }
+      body.panel-open .v2-dock { right: 388px; }
     }
     .v2-more-menu {
       position: absolute; right: 12px; bottom: 100px; z-index: 12; display: none; flex-direction: column; gap: 5px;
@@ -1622,7 +1626,7 @@
       backdrop-filter: blur(6px);
     }
     #drawerNodePayload {
-      max-height: 220px;
+      max-height: 168px; /* V3-G：默认 8 行内，四卡首屏同屏（展开全部解除） */
       overflow: hidden;
     }
     #drawerNodePayload.expanded {
@@ -2801,7 +2805,7 @@
                   <button class="result-notice-close" type="button" aria-label="关闭提示" data-i18n-aria-label="common.closePrompt">✕</button>
                 </div>
                 <div class="graph-controls v2-graph-controls v2-graph-controls--flat">
-                  <button class="btn" id="toggleWebGLBtn" title="切换 WebGL/Canvas 渲染后端（加载失败自动回退 Canvas）">WebGL 渲染</button>
+                  <button class="btn" id="toggleWebGLBtn" title="切换 WebGL/Canvas 渲染后端（加载失败自动回退 Canvas）">Canvas 渲染</button>
                   <!-- PR-18 布局四档：力导向为默认；其余三档为一次性确定性静态布局（物理关闭） -->
                   <button class="btn active" id="layoutForceBtn" title="力导向布局（物理模拟实时收敛）">力导向</button>
                   <button class="btn" id="layoutClusterBtn" title="聚类布局：Louvain 社区分簇摆位（离线回退按类型分组），静态确定性">聚类</button>
@@ -2810,20 +2814,20 @@
                   <button class="btn" id="graphMoreBtnQuery" data-i18n="graph.more">更多</button>
                 </div>
                 <div class="v2-more-menu" id="graphMoreMenuQuery">
+                  <button class="btn" id="gftExportPngBtn" title="导出 PNG（Canvas 路径）">导出 PNG</button>
+                  <button class="btn" id="gftFullscreenBtn" title="画布全屏">全屏</button>
                   <button class="btn" id="centerGraphBtn" title="重置居中">居中视角</button>
                   <button class="btn" id="togglePhysicsBtn" title="固定物理模拟">冻结力学</button>
                   <button class="btn active" id="colorModeTypeBtn" title="按节点类型着色">按类型</button>
                   <button class="btn" id="colorModeCommunityBtn" title="Louvain 社区检测着色（按需加载）">按社区</button>
                   <button class="btn" id="graphFilterBtn" title="按节点类型 / 边 label 过滤显示">过滤器</button>
                 </div>
-                <!-- PR-17 画布浮动工具条：缩放 / 适合窗口 / 全屏（右上角垂直） -->
+                <!-- PR-17 画布浮动工具条：V3-C 横排 4 钮（导出/全屏已收进更多菜单） -->
                 <div class="graph-float-toolbar" role="group" aria-label="画布视图工具条">
                   <button class="btn" id="gftZoomInBtn" title="放大">＋</button>
                   <button class="btn" id="gftZoomOutBtn" title="缩小">－</button>
                   <button class="btn" id="gftFitBtn" title="适合窗口（按可见节点包围盒适配）">适合窗口</button>
                   <button class="btn" id="graphMergeBtn" title="把当前查询/检索结果并入图探索（增量合并）">并入图探索</button>
-                  <button class="btn" id="gftExportPngBtn" title="导出 PNG（Canvas 路径）">导出 PNG</button>
-                  <button class="btn" id="gftFullscreenBtn" title="画布全屏">全屏</button>
                 </div>
                 <!-- 过滤器面板已并入右侧统一面板（PR-19），浮动入口按钮改为打开过滤器 tab -->
                 <!-- 社区着色图例（按社区模式显示；芯片可点击聚焦社区） -->
@@ -2841,23 +2845,15 @@
         </div>
       </div>
 
-      <!-- 标签页 2：独立图拓扑探索 -->
+      <!-- 标签页 2：独立图拓扑探索（V3-D：顶部工具条收纳进左上 HUD，提示改一次性 toast） -->
       <div class="tab-pane" id="graphExplorePane" role="tabpanel" aria-labelledby="tab-graphExplorePane">
-        <div class="editor-toolbar">
-          <div class="toolbar-left">
-            <button class="btn btn-primary" id="loadWholeGraphBtn">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>
-              <span data-i18n="graph.loadWhole">加载全图拓扑（前 100 条边）</span>
-            </button>
-            <button class="btn" id="graphTqlBtn" title="在探索器内运行只读 TQL，结果增量并入当前图（不离开探索流）">TQL 查询入图</button>
-            <span style="color: var(--text-muted); font-size: 12px;" data-i18n="graph.hint.drag">提示：可在画布上自由拖拽节点，滚轮缩放，单击节点查看属性</span>
-          </div>
-        </div>
         <div class="v2-graph-stage" style="flex: 1; position: relative; background: var(--bg-surface);" id="standaloneGraphShell">
           <canvas id="standaloneGraphCanvas" style="width: 100%; height: 100%; display: block;"></canvas>
           <!-- Sigma WebGL 渲染容器（独立画布的第二视图实例，共享同一图数据） -->
           <div class="graph-sigma-container" id="standaloneSigmaContainer" hidden></div>
           <div class="v2-hud left">
+            <button class="btn" id="loadWholeGraphBtn" data-i18n="graph.hud.loadWhole" data-i18n-title="graph.loadWhole" title="加载全图拓扑（前 100 条边，原地并入当前图）">加载全图</button>
+            <button class="btn" id="graphTqlBtn" data-i18n="graph.tqlIn" title="在探索器内运行只读 TQL，结果增量并入当前图（不离开探索流）">TQL 查询入图</button>
             <button class="btn" id="graphHudSearch" data-i18n="graph.hud.search">图内搜索</button>
             <button class="btn" id="graphHudKhop" title="k-hop 邻域步数">k-hop: 2</button>
             <button class="btn" id="graphHudPath" data-i18n="graph.hud.path">路径追踪</button>
@@ -2878,12 +2874,12 @@
               </div>
               <div>
                 <div class="v2-cockpit-hits-head" data-i18n="graph.cockpit.hits">命中节点</div>
-                <div id="graphCockpitHits" class="v2-cockpit-empty" data-i18n="graph.cockpit.empty">运行 TQL 后显示命中节点</div>
+                <div id="graphCockpitHits" class="v2-cockpit-empty v2-cockpit-empty--idle" data-i18n="graph.cockpit.idle">尚未运行 · 运行后在此列出命中</div>
               </div>
             </div>
           </section>
           <div class="graph-controls v2-graph-controls">
-            <button class="btn" id="toggleWebGLBtnStandalone" title="切换 WebGL/Canvas 渲染后端（加载失败自动回退 Canvas）">WebGL 渲染</button>
+            <button class="btn" id="toggleWebGLBtnStandalone" title="切换 WebGL/Canvas 渲染后端（加载失败自动回退 Canvas）">Canvas 渲染</button>
             <!-- PR-18 布局四档（独立探索视图，与全局布局模式同步） -->
             <button class="btn active" id="layoutForceBtnStandalone" title="力导向布局（物理模拟实时收敛）">力导向</button>
             <button class="btn" id="layoutClusterBtnStandalone" title="聚类布局：Louvain 社区分簇摆位（离线回退按类型分组），静态确定性">聚类</button>
@@ -2892,6 +2888,9 @@
             <button class="btn" id="graphMoreBtn" data-i18n="graph.more">更多</button>
           </div>
           <div class="v2-more-menu" id="graphMoreMenu">
+            <button class="btn" id="gftExportPngBtnStandalone" title="导出 PNG（Sigma 走 toPNG，不可用时合成 layer 画布）">导出 PNG</button>
+            <button class="btn" id="gftFullscreenBtnStandalone" title="画布全屏">全屏</button>
+            <button class="btn" id="graphMotionBtn" title="图动效开关" aria-pressed="true">动效: 开</button>
             <button class="btn" id="centerStandaloneBtn" title="重置居中">居中视角</button>
             <button class="btn" id="graphMergeBtnStandalone" title="把当前查询/检索结果并入图探索（增量合并）">并入图探索</button>
             <button class="btn active" id="colorModeTypeBtnStandalone" title="按节点类型着色">按类型</button>
@@ -2933,15 +2932,12 @@
             <select class="ns-key-select" id="nsKeySelect" aria-label="命名空间键" data-i18n-aria-label="graph.nsKeyAria"></select>
             <div class="ns-tree" id="nsTree"></div>
           </div>
-          <!-- PR-17 画布浮动工具条（独立探索视图） -->
+          <!-- PR-17 画布浮动工具条（独立探索视图）：V3-C 横排 4 钮（导出/动效/全屏已收进更多菜单） -->
           <div class="graph-float-toolbar" role="group" aria-label="画布视图工具条">
             <button class="btn" id="gftZoomInBtnStandalone" title="放大">＋</button>
             <button class="btn" id="gftZoomOutBtnStandalone" title="缩小">－</button>
             <button class="btn" id="gftFitBtnStandalone" title="适合窗口（按可见节点包围盒适配）">适合窗口</button>
-            <button class="btn" id="gftExportPngBtnStandalone" title="导出 PNG（Sigma 走 toPNG，不可用时合成 layer 画布）">导出 PNG</button>
             <button class="btn" id="nebulaModeBtn" title="星云模式：单查询拉取全库拓扑（MATCH 上限 10000 行），以 WebGL 星图呈现（Sigma 专属，物理关闭）">星云模式</button>
-            <button class="btn" id="graphMotionBtn" title="图动效开关" aria-pressed="true">动效: 开</button>
-            <button class="btn" id="gftFullscreenBtnStandalone" title="画布全屏">全屏</button>
           </div>
           <!-- 过滤器面板已并入右侧统一面板（PR-19） -->
           <div class="graph-legend" id="graphLegendStandalone" hidden></div>
@@ -3088,23 +3084,12 @@
           <h4 id="drawerNodeTitle" data-i18n="detail.title">节点详情</h4>
           <!-- 内层关闭按钮已移除：与面板 uspCollapseBtn 功能重合（双 X 问题），收起语义统一到面板 -->
         </div>
-        <!-- Trinity 三平面：Payload / Vector / Edges -->
+        <!-- Trinity 三平面：Payload / Vector / Edges（V3-G：图操作上移到 Payload 卡底部，四卡可同屏） -->
         <section class="inspector-plane">
           <div class="inspector-plane-title"><span class="inspector-dot" style="background: var(--tri-doc);"></span>Payload</div>
           <div class="json-view" id="drawerNodePayload" style="padding: 8px 10px;"></div>
           <button class="btn" id="payloadExpandBtn" type="button" hidden data-i18n="detail.expandPayload" style="margin-top: 6px;">展开全部</button>
-        </section>
-        <section class="inspector-plane">
-          <div class="inspector-plane-title"><span class="inspector-dot" style="background: var(--tri-vector);"></span>Vector</div>
-          <div id="drawerNodeVector" class="inspector-vector"></div>
-        </section>
-        <section class="inspector-plane">
-          <div class="inspector-plane-title"><span class="inspector-dot" style="background: var(--tri-graph);"></span>Edges</div>
-          <div id="drawerNodeEdges" class="inspector-edges">-</div>
-          <!-- PR-19 关联节点迷你图：中心=当前节点，环上已拉取邻居确定性摆位（零新增请求） -->
-          <canvas id="drawerMiniMap" class="drawer-mini-map" width="300" height="170"
-            aria-label="当前节点邻接迷你图" title="点击邻居节点跳转查看"></canvas>
-          <div style="display: flex; align-items: center; gap: 6px; margin-top: 8px;">
+          <div style="display: flex; align-items: center; gap: 6px; margin-top: 8px; flex-wrap: wrap;">
             <select id="khopDepthSelect" class="vl-input" style="width: 90px; padding: 4px 6px;" title="邻域扩展跳数" aria-label="邻域扩展跳数" data-i18n-aria-label="detail.khopAria">
               <option value="1" selected>1 跳</option>
               <option value="2">2 跳</option>
@@ -3115,7 +3100,7 @@
           </div>
           <div class="ai-ctx-size" id="khopHint"></div>
           <!-- 路径追踪（0.8.8：GET /v1/nodes/{from}/paths/to/{to}） -->
-          <div style="display: flex; align-items: center; gap: 6px; margin-top: 8px;">
+          <div style="display: flex; align-items: center; gap: 6px; margin-top: 8px; flex-wrap: wrap;">
             <input class="vl-input" id="pathTargetInput" type="text" inputmode="numeric"
               placeholder="目标节点 id" aria-label="路径追踪目标节点 id" data-i18n-placeholder="detail.pathTarget" data-i18n-aria-label="detail.pathTargetAria"
               style="width: 110px; padding: 4px 6px; font-family: var(--font-mono);">
@@ -3128,6 +3113,17 @@
           </div>
           <div class="ai-ctx-size" id="pathHint"></div>
           <button class="btn" id="clearPathBtn" type="button" hidden style="margin-top: 6px;" data-i18n="detail.clearPath">清除路径高亮</button>
+        </section>
+        <section class="inspector-plane">
+          <div class="inspector-plane-title"><span class="inspector-dot" style="background: var(--tri-vector);"></span>Vector</div>
+          <div id="drawerNodeVector" class="inspector-vector"></div>
+        </section>
+        <section class="inspector-plane">
+          <div class="inspector-plane-title"><span class="inspector-dot" style="background: var(--tri-graph);"></span>Edges</div>
+          <div id="drawerNodeEdges" class="inspector-edges">-</div>
+          <!-- PR-19 关联节点迷你图：中心=当前节点，环上已拉取邻居确定性摆位（零新增请求） -->
+          <canvas id="drawerMiniMap" class="drawer-mini-map" width="300" height="170"
+            aria-label="当前节点邻接迷你图" title="点击邻居节点跳转查看"></canvas>
         </section>
         <!-- 平面 4: 向量空间投影（PCA 3D：当前节点 + 1 跳邻居） -->
         <section class="inspector-plane" id="projectionCard">
@@ -3158,6 +3154,7 @@
       <span id="statusQueryTime">耗时: -</span>
       <span id="statusRowCount">返回: 0 行</span>
       <span id="statusAffected">影响: -</span>
+      <span id="statusGraphInfo" hidden></span>
     </div>
     <div class="status-right">
       <span id="statusQuiver" class="status-pill" title="QuIVer 向量索引预热状态 (来自 /health/details 的 quiverWarmup)" data-i18n-title="status.quiverTitle">QuIVer: -</span>
@@ -3383,6 +3380,7 @@
         'status.elapsedZero': '耗时: -',
         'status.affectedZero': '影响: -',
         'status.quiverTitle': 'QuIVer 向量索引预热状态 (来自 /health/details 的 quiverWarmup)',
+        'status.graphInfo': '图: {nodes} 节点 · {edges} 边 · {backend} · {fps} FPS',
         'status.healthTitle': '引擎整体就绪状态 (来自 /health/details 的 status)',
       },
       en: {
@@ -3472,6 +3470,7 @@
         'status.elapsedZero': 'Elapsed: -',
         'status.affectedZero': 'Affected: -',
         'status.quiverTitle': 'QuIVer vector index warmup state (from /health/details quiverWarmup)',
+        'status.graphInfo': 'Graph: {nodes} nodes · {edges} edges · {backend} · {fps} FPS',
         'status.healthTitle': 'Engine readiness (from /health/details status)',
       }
     };
@@ -3484,6 +3483,9 @@
         'graph.tqlMergeTitle': '在探索器内运行只读 TQL，结果增量并入当前图（不离开探索流）',
         'graph.hint.drag': '提示：可在画布上自由拖拽节点，滚轮缩放，单击节点查看属性',
         'graph.hud.search': '图内搜索',
+        'graph.hud.loadWhole': '加载全图',
+        'graph.tqlIn': 'TQL 查询入图',
+        'graph.cockpit.idle': '尚未运行 · 运行后在此列出命中',
         'graph.hud.path': '路径追踪',
         'graph.motion.label': '动效',
         'graph.motion.on': '开',
@@ -3525,7 +3527,7 @@
         'graph.filterTitle': '按节点类型 / 边 label 过滤显示',
         'graph.layout.force': '力导向',
         'graph.layout.forceTitle': '力导向布局（物理模拟实时收敛）',
-        'graph.layout.cluster': '聚类',
+        'graph.layout.cluster': '星云聚类',
         'graph.layout.clusterTitle': '聚类布局：Louvain 社区分簇摆位（离线回退按类型分组），静态确定性',
         'graph.layout.vector': '向量星图',
         'graph.layout.vectorTitle': '向量星图：PCA 二维投影（无向量/低维节点放外环），静态确定性',
@@ -3797,6 +3799,9 @@
         'graph.tqlMergeTitle': 'Run read-only TQL inside the explorer and merge results without leaving the flow',
         'graph.hint.drag': 'Tip: drag nodes, scroll to zoom, click a node to inspect its payload',
         'graph.hud.search': 'Graph search',
+        'graph.hud.loadWhole': 'Load graph',
+        'graph.tqlIn': 'TQL into graph',
+        'graph.cockpit.idle': 'Not run yet · hits appear here after running',
         'graph.hud.path': 'Path trace',
         'graph.motion.label': 'Motion',
         'graph.motion.on': 'on',
@@ -3838,7 +3843,7 @@
         'graph.filterTitle': 'Filter by node type / edge label',
         'graph.layout.force': 'Force',
         'graph.layout.forceTitle': 'Force-directed layout (live physics)',
-        'graph.layout.cluster': 'Cluster',
+        'graph.layout.cluster': 'Nebula cluster',
         'graph.layout.clusterTitle': 'Cluster layout: Louvain communities (fallback: type groups), deterministic',
         'graph.layout.vector': 'Vector map',
         'graph.layout.vectorTitle': 'Vector map: PCA projection (no/low-dim nodes on outer ring), deterministic',
@@ -4170,8 +4175,8 @@
         const el = document.getElementById(id);
         if (el) el.title = t(key);
       });
-      const loadWhole = document.querySelector('#loadWholeGraphBtn [data-i18n="graph.loadWhole"]');
-      if (loadWhole) loadWhole.textContent = t('graph.loadWhole');
+      const loadWhole = document.querySelector('#loadWholeGraphBtn');
+      if (loadWhole) loadWhole.textContent = t('graph.hud.loadWhole');
       const dragHint = document.querySelector('[data-i18n="graph.hint.drag"]');
       if (dragHint) dragHint.textContent = t('graph.hint.drag');
       // 动态态：物理/后端/星云/全屏
@@ -4182,7 +4187,7 @@
       if (typeof graphBackend !== 'undefined') {
         ['toggleWebGLBtn', 'toggleWebGLBtnStandalone'].forEach((id) => {
           const el = document.getElementById(id);
-          if (el) el.textContent = t(graphBackend === 'sigma' ? 'graph.canvas' : 'graph.webgl');
+          if (el) el.textContent = t(graphBackend === 'sigma' ? 'graph.webgl' : 'graph.canvas');
         });
       }
       if (typeof nebulaActive !== 'undefined') {
@@ -7720,6 +7725,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       const cockpit = document.getElementById('graphCockpit');
       const cockpitToggle = document.getElementById('graphCockpitToggle');
       const cockpitPreview = document.getElementById('graphCockpitPreview');
+      renderCockpitHits(null); // V3-F 初始为「未运行」结构化空态（区别于无命中摘要）
       const cockpitRun = document.getElementById('graphCockpitRun');
       const cockpitQuery = document.getElementById('graphCockpitQuery');
       const cockpitThreshold = document.getElementById('graphCockpitThreshold');
@@ -8426,6 +8432,28 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       document.getElementById('nsKeySelect').addEventListener('change', renderNamespaceTree);
     }
 
+    // V3-H：状态栏图信息（节点 · 边 · 当前后端 · 帧率估算），图视图激活时显示
+    let __lastGraphDrawTs = 0;
+    let __graphFpsEstimate = 0;
+    function updateStatusGraphInfo() {
+      const el = document.getElementById('statusGraphInfo');
+      if (!el) return;
+      const pane = document.getElementById('graphExplorePane');
+      el.hidden = !(pane && pane.classList.contains('active'));
+      if (el.hidden) return;
+      const now = performance.now();
+      if (__lastGraphDrawTs > 0) {
+        const dt = now - __lastGraphDrawTs;
+        if (dt > 8 && dt < 400) __graphFpsEstimate = Math.round(1000 / dt);
+      }
+      __lastGraphDrawTs = now;
+      el.textContent = t('status.graphInfo', {
+        nodes: graphNodes.length, edges: graphEdges.length,
+        backend: graphBackend === 'sigma' ? 'WebGL' : 'Canvas',
+        fps: __graphFpsEstimate || '-',
+      });
+    }
+
     function redrawGraph() {
       const canvas = document.getElementById('graphCanvas');
       if (!canvas) return;
@@ -8448,6 +8476,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         drawGraphScene(sa.getContext('2d'), standaloneTransform, sa);
       }
       syncSigmaPositions();
+      updateStatusGraphInfo();
     }
 
     // 画布尺寸与父容器同步（隐藏容器 clientWidth=0 时跳过）
@@ -9114,9 +9143,10 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     }
 
     function syncBackendButtons() {
+      // V3-H：双态显示当前后端（sigma → WebGL / canvas → Canvas），title 保留切换语义
       ['toggleWebGLBtn', 'toggleWebGLBtnStandalone'].forEach(id => {
         const btn = document.getElementById(id);
-        if (btn) btn.textContent = t(graphBackend === 'sigma' ? 'graph.canvas' : 'graph.webgl');
+        if (btn) btn.textContent = t(graphBackend === 'sigma' ? 'graph.webgl' : 'graph.canvas');
       });
     }
 
@@ -9437,14 +9467,32 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       }));
     }
 
-    // 命中列表渲染：hits 为空时回落空态/摘要文案（双字典）
+    // 命中列表渲染：null=未运行（结构化占位）；{summary}=已运行但无命中/被阈值过滤；{hits}=命中卡片
     function renderCockpitHits(state) {
       const box = document.getElementById('graphCockpitHits');
       if (!box) return;
       const hits = state && state.hits;
       if (!hits || !hits.length) {
-        box.className = 'v2-cockpit-empty';
-        box.textContent = (state && state.summary) || t('graph.cockpit.empty');
+        if (state && state.summary) {
+          box.className = 'v2-cockpit-empty';
+          box.textContent = state.summary;
+          return;
+        }
+        box.className = 'v2-cockpit-empty v2-cockpit-empty--idle';
+        box.textContent = '';
+        const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        icon.setAttribute('viewBox', '0 0 24 24');
+        icon.setAttribute('width', '22');
+        icon.setAttribute('height', '22');
+        icon.setAttribute('fill', 'none');
+        icon.setAttribute('stroke', 'currentColor');
+        icon.setAttribute('stroke-width', '1.6');
+        icon.setAttribute('aria-hidden', 'true');
+        icon.innerHTML = '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 4.5 4.5"/>';
+        const text = document.createElement('span');
+        text.textContent = t('graph.cockpit.idle');
+        box.appendChild(icon);
+        box.appendChild(text);
         return;
       }
       box.className = 'v2-cockpit-hits';
@@ -9557,7 +9605,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
       const payloadBtn = document.getElementById('payloadExpandBtn');
       if (payloadEl && payloadBtn) {
         payloadEl.classList.remove('expanded');
-        payloadBtn.hidden = payloadEl.scrollHeight <= 220;
+        payloadBtn.hidden = payloadEl.scrollHeight <= 168;
         payloadBtn.textContent = t('detail.expandPayload');
       }
 
@@ -10189,6 +10237,11 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
     // 独立图拓扑探索标签页
     function initStandaloneGraph() {
       document.getElementById('loadWholeGraphBtn').onclick = () => {
+        // V3-D：拖拽提示不再常驻工具条，首次加载改为一次性 toast
+        if (!window.__v3DragHintShown) {
+          window.__v3DragHintShown = true;
+          showToast(t('graph.hint.drag'));
+        }
         // V2：原地加载到探索器，不再跳到查询控制台。
         // 复用探索器 TQL 管线，保留方向、标签与权重。
         const query = 'MATCH (a)-[relation]->(b) RETURN a, relation, b LIMIT 100';
@@ -11772,7 +11825,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           '顶栏视图名应切英文，实际 ' + document.getElementById('headerViewName').textContent);
         assert(document.querySelector('.sidebar .nav-item[data-action="quick-find"]').textContent.includes('Documents'),
           '侧栏应切到英文');
-        assert(document.querySelector('#loadWholeGraphBtn [data-i18n="graph.loadWhole"]').textContent.includes('Load full graph'),
+        assert(document.getElementById('loadWholeGraphBtn').textContent.includes('Load graph'),
           '图探索主按钮应切英文');
         assert(document.getElementById('vlSourceTabNode').textContent.includes('Pick a node'),
           '向量实验台来源 tab 应切英文');
@@ -11794,7 +11847,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
           '主标签应恢复中文');
         assert(document.getElementById('headerViewName').textContent.includes('TQL 查询控制台'),
           '顶栏视图名应恢复中文');
-        assert(document.querySelector('#loadWholeGraphBtn [data-i18n="graph.loadWhole"]').textContent.includes('加载全图拓扑'),
+        assert(document.getElementById('loadWholeGraphBtn').textContent.includes('加载全图'),
           '图探索主按钮应恢复中文');
         assert(document.querySelector('#tutorialStepsNav .tutorial-step-item').textContent.includes('三模合一引擎总览'),
           '教程导航应恢复中文');
@@ -12388,7 +12441,7 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         assert(sigmaInstances.query.graph.order() === 3, 'Sigma 图应有 3 节点，实际 ' + sigmaInstances.query.graph.order());
         assert(sigmaInstances.query.graph.size() >= 2, 'Sigma 图应至少 2 边');
         assert(!document.getElementById('graphSigmaContainer').hidden, 'Sigma 容器应显示');
-        assert(document.getElementById('toggleWebGLBtn').textContent === 'Canvas 渲染', '按钮应提示切回 Canvas');
+        assert(document.getElementById('toggleWebGLBtn').textContent === 'WebGL 渲染', '按钮应双态显示当前后端（V3-H：sigma 生效中）');
       });
 
       addAssert('WebGL 图渲染：Sigma 节点点击打开 360° 抽屉', 'WebGL 图渲染', async () => {
@@ -13276,6 +13329,44 @@ CREATE ({name: "Bob", type: "person", citations: 120, department: "AI Lab"})
         await waitFor(() => graphNodes.length > 0 && graphNodes.every(n => n._cluster != null), 4000, '聚类分组标记');
         setGraphLayoutMode('force');
         assert(graphNodes.every(n => n._cluster == null), '切回力导向应清除全部分组标记');
+        renderGraph(FIND_ROWS);
+      });
+
+      addAssert('V3 收敛：浅色舞台浮层暖石 token（cockpit/dock/布局条/HUD/运行钮）', 'V3 收敛', async () => {
+        const html = document.documentElement;
+        const prevTheme = html.getAttribute('data-theme');
+        html.setAttribute('data-theme', 'light');
+        try {
+          const bgOf = (el) => el ? getComputedStyle(el).backgroundColor : null;
+          assert(bgOf(document.getElementById('graphCockpit')) === 'rgba(251, 249, 244, 0.94)', 'cockpit 应为暖石浮层底 rgba(251,249,244,.94)');
+          assert(bgOf(document.querySelector('.v2-dock')) === 'rgba(251, 249, 244, 0.94)', '结果抽屉应为暖石浮层底');
+          assert(bgOf(document.querySelector('.v2-graph-controls')) === 'rgba(251, 249, 244, 0.94)', '布局条应为暖石浮层底');
+          assert(bgOf(document.getElementById('graphHudSearch')) === 'rgba(251, 249, 244, 0.94)', '左上 HUD 按钮应为暖石浮层底');
+          assert(bgOf(document.getElementById('graphCockpitRun')) === 'rgb(36, 32, 24)', '运行钮应为反色实心 #242018');
+        } finally {
+          html.setAttribute('data-theme', prevTheme || 'dark');
+        }
+      });
+
+      addAssert('V3 收敛：面板打开后 cockpit/dock 右让 376px（浮层零遮挡）', 'V3 收敛', async () => {
+        if (window.innerWidth < 901) return; // 让位规则仅 ≥901px 视口生效
+        document.querySelector('[data-tab="graphExplorePane"]').click(); // cockpit/dock 只在探索 tab，display:none 下 rect 恒 0
+        collapseUnifiedPanel(); // 前序断言可能遗留 panel-open，先复位到未让位基线
+        renderGraph(MATCH_ROWS);
+        const cockpit = document.getElementById('graphCockpit');
+        const dock = document.querySelector('.v2-dock');
+        // 用 computed 布局值（left/right）：cockpit 的 width 有 180ms transition，rect 读数会读到中间态
+        const csNum = (el, prop) => parseFloat(getComputedStyle(el)[prop]);
+        const beforeLeft = csNum(cockpit, 'left');
+        const beforeRight = csNum(dock, 'right');
+        openNodeDrawer({ id: '1', label: 'Alice', payload: { name: 'Alice', type: 'person' }, vector: [] });
+        assert(document.body.classList.contains('panel-open'), '打开详情应置 body.panel-open');
+        assert(Math.abs(csNum(cockpit, 'left') - beforeLeft + 188) < 2,
+          `cockpit 布局中心应左移 188px（实测 ${Math.round(beforeLeft - csNum(cockpit, 'left'))}）`);
+        assert(Math.abs(csNum(dock, 'right') - beforeRight - 376) < 2,
+          `dock 右侧让位应为 376px（实测 ${Math.round(csNum(dock, 'right') - beforeRight)}）`);
+        collapseUnifiedPanel();
+        assert(Math.abs(csNum(dock, 'right') - beforeRight) < 2, '收起面板后 dock 应回到原位');
         renderGraph(FIND_ROWS);
       });
 
