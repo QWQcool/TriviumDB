@@ -11,6 +11,74 @@ import tempfile
 import triviumdb
 
 
+def run_transaction_contract(root: str) -> None:
+    contract_path = os.path.join(os.path.dirname(__file__), "..", "contracts", "transaction_cases.json")
+    with open(contract_path, encoding="utf-8") as source:
+        contract = json.load(source)
+    for dtype in contract["dtypes"]:
+        for case in contract["cases"]:
+            file = os.path.join(root, f"transaction-{dtype}-mmap-{case['name']}.tdb")
+            options = dict(dim=contract["dimension"], dtype=dtype, auto_build_quiver=False)
+            db = triviumdb.TriviumDB(file, **options)
+            try:
+                for node in contract["setup"]:
+                    db.insert_with_id(node["id"], node["vector"], node["payload"])
+                with open(file + ".wal", "rb") as source:
+                    before_wal = source.read()
+                tx = db.transaction()
+                for operation in case["operations"]:
+                    kind = operation["type"]
+                    if kind == "insert":
+                        tx.insert(operation["vector"], operation["payload"])
+                    elif kind == "insertWithId":
+                        tx.insert_with_id(operation["id"], operation["vector"], operation["payload"])
+                    elif kind == "delete":
+                        tx.delete(operation["id"])
+                    elif kind == "updatePayload":
+                        tx.update_payload(operation["id"], operation["payload"])
+                    elif kind == "updateVector":
+                        tx.update_vector(operation["id"], operation["vector"])
+                    else:
+                        raise AssertionError(f"未知事务契约操作：{kind}")
+                if "error" in case["expected"]:
+                    try:
+                        tx.commit()
+                    except RuntimeError:
+                        pass
+                    else:
+                        raise AssertionError("非法事务必须整批拒绝")
+                    with open(file + ".wal", "rb") as source:
+                        assert source.read() == before_wal
+                else:
+                    assert tx.commit() == case["expected"]["ids"]
+
+                def check(database):
+                    assert sorted(database.all_node_ids()) == [node["id"] for node in case["expected"]["nodes"]]
+                    for expected in case["expected"]["nodes"]:
+                        actual = database.get(expected["id"])
+                        assert actual is not None
+                        assert actual.id == expected["id"]
+                        assert actual.payload == expected["payload"]
+                        assert actual.vector == expected["vector"]
+
+                check(db)
+                replay_file = file + ".replay"
+                shutil.copyfile(file + ".wal", replay_file + ".wal")
+                replay = triviumdb.TriviumDB(replay_file, **options)
+                try:
+                    check(replay)
+                finally:
+                    replay.close()
+                db.close()
+                reopened = triviumdb.TriviumDB(file, **options)
+                try:
+                    check(reopened)
+                finally:
+                    reopened.close()
+            finally:
+                db.close()
+
+
 def run_text_recovery_contract(root: str) -> None:
     source = os.path.join(os.path.dirname(__file__), "..", "fixtures", "v0810_text_mmap")
     for missing in [False, True]:
@@ -296,6 +364,7 @@ def main() -> None:
         run_lifecycle_contract(root)
         run_resource_contract(root)
         run_shared_contract(root)
+        run_transaction_contract(root)
         run_text_recovery_contract(root)
         run_query_budget_contract(root)
         path = os.path.join(root, "api.tdb")

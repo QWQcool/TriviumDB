@@ -13,6 +13,49 @@ const { TriviumDB, ResourceRuntime, verifySnapshot, restoreSnapshot } = require(
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'triviumdb-node-public-api-'))
 const file = path.join(root, 'api.tdb')
 
+function runTransactionContract(root) {
+  const contract = require('../contracts/transaction_cases.json')
+  for (const dtype of contract.dtypes) {
+    for (const storageMode of contract.storage_modes) {
+      for (const test of contract.cases) {
+        const file = path.join(root, `transaction-${dtype}-${storageMode}-${test.name}.tdb`)
+        const options = { dim: contract.dimension, dtype, storageMode, autoBuildQuiver: false }
+        const db = new TriviumDB(file, options)
+        try {
+          for (const node of contract.setup) db.insertWithId(node.id, node.vector, node.payload)
+          const beforeWal = fs.readFileSync(file + '.wal')
+          if (test.expected.error) {
+            assert.throws(() => db.commitTransaction(test.operations), Error)
+            assert.deepEqual(fs.readFileSync(file + '.wal'), beforeWal)
+          } else {
+            assert.deepEqual(db.commitTransaction(test.operations), test.expected.ids)
+          }
+          const check = database => {
+            assert.deepEqual(database.allNodeIds().sort((a, b) => a - b), test.expected.nodes.map(node => node.id))
+            for (const expected of test.expected.nodes) {
+              const actual = database.get(expected.id)
+              assert.ok(actual)
+              assert.equal(actual.id, expected.id)
+              assert.deepEqual(actual.payload, expected.payload)
+              assert.deepEqual(actual.vector, expected.vector)
+            }
+          }
+          check(db)
+          const replayFile = file + '.replay'
+          fs.copyFileSync(file + '.wal', replayFile + '.wal')
+          const replay = new TriviumDB(replayFile, options)
+          try { check(replay) } finally { replay.close() }
+          db.close()
+          const reopened = new TriviumDB(file, options)
+          try { check(reopened) } finally { reopened.close() }
+        } finally {
+          db.close()
+        }
+      }
+    }
+  }
+}
+
 function runTextRecoveryContract(root) {
   const source = path.join(__dirname, '..', 'fixtures', 'v0810_text_mmap')
   for (const missing of [false, true]) {
@@ -280,6 +323,7 @@ async function main() {
     runLifecycleContract(root)
     runResourceContract(root)
     runSharedContract(root)
+    runTransactionContract(root)
     runTextRecoveryContract(root)
     await runAsyncResourceContract(root)
     assert.throws(

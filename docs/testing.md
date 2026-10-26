@@ -265,10 +265,25 @@ fn tx_insert_后_在同一事务link() {
     let mut tx = db.begin_tx();
     tx.insert_with_id(10, &[1.0, 0.0, 0.0], json!({}));
     tx.insert_with_id(20, &[0.0, 1.0, 0.0], json!({}));
-    tx.link(10, 20, "related", 0.5);   // ✅ 合法：pending_ids 能追踪到 10 和 20
+    tx.link(10, 20, "related", 0.5);   // 顺序状态投影已记录两个节点存在
     let ids = tx.commit().unwrap();
     assert_eq!(ids.len(), 2);
 }
+```
+
+### 事务顺序状态与 WAL 语义
+
+`core/transaction_state.rs` 使用独立的单节点状态模型，穷举插入、删除、更新 Payload、更新向量的一至四步组合，分别从存在与不存在的初态执行。矩阵包含 f32/f16/u64 和 Rom/Mmap；成功时验证完整向量、Payload、返回 ID 与未触及节点，失败时验证原内容和 WAL 字节。额外检查自动 ID 分配、图边、自环、文本删除、唯一索引与持久化重开。
+
+`tests/contracts/transaction_cases.json` 为三端提供独立固定预期，覆盖删除重建后的重复插入、更新、反复重建、最终删除和自动 ID 混用。Rust、Python、Node 各自执行当前会话、复制已确认 WAL 后的独立恢复与检查点重开，核对全部节点 ID、向量及 Payload。Rust 和 Node 执行 Rom/Mmap 矩阵；Python 使用其当前构造 API 的默认 Mmap 模式。
+
+`storage/wal_semantics.rs` 使用正常 WAL API 生成 CRC 合法帧，分别构造非法 JSON、错误维度、非有限数值、保留 ID 和 ID 推进溢出。既有检查点与 WAL-only、独立记录与已提交事务均要求结构化拒绝；重复打开失败后比较完整原始文件组。合法 `null`、有效幂等重放、最大合法 ID 和未提交非法记录另有正向样例。
+
+```bash
+cargo test --test core transaction_state -- --test-threads=1
+cargo test --test storage wal_semantics -- --test-threads=1
+npm run test:public-api
+python tests/python/public_api.py
 ```
 
 ### Filter 错误路径覆盖
