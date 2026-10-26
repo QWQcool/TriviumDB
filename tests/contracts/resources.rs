@@ -49,10 +49,14 @@ fn check_budget(error: TriviumError, expected: &Value) {
 
 fn run<T: VectorType + serde::Serialize + serde::de::DeserializeOwned>(case: &Value, dtype: &str) {
     let dir = std::env::temp_dir().join(format!(
-        "triviumdb_resource_contract_{}_{dtype}",
-        std::process::id()
+        "triviumdb_resource_contract_{}_{dtype}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos(),
     ));
-    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::create_dir(&dir).unwrap();
     let path = |name: &str| {
         dir.join(format!("{name}.tdb"))
             .to_string_lossy()
@@ -158,6 +162,7 @@ fn run<T: VectorType + serde::Serialize + serde::de::DeserializeOwned>(case: &Va
     second.close().unwrap();
     replacement.close().unwrap();
     check(runtime.stats(), &case["expected"]["closed_all"]);
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]

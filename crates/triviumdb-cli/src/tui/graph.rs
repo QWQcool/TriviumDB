@@ -26,7 +26,13 @@ struct GraphData {
 }
 
 pub fn render_graph(f: &mut Frame, app: &App, area: Rect, focused: bool) {
-    let data = build_graph(app);
+    let data = match build_graph(app) {
+        Ok(data) => data,
+        Err(error) => {
+            f.render_widget(Paragraph::new(format!("读取图失败：{error}")), area);
+            return;
+        }
+    };
 
     let border_style = if focused {
         Style::default()
@@ -100,7 +106,7 @@ pub fn render_graph(f: &mut Frame, app: &App, area: Rect, focused: bool) {
     f.render_widget(canvas, area);
 }
 
-fn build_graph(app: &App) -> GraphData {
+fn build_graph(app: &App) -> triviumdb::Result<GraphData> {
     use std::collections::hash_map::Entry;
 
     let mut order: Vec<NodeId> = Vec::new();
@@ -127,7 +133,7 @@ fn build_graph(app: &App) -> GraphData {
             order.push(id);
             let name = app
                 .handle
-                .get_payload(id)
+                .get_payload(id)?
                 .and_then(|p| p.get("name").and_then(|v| v.as_str()).map(str::to_string))
                 .unwrap_or_else(|| format!("#{id}"));
             e.insert(truncate_label(&name));
@@ -141,7 +147,7 @@ fn build_graph(app: &App) -> GraphData {
     let mut edges: Vec<(usize, usize)> = Vec::new();
     let mut seen: HashSet<(usize, usize)> = HashSet::new();
     for (i, &id) in order.iter().enumerate() {
-        for e in app.handle.get_edges(id) {
+        for e in app.handle.get_edges(id)? {
             if let Some(&j) = index.get(&e.target_id) {
                 let key = if i < j { (i, j) } else { (j, i) };
                 if i != j && seen.insert(key) {
@@ -160,13 +166,13 @@ fn build_graph(app: &App) -> GraphData {
 
     let labels: Vec<String> = order.iter().map(|id| label_of[id].clone()).collect();
     let is_extra: Vec<bool> = order.iter().map(|id| extra_of[id]).collect();
-    GraphData {
+    Ok(GraphData {
         labels,
         is_extra,
         edges,
         pos,
         selected,
-    }
+    })
 }
 
 /// 节点标签：优先 payload.name，否则 #id；截断到 ~12 字符。

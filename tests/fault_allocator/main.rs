@@ -69,7 +69,7 @@ fn __allocator_failure_child_entry() {
     let path = tmp_db("allocator_failure_child");
     cleanup(&path);
     let db = Database::<f32>::open(&path, DIM).unwrap();
-    let before = db.node_count();
+    let before = db.node_count().unwrap();
 
     // 只拒绝目标 API 的首次中型预留；阈值远低于物理内存，且失败分配不会提交页面。
     FAIL_ABOVE_BYTES.store(512 * 1024, Ordering::Relaxed);
@@ -81,12 +81,16 @@ fn __allocator_failure_child_entry() {
         result.is_err(),
         "数据库容量预留必须传播真实 allocator failure"
     );
-    assert_eq!(db.node_count(), before, "失败预留不得改变数据库状态");
+    assert_eq!(
+        db.node_count().unwrap(),
+        before,
+        "失败预留不得改变数据库状态"
+    );
     drop(db);
 
     let reopened = Database::<f32>::open(&path, DIM).unwrap();
     assert_eq!(
-        reopened.node_count(),
+        reopened.node_count().unwrap(),
         before,
         "失败后数据库必须仍可安全重开"
     );

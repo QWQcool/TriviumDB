@@ -45,7 +45,11 @@ fn BND_01_dim等于1_最小维度全流程() {
     drop(db);
 
     let db = Database::<f32>::open(&path, 1).unwrap();
-    assert_eq!(db.node_count(), 2, "1 维 flush/reload 后节点数一致");
+    assert_eq!(
+        db.node_count().unwrap(),
+        2,
+        "1 维 flush/reload 后节点数一致"
+    );
 
     cleanup(&path);
 }
@@ -188,14 +192,14 @@ fn BND_05_payload为空JSON对象() {
         .insert(&[1.0, 0.0, 0.0, 0.0], serde_json::json!({}))
         .unwrap();
 
-    let p = db.get_payload(id).unwrap();
+    let p = db.get_payload(id).unwrap().unwrap();
     assert_eq!(p, serde_json::json!({}));
 
     db.flush().unwrap();
     drop(db);
 
     let db = Database::<f32>::open(&path, 4).unwrap();
-    let p = db.get_payload(id).unwrap();
+    let p = db.get_payload(id).unwrap().unwrap();
     assert_eq!(p, serde_json::json!({}), "空 JSON flush 后应保持一致");
 
     cleanup(&path);
@@ -229,7 +233,7 @@ fn BND_06_payload含Unicode和特殊字符() {
 
     let db = Database::<f32>::open(&path, 4).unwrap();
     for (i, id) in ids.iter().enumerate() {
-        let p = db.get_payload(*id).unwrap();
+        let p = db.get_payload(*id).unwrap().unwrap();
         assert_eq!(
             p, special_payloads[i],
             "Unicode payload {} flush 后不一致",
@@ -264,7 +268,7 @@ fn BND_07_边标签为空字符串() {
     drop(db);
 
     let db = Database::<f32>::open(&path, 4).unwrap();
-    assert_eq!(db.node_count(), 2, "空标签边 flush 后节点数一致");
+    assert_eq!(db.node_count().unwrap(), 2, "空标签边 flush 后节点数一致");
 
     cleanup(&path);
 }
@@ -393,10 +397,13 @@ fn FMT_01_未来版本号文件_优雅拒绝() {
     assert!(result.is_ok(), "未来版本号不应 panic");
     match result.unwrap() {
         Ok(db) => {
-            assert!(db.node_count() <= 1, "接受未来版本时不能产生额外脏节点");
-            for id in db.all_node_ids() {
+            assert!(
+                db.node_count().unwrap() <= 1,
+                "接受未来版本时不能产生额外脏节点"
+            );
+            for id in db.all_node_ids().unwrap() {
                 assert!(
-                    db.get_payload(id).is_some(),
+                    db.get_payload(id).unwrap().is_some(),
                     "接受未来版本时恢复节点必须可读"
                 );
             }

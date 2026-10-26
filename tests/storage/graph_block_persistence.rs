@@ -52,11 +52,11 @@ fn 图块_readonly_mmap_与_rw_结果差分一致() {
     assert!(std::path::Path::new(&format!("{path}.gidx")).exists());
 
     let rw = Database::<f32>::open(&path, DIM).unwrap();
-    let expected = rw.get_edges(1);
+    let expected = rw.get_edges(1).unwrap();
     drop(rw);
     let ro = Database::<f32>::open_read_only(&path, DIM).unwrap();
-    assert_eq!(ro.get_edges(1), expected);
-    assert_eq!(ro.get_incoming_edges(2, None).len(), 2);
+    assert_eq!(ro.get_edges(1).unwrap(), expected);
+    assert_eq!(ro.get_incoming_edges(2, None).unwrap().len(), 2);
     assert!(ro.index_memory_stats().mapped_bytes > (6 * DIM * 4) as u64);
     drop(ro);
     cleanup(&path);
@@ -155,7 +155,7 @@ fn 图块_immutable_manifest_覆盖_sidecar_且只读零写() {
     assert!(manifest.contains(".gidx"));
     let before = std::fs::read(format!("{path}.gidx")).unwrap();
     let immutable = Database::<f32>::open_immutable(&path, DIM).unwrap();
-    assert_eq!(immutable.get_edges(1).len(), 2);
+    assert_eq!(immutable.get_edges(1).unwrap().len(), 2);
     drop(immutable);
     assert_eq!(std::fs::read(format!("{path}.gidx")).unwrap(), before);
     cleanup(&path);

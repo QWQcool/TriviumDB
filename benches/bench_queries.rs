@@ -81,7 +81,7 @@ fn build_test_db(name: &str, node_count: usize) -> Database<f32> {
 
 fn bench_tql_match_by_id(c: &mut Criterion) {
     let db = build_test_db("tql_match_id", 5000);
-    let ids = db.all_node_ids();
+    let ids = db.all_node_ids().unwrap();
     let anchor = ids[ids.len() / 2];
 
     c.bench_function("tql_match_by_id_1hop", |b| {
@@ -107,7 +107,7 @@ fn bench_tql_match_by_prop(c: &mut Criterion) {
 
 fn bench_tql_match_with_where(c: &mut Criterion) {
     let db = build_test_db("tql_match_where", 5000);
-    let ids = db.all_node_ids();
+    let ids = db.all_node_ids().unwrap();
     let anchor = ids[0];
 
     c.bench_function("tql_match_where_clause", |b| {
@@ -196,7 +196,7 @@ fn bench_tql_set(c: &mut Criterion) {
         .unwrap();
     }
 
-    let ids = db.all_node_ids();
+    let ids = db.all_node_ids().unwrap();
     let mut idx = 0usize;
 
     c.bench_function("tql_mut_set_by_id", |b| {
@@ -284,14 +284,14 @@ fn bench_create_index(c: &mut Criterion) {
 
 fn bench_get_payload(c: &mut Criterion) {
     let db = build_test_db("get_payload", 5000);
-    let ids = db.all_node_ids();
+    let ids = db.all_node_ids().unwrap();
 
     c.bench_function("get_payload_5k", |b| {
         let mut idx = 0usize;
         b.iter(|| {
             let id = ids[idx % ids.len()];
             idx += 1;
-            black_box(db.get_payload(id))
+            black_box(db.get_payload(id).unwrap())
         })
     });
 
@@ -300,14 +300,14 @@ fn bench_get_payload(c: &mut Criterion) {
 
 fn bench_get_edges(c: &mut Criterion) {
     let db = build_test_db("get_edges", 5000);
-    let ids = db.all_node_ids();
+    let ids = db.all_node_ids().unwrap();
 
     c.bench_function("get_edges_5k", |b| {
         let mut idx = 0usize;
         b.iter(|| {
             let id = ids[idx % ids.len()];
             idx += 1;
-            black_box(db.get_edges(id))
+            black_box(db.get_edges(id).unwrap())
         })
     });
 
@@ -316,14 +316,14 @@ fn bench_get_edges(c: &mut Criterion) {
 
 fn bench_contains(c: &mut Criterion) {
     let db = build_test_db("contains", 5000);
-    let ids = db.all_node_ids();
+    let ids = db.all_node_ids().unwrap();
 
     c.bench_function("contains_5k", |b| {
         let mut idx = 0usize;
         b.iter(|| {
             let id = ids[idx % ids.len()];
             idx += 1;
-            black_box(db.contains(id))
+            black_box(db.contains(id).unwrap())
         })
     });
 

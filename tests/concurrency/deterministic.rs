@@ -294,10 +294,10 @@ fn DET_04_flush前后数据bit_exact一致() {
 
     // 重新打开
     let db = Database::<f32>::open(&path, DIM).unwrap();
-    assert_eq!(db.node_count(), 100, "flush 后节点数应一致");
+    assert_eq!(db.node_count().unwrap(), 100, "flush 后节点数应一致");
 
-    for &id in &db.all_node_ids() {
-        let payload = db.get_payload(id).unwrap();
+    for &id in &db.all_node_ids().unwrap() {
+        let payload = db.get_payload(id).unwrap().unwrap();
         let expected = id_payload_map.get(&id).unwrap();
         assert_eq!(
             payload, *expected,

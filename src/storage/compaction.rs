@@ -343,11 +343,16 @@ impl CompactionThread {
                 };
                 #[cfg(feature = "test-hooks")]
                 crate::test_hooks::hit(crate::test_hooks::ConcurrencyPoint::BeforeCompactionSave);
-                file_format::save(&mut mt, &db_path, storage_mode)?;
                 let mut wal = lock(&wal);
+                wal.ensure_writable()?;
+                if !mt.needs_checkpoint() {
+                    return Ok(true);
+                }
+                file_format::save(&mut mt, &db_path, storage_mode)?;
                 #[cfg(feature = "test-hooks")]
                 crate::test_hooks::hit(crate::test_hooks::ConcurrencyPoint::BeforeWalClear);
                 wal.clear()?;
+                mt.mark_checkpoint_clean();
                 mt.advise_cold_vectors_dontneed();
                 Ok(true)
             }),

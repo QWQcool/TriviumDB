@@ -52,6 +52,16 @@
           {"query": "TEXT AC \"personanchor\" TOP 10 AS hits WITH hits RETURN hits", "count": 1}
         ]
       }
+    },
+    {
+      "name": "text_rebuild",
+      "operation": "text_rebuild",
+      "documents": [{"id": 2, "text": "rebuilttoken", "keywords": ["restoredanchor"]}],
+      "expected": {"checks": [
+        {"query": "TEXT BM25 \"rebuilttoken\" TOP 10 AS hits WITH hits RETURN hits", "count": 1},
+        {"query": "TEXT AC \"restoredanchor\" TOP 10 AS hits WITH hits RETURN hits", "count": 1},
+        {"query": "TEXT AC \"personanchor\" TOP 10 AS hits WITH hits RETURN hits", "count": 0}
+      ]}
     }
   ],
   "ffi_cases": [

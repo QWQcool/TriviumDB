@@ -44,9 +44,13 @@ fn seed_flushed_db(path: &str, count: u32) {
 }
 
 fn assert_flushed_payloads(db: &Database<f32>, count: u32) {
-    assert_eq!(db.node_count(), count as usize, "已 flush 节点数量必须完整");
-    for id in db.all_node_ids() {
-        let node = db.get(id).expect("恢复节点必须能完整读取");
+    assert_eq!(
+        db.node_count().unwrap(),
+        count as usize,
+        "已 flush 节点数量必须完整"
+    );
+    for id in db.all_node_ids().unwrap() {
+        let node = db.get(id).unwrap().expect("恢复节点必须能完整读取");
         let idx = node
             .payload
             .get("idx")
@@ -102,7 +106,11 @@ fn IO_01_WAL文件被清空_安全启动() {
     let db = result.unwrap().unwrap();
 
     // flush 过的数据应该还在
-    assert_eq!(db.node_count(), 50, "flush 过的数据不受 WAL 清空影响");
+    assert_eq!(
+        db.node_count().unwrap(),
+        50,
+        "flush 过的数据不受 WAL 清空影响"
+    );
 
     cleanup(&path);
 }
@@ -174,7 +182,7 @@ fn IO_03_TDB文件全覆写随机数据_安全拒绝() {
     cleanup(&path);
     let clean = Database::<f32>::open(&path, DIM).unwrap();
     assert_eq!(
-        clean.node_count(),
+        clean.node_count().unwrap(),
         0,
         "拒绝损坏库后同路径重建不能携带脏状态"
     );
@@ -209,10 +217,14 @@ fn IO_04_vec与tdb大小不匹配_降级加载() {
     assert!(result.is_ok(), "大小不匹配不应 panic");
     match result.unwrap() {
         Ok(mut db) => {
-            assert_eq!(db.node_count(), 100, "降级加载必须保留 flush 完整节点");
-            for id in db.all_node_ids() {
+            assert_eq!(
+                db.node_count().unwrap(),
+                100,
+                "降级加载必须保留 flush 完整节点"
+            );
+            for id in db.all_node_ids().unwrap() {
                 assert!(
-                    db.get_payload(id).is_some(),
+                    db.get_payload(id).unwrap().is_some(),
                     "降级恢复出的节点必须可读取 payload"
                 );
             }
@@ -220,14 +232,14 @@ fn IO_04_vec与tdb大小不匹配_降级加载() {
                 .insert(&[200.0, 0.0, 0.0, 0.0], serde_json::json!({"idx": 200}))
                 .unwrap();
             assert!(id > 0, "降级恢复后应仍可安全写入");
-            assert_eq!(db.node_count(), 101, "新写入不能覆盖已恢复节点");
+            assert_eq!(db.node_count().unwrap(), 101, "新写入不能覆盖已恢复节点");
         }
         Err(e) => {
             assert!(!e.to_string().is_empty(), "安全拒绝必须返回可诊断错误");
             cleanup(&path);
             let clean = Database::<f32>::open(&path, DIM).unwrap();
             assert_eq!(
-                clean.node_count(),
+                clean.node_count().unwrap(),
                 0,
                 "拒绝不一致库后同路径重建不能携带脏状态"
             );
@@ -262,7 +274,11 @@ fn IO_05_残留tmp文件_不影响正常启动() {
     std::fs::write(&vec_tmp_path, b"corrupted vec partial write").unwrap();
 
     let db = Database::<f32>::open(&path, DIM).unwrap();
-    assert_eq!(db.node_count(), 20, "残留 .tmp 文件不应影响正常加载");
+    assert_eq!(
+        db.node_count().unwrap(),
+        20,
+        "残留 .tmp 文件不应影响正常加载"
+    );
 
     cleanup(&path);
 }
@@ -409,7 +425,11 @@ fn IO_07_纯WAL恢复_不flush直接退出() {
 
     // 重新打开
     let db = Database::<f32>::open(&path, DIM).unwrap();
-    assert_eq!(db.node_count(), 100, "纯 WAL 恢复应找回所有 100 个节点");
+    assert_eq!(
+        db.node_count().unwrap(),
+        100,
+        "纯 WAL 恢复应找回所有 100 个节点"
+    );
 
     cleanup(&path);
 }
@@ -433,12 +453,12 @@ fn IO_08_SyncMode_Normal和Full_drop后必须恢复完整WAL() {
 
         let db = Database::<f32>::open(&path, DIM).unwrap();
         assert_eq!(
-            db.node_count(),
+            db.node_count().unwrap(),
             12,
             "{mode:?} 在正常 drop 后必须能完整恢复已写 WAL"
         );
-        for id in db.all_node_ids() {
-            let payload = db.get_payload(id).expect("恢复节点必须有 payload");
+        for id in db.all_node_ids().unwrap() {
+            let payload = db.get_payload(id).unwrap().expect("恢复节点必须有 payload");
             assert_eq!(
                 payload.get("mode").and_then(|value| value.as_str()),
                 Some(format!("{mode:?}").as_str()),
@@ -475,7 +495,7 @@ fn IO_09_SyncMode_Off未flush_writer时允许WAL不可见() {
 
     let db = Database::<f32>::open(&path, DIM).unwrap();
     assert_eq!(
-        db.node_count(),
+        db.node_count().unwrap(),
         8,
         "SyncMode::Off 在正常 drop 刷出 BufWriter 后仍应可恢复"
     );

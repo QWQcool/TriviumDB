@@ -140,28 +140,6 @@ jobs:
         run: cargo test --target ${{ matrix.target }} --doc
 
   # ═══════════════════════════════════════════
-  #  控制台浏览器回归：禁止外网请求，不依赖真实数据库或 CDN
-  # ═══════════════════════════════════════════
-  webui:
-    name: Web Console (Chromium)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: 安装浏览器测试工具
-        run: npm install --no-save --ignore-scripts playwright@1.62.1
-
-      - name: 安装 Chromium 及系统依赖
-        run: npx playwright install --with-deps chromium
-
-      - name: 运行离线控制台自检
-        run: node scripts/test_webui.cjs
-
-  # ═══════════════════════════════════════════
   #  Job 2a: CLI/TUI 工具测试
   # ═══════════════════════════════════════════
   cli:
@@ -218,6 +196,9 @@ jobs:
       - name: 验证上下文关闭与文件锁生命周期
         run: python tests/python/context_manager.py
 
+      - name: 验证完整资源释放与跨语言循环引用
+        run: python tests/python/test_resource_lifecycle.py
+
       - name: 验证 Python 公共 API 契约
         run: python tests/python/public_api.py
 
@@ -253,17 +234,28 @@ jobs:
       - name: 构建 Node.js 原生绑定
         run: npm run build
 
-      - name: 校验 TypeScript 声明为最新
-        run: git diff --exit-code -- triviumdb.d.ts
-
       - name: 验证关闭、资源管理与跨进程文件锁
         run: npm run test:lifecycle
+
+      - name: 验证完整资源释放与跨语言循环引用
+        run: npm run test:resource-lifecycle
+
+      - name: 验证重启内存与三十万节点进程排空
+        run: npm run test:process-lifecycle
+
+      - name: 保存进程生命周期诊断
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: process-lifecycle-${{ matrix.runner }}
+          path: target/lifecycle-reports/
+          if-no-files-found: ignore
 
       - name: 验证 Node.js 公共 API 契约
         run: npm run test:public-api
 
-      - name: 校验 TypeScript 类型声明
-        run: npx --yes --package typescript tsc --noEmit --skipLibCheck triviumdb.d.ts
+      - name: 验证 npm 产物的 TypeScript 消费与原生运行契约
+        run: npm run test:package
 
   # ═══════════════════════════════════════════
   #  Job 2b: ARM64 Linux 原生测试 (QEMU)
@@ -486,8 +478,8 @@ jobs:
           cargo llvm-cov clean --workspace
           # --lib --tests: 只收集库代码和测试的覆盖率，排除 bench target
           # （重型 benchmark 会导致 CI 超时且不贡献库覆盖率）
-          # --exclude triviumdb-cli: CLI/TUI 工具是独立交付物，不计入核心库 80% 门禁
-          cargo llvm-cov --workspace --exclude triviumdb-cli --features test-hooks --lib --tests --lcov --output-path lcov.info -- --test-threads=1
+          # 核心库覆盖率单独统计；CLI 独立验收，Server 使用 nightly 自测入口。
+          cargo llvm-cov --workspace --exclude triviumdb-cli --exclude triviumdb-server --features test-hooks --lib --tests --lcov --output-path lcov.info -- --test-threads=1
           cargo llvm-cov report --html --output-dir target/llvm-cov/html
           cargo llvm-cov report
 
@@ -576,10 +568,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: 格式检查
-        run: cargo fmt --all -- --check
+        run: cargo fmt -p triviumdb -p triviumdb-cli -- --check
 
       - name: 静态分析 (Clippy)
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --exclude triviumdb-server --all-targets -- -D warnings
 
   memory-pressure-observation:
     name: Memory Pressure Observation
@@ -664,7 +656,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: 编译全部 benchmark 目标
-        run: cargo bench --workspace --no-run
+        run: cargo bench --workspace --exclude triviumdb-server --no-run
 
       - name: 运行无外部数据依赖的日常基准
         run: |

@@ -8,6 +8,9 @@ use std::process::Command;
 use triviumdb::database::Database;
 
 #[cfg(feature = "test-hooks")]
+mod text_publication;
+
+#[cfg(feature = "test-hooks")]
 use triviumdb::test_hooks::{ConcurrencyPoint, pause_at};
 
 const DIM: usize = 4;
@@ -130,7 +133,7 @@ fn assert_exact_recovered_data(database: &Database<f32>, case: &str) {
     let expected: Vec<u64> = (1..=base + 3)
         .filter(|id| case != "rewrite" || *id != 2)
         .collect();
-    let mut actual = database.all_node_ids();
+    let mut actual = database.all_node_ids().unwrap();
     actual.sort_unstable();
     assert_eq!(
         actual, expected,
@@ -139,6 +142,7 @@ fn assert_exact_recovered_data(database: &Database<f32>, case: &str) {
     for id in expected {
         let node = database
             .get(id)
+            .unwrap()
             .unwrap_or_else(|| panic!("恢复状态缺少节点 {id}"));
         assert_eq!(
             node.vector,
@@ -149,7 +153,7 @@ fn assert_exact_recovered_data(database: &Database<f32>, case: &str) {
             },
             "节点 {id} 的向量来自混合代际"
         );
-        let payload = database.get_payload(id).unwrap();
+        let payload = database.get_payload(id).unwrap().unwrap();
         assert_eq!(payload["id"], id);
         assert_eq!(
             payload["generation"],
@@ -161,7 +165,7 @@ fn assert_exact_recovered_data(database: &Database<f32>, case: &str) {
         );
     }
     if case == "rewrite" {
-        let edges = database.get_edges(1);
+        let edges = database.get_edges(1).unwrap();
         assert!(
             edges.iter().any(|edge| edge.target_id == 3
                 && edge.label == "更新后的边"
@@ -350,9 +354,9 @@ fn PWR_00B_group_commit确认后强杀可恢复全部独立事务() {
     child.wait().unwrap();
 
     let database = Database::<f32>::open(&path, DIM).unwrap();
-    assert_eq!(database.node_count(), 12);
+    assert_eq!(database.node_count().unwrap(), 12);
     for id in 1..=12u64 {
-        assert_eq!(database.get_payload(id).unwrap()["id"], id);
+        assert_eq!(database.get_payload(id).unwrap().unwrap()["id"], id);
     }
     std::fs::remove_file(ready).ok();
     cleanup(&path);
@@ -405,7 +409,7 @@ fn PWR_00_真实强杀子进程后WAL保持可恢复() {
     child.wait().unwrap();
 
     let db = Database::<f32>::open(&path, DIM).unwrap();
-    assert_eq!(db.node_count(), 8, "强制终止后必须回放完整 WAL 帧");
+    assert_eq!(db.node_count().unwrap(), 8, "强制终止后必须回放完整 WAL 帧");
     std::fs::remove_file(ready).ok();
     cleanup(&path);
 }
@@ -435,7 +439,7 @@ fn PWR_01_快速断电循环_100轮() {
             }
         };
 
-        let count = db.node_count();
+        let count = db.node_count().unwrap();
         assert!(
             count >= max_seen.saturating_sub(1), // 允许丢失 WAL 中未 flush 的数据
             "第 {} 轮: 节点数 {} 低于历史最高 {} 超过 1 个（数据意外丢失）",
@@ -466,7 +470,7 @@ fn PWR_01_快速断电循环_100轮() {
             }
         }
 
-        let new_count = db.node_count();
+        let new_count = db.node_count().unwrap();
         if new_count > max_seen {
             max_seen = new_count;
         }
@@ -479,10 +483,10 @@ fn PWR_01_快速断电循环_100轮() {
     let db = Database::<f32>::open(&path, DIM).unwrap();
     eprintln!(
         "  ✅ 100 轮断电循环: 最终 {} 个节点 (历史最高 {})",
-        db.node_count(),
+        db.node_count().unwrap(),
         max_seen
     );
-    assert!(db.node_count() > 0, "100 轮后应至少有一些数据存活");
+    assert!(db.node_count().unwrap() > 0, "100 轮后应至少有一些数据存活");
 
     cleanup(&path);
 }
@@ -521,14 +525,14 @@ fn PWR_02_flush中途断电_tmp残留_原子性验证() {
     // 重新打开 — 应忽略 .tmp，从旧 .tdb 加载
     let db = Database::<f32>::open(&path, DIM).unwrap();
     assert_eq!(
-        db.node_count(),
+        db.node_count().unwrap(),
         50,
         "flush 中途断电后应从旧 .tdb 恢复完整 50 个节点"
     );
 
     eprintln!(
         "  ✅ flush 中途断电: 从旧 .tdb 恢复 {} 个节点",
-        db.node_count()
+        db.node_count().unwrap()
     );
 
     cleanup(&path);
@@ -558,7 +562,13 @@ fn PWR_03_删除后断电_tombstone持久化() {
     // 删除前 50 个 + flush + 断电
     {
         let mut db = Database::<f32>::open(&path, DIM).unwrap();
-        let ids: Vec<u64> = db.all_node_ids().iter().take(50).copied().collect();
+        let ids: Vec<u64> = db
+            .all_node_ids()
+            .unwrap()
+            .iter()
+            .take(50)
+            .copied()
+            .collect();
         for id in &ids {
             db.delete(*id).unwrap();
         }
@@ -569,14 +579,14 @@ fn PWR_03_删除后断电_tombstone持久化() {
     // 重新打开 — 验证删除持久化
     let db = Database::<f32>::open(&path, DIM).unwrap();
     assert_eq!(
-        db.node_count(),
+        db.node_count().unwrap(),
         50,
         "删除 50 个节点后 flush + 断电重启，应剩余 50 个"
     );
 
     eprintln!(
         "  ✅ 删除 + 断电: 剩余 {} 个节点，tombstone 正确持久化",
-        db.node_count()
+        db.node_count().unwrap()
     );
 
     cleanup(&path);
@@ -609,14 +619,14 @@ fn PWR_04_事务commit后断电_WAL原子回放() {
     // 重新打开 — WAL 应回放事务中的 20 条记录
     let db = Database::<f32>::open(&path, DIM).unwrap();
     assert_eq!(
-        db.node_count(),
+        db.node_count().unwrap(),
         20,
         "事务 commit 后断电，WAL 回放应恢复 20 个节点"
     );
 
     // 验证 payload 完整性
-    for &id in &db.all_node_ids() {
-        let payload = db.get_payload(id).unwrap();
+    for &id in &db.all_node_ids().unwrap() {
+        let payload = db.get_payload(id).unwrap().unwrap();
         assert!(
             payload.get("tx_item").is_some(),
             "节点 {} 的 payload 应包含 tx_item 字段",
@@ -626,7 +636,7 @@ fn PWR_04_事务commit后断电_WAL原子回放() {
 
     eprintln!(
         "  ✅ 事务 + 断电: WAL 回放恢复 {} 个节点，payload 完整",
-        db.node_count()
+        db.node_count().unwrap()
     );
 
     cleanup(&path);

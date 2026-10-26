@@ -146,8 +146,8 @@ fn 未提交事务_缺commit与commit后残帧均保持原子恢复() {
     let second_commit_start = frames.last().unwrap().0;
     std::fs::write(format!("{source}.wal"), &bytes[..second_commit_start]).unwrap();
     let database = Database::<f32>::open(&source, DIM).unwrap();
-    assert!(database.get_payload(1).is_some());
-    assert!(database.get_payload(2).is_none());
+    assert!(database.get_payload(1).unwrap().is_some());
+    assert!(database.get_payload(2).unwrap().is_none());
     drop(database);
     cleanup(&source);
 }

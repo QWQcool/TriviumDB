@@ -68,8 +68,8 @@ fn CRUD_索引_分页和重开公共契约保持一致() {
             },
         )
         .unwrap();
-        assert_eq!(database.node_count(), 32);
-        assert_eq!(database.get_payload(16).unwrap()["kind"], "even");
+        assert_eq!(database.node_count().unwrap(), 32);
+        assert_eq!(database.get_payload(16).unwrap().unwrap()["kind"], "even");
         drop(database);
         cleanup(&path);
     }
@@ -153,7 +153,7 @@ fn Hook非法命中不得越过最终公共结果契约() {
             .insert_with_id(id, &[1.0, 0.0], json!({"id": id}))
             .unwrap();
     }
-    database.set_hook(InvalidRecall);
+    database.set_hook(InvalidRecall).unwrap();
     let result = database.search(&[1.0, 0.0], 10, 0, -1.0);
     match result {
         Ok(hits) => {

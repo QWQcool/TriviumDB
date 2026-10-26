@@ -18,11 +18,11 @@ pub fn run(handle: &DbHandle, db_path: &str, output: &str) -> CliResult {
     let file = File::create(output)?;
     let mut w = BufWriter::new(file);
 
-    let ids = handle.get_all_ids();
+    let ids = handle.get_all_ids()?;
     let pb = crate::util::progress_bar(ids.len() as u64, "export");
     let mut count = 0usize;
     for id in ids {
-        if let Some(node) = handle.get(id) {
+        if let Some(node) = handle.get(id)? {
             let line = json!({
                 "id": node.id,
                 "vector": node.vector,

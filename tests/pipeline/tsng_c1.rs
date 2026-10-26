@@ -900,7 +900,7 @@ fn c1_5_累计_wal_观测区分逻辑负载且查询零写入() {
     db.search_tsng_industrial(&query, IndustrialSearchConfig::for_top_k(1))
         .unwrap();
     assert_eq!(db.storage_write_stats(), after_insert);
-    assert!(db.contains(id));
+    assert!(db.contains(id).unwrap());
     db.close().unwrap();
     cleanup(&path);
 }

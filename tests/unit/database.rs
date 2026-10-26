@@ -28,7 +28,7 @@ fn open_db(name: &str) -> Database<f32> {
 #[test]
 fn open_新建数据库() {
     let db = open_db("open_new");
-    assert_eq!(db.node_count(), 0);
+    assert_eq!(db.node_count().unwrap(), 0);
 }
 
 #[test]
@@ -46,7 +46,7 @@ fn open_空旧WAL自动升级且首次写入后二次打开成功() {
         let mut db = Database::<f32>::open(&path, 3).unwrap();
         db.insert_with_id(2, &[0.0, 1.0, 0.0], json!({"kind": "new"}))
             .unwrap();
-        assert_eq!(db.node_count(), 2);
+        assert_eq!(db.node_count().unwrap(), 2);
     }
 
     let wal = std::fs::read(format!("{}.wal", path)).unwrap();
@@ -57,8 +57,8 @@ fn open_空旧WAL自动升级且首次写入后二次打开成功() {
     );
 
     let db = Database::<f32>::open(&path, 3).unwrap();
-    assert_eq!(db.node_count(), 2);
-    assert_eq!(db.get_payload(2).unwrap()["kind"], "new");
+    assert_eq!(db.node_count().unwrap(), 2);
+    assert_eq!(db.get_payload(2).unwrap().unwrap()["kind"], "new");
 }
 
 #[test]
@@ -116,9 +116,9 @@ fn open_非空v2_wal自动迁移并恢复已提交事务() {
     std::fs::write(format!("{}.wal", path), wal).unwrap();
 
     let db = Database::<f32>::open(&path, 3).unwrap();
-    assert_eq!(db.node_count(), 2);
-    assert_eq!(db.get_payload(2).unwrap()["kind"], "recovered");
-    let edges = db.get_edges(1);
+    assert_eq!(db.node_count().unwrap(), 2);
+    assert_eq!(db.get_payload(2).unwrap().unwrap()["kind"], "recovered");
+    let edges = db.get_edges(1).unwrap();
     assert_eq!(edges.len(), 1);
     assert_eq!(edges[0].target_id, 2);
     assert_eq!(edges[0].label, "legacy");
@@ -176,11 +176,11 @@ fn group_commit多个事务共享一次fsync并保持独立结果() {
     assert!(synced);
     assert!(results.iter().all(Result::is_ok));
     assert_eq!(db.wal_stats().sync_count - before, 1);
-    assert_eq!(db.node_count(), 4);
+    assert_eq!(db.node_count().unwrap(), 4);
     drop(db);
 
     let db = Database::<f32>::open(&path, 3).unwrap();
-    assert_eq!(db.node_count(), 4);
+    assert_eq!(db.node_count().unwrap(), 4);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -193,10 +193,10 @@ fn insert_和_get() {
     let id = db
         .insert(&[1.0, 2.0, 3.0], json!({"name": "test"}))
         .unwrap();
-    assert!(db.contains(id));
-    assert_eq!(db.node_count(), 1);
+    assert!(db.contains(id).unwrap());
+    assert_eq!(db.node_count().unwrap(), 1);
 
-    let payload = db.get_payload(id).unwrap();
+    let payload = db.get_payload(id).unwrap().unwrap();
     assert_eq!(payload["name"], "test");
 }
 
@@ -204,9 +204,9 @@ fn insert_和_get() {
 fn insert_with_id_和_get() {
     let mut db = open_db("insert_id");
     db.insert_with_id(42, &[1.0, 0.0, 0.0], json!({})).unwrap();
-    assert!(db.contains(42));
+    assert!(db.contains(42).unwrap());
 
-    let node = db.get(42).unwrap();
+    let node = db.get(42).unwrap().unwrap();
     assert_eq!(node.vector, vec![1.0, 0.0, 0.0]);
     assert_eq!(node.id, 42);
 }
@@ -216,8 +216,8 @@ fn insert_with_id_ID0拒绝且无状态残留() {
     let mut db = open_db("insert_id_zero");
     let result = db.insert_with_id(0, &[1.0, 0.0, 0.0], json!({"invalid": true}));
     assert!(result.is_err());
-    assert!(!db.contains(0));
-    assert_eq!(db.node_count(), 0);
+    assert!(!db.contains(0).unwrap());
+    assert_eq!(db.node_count().unwrap(), 0);
     assert_eq!(db.insert(&[1.0, 0.0, 0.0], json!({})).unwrap(), 1);
 }
 
@@ -226,8 +226,8 @@ fn delete_操作() {
     let mut db = open_db("delete");
     let id = db.insert(&[1.0, 0.0, 0.0], json!({})).unwrap();
     db.delete(id).unwrap();
-    assert!(!db.contains(id));
-    assert_eq!(db.node_count(), 0);
+    assert!(!db.contains(id).unwrap());
+    assert_eq!(db.node_count().unwrap(), 0);
 }
 
 #[test]
@@ -237,11 +237,11 @@ fn link_和_unlink() {
     let id2 = db.insert(&[0.0, 1.0, 0.0], json!({})).unwrap();
 
     db.link(id1, id2, "knows", 1.0).unwrap();
-    let edges = db.get_edges(id1);
+    let edges = db.get_edges(id1).unwrap();
     assert_eq!(edges.len(), 1);
 
     db.unlink(id1, id2).unwrap();
-    let edges = db.get_edges(id1);
+    let edges = db.get_edges(id1).unwrap();
     assert!(edges.is_empty());
 }
 
@@ -250,7 +250,7 @@ fn update_payload_操作() {
     let mut db = open_db("update_payload");
     let id = db.insert(&[1.0, 0.0, 0.0], json!({"v": 1})).unwrap();
     db.update_payload(id, json!({"v": 2})).unwrap();
-    assert_eq!(db.get_payload(id).unwrap()["v"], 2);
+    assert_eq!(db.get_payload(id).unwrap().unwrap()["v"], 2);
 }
 
 #[test]
@@ -258,7 +258,7 @@ fn update_vector_操作() {
     let mut db = open_db("update_vector");
     let id = db.insert(&[1.0, 0.0, 0.0], json!({})).unwrap();
     db.update_vector(id, &[0.0, 1.0, 0.0]).unwrap();
-    let vec = db.get(id).unwrap().vector;
+    let vec = db.get(id).unwrap().unwrap().vector;
     assert_eq!(vec, vec![0.0, 1.0, 0.0]);
 }
 
@@ -276,7 +276,10 @@ fn patch_payload_超限拒绝且保留原状态() {
         result,
         Err(triviumdb::TriviumError::PayloadTooLarge { .. })
     ));
-    assert_eq!(db.get_payload(id).unwrap(), json!({"name": "original"}));
+    assert_eq!(
+        db.get_payload(id).unwrap().unwrap(),
+        json!({"name": "original"})
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -295,7 +298,7 @@ fn flush_和_compact() {
     db.insert(&[1.0, 0.0, 0.0], json!({"a": 1})).unwrap();
     db.flush().unwrap();
     db.compact().unwrap();
-    assert_eq!(db.node_count(), 1);
+    assert_eq!(db.node_count().unwrap(), 1);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -305,7 +308,7 @@ fn flush_和_compact() {
 #[test]
 fn set_hook_和_clear_hook() {
     let mut db = open_db("hook");
-    db.set_hook(triviumdb::NoopHook);
+    db.set_hook(triviumdb::NoopHook).unwrap();
     db.clear_hook();
 }
 
@@ -403,7 +406,7 @@ fn patch_payload_set_操作() {
         .unwrap();
     db.patch_payload(id, json!({"$set": {"age": 26, "city": "Tokyo"}}))
         .unwrap();
-    let p = db.get_payload(id).unwrap();
+    let p = db.get_payload(id).unwrap().unwrap();
     assert_eq!(p["name"], "Alice", "$set 不应影响未修改字段");
     assert_eq!(p["age"], 26);
     assert_eq!(p["city"], "Tokyo");
@@ -415,12 +418,12 @@ fn patch_payload_inc_操作() {
     let id = db.insert(&[1.0, 0.0, 0.0], json!({"visits": 10})).unwrap();
     db.patch_payload(id, json!({"$inc": {"visits": 3}}))
         .unwrap();
-    assert_eq!(db.get_payload(id).unwrap()["visits"], 13);
+    assert_eq!(db.get_payload(id).unwrap().unwrap()["visits"], 13);
 
     // 连续递增
     db.patch_payload(id, json!({"$inc": {"visits": -5}}))
         .unwrap();
-    assert_eq!(db.get_payload(id).unwrap()["visits"], 8);
+    assert_eq!(db.get_payload(id).unwrap().unwrap()["visits"], 8);
 }
 
 #[test]
@@ -431,7 +434,7 @@ fn patch_payload_unset_操作() {
         .unwrap();
     db.patch_payload(id, json!({"$unset": {"b": true}}))
         .unwrap();
-    let p = db.get_payload(id).unwrap();
+    let p = db.get_payload(id).unwrap().unwrap();
     assert_eq!(p["a"], 1);
     assert!(p.get("b").is_none());
 }
@@ -465,7 +468,7 @@ fn patch_payload_组合操作() {
         }),
     )
     .unwrap();
-    let p = db.get_payload(id).unwrap();
+    let p = db.get_payload(id).unwrap().unwrap();
     assert_eq!(p["name"], "Bob");
     assert_eq!(p["score"], 90);
     assert!(p.get("deprecated").is_none());
@@ -494,7 +497,7 @@ fn patch_payload_WAL持久化() {
     }
     {
         let db = Database::<f32>::open(&path, 3).unwrap();
-        let p = db.get_payload(id).unwrap();
+        let p = db.get_payload(id).unwrap().unwrap();
         assert_eq!(p["counter"], 42, "WAL 恢复后 patch 结果应持久化");
     }
 }
@@ -527,9 +530,9 @@ fn neighbors_基础() {
     db.link(id1, id2, "a", 1.0).unwrap();
     db.link(id2, id3, "b", 1.0).unwrap();
 
-    let n1 = db.neighbors(id1, 1);
+    let n1 = db.neighbors(id1, 1).unwrap();
     assert_eq!(n1.len(), 1);
-    let n2 = db.neighbors(id1, 2);
+    let n2 = db.neighbors(id1, 2).unwrap();
     assert_eq!(n2.len(), 2);
 }
 
@@ -539,7 +542,7 @@ fn dim_和_all_node_ids() {
     assert_eq!(db.dim(), 3);
     db.insert(&[1.0, 0.0, 0.0], json!({})).unwrap();
     db.insert(&[0.0, 1.0, 0.0], json!({})).unwrap();
-    assert_eq!(db.all_node_ids().len(), 2);
+    assert_eq!(db.all_node_ids().unwrap().len(), 2);
 }
 
 #[test]
@@ -581,7 +584,7 @@ fn tx_insert_和_commit() {
         let ids = tx.commit().unwrap();
         assert_eq!(ids.len(), 2);
     }
-    assert_eq!(db.node_count(), 2);
+    assert_eq!(db.node_count().unwrap(), 2);
 }
 
 #[test]
@@ -592,7 +595,7 @@ fn tx_insert_with_id() {
         tx.insert_with_id(100, &[1.0, 0.0, 0.0], json!({}));
         tx.commit().unwrap();
     }
-    assert!(db.contains(100));
+    assert!(db.contains(100).unwrap());
 }
 
 #[test]
@@ -605,13 +608,13 @@ fn tx_link_和_unlink() {
         tx.link(1, 2, "knows", 1.0);
         tx.commit().unwrap();
     }
-    assert_eq!(db.get_edges(1).len(), 1);
+    assert_eq!(db.get_edges(1).unwrap().len(), 1);
     {
         let mut tx = db.begin_tx();
         tx.unlink(1, 2);
         tx.commit().unwrap();
     }
-    assert!(db.get_edges(1).is_empty());
+    assert!(db.get_edges(1).unwrap().is_empty());
 }
 
 #[test]
@@ -623,7 +626,7 @@ fn tx_delete() {
         tx.delete(1);
         tx.commit().unwrap();
     }
-    assert!(!db.contains(1));
+    assert!(!db.contains(1).unwrap());
 }
 
 #[test]
@@ -637,8 +640,8 @@ fn tx_update_payload_和_vector() {
         tx.update_vector(1, &[0.0, 1.0, 0.0]);
         tx.commit().unwrap();
     }
-    assert_eq!(db.get_payload(1).unwrap()["v"], 2);
-    assert_eq!(db.get(1).unwrap().vector, vec![0.0, 1.0, 0.0]);
+    assert_eq!(db.get_payload(1).unwrap().unwrap()["v"], 2);
+    assert_eq!(db.get(1).unwrap().unwrap().vector, vec![0.0, 1.0, 0.0]);
 }
 
 #[test]
@@ -650,7 +653,7 @@ fn tx_rollback_不影响数据库() {
         tx.delete(1);
         tx.rollback();
     }
-    assert!(db.contains(1), "rollback 后节点应仍存在");
+    assert!(db.contains(1).unwrap(), "rollback 后节点应仍存在");
 }
 
 #[test]
@@ -659,7 +662,7 @@ fn tx_insert_NaN向量报错() {
     let mut tx = db.begin_tx();
     tx.insert(&[f32::NAN, 0.0, 0.0], json!({}));
     assert!(tx.commit().is_err());
-    assert_eq!(db.node_count(), 0, "失败的事务不应改变状态");
+    assert_eq!(db.node_count().unwrap(), 0, "失败的事务不应改变状态");
 }
 
 #[test]
@@ -764,7 +767,7 @@ fn tx_insert_后_在同一事务link() {
         let ids = tx.commit().unwrap();
         assert_eq!(ids.len(), 2);
     }
-    assert_eq!(db.get_edges(10).len(), 1);
+    assert_eq!(db.get_edges(10).unwrap().len(), 1);
 }
 
 #[test]
@@ -776,7 +779,7 @@ fn tx_insert_后_在同一事务delete() {
         tx.delete(10);
         tx.commit().unwrap();
     }
-    assert!(!db.contains(10));
+    assert!(!db.contains(10).unwrap());
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -789,7 +792,7 @@ fn tql_mut_create_节点() {
     let result = db.tql_mut(r#"CREATE ({name: "Alice", age: 30})"#).unwrap();
     assert_eq!(result.affected, 1);
     assert_eq!(result.created_ids.len(), 1);
-    assert!(db.contains(result.created_ids[0]));
+    assert!(db.contains(result.created_ids[0]).unwrap());
 }
 
 #[test]
@@ -892,14 +895,14 @@ fn get_all_ids() {
     let mut db = open_db("all_ids");
     db.insert(&[1.0, 0.0, 0.0], json!({})).unwrap();
     db.insert(&[0.0, 1.0, 0.0], json!({})).unwrap();
-    let ids = db.get_all_ids();
+    let ids = db.get_all_ids().unwrap();
     assert_eq!(ids.len(), 2);
 }
 
 #[test]
 fn get_不存在返回None() {
     let db = open_db("get_none");
-    assert!(db.get(999).is_none());
+    assert!(db.get(999).unwrap().is_none());
 }
 
 #[test]

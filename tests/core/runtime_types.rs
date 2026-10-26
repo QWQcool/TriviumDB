@@ -103,7 +103,7 @@ fn seed_typed_graph(path: &str) -> Database<f32> {
         )
         .unwrap();
     }
-    let mut ids = db.all_node_ids();
+    let mut ids = db.all_node_ids().unwrap();
     ids.sort(); // 确保边拓扑在所有平台上确定性一致（HashMap 迭代序不保证稳定）
     for i in 0..ids.len() - 1 {
         db.link(ids[i], ids[i + 1], "seq", 1.0).unwrap();
@@ -280,7 +280,7 @@ fn COV5_05_where_id_field() {
     let path = tmp_db("id_field");
     let db = seed_typed_graph(&path);
 
-    let ids = db.all_node_ids();
+    let ids = db.all_node_ids().unwrap();
     let target = ids[3];
     let q = format!("MATCH (a) WHERE a.id == {} RETURN a", target);
     let r = db.tql_nodes(&q).unwrap();
@@ -407,19 +407,19 @@ fn COV5_09_find_and_or_not() {
     let r = db.tql_nodes(r#"FIND {} WHERE _.rank > 2 AND _.rank < 6 RETURN *"#);
     let err = r.expect_err("空 FIND 文档应被安全拒绝");
     assert!(!err.to_string().is_empty(), "安全拒绝必须返回可诊断错误");
-    assert_eq!(db.node_count(), 8, "解析失败不能污染数据库");
+    assert_eq!(db.node_count().unwrap(), 8, "解析失败不能污染数据库");
 
     // FIND + OR 当前语法会把空 FIND 文档安全拒绝
     let r = db.tql_nodes(r#"FIND {} WHERE _.rank < 2 OR _.rank > 5 RETURN *"#);
     let err = r.expect_err("空 FIND 文档应被安全拒绝");
     assert!(!err.to_string().is_empty(), "安全拒绝必须返回可诊断错误");
-    assert_eq!(db.node_count(), 8, "解析失败不能污染数据库");
+    assert_eq!(db.node_count().unwrap(), 8, "解析失败不能污染数据库");
 
     // FIND + NOT 当前语法会把空 FIND 文档安全拒绝
     let r = db.tql_nodes(r#"FIND {} WHERE NOT _.active == true RETURN *"#);
     let err = r.expect_err("空 FIND 文档应被安全拒绝");
     assert!(!err.to_string().is_empty(), "安全拒绝必须返回可诊断错误");
-    assert_eq!(db.node_count(), 8, "解析失败不能污染数据库");
+    assert_eq!(db.node_count().unwrap(), 8, "解析失败不能污染数据库");
 
     cleanup(&path);
 }
@@ -485,8 +485,8 @@ fn COV5_10_f16_full_lifecycle() {
     drop(db);
 
     let db2 = Database::<f16>::open(&path, DIM).unwrap();
-    assert!(db2.contains(id1));
-    assert!(db2.contains(id2));
+    assert!(db2.contains(id1).unwrap());
+    assert!(db2.contains(id2).unwrap());
 
     cleanup(&path);
 }
@@ -514,7 +514,7 @@ fn COV5_11_flush_reopen_mmap() {
 
     // 重新打开 → vec_pool 从 .vec 文件 mmap 加载
     let db = Database::<f32>::open(&path, DIM).unwrap();
-    assert_eq!(db.node_count(), 50);
+    assert_eq!(db.node_count().unwrap(), 50);
 
     let hits = db.search(&[25.0, 0.0, 0.0, 0.0], 5, 0, 0.0).unwrap();
     assert_eq!(hits.len(), 5, "mmap 重新加载后搜索应遵守 top_k=5");
@@ -544,7 +544,7 @@ fn COV5_12_incremental_flush_reopen() {
     // 第二轮增量
     {
         let mut db = Database::<f32>::open(&path, DIM).unwrap();
-        assert_eq!(db.node_count(), 10);
+        assert_eq!(db.node_count().unwrap(), 10);
         for i in 10..20u32 {
             db.insert(&[i as f32, 0.0, 0.0, 0.0], serde_json::json!({"round": 2}))
                 .unwrap();
@@ -554,7 +554,7 @@ fn COV5_12_incremental_flush_reopen() {
 
     // 验证
     let db = Database::<f32>::open(&path, DIM).unwrap();
-    assert_eq!(db.node_count(), 20);
+    assert_eq!(db.node_count().unwrap(), 20);
 
     cleanup(&path);
 }
@@ -585,22 +585,22 @@ fn COV5_14_tql_syntax_errors() {
 
     // 不完整 SEARCH
     assert_tql_err(db.tql_nodes("SEARCH VECTOR"), "Expected");
-    assert_eq!(db.node_count(), 0, "语法错误不能污染空数据库");
+    assert_eq!(db.node_count().unwrap(), 0, "语法错误不能污染空数据库");
 
     // MATCH 缺少括号
     assert_tql_err(db.tql_nodes("MATCH a RETURN a"), "Expected");
-    assert_eq!(db.node_count(), 0, "语法错误不能污染空数据库");
+    assert_eq!(db.node_count().unwrap(), 0, "语法错误不能污染空数据库");
 
     // 空查询
     assert_tql_err(db.tql_nodes(""), "Expected");
-    assert_eq!(db.node_count(), 0, "语法错误不能污染空数据库");
+    assert_eq!(db.node_count().unwrap(), 0, "语法错误不能污染空数据库");
 
     // 无效操作符
     assert_tql_err(
         db.tql_nodes(r#"FIND {x: {$invalid: 1}} RETURN *"#),
         "invalid",
     );
-    assert_eq!(db.node_count(), 0, "语法错误不能污染空数据库");
+    assert_eq!(db.node_count().unwrap(), 0, "语法错误不能污染空数据库");
 
     cleanup(&path);
 }
@@ -758,13 +758,13 @@ fn COV5_19_tql_mut_complex() {
 fn COV5_20_tql_mut_delete_multi() {
     let path = tmp_db("del_multi");
     let mut db = seed_typed_graph(&path);
-    let before = db.node_count();
+    let before = db.node_count().unwrap();
 
     let r = db
         .tql_mut(r#"MATCH (a) WHERE a.rank < 2 DELETE a"#)
         .unwrap();
     assert!(r.affected >= 1);
-    assert!(db.node_count() < before);
+    assert!(db.node_count().unwrap() < before);
 
     cleanup(&path);
 }

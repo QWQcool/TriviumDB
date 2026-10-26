@@ -72,7 +72,7 @@ fn 测试_全业务链路_社交网络复杂流转() {
     }
 
     // 验证初始状态：节点数量应为 3
-    assert_eq!(db.node_count(), 3);
+    assert_eq!(db.node_count().unwrap(), 3);
 
     // 3. 第二阶段：变更图谱结构与属性 (事务 Commit)
     {
@@ -105,7 +105,7 @@ fn 测试_全业务链路_社交网络复杂流转() {
     }
 
     // 验证 Rollback 有效：节点数仍然应该是 3
-    assert_eq!(db.node_count(), 3);
+    assert_eq!(db.node_count().unwrap(), 3);
 
     // 5. 第四阶段：复杂查询层结合 (Cypher + Vector)
     {
@@ -149,8 +149,8 @@ fn 测试_全业务链路_社交网络复杂流转() {
         db.compact().expect("压实异常");
 
         // 验证 Bob 已被彻底清理
-        assert!(!db.contains(bob_id), "节点记录应当已拔除");
-        assert_eq!(db.node_count(), 2, "此时图谱网络内只剩 2 人");
+        assert!(!db.contains(bob_id).unwrap(), "节点记录应当已拔除");
+        assert_eq!(db.node_count().unwrap(), 2, "此时图谱网络内只剩 2 人");
 
         // Alice 是否还是 follow Bob?
         let rel_check = db
@@ -190,10 +190,10 @@ fn 测试_独立写操作API_与无事务修改的一致性() {
     db.flush().unwrap();
 
     // 验证更新立即穿透生效
-    let p = db.get_payload(id1).unwrap();
+    let p = db.get_payload(id1).unwrap().unwrap();
     assert_eq!(p["status"], "updated");
 
-    let n = db.get(id1).unwrap();
+    let n = db.get(id1).unwrap().unwrap();
     assert_eq!(n.vector, vec![2.0, 2.0, 2.0]);
 
     cleanup(&path);

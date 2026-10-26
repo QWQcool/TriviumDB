@@ -192,7 +192,13 @@ impl App {
     /// 刷新右侧节点详情（重新从 DB 取完整信息，避免投影裁剪导致缺字段）。
     fn update_detail(&mut self) {
         let id = self.selected_node_id();
-        self.detail = id.and_then(|id| self.handle.get(id));
+        self.detail = match id.map(|id| self.handle.get(id)).transpose() {
+            Ok(node) => node.flatten(),
+            Err(error) => {
+                self.status = format!("读取节点失败：{error}");
+                None
+            }
+        };
     }
 
     fn select_next(&mut self) {
@@ -394,7 +400,13 @@ impl App {
                 let mut rows: CliRows = Vec::new();
                 let mut scores: Vec<f32> = Vec::new();
                 for (id, score, _payload) in &hits {
-                    if let Some(n) = self.handle.get(*id) {
+                    if let Some(n) = match self.handle.get(*id) {
+                        Ok(node) => node,
+                        Err(error) => {
+                            self.status = format!("读取节点失败：{error}");
+                            return;
+                        }
+                    } {
                         let mut row = std::collections::HashMap::new();
                         row.insert("node".to_string(), n);
                         rows.push(row);
@@ -427,7 +439,13 @@ impl App {
     /// 把选中节点的 1-hop 邻居加入图（k-hop 展开）。
     fn graph_expand(&mut self) {
         if let Some(id) = self.selected_node_id() {
-            for nb in self.handle.neighbors(id, 1) {
+            for nb in match self.handle.neighbors(id, 1) {
+                Ok(nodes) => nodes,
+                Err(error) => {
+                    self.status = format!("读取邻居失败：{error}");
+                    return;
+                }
+            } {
                 self.graph_state.extra.insert(nb);
             }
             self.status = format!(

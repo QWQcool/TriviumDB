@@ -239,12 +239,12 @@ fn INTRUDE_01_BTS单比特翻转_TDB文件多点侵入() {
     match result.unwrap() {
         Ok(db) => {
             assert!(
-                db.node_count() <= 20,
+                db.node_count().unwrap() <= 20,
                 "bit-flip 降级加载后节点数不应超过原始 20，实际 {}",
-                db.node_count()
+                db.node_count().unwrap()
             );
-            for &id in &db.all_node_ids() {
-                if let Some(p) = db.get_payload(id) {
+            for &id in &db.all_node_ids().unwrap() {
+                if let Some(p) = db.get_payload(id).unwrap() {
                     assert!(
                         p.get("idx").is_some(),
                         "节点 {} 的 payload 应包含 idx 字段，实际内容: {}",
@@ -255,7 +255,7 @@ fn INTRUDE_01_BTS单比特翻转_TDB文件多点侵入() {
             }
             eprintln!(
                 "  ✅ mmap BTS bit-flip: 引擎降级加载，{} 个节点存活（数据完整性已验证）",
-                db.node_count()
+                db.node_count().unwrap()
             );
         }
         Err(e) => {
@@ -311,14 +311,14 @@ fn INTRUDE_02_MOVNTI非时序毒写_DMA级侵入() {
 
     match result.unwrap() {
         Ok(db) => {
-            let count = db.node_count();
+            let count = db.node_count().unwrap();
             assert!(
                 count <= 15,
                 "MOVNTI 毒写降级加载后节点数不应超过原始 15，实际 {}",
                 count
             );
-            for &id in &db.all_node_ids() {
-                let node = db.get(id);
+            for &id in &db.all_node_ids().unwrap() {
+                let node = db.get(id).unwrap();
                 assert!(
                     node.is_some(),
                     "all_node_ids 返回的 ID {} 应能通过 get() 获取",
@@ -414,19 +414,19 @@ fn INTRUDE_03_WAL尾部注入垃圾帧_回放容错() {
         .unwrap()
         .expect("WAL 尾部垃圾不应导致加载失败：5 个已 flush 的节点应通过 .tdb 文件恢复");
     assert!(
-        db.node_count() >= 5,
+        db.node_count().unwrap() >= 5,
         "至少 5 个已 flush 的节点应存活，实际 {}",
-        db.node_count()
+        db.node_count().unwrap()
     );
     assert!(
-        db.node_count() <= 8,
+        db.node_count().unwrap() <= 8,
         "节点数不应超过原始写入的 8 个，实际 {}",
-        db.node_count()
+        db.node_count().unwrap()
     );
     // 验证已 flush 节点的 payload 语义完整性
     let mut valid_count = 0;
-    for &id in &db.all_node_ids() {
-        if let Some(p) = db.get_payload(id)
+    for &id in &db.all_node_ids().unwrap() {
+        if let Some(p) = db.get_payload(id).unwrap()
             && p.get("valid").and_then(|v| v.as_bool()) == Some(true)
         {
             valid_count += 1;
@@ -438,7 +438,7 @@ fn INTRUDE_03_WAL尾部注入垃圾帧_回放容错() {
     );
     eprintln!(
         "  ✅ WAL 注入容错: {} 个节点存活，payload 完整性已验证",
-        db.node_count()
+        db.node_count().unwrap()
     );
 
     cleanup(&path);
@@ -595,15 +595,15 @@ fn INTRUDE_06_渐进式比特衰减_NAND_Flash老化模拟() {
 
     match result.unwrap() {
         Ok(db) => {
-            let survived = db.node_count();
+            let survived = db.node_count().unwrap();
             assert!(
                 survived <= 50,
                 "bit-rot 降级加载后节点数不应超过原始 50，实际 {}",
                 survived
             );
-            for &id in &db.all_node_ids() {
+            for &id in &db.all_node_ids().unwrap() {
                 assert!(
-                    db.get(id).is_some(),
+                    db.get(id).unwrap().is_some(),
                     "all_node_ids 返回的 ID {} 应能通过 get() 获取",
                     id
                 );
@@ -680,21 +680,21 @@ fn INTRUDE_07_TDB加WAL双文件同时侵入_灾难级容错() {
         Ok(db) => {
             // 双通道损坏后如果还能加载，节点数不应超过原始写入数
             assert!(
-                db.node_count() <= 15,
+                db.node_count().unwrap() <= 15,
                 "双文件侵入降级加载后节点数不应超过原始 15，实际 {}",
-                db.node_count()
+                db.node_count().unwrap()
             );
             // 基本操作不能 panic
-            for &id in &db.all_node_ids() {
+            for &id in &db.all_node_ids().unwrap() {
                 assert!(
-                    db.get(id).is_some(),
+                    db.get(id).unwrap().is_some(),
                     "all_node_ids 返回的 ID {} 应能通过 get() 获取",
                     id
                 );
             }
             eprintln!(
                 "  ⚠️ 双文件损坏后降级加载: {} 节点存活（数据完整性已验证）",
-                db.node_count()
+                db.node_count().unwrap()
             );
         }
         Err(e) => {

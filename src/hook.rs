@@ -134,7 +134,7 @@ impl HookContext {
 ///       │
 ///   返回结果
 /// ```
-pub trait SearchHook: Send + Sync {
+pub trait SearchHook: Send + Sync + std::any::Any {
     /// 🔌 Hook #1：查询预处理
     ///
     /// 在检索管线启动前调用。可以修改查询向量、调整配置参数、注入上下文数据。

@@ -5,9 +5,47 @@
 
 import json
 import os
+import shutil
 import tempfile
 
 import triviumdb
+
+
+def run_text_recovery_contract(root: str) -> None:
+    source = os.path.join(os.path.dirname(__file__), "..", "fixtures", "v0810_text_mmap")
+    for missing in [False, True]:
+        target = os.path.join(root, f"text-upgrade-{missing}.tdb")
+        for suffix in ["", ".vec", ".flush_ok", ".pld.2", ".text", ".text.meta", ".wal"]:
+            if missing and suffix == ".text.meta":
+                continue
+            shutil.copyfile(os.path.join(source, "sample.tdb" + suffix), target + suffix)
+        db = triviumdb.TriviumDB(target, dim=4, auto_build_quiver=False)
+        db.insert_with_id(5, [0, 0, 1, 0], {})
+        db.flush()
+        db.build_text_index()
+        assert sorted(row.row["hits"]["id"] for row in db.tql(
+            'TEXT BM25 "alpha" TOP 10 AS hits WITH hits RETURN hits')) == [1, 2, 3, 4]
+        db.close()
+        with open(target + ".text", "wb") as output:
+            output.write(b"corrupt")
+        db = triviumdb.TriviumDB(target, dim=4, load_text_index=True, auto_build_quiver=False)
+        with open(target + ".text", "rb") as original:
+            assert original.read() == b"corrupt"
+        try:
+            db.build_text_index()
+        except triviumdb.ImmutableArtifactError:
+            pass
+        else:
+            raise AssertionError("损坏文本应返回结构化校验错误")
+        db.rebuild_text_index([{"id": 1, "text": "restoredtoken", "keywords": ["restoredanchor"]}])
+        db.close()
+        reader = triviumdb.TriviumDB(target, dim=4, load_text_index=True, access_mode="read_only")
+        assert reader.node_count() == 5
+        assert [row.row["hits"]["id"] for row in reader.tql(
+            'TEXT BM25 "restoredtoken" TOP 10 AS hits WITH hits RETURN hits')] == [1]
+        assert [row.row["hits"]["id"] for row in reader.tql(
+            'TEXT AC "restoredanchor" TOP 10 AS hits WITH hits RETURN hits')] == [1]
+        reader.close()
 
 
 def run_lifecycle_contract(root: str) -> None:
@@ -200,6 +238,10 @@ def run_shared_contract(root: str) -> None:
                     db.delete(1)
                 for check in expected[phase]:
                     assert len(db.tql(check["query"])) == check["count"], case["name"]
+        elif case["operation"] == "text_rebuild":
+            db.rebuild_text_index(case["documents"])
+            for check in expected["checks"]:
+                assert len(db.tql(check["query"])) == check["count"], case["name"]
         else:
             raise AssertionError(f"未知共享契约操作: {case['operation']}")
     db.close()
@@ -209,6 +251,18 @@ def run_shared_contract(root: str) -> None:
         pass
     else:
         raise AssertionError("关闭后的文本构建错误必须透传")
+    reader = triviumdb.TriviumDB(path, dim=contract["setup"]["dimension"],
+        load_text_index=True, access_mode="read_only")
+    checks = next(case for case in contract["cases"] if case["operation"] == "text_rebuild")["expected"]["checks"]
+    for check in checks:
+        assert len(reader.tql(check["query"])) == check["count"]
+    try:
+        reader.rebuild_text_index([])
+    except triviumdb.ReadOnlyError:
+        pass
+    else:
+        raise AssertionError("只读句柄的文本重建必须返回写入权限错误")
+    reader.close()
 
 
 def run_query_budget_contract(root: str) -> None:
@@ -242,6 +296,7 @@ def main() -> None:
         run_lifecycle_contract(root)
         run_resource_contract(root)
         run_shared_contract(root)
+        run_text_recovery_contract(root)
         run_query_budget_contract(root)
         path = os.path.join(root, "api.tdb")
         db = triviumdb.TriviumDB(path, dim=2)

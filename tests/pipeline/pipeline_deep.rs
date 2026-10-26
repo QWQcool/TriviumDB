@@ -44,7 +44,7 @@ fn COV6_01_fista_shadow_query() {
         )
         .unwrap();
     }
-    let ids = db.all_node_ids();
+    let ids = db.all_node_ids().unwrap();
     for i in 0..ids.len() - 1 {
         db.link(ids[i], ids[i + 1], "chain", 0.9).unwrap();
     }
@@ -85,7 +85,7 @@ fn COV6_02_migrate_with_edges() {
 
     let (new_db, migrated) = db.migrate_to(&new_path, 8).unwrap();
     assert_eq!(migrated.len(), 3);
-    let edges = new_db.get_edges(id1);
+    let edges = new_db.get_edges(id1).unwrap();
     assert!(!edges.is_empty(), "边应迁移");
 
     cleanup(&path);
@@ -115,7 +115,7 @@ fn COV6_04_refractory_dpp() {
         db.insert(&[i as f32, 0.0, 0.0, 0.0], serde_json::json!({"idx": i}))
             .unwrap();
     }
-    let ids = db.all_node_ids();
+    let ids = db.all_node_ids().unwrap();
     for i in 0..ids.len() {
         for j in (i + 1)..ids.len().min(i + 5) {
             db.link(ids[i], ids[j], "dense", 0.9).unwrap();

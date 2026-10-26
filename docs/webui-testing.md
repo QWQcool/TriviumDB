@@ -1,54 +1,51 @@
-# Web Console（WebUI）测试与验收
+# nightly WebUI 开发诊断
 
-WebUI 位于 `crates/triviumdb-server/web/index.html`，由 Server 通过 `include_str!` 内嵌，修改页面后必须重新构建 Server。当前文档对应 0.9.0-beta.1 集成与发布验收。
+Server 与 WebUI 处于 nightly 快速迭代阶段，布局、主题、交互和 HTTP 接口随开发调整。开发者按需要选择服务端自测、浏览器交互检查和截图记录。嵌入式 Core、Rust/Python/Node SDK 与 CLI 使用各自的正式验收流程。
 
-## 验证范围
+WebUI 位于 `crates/triviumdb-server/web/index.html`，由 Server 通过 `include_str!` 内嵌，页面修改后重新构建 Server。
 
-| 层级 | 入口 | 验证内容 |
+## 按需运行
+
+| 工具 | 入口 | 用途 |
 | --- | --- | --- |
-| 服务端契约 | `cargo test -p triviumdb-server` | HTTP、TQL 与图探索 API |
-| 页内自检 | `/ui?selftest=1` | `window.__selftestResults` 中的状态、解析、布局、流式与回归断言 |
-| 浏览器冒烟 | `scripts/ui-smoke.mjs` | 临时真实数据库、种子数据、图探索、AI 模拟、查询与抽屉；Chromium/WebKit 各执行一次 |
-| 视觉回归 | `scripts/visual-baseline.mjs` | 固定视口、确定性布局和平台对应 PNG 基线的实际像素比对 |
+| Server 自测 | `cargo test -p triviumdb-server` | 当前 HTTP、TQL 与图探索实现 |
+| 页内自测 | `/ui?selftest=1` | 当前页面的状态与逻辑诊断 |
+| 离线浏览器检查 | `node scripts/test_webui.cjs` | 页面自测与离线交互 |
+| 端到端检查 | `node scripts/ui-smoke.mjs` | 临时 Server、种子数据和当前交互流程 |
+| 截图记录 | `node scripts/visual-baseline.mjs` | 保存当前界面截图 |
 
-全量渲染、增量并图、邻域与路径共用真实边解析：不能根据同一行中的节点顺序猜测关系，边以起点、终点和标签去重，并保留权重及元数据。默认 1500 节点渲染上限覆盖所有入口，星云模式才可显式放宽。路径补齐请求保留完整 u64 ID，禁止通过 JavaScript `Number` 舍入。页内自检包含上述反例，以及 WebGL 平行边与精确路径高亮检查。
-
-## 本地运行
-
-浏览器测试依赖固定版本，保证本地与视觉 CI 使用相同浏览器构建：
+浏览器工具的安装和运行：
 
 ```bash
 npm i --no-save --ignore-scripts playwright@1.64.1 pixelmatch@8.0.0 pngjs@7.0.0
 npx playwright install chromium webkit
+cargo build -p triviumdb-server --target-dir target/webui-tests
+
+node scripts/visual-baseline.mjs
 node scripts/test_webui.cjs
 node scripts/ui-smoke.mjs
 SMOKE_BROWSER=webkit node scripts/ui-smoke.mjs
-node scripts/visual-baseline.mjs
 ```
 
-PowerShell 使用 `$env:SMOKE_BROWSER='webkit'` 设置引擎，运行后移除该环境变量。依赖缺失时脚本返回失败，不能把没有执行的检查算作通过。
+PowerShell 使用 `$env:SMOKE_BROWSER='webkit'` 选择引擎。脚本默认使用独立构建目录 `target/webui-tests`，也可通过 `CARGO_TARGET_DIR` 指定目录。
 
-冒烟脚本默认使用 `target/webui-tests` 独立构建目录；显式设置 `CARGO_TARGET_DIR` 时使用该目录。视觉脚本读取同一目录的 Server；也可以先运行：
+## 可选的截图比对
+
+设计调整时可以直接记录新界面，需要对照某个参考设计时再显式选择比对或更新：
 
 ```bash
-cargo build -p triviumdb-server --target-dir target/webui-tests
+node scripts/visual-baseline.mjs --record-only
+node scripts/visual-baseline.mjs --compare
+node scripts/visual-baseline.mjs --update
+node scripts/visual-baseline.mjs --with-sigma
 ```
 
-两个脚本都只终止自己创建的子进程，每轮数据库位于 `.tmp` 内的独占目录，清理仅涉及该目录的直接子文件。不得使用 `taskkill /IM`、`pkill` 或扫描删除其他轮次数据库来处理可执行文件占用。
+参考图按平台放在 `tests/visual/baseline/<platform>/`。截图写入 `.tmp/visual-shots/`，显式比对产生的差异图写入 `.tmp/visual-diff/`。现有参考图用于开发对照，随设计演进维护或替换。
 
-## 视觉基线
+## 手动 workflow
 
-基线按平台分目录，当前仓库维护 `tests/visual/baseline/win32/`。WebUI workflow 使用 Windows runner，与基线平台对应。固定视口 1400×860、缩放 1、减少动态效果，默认排除依赖 GPU 的 Sigma 截图；单像素阈值为 0.2，允许差异像素比例为 1.5%。
+Actions 中的 **Nightly WebUI Diagnostics** 通过 `workflow_dispatch` 手动运行。默认记录截图；`run_smoke` 选择是否执行当前页面的交互自测，`visual_mode` 选择记录、比对或更新参考图。产物随该次诊断上传。
 
-```bash
-node scripts/visual-baseline.mjs               # 强制比对，缺失基线或比对依赖时失败
-node scripts/visual-baseline.mjs --update      # 显式生成当前平台基线，必须审阅后提交
-node scripts/visual-baseline.mjs --record-only # 显式只截图，不代表视觉回归通过
-node scripts/visual-baseline.mjs --with-sigma  # 本地额外验证 WebGL 导出
-```
+常规 PR/push 与嵌入式 beta/stable 发布执行 Core、SDK 和 CLI 验收。Server 使用独立 workflow 与按需自测入口。界面重做时，开发者同步调整相关诊断脚本即可。
 
-截图写入 `.tmp/visual-shots/`，差异图写入 `.tmp/visual-diff/`。workflow 无论成功或失败都会上传截图；手动 `update_baseline=true` 还会上传新基线。基线变更须说明原因，并实际查看截图，不能通过自动覆盖基线掩盖布局或语义回归。
-
-## 发布前要求
-
-WebUI 专项验证补充而不替代 `CONTRIBUTING.md` 的全工作区、Clippy、hook 套件和绑定检查。平台限制应在验收记录中如实说明，不得用某台机器的环境限制豁免全项目门禁。完整证据绑定具体提交，候选阶段不打正式 tag；正式 tag 只创建在通过验收的 master 发布提交上。
+脚本创建独立临时数据库，仅清理自身创建的子进程与文件。

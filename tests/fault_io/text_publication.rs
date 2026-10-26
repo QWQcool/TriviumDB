@@ -1,0 +1,109 @@
+use serde_json::json;
+use triviumdb::database::{Config, Database, SearchConfig, StorageMode};
+use triviumdb::test_hooks::{IoPoint, fail_io_at};
+
+fn hits(db: &Database<f32>, query: &str) -> Vec<u64> {
+    let config = SearchConfig {
+        top_k: 10,
+        recall_k: 10,
+        expand_depth: 0,
+        min_score: -1.,
+        enable_text_hybrid_search: true,
+        enable_advanced_pipeline: false,
+        ..Default::default()
+    };
+    db.search_hybrid(Some(query), None, &config)
+        .unwrap()
+        .iter()
+        .map(|hit| hit.id)
+        .collect()
+}
+
+#[test]
+fn 文本与派生索引发布故障支持重开恢复及同句柄重试() {
+    for mode in [StorageMode::Mmap, StorageMode::Rom] {
+        for point in [
+            IoPoint::TextMetadataWrite,
+            IoPoint::PropertySidecarWrite,
+            IoPoint::GraphSidecarWrite,
+            IoPoint::PublicationCommitSync,
+            IoPoint::PublicationCommitRename,
+        ] {
+            if mode == StorageMode::Mmap
+                && matches!(
+                    point,
+                    IoPoint::PublicationCommitSync | IoPoint::PublicationCommitRename
+                )
+            {
+                continue;
+            }
+            for retry in [false, true] {
+                let dir = std::env::temp_dir().join(format!(
+                    "tdb-text-io-{}-{}",
+                    std::process::id(),
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_nanos()
+                ));
+                std::fs::create_dir(&dir).unwrap();
+                let path = dir.join("data.tdb").to_str().unwrap().to_owned();
+                let open = || {
+                    Database::<f32>::open_with_config(
+                        &path,
+                        Config {
+                            dim: 3,
+                            storage_mode: mode,
+                            load_text_index: true,
+                            auto_build_quiver: false,
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap()
+                };
+                let mut db = open();
+                db.insert_with_id(1, &[1., 0., 0.], json!({"version":"旧"}))
+                    .unwrap();
+                db.index_text(1, "original").unwrap();
+                db.index_keyword(1, "旧别名").unwrap();
+                db.close().unwrap();
+                let mut db = open();
+                db.index_text(1, "updated").unwrap();
+                db.insert_with_id(2, &[0., 1., 0.], json!({"version":"新"}))
+                    .unwrap();
+                db.create_index("version").unwrap();
+                db.link(1, 2, "关联", 1.).unwrap();
+                {
+                    let _failure = fail_io_at(point);
+                    assert!(db.flush().is_err(), "故障应传递：{mode:?} {point:?}");
+                }
+                if retry {
+                    db.flush().unwrap();
+                }
+                drop(db);
+                let mut db = open();
+                assert_eq!(db.node_count().unwrap(), 2);
+                assert_eq!(db.get_payload(2).unwrap().unwrap(), json!({"version":"新"}));
+                assert_eq!(db.get_edges(1).unwrap()[0].target_id, 2);
+                assert_eq!(
+                    hits(&db, if retry { "updated" } else { "original" }),
+                    vec![1]
+                );
+                assert_eq!(hits(&db, "旧别名"), vec![1]);
+                db.flush().unwrap();
+                db.close().unwrap();
+                let mut db = open();
+                assert_eq!(
+                    hits(&db, if retry { "updated" } else { "original" }),
+                    vec![1]
+                );
+                db.close().unwrap();
+                // 测试目录由本轮独占创建，仅清理直接子文件。
+                for entry in std::fs::read_dir(&dir).unwrap() {
+                    std::fs::remove_file(entry.unwrap().path()).unwrap();
+                }
+                std::fs::remove_dir(&dir).unwrap();
+            }
+        }
+    }
+}

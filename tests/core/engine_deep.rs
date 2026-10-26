@@ -72,7 +72,7 @@ fn seed_chain(path: &str, n: u32) -> Database<f32> {
         )
         .unwrap();
     }
-    let ids = db.all_node_ids();
+    let ids = db.all_node_ids().unwrap();
     for i in 0..ids.len() - 1 {
         db.link(ids[i], ids[i + 1], "next", 0.9).unwrap();
     }
@@ -105,9 +105,15 @@ fn COV7_01_optional_match_null_fill() {
     assert_eq!(r.len(), 1, "无匹配时必须保留左侧节点");
     assert_eq!(r[0]["a"].payload["name"], "lonely");
     assert!(!r[0].contains_key("b"), "未匹配的右侧变量必须为空");
-    assert_eq!(db.node_count(), 1, "OPTIONAL 空匹配不能改变节点数据");
     assert_eq!(
-        db.get_payload(1).and_then(|p| p.get("name").cloned()),
+        db.node_count().unwrap(),
+        1,
+        "OPTIONAL 空匹配不能改变节点数据"
+    );
+    assert_eq!(
+        db.get_payload(1)
+            .unwrap()
+            .and_then(|p| p.get("name").cloned()),
         Some(serde_json::json!("lonely")),
         "空匹配不能绑定或写入脏节点"
     );
@@ -136,7 +142,7 @@ fn COV7_02_optional_match_mixed() {
         4,
         "未命中的左侧节点必须以空右侧保留"
     );
-    assert_eq!(db.node_count(), 5, "OPTIONAL 查询不能改变图数据");
+    assert_eq!(db.node_count().unwrap(), 5, "OPTIONAL 查询不能改变图数据");
     assert_eq!(
         db.tql_nodes(r#"MATCH (a)-[:skip]->(b) RETURN a, b"#)
             .unwrap()
@@ -374,16 +380,23 @@ fn COV7_13_detach_delete_no_match() {
     let path = tmp_db("detach_no_match");
     let mut db = seed_chain(&path, 3);
 
-    let before = db.node_count();
-    let ids = db.all_node_ids();
+    let before = db.node_count().unwrap();
+    let ids = db.all_node_ids().unwrap();
 
     // DELETE 没有 MATCH 前缀应报错
     let r = db.tql_mut(r#"DELETE a"#);
     let err = r.expect_err("DELETE without MATCH should fail");
     assert!(!err.to_string().is_empty(), "DELETE 拒绝必须返回可诊断错误");
-    assert_eq!(db.node_count(), before, "DELETE 失败不能改变节点数");
+    assert_eq!(
+        db.node_count().unwrap(),
+        before,
+        "DELETE 失败不能改变节点数"
+    );
     for id in ids {
-        let payload = db.get_payload(id).expect("DELETE 失败不能删除原节点");
+        let payload = db
+            .get_payload(id)
+            .unwrap()
+            .expect("DELETE 失败不能删除原节点");
         assert!(
             payload.get("name").is_some(),
             "DELETE 失败后节点 payload 必须保持可读"
@@ -439,7 +452,7 @@ fn COV7_15_find_null_value() {
         .tql_nodes(r#"FIND {nonexistent: null} RETURN *"#)
         .unwrap();
     assert_eq!(r.len(), 0, "缺失字段与 null 比较当前应安全返回空集");
-    assert_eq!(db.node_count(), 5, "null 过滤不能修改数据库");
+    assert_eq!(db.node_count().unwrap(), 5, "null 过滤不能修改数据库");
 
     cleanup(&path);
 }
@@ -526,9 +539,12 @@ fn COV7_19_wal_truncated_recovery() {
     let db = Database::<f32>::open(&path, DIM);
     match db {
         Ok(db) => {
-            assert!(db.node_count() <= 5, "截断 WAL 恢复不能产生额外脏节点");
-            for id in db.all_node_ids() {
-                let payload = db.get_payload(id).expect("恢复节点必须有 payload");
+            assert!(
+                db.node_count().unwrap() <= 5,
+                "截断 WAL 恢复不能产生额外脏节点"
+            );
+            for id in db.all_node_ids().unwrap() {
+                let payload = db.get_payload(id).unwrap().expect("恢复节点必须有 payload");
                 let v = payload
                     .get("v")
                     .and_then(|value| value.as_u64())
@@ -559,8 +575,11 @@ fn COV7_20_delete_twice() {
     // 再删一次
     let r = db.delete(id);
     assert!(r.is_err(), "重复删除同一节点应安全拒绝");
-    assert_eq!(db.node_count(), 0, "重复删除不能产生脏节点");
-    assert!(db.get_payload(id).is_none(), "已删除节点不能残留 payload");
+    assert_eq!(db.node_count().unwrap(), 0, "重复删除不能产生脏节点");
+    assert!(
+        db.get_payload(id).unwrap().is_none(),
+        "已删除节点不能残留 payload"
+    );
 
     cleanup(&path);
 }
@@ -577,7 +596,7 @@ fn COV7_21_unlink_nonexistent() {
         .insert(&[0.0, 1.0, 0.0, 0.0], serde_json::json!({}))
         .unwrap();
 
-    let before = db.node_count();
+    let before = db.node_count().unwrap();
     // 节点存在但 src 无出边：幂等成功（不再误报 NodeNotFound）
     let r = db.unlink(id1, id2);
     assert!(
@@ -585,9 +604,9 @@ fn COV7_21_unlink_nonexistent() {
         "存在但无出边的节点 unlink 应幂等成功，实际 {:?}",
         r
     );
-    assert_eq!(db.node_count(), before, "unlink 不能影响节点数");
-    assert!(db.get_payload(id1).is_some(), "源节点不能被误删");
-    assert!(db.get_payload(id2).is_some(), "目标节点不能被误删");
+    assert_eq!(db.node_count().unwrap(), before, "unlink 不能影响节点数");
+    assert!(db.get_payload(id1).unwrap().is_some(), "源节点不能被误删");
+    assert!(db.get_payload(id2).unwrap().is_some(), "目标节点不能被误删");
 
     // 节点不存在：仍应报错
     let r2 = db.unlink(9999, id1);
@@ -611,7 +630,7 @@ fn COV7_22_update_payload_search() {
     db.update_payload(id, serde_json::json!({"stage": "updated", "extra": 42}))
         .unwrap();
 
-    let p = db.get_payload(id).unwrap();
+    let p = db.get_payload(id).unwrap().unwrap();
     assert_eq!(p["stage"], "updated");
     assert_eq!(p["extra"], 42);
 
@@ -629,7 +648,7 @@ fn COV7_23_match_budget_exceeded() {
         db.insert(&[i as f32, 0.0, 0.0, 0.0], serde_json::json!({"i": i}))
             .unwrap();
     }
-    let ids = db.all_node_ids();
+    let ids = db.all_node_ids().unwrap();
     // 全连接（20*19/2 = 190 条边）
     for i in 0..ids.len() {
         for j in (i + 1)..ids.len() {

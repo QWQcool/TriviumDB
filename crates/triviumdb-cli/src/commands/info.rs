@@ -31,7 +31,7 @@ pub fn print_info(handle: &DbHandle, path: &str, format: OutputFormat) -> CliRes
     let wal_size = file_size(&wal_path);
     let quiver_exists = Path::new(&quiver_path).exists();
 
-    let node_count = handle.node_count();
+    let node_count = handle.node_count()?;
     let actual_dim = handle.dim();
     let mem = handle.estimated_memory();
     let file_version = header.map(|h| h.version);

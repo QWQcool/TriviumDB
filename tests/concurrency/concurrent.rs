@@ -69,7 +69,7 @@ fn 并发_8线程同时只读查询_不恐慌不矛盾() {
             // 每个线程执行 200 轮只读操作
             for round in 0..200 {
                 // 操作 1: node_count
-                let count = db.node_count();
+                let count = db.node_count().unwrap();
                 assert!(
                     count > 0,
                     "线程 {} 轮 {}: node_count 返回 0",
@@ -78,7 +78,7 @@ fn 并发_8线程同时只读查询_不恐慌不矛盾() {
                 );
 
                 // 操作 2: all_node_ids
-                let ids = db.all_node_ids();
+                let ids = db.all_node_ids().unwrap();
                 assert_eq!(
                     ids.len(),
                     count,
@@ -91,7 +91,7 @@ fn 并发_8线程同时只读查询_不恐慌不矛盾() {
 
                 // 操作 3: get_payload（验证每个 ID 都能查到）
                 for &id in &ids {
-                    let payload = db.get_payload(id);
+                    let payload = db.get_payload(id).unwrap();
                     assert!(
                         payload.is_some(),
                         "线程 {} 轮 {}: id {} 在 all_node_ids 中但 get_payload 返回 None",
@@ -188,7 +188,7 @@ fn 并发_1写4读_写入期间读取一致性() {
             let mut rounds = 0;
             while !stop.load(std::sync::atomic::Ordering::Relaxed) && rounds < 500 {
                 let db = db.lock().unwrap();
-                let count = db.node_count();
+                let count = db.node_count().unwrap();
 
                 // 单调性：节点数只增不减
                 assert!(
@@ -202,7 +202,7 @@ fn 并发_1写4读_写入期间读取一致性() {
                 prev_count = count;
 
                 // 一致性：all_node_ids 和 node_count 必须匹配
-                let ids = db.all_node_ids();
+                let ids = db.all_node_ids().unwrap();
                 assert_eq!(
                     ids.len(),
                     count,
@@ -240,14 +240,14 @@ fn 并发_1写4读_写入期间读取一致性() {
     // 验证最终状态：50 初始 + 200 写入 = 250
     let db = db.lock().unwrap();
     assert_eq!(
-        db.node_count(),
+        db.node_count().unwrap(),
         250,
         "最终节点数应为 250（50 初始 + 200 写入），实际 {}",
-        db.node_count()
+        db.node_count().unwrap()
     );
     eprintln!(
         "  ✅ 1 写 4 读并发: 最终 {} 个节点，节点数单调递增，数据一致",
-        db.node_count()
+        db.node_count().unwrap()
     );
 
     drop(db);
