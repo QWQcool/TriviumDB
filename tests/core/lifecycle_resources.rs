@@ -272,7 +272,19 @@ fn 分组提交异常子进程() {
 fn 分组异常后确认的Full写入跨进程恢复() {
     let root = directory("unwind");
     let path = root.join("sample.tdb");
-    let status = std::process::Command::new(std::env::current_exe().unwrap())
+    let executable = std::env::current_exe().unwrap();
+    // Cargo 的仿真启动参数不会自动传给测试内部创建的子进程。
+    let mut command = if std::env::var_os("TRIVIUM_TEST_QEMU_AARCH64").is_some() {
+        let mut command = std::process::Command::new("qemu-aarch64");
+        command
+            .arg("-L")
+            .arg("/usr/aarch64-linux-gnu")
+            .arg(executable);
+        command
+    } else {
+        std::process::Command::new(executable)
+    };
+    let status = command
         .args([
             "--exact",
             "lifecycle_resources::分组提交异常子进程",
@@ -281,7 +293,10 @@ fn 分组异常后确认的Full写入跨进程恢复() {
         .env("TDB_GROUP_UNWIND_CHILD", &path)
         .status()
         .unwrap();
-    assert!(status.success());
+    assert!(
+        status.success(),
+        "分组提交异常子进程启动或执行失败：{status}"
+    );
     let mut db = Database::<f32>::open(&path.to_string_lossy(), 4).unwrap();
     for id in 1..=3 {
         assert!(
