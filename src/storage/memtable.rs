@@ -18,9 +18,9 @@ use crate::storage::vec_pool::VecPool;
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-const AUTO_QUIVER_TARGET_COMPONENTS: usize = 8_000_000;
-const AUTO_QUIVER_MIN_NODES: usize = 2_500;
-const AUTO_QUIVER_MAX_NODES: usize = 10_000;
+const AUTO_QUIVER_TARGET_COMPONENTS: usize = 666_667;
+const AUTO_QUIVER_MIN_NODES: usize = 209;
+const AUTO_QUIVER_MAX_NODES: usize = 834;
 
 /// 根据暴力检索的近似向量分量工作量计算自动 QuIVer 节点阈值。
 pub fn auto_quiver_node_threshold(dim: usize) -> usize {
@@ -330,6 +330,8 @@ pub struct MemTable<T: VectorType> {
     dim: usize,
     next_id: NodeId,
     generation: u64,
+    /// 最近一次完整检查点之后是否发生了需要持久化的变更。
+    checkpoint_dirty: bool,
     vector_generation: u64,
     property_generation: u64,
     graph_generation: u64,
@@ -402,7 +404,7 @@ pub struct MemTable<T: VectorType> {
     // 空闲索引回收槽：O(1) 回收墓碑位置，防止物理大数组无尽膨胀
     free_slots: Vec<usize>,
 
-    // 4. QuIVer BQ-native Vamana 图索引（惰性构建，N >= 10,000 时自动触发）
+    // 4. QuIVer BQ-native Vamana 图索引，达到维度相关阈值后按需构建。
     //    冷热分离：QuIVer 内部 BQ sigs + 图拓扑 = hot，f32 向量 = cold
     //    事务安全：事务 commit 期间暂停 QuIVer 同步，commit 后由事务层统一同步
     quiver_index: Option<QuIVer>,
@@ -438,6 +440,7 @@ impl<T: VectorType> MemTable<T> {
             dim,
             next_id: 1, // 从 1 开始，保留 0 作为特殊标记
             generation: 0,
+            checkpoint_dirty: true,
             vector_generation: 0,
             property_generation: 0,
             graph_generation: 0,
@@ -487,6 +490,7 @@ impl<T: VectorType> MemTable<T> {
             dim,
             next_id,
             generation: 0,
+            checkpoint_dirty: true,
             vector_generation: 0,
             property_generation: 0,
             graph_generation: 0,
@@ -550,6 +554,7 @@ impl<T: VectorType> MemTable<T> {
 
     #[inline]
     fn mark_property_changed(&mut self) {
+        self.checkpoint_dirty = true;
         self.property_generation = self.property_generation.wrapping_add(1);
         *self
             .column_pair_stats_cache
@@ -563,6 +568,7 @@ impl<T: VectorType> MemTable<T> {
 
     #[inline]
     fn mark_graph_changed(&mut self) {
+        self.checkpoint_dirty = true;
         self.graph_generation = self.graph_generation.wrapping_add(1);
         self.cross_modal_stats_cache
             .write()
@@ -572,6 +578,7 @@ impl<T: VectorType> MemTable<T> {
 
     #[inline]
     fn mark_changed(&mut self, vectors_changed: bool) {
+        self.checkpoint_dirty = true;
         self.generation = self.generation.wrapping_add(1);
         if vectors_changed {
             self.bq_signatures.take();
@@ -604,6 +611,7 @@ impl<T: VectorType> MemTable<T> {
     #[inline]
     pub fn advance_next_id(&mut self, candidate: NodeId) {
         if candidate > self.next_id {
+            self.checkpoint_dirty = true;
             self.next_id = candidate;
         }
     }
@@ -686,6 +694,7 @@ impl<T: VectorType> MemTable<T> {
 
     /// 暴露 VecPool 的可变引用（供 flush 时持久化向量池）
     pub fn vec_pool_mut(&mut self) -> &mut VecPool<T> {
+        self.checkpoint_dirty = true;
         self.bq_signatures.take();
         &mut self.vec_pool
     }
@@ -1022,6 +1031,7 @@ impl<T: VectorType> MemTable<T> {
                 changed = true;
             }
             if changed {
+                self.checkpoint_dirty = true;
                 self.generation = self.generation.wrapping_add(1);
             }
             return Ok(());
@@ -1300,13 +1310,8 @@ impl<T: VectorType> MemTable<T> {
     /// 管理 QuIVer 自动构建；只有显式请求连续视图时才准备合并缓存。
     /// 当前查询按 slot 或分段读取向量，不依赖连续副本和旧 1-bit 签名。
     pub fn ensure_vectors_cache(&mut self, materialize_flat: bool) {
-        // QuIVer 自动构建：当数据量 >= 10,000 且索引不存在时自动触发
-        let active = self.payloads.len();
-        if self.dim <= crate::index::bq::MAX_BQ_DIM
-            && self.auto_build_quiver
-            && active >= 10_000
-            && self.quiver_index.is_none()
-        {
+        // 连续视图入口与普通查询共享自动构建资格和阈值。
+        if self.auto_quiver_build_needed() {
             self.build_quiver_impl(&QuIVerConfig::default());
         }
 
@@ -1359,11 +1364,13 @@ impl<T: VectorType> MemTable<T> {
 
     /// 从持久化文件恢复 BQ 签名数组（跳过重建）
     pub fn set_bq_signatures(&mut self, sigs: Vec<BqSignature>) {
+        self.checkpoint_dirty = true;
         self.bq_signatures = std::sync::OnceLock::from(sigs);
     }
 
     /// 从持久化文件恢复 QuIVer 索引（跳过重建）
     pub fn set_quiver_index(&mut self, mut quiver: QuIVer) {
+        self.checkpoint_dirty = true;
         if self.dim <= crate::index::bq::MAX_BQ_DIM {
             if let Err(error) = quiver.prepare_default_sm(|slot, buffer| {
                 if let Some(vector) = self.vec_pool.get(slot) {
@@ -1468,7 +1475,7 @@ impl<T: VectorType> MemTable<T> {
 
     /// 手动构建 QuIVer BQ-native Vamana 索引
     ///
-    /// 通常不需要手动调用——`ensure_vectors_cache()` 会在 N >= 10,000 时自动构建。
+    /// 达到维度相关阈值后，查询准备或 `ensure_vectors_cache()` 会按需自动构建。
     /// 此方法用于提前构建或使用自定义配置。
     ///
     /// **冷热分离**：
@@ -1548,6 +1555,7 @@ impl<T: VectorType> MemTable<T> {
             return false;
         }
         self.quiver_index = Some(index);
+        self.checkpoint_dirty = true;
         self.vec_pool.advise_random();
         true
     }
@@ -1557,6 +1565,7 @@ impl<T: VectorType> MemTable<T> {
     /// 按 slot 流式从 mmap 零拷贝读取向量并转 f32，不物化全量 merged 缓存，
     /// 避免构建期把整个冷数据集复制入堆。
     fn build_quiver_impl(&mut self, config: &QuIVerConfig) {
+        self.checkpoint_dirty = true;
         let dim = self.dim;
         if self.vec_pool.total_count() == 0 || self.payloads.is_empty() {
             self.quiver_index = None;
@@ -2306,6 +2315,7 @@ impl<T: VectorType> MemTable<T> {
     }
 
     pub fn set_property_indexes(&mut self, indexes: PropertyIndexRegistry) {
+        self.checkpoint_dirty = true;
         self.property_indexes = indexes;
         self.mark_property_changed();
     }
@@ -2827,6 +2837,14 @@ impl<T: VectorType> MemTable<T> {
         self.resource_runtime = runtime;
     }
 
+    pub(crate) fn needs_checkpoint(&self) -> bool {
+        self.checkpoint_dirty
+    }
+
+    pub(crate) fn mark_checkpoint_clean(&mut self) {
+        self.checkpoint_dirty = false;
+    }
+
     pub(crate) fn advise_cold_vectors_dontneed(&self) {
         self.vec_pool.advise_dontneed();
     }
@@ -2839,6 +2857,7 @@ impl<T: VectorType> MemTable<T> {
 
     pub fn index_keyword(&mut self, id: NodeId, keyword: &str) {
         if self.contains(id) {
+            self.checkpoint_dirty = true;
             if self.deferred_text_path.is_some() {
                 self.pending_text_mutations
                     .push(PendingTextMutation::Keyword(id, keyword.to_owned()));
@@ -2850,6 +2869,7 @@ impl<T: VectorType> MemTable<T> {
 
     pub fn index_text(&mut self, id: NodeId, text: &str) {
         if self.contains(id) {
+            self.checkpoint_dirty = true;
             if self.deferred_text_path.is_some() {
                 self.pending_text_mutations
                     .push(PendingTextMutation::Text(id, text.to_owned()));
@@ -2860,14 +2880,17 @@ impl<T: VectorType> MemTable<T> {
     }
 
     pub fn build_text_index(&mut self) {
+        self.checkpoint_dirty = true;
         self.text_index.build();
     }
 
     pub(crate) fn try_build_text_index(&mut self) -> Result<()> {
+        self.checkpoint_dirty = true;
         self.text_index.try_build()
     }
 
     pub(crate) fn set_text_index(&mut self, text_index: TextIndex) {
+        self.checkpoint_dirty = true;
         self.text_index = text_index;
         self.text_index
             .retain_nodes(|id| self.active_ids.contains(id));
@@ -2986,6 +3009,7 @@ impl<T: VectorType> MemTable<T> {
     /// 遍历所有活跃节点的 payload JSON，将字符串字段值注入 BM25 倒排索引。
     /// 这使得文本混合检索在重启后自动恢复，无需额外持久化文件。
     pub fn rebuild_text_index_from_payloads(&mut self) {
+        self.checkpoint_dirty = true;
         self.deferred_text_path = None;
         self.deferred_text_meta = None;
         self.pending_text_mutations = Vec::new();

@@ -339,16 +339,16 @@ fn assert_crash_and_recover(path: &str, mode: &str, label: &str) {
         .unwrap_or_else(|e| panic!("{}: 崩溃后重新打开数据库失败: {}", label, e));
 
     assert!(
-        db.node_count() >= 5,
+        db.node_count().unwrap() >= 5,
         "{}: 至少应恢复 5 个已 flush 节点，实际 {}",
         label,
-        db.node_count()
+        db.node_count().unwrap()
     );
 
     // 验证 flushed 阶段节点的 payload 语义完整性
     let mut flushed = 0;
-    for &id in &db.all_node_ids() {
-        if let Some(p) = db.get_payload(id)
+    for &id in &db.all_node_ids().unwrap() {
+        if let Some(p) = db.get_payload(id).unwrap()
             && p.get("phase").and_then(|v| v.as_str()) == Some("flushed")
         {
             flushed += 1;
@@ -359,8 +359,8 @@ fn assert_crash_and_recover(path: &str, mode: &str, label: &str) {
     eprintln!(
         "  ✅ {}: {} 个节点存活（5 flush + {} WAL）",
         label,
-        db.node_count(),
-        db.node_count().saturating_sub(5)
+        db.node_count().unwrap(),
+        db.node_count().unwrap().saturating_sub(5)
     );
 }
 
@@ -448,7 +448,7 @@ fn HW07_写入中途UD2崩溃_数据库仍可打开() {
 
     let result = triviumdb::Database::<f32>::open(&path, DIM);
     match &result {
-        Ok(db) => eprintln!("  ✅ 中途崩溃恢复：{} 个节点存活", db.node_count()),
+        Ok(db) => eprintln!("  ✅ 中途崩溃恢复：{} 个节点存活", db.node_count().unwrap()),
         Err(_) if !std::path::Path::new(&path).exists() => {
             eprintln!("  ✅ 数据库文件不存在（从未 flush），预期行为");
         }
@@ -470,13 +470,13 @@ fn HW08_大Payload_8KB_WAL缓冲压力崩溃恢复() {
     let db = triviumdb::Database::<f32>::open(&path, DIM).expect("大 Payload 崩溃后打开失败");
 
     assert!(
-        db.node_count() >= 5,
+        db.node_count().unwrap() >= 5,
         "至少 5 个已 flush 的大 payload 节点应存活"
     );
 
     // 验证大 payload 的数据完整性（不是被截断的 JSON）
-    for &id in &db.all_node_ids() {
-        if let Some(p) = db.get_payload(id)
+    for &id in &db.all_node_ids().unwrap() {
+        if let Some(p) = db.get_payload(id).unwrap()
             && let Some(fat) = p.get("fat").and_then(|v| v.as_str())
         {
             assert_eq!(
@@ -490,7 +490,7 @@ fn HW08_大Payload_8KB_WAL缓冲压力崩溃恢复() {
     }
     eprintln!(
         "  ✅ 大 Payload 崩溃恢复：{} 个节点，数据完整",
-        db.node_count()
+        db.node_count().unwrap()
     );
     cleanup(&path);
 }
@@ -517,28 +517,28 @@ fn HW09_连续三次崩溃_累积WAL回放恢复() {
         // 每轮崩溃后验证数据库仍可打开
         let db = triviumdb::Database::<f32>::open(&path, DIM)
             .unwrap_or_else(|e| panic!("轮次 {} 崩溃后打开失败: {}", round, e));
-        eprintln!("  轮次 {}: {} 个节点存活", round, db.node_count());
+        eprintln!("  轮次 {}: {} 个节点存活", round, db.node_count().unwrap());
     }
 
     // 最终验证：3 轮各写入 3 个节点，全部 9 个已确认提交的节点必须通过 WAL 回放恢复
     let db = triviumdb::Database::<f32>::open(&path, DIM).unwrap();
     assert_eq!(
-        db.node_count(),
+        db.node_count().unwrap(),
         9,
         "连续 3 轮崩溃-写入后，WAL 回放应恢复全部 9 个已确认提交的节点，实际恢复 {} 个",
-        db.node_count()
+        db.node_count().unwrap()
     );
     // 验证恢复的节点数据可读
-    for &id in &db.all_node_ids() {
+    for &id in &db.all_node_ids().unwrap() {
         assert!(
-            db.get(id).is_some(),
+            db.get(id).unwrap().is_some(),
             "WAL 恢复的节点 {} 应能通过 get() 获取",
             id
         );
     }
     eprintln!(
         "  ✅ 连续 3 次崩溃后最终恢复：{} 个节点（数据完整性已验证）",
-        db.node_count()
+        db.node_count().unwrap()
     );
 
     cleanup(&path);
@@ -576,18 +576,18 @@ fn HW10_全异常向量交叉轰炸_同一DB连续恢复() {
             .unwrap_or_else(|e| panic!("轮次 {} ({}) 崩溃后打开失败: {}", i, label, e));
 
         assert!(
-            db.node_count() >= 5,
+            db.node_count().unwrap() >= 5,
             "轮次 {} ({}): 至少 5 节点存活，实际 {}",
             i,
             label,
-            db.node_count()
+            db.node_count().unwrap()
         );
 
         eprintln!(
             "  ✅ 轮次 {} [{}]: {} 个节点恢复",
             i,
             label,
-            db.node_count()
+            db.node_count().unwrap()
         );
     }
 

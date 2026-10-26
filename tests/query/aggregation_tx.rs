@@ -50,7 +50,7 @@ fn seed_scored_graph(path: &str) -> Database<f32> {
         .unwrap();
     }
 
-    let ids = db.all_node_ids();
+    let ids = db.all_node_ids().unwrap();
     for i in 0..ids.len() - 1 {
         db.link(ids[i], ids[i + 1], "next", 1.0).unwrap();
     }
@@ -352,8 +352,11 @@ fn COV4_16_tx_full_ops() {
         tx.commit().unwrap();
     }
 
-    assert_eq!(db.get_payload(ids[0]).unwrap()["name"], "A_updated");
-    assert_eq!(db.get_edges(ids[0]).len(), 1);
+    assert_eq!(
+        db.get_payload(ids[0]).unwrap().unwrap()["name"],
+        "A_updated"
+    );
+    assert_eq!(db.get_edges(ids[0]).unwrap().len(), 1);
 
     // 事务内: Unlink + Delete
     {
@@ -363,8 +366,8 @@ fn COV4_16_tx_full_ops() {
         tx.commit().unwrap();
     }
 
-    assert!(db.get_edges(ids[0]).is_empty());
-    assert!(!db.contains(ids[2]));
+    assert!(db.get_edges(ids[0]).unwrap().is_empty());
+    assert!(!db.contains(ids[2]).unwrap());
 
     cleanup(&path);
 }
@@ -496,8 +499,8 @@ fn COV4_21_wal_replay_full() {
 
     // 重新打开触发 WAL 回放
     let db = Database::<f32>::open(&path, DIM).unwrap();
-    assert_eq!(db.node_count(), 1);
-    assert_eq!(db.get_payload(id1).unwrap()["v"], 10);
+    assert_eq!(db.node_count().unwrap(), 1);
+    assert_eq!(db.get_payload(id1).unwrap().unwrap()["v"], 10);
 
     cleanup(&path);
 }
@@ -653,7 +656,11 @@ fn COV4_26D_tql_create_failure_is_atomic() {
     let query = format!("CREATE (a {{name: \"kept_out\"}})-[:next]->(b {{data: \"{oversized}\"}})");
 
     assert!(db.tql_mut(&query).is_err());
-    assert_eq!(db.node_count(), 0, "任一操作预检失败时整条 CREATE 不得落库");
+    assert_eq!(
+        db.node_count().unwrap(),
+        0,
+        "任一操作预检失败时整条 CREATE 不得落库"
+    );
 
     cleanup(&path);
 }
@@ -689,7 +696,7 @@ fn COV4_28_tql_explain_variants() {
     assert!(!r2.is_empty());
     let plan = &r2[0]["plan"].payload;
     assert_eq!(plan["industrial_access_path"], "exact_fallback");
-    assert_eq!(plan["estimated_candidates"], db.node_count());
+    assert_eq!(plan["estimated_candidates"], db.node_count().unwrap());
     assert!(plan["estimated_temp_bytes"].as_u64().unwrap() > 0);
     assert!(plan["estimated_vector_page_reads"].as_u64().unwrap() > 0);
     assert_eq!(plan["temporary_spill"], false);
@@ -720,7 +727,7 @@ fn COV4_30_double_flush() {
         .unwrap();
     db.flush().unwrap();
     db.flush().unwrap();
-    assert_eq!(db.node_count(), 1);
+    assert_eq!(db.node_count().unwrap(), 1);
 
     cleanup(&path);
 }

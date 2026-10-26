@@ -57,7 +57,11 @@ fn Mmap模式_持久化后重新加载_数据完整() {
     }
 
     let db = Database::<f32>::open(&path, DIM).unwrap();
-    assert_eq!(db.node_count(), 2, "Mmap 模式重加载后应有 2 个节点");
+    assert_eq!(
+        db.node_count().unwrap(),
+        2,
+        "Mmap 模式重加载后应有 2 个节点"
+    );
 
     cleanup(&path);
 }
@@ -193,11 +197,11 @@ fn P0_Payload冷存储重启后按需读取且可再次持久化() {
     }
     {
         let mut db = Database::<f32>::open(&path, DIM).unwrap();
-        assert_eq!(db.get_payload(id).unwrap()["nested"]["n"], 7);
+        assert_eq!(db.get_payload(id).unwrap().unwrap()["nested"]["n"], 7);
         db.flush().unwrap();
     }
     let db = Database::<f32>::open(&path, DIM).unwrap();
-    assert_eq!(db.get_payload(id).unwrap()["正文"], "惰性解析");
+    assert_eq!(db.get_payload(id).unwrap().unwrap()["正文"], "惰性解析");
     let config = triviumdb::database::SearchConfig {
         top_k: 1,
         expand_depth: 0,
@@ -278,7 +282,7 @@ fn Rom模式_持久化后重新加载_数据完整() {
         ..Default::default()
     };
     let db = Database::<f32>::open_with_config(&path, config).unwrap();
-    assert_eq!(db.node_count(), 2, "Rom 模式重加载后应有 2 个节点");
+    assert_eq!(db.node_count().unwrap(), 2, "Rom 模式重加载后应有 2 个节点");
 
     cleanup(&path);
 }
@@ -313,7 +317,7 @@ fn QuIVer_sidecar错配主数据时_拒绝加载并清理() {
 
     let target = Database::<f32>::open(&target_path, DIM).unwrap();
     assert!(!Path::new(&target_sidecar).exists());
-    let node = target.get(1).unwrap();
+    let node = target.get(1).unwrap().unwrap();
     assert_eq!(node.payload["db"], "target");
 
     cleanup(&source_path);
@@ -445,7 +449,10 @@ fn P0_2_WAL恢复后_新插入不复用已有ID() {
             new_id,
             last_id
         );
-        assert!(db.get(last_id).is_some(), "WAL 回放应恢复 seq=2 的节点");
+        assert!(
+            db.get(last_id).unwrap().is_some(),
+            "WAL 回放应恢复 seq=2 的节点"
+        );
     }
 
     cleanup(&path);
@@ -477,8 +484,11 @@ fn 删除后持久化再加载_节点确实消失() {
     }
 
     let db = Database::<f32>::open(&path, DIM).unwrap();
-    assert!(!db.contains(del_id), "删除并 flush 后重加载，节点应不存在");
-    assert_eq!(db.node_count(), 1, "应只剩 1 个节点");
+    assert!(
+        !db.contains(del_id).unwrap(),
+        "删除并 flush 后重加载，节点应不存在"
+    );
+    assert_eq!(db.node_count().unwrap(), 1, "应只剩 1 个节点");
 
     cleanup(&path);
 }

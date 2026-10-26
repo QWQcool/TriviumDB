@@ -79,8 +79,8 @@ fn sidecar跨代际不能产生幽灵节点或错误索引结果() {
         )
         .unwrap();
         if let Ok(database) = Database::<f32>::open_read_only(&candidate, DIM) {
-            assert_eq!(database.node_count(), 7);
-            assert!(database.all_node_ids().iter().all(|id| *id <= 7));
+            assert_eq!(database.node_count().unwrap(), 7);
+            assert!(database.all_node_ids().unwrap().iter().all(|id| *id <= 7));
         }
         assert_read_only_zero_write(&candidate);
         cleanup(&candidate);

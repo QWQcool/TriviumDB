@@ -58,11 +58,11 @@ fn F16_基础CRUD_插入查询删除() {
         )
         .unwrap();
 
-    assert_eq!(db.node_count(), 1);
-    assert!(db.contains(id));
+    assert_eq!(db.node_count().unwrap(), 1);
+    assert!(db.contains(id).unwrap());
 
     // 查询：通过 get() 获取 NodeView，其中包含 vector 字段
-    let node = db.get(id).unwrap();
+    let node = db.get(id).unwrap().unwrap();
     assert_eq!(node.id, id);
     assert_eq!(node.payload["label"], "unit_x");
     assert_eq!(node.vector.len(), F16_DIM);
@@ -70,8 +70,8 @@ fn F16_基础CRUD_插入查询删除() {
 
     // 删除
     db.delete(id).unwrap();
-    assert_eq!(db.node_count(), 0);
-    assert!(!db.contains(id));
+    assert_eq!(db.node_count().unwrap(), 0);
+    assert!(!db.contains(id).unwrap());
 
     cleanup(&path);
 }
@@ -192,11 +192,15 @@ fn F16_持久化_flush后重新加载数据完整() {
 
     // 第二阶段：重新打开并验证
     let db = Database::<f16>::open(&path, F16_DIM).unwrap();
-    assert_eq!(db.node_count(), 10, "flush 后重新加载应恢复全部 10 个节点");
+    assert_eq!(
+        db.node_count().unwrap(),
+        10,
+        "flush 后重新加载应恢复全部 10 个节点"
+    );
 
     // 验证每个节点的 payload 语义完整
-    for &id in &db.all_node_ids() {
-        let payload = db.get_payload(id).expect("节点 payload 不应丢失");
+    for &id in &db.all_node_ids().unwrap() {
+        let payload = db.get_payload(id).unwrap().expect("节点 payload 不应丢失");
         assert!(
             payload.get("idx").is_some(),
             "节点 {} 的 payload 应包含 idx 字段",
@@ -233,7 +237,7 @@ fn F16_事务_提交与维度校验() {
         tx.commit().unwrap()
     };
     assert_eq!(ids.len(), 2, "事务应返回 2 个 ID");
-    assert_eq!(db.node_count(), 2);
+    assert_eq!(db.node_count().unwrap(), 2);
 
     // 维度不匹配的事务应被拒绝
     let result = {
@@ -246,7 +250,7 @@ fn F16_事务_提交与维度校验() {
     };
     assert!(result.is_err(), "维度不匹配的 f16 事务应被 commit 拒绝");
     // 已提交的 2 个节点不受影响
-    assert_eq!(db.node_count(), 2);
+    assert_eq!(db.node_count().unwrap(), 2);
 
     cleanup(&path);
 }
@@ -272,13 +276,13 @@ fn F16_WAL恢复_未flush数据通过WAL回放() {
     // 第二阶段：重新打开 → WAL 回放
     let db = Database::<f16>::open(&path, F16_DIM).unwrap();
     assert_eq!(
-        db.node_count(),
+        db.node_count().unwrap(),
         5,
         "f16 WAL 回放应恢复全部 5 个未 flush 的节点"
     );
 
-    for &id in &db.all_node_ids() {
-        let p = db.get_payload(id).unwrap();
+    for &id in &db.all_node_ids().unwrap() {
+        let p = db.get_payload(id).unwrap().unwrap();
         assert_eq!(p["wal"], true, "WAL 恢复的节点 payload 应正确");
     }
 
@@ -301,7 +305,7 @@ fn F16_更新向量与Payload() {
     // 更新向量
     db.update_vector(id, &f16_vec(&[0.0, 0.0, 0.0, 1.0]))
         .unwrap();
-    let node = db.get(id).unwrap();
+    let node = db.get(id).unwrap().unwrap();
     assert!(
         (node.vector[3].to_f32() - 1.0).abs() < 0.01,
         "更新后向量第 4 分量应为 1.0"
@@ -310,7 +314,7 @@ fn F16_更新向量与Payload() {
     // 更新 payload
     db.update_payload(id, serde_json::json!({"version": 2}))
         .unwrap();
-    let p = db.get_payload(id).unwrap();
+    let p = db.get_payload(id).unwrap().unwrap();
     assert_eq!(p["version"], 2);
 
     cleanup(&path);
@@ -336,14 +340,14 @@ fn U64_基础CRUD_插入查询删除() {
         )
         .unwrap();
 
-    assert_eq!(db.node_count(), 1);
-    let node = db.get(id).unwrap();
+    assert_eq!(db.node_count().unwrap(), 1);
+    let node = db.get(id).unwrap().unwrap();
     assert_eq!(node.payload["label"], "hash_a");
     assert_eq!(node.vector[0], 0xFFFFFFFF_00000000u64);
     assert_eq!(node.vector[1], 0x12345678_9ABCDEF0u64);
 
     db.delete(id).unwrap();
-    assert_eq!(db.node_count(), 0);
+    assert_eq!(db.node_count().unwrap(), 0);
 
     cleanup(&path);
 }
@@ -436,11 +440,15 @@ fn U64_持久化_flush后重新加载() {
     }
 
     let db = Database::<u64>::open(&path, U64_DIM).unwrap();
-    assert_eq!(db.node_count(), 10, "u64 flush 后应恢复全部 10 个节点");
+    assert_eq!(
+        db.node_count().unwrap(),
+        10,
+        "u64 flush 后应恢复全部 10 个节点"
+    );
 
     // 验证向量数据完整性
-    for &id in &db.all_node_ids() {
-        let node = db.get(id).unwrap();
+    for &id in &db.all_node_ids().unwrap() {
+        let node = db.get(id).unwrap().unwrap();
         assert_eq!(
             node.vector.len(),
             U64_DIM,
@@ -467,10 +475,10 @@ fn U64_事务_多操作原子提交() {
         tx.commit().unwrap()
     };
     assert_eq!(ids.len(), 3);
-    assert_eq!(db.node_count(), 3);
+    assert_eq!(db.node_count().unwrap(), 3);
 
     for &id in &ids {
-        assert!(db.contains(id), "事务提交的 ID {} 应可访问", id);
+        assert!(db.contains(id).unwrap(), "事务提交的 ID {} 应可访问", id);
     }
 
     cleanup(&path);
@@ -489,7 +497,11 @@ fn U64_WAL恢复() {
     }
 
     let db = Database::<u64>::open(&path, U64_DIM).unwrap();
-    assert_eq!(db.node_count(), 8, "u64 WAL 回放应恢复全部 8 个节点");
+    assert_eq!(
+        db.node_count().unwrap(),
+        8,
+        "u64 WAL 回放应恢复全部 8 个节点"
+    );
 
     let results = db.search(&[0u64, !0u64], 3, 0, 0.0).unwrap();
     assert!(!results.is_empty(), "WAL 恢复后搜索应正常");
@@ -508,12 +520,12 @@ fn U64_更新向量与Payload() {
         .unwrap();
 
     db.update_vector(id, &[0xCCCC, 0xDDDD]).unwrap();
-    let node = db.get(id).unwrap();
+    let node = db.get(id).unwrap().unwrap();
     assert_eq!(node.vector[0], 0xCCCC);
     assert_eq!(node.vector[1], 0xDDDD);
 
     db.update_payload(id, serde_json::json!({"v": 2})).unwrap();
-    assert_eq!(db.get_payload(id).unwrap()["v"], 2);
+    assert_eq!(db.get_payload(id).unwrap().unwrap()["v"], 2);
 
     cleanup(&path);
 }
@@ -537,7 +549,7 @@ fn F16_精度边界_极小值不丢失() {
         )
         .unwrap();
 
-    let node = db.get(id).unwrap();
+    let node = db.get(id).unwrap().unwrap();
     // f16 有精度损失，但不应变成 0 或 NaN
     assert!(node.vector[0].to_f32() > 60000.0, "f16 最大值应保留");
     assert!(node.vector[1].to_f32() > 0.0, "f16 极小值不应变为 0");
@@ -591,14 +603,14 @@ fn F16_大批量插入搜索_50节点() {
         .unwrap();
     }
 
-    assert_eq!(db.node_count(), 50);
+    assert_eq!(db.node_count().unwrap(), 50);
 
     // flush + 重新加载
     db.flush().unwrap();
     drop(db);
     let db = Database::<f16>::open(&path, F16_DIM).unwrap();
     assert_eq!(
-        db.node_count(),
+        db.node_count().unwrap(),
         50,
         "f16 大批量 flush 后应保留全部 50 个节点"
     );
@@ -625,13 +637,13 @@ fn U64_大批量插入搜索_50节点() {
         )
         .unwrap();
     }
-    assert_eq!(db.node_count(), 50);
+    assert_eq!(db.node_count().unwrap(), 50);
 
     db.flush().unwrap();
     drop(db);
     let db = Database::<u64>::open(&path, U64_DIM).unwrap();
     assert_eq!(
-        db.node_count(),
+        db.node_count().unwrap(),
         50,
         "u64 大批量 flush 后应保留全部 50 个节点"
     );
@@ -665,7 +677,7 @@ fn F16_图谱边_插入与查询() {
         .unwrap();
 
     db.link(id_a, id_b, "knows", 1.0).unwrap();
-    let edges = db.get_edges(id_a);
+    let edges = db.get_edges(id_a).unwrap();
     assert_eq!(edges.len(), 1, "A 应有 1 条出边");
     assert_eq!(edges[0].target_id, id_b, "出边应指向 B");
     assert_eq!(edges[0].label, "knows");

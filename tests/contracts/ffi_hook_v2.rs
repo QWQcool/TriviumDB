@@ -75,6 +75,34 @@ fn qemu_aarch64环境不支持运行时宿主动态库夹具() -> bool {
     std::env::var_os("TRIVIUM_TEST_QEMU_AARCH64").is_some()
 }
 
+#[test]
+fn 同步与后台关闭后持有数据库对象仍可删除Hook动态库() {
+    if qemu_aarch64环境不支持运行时宿主动态库夹具() {
+        return;
+    }
+    for asynchronous in [false, true] {
+        let library = build_fixture(
+            if asynchronous {
+                "close_async"
+            } else {
+                "close_sync"
+            },
+            2,
+        );
+        let path = library.with_extension("tdb");
+        let mut db = triviumdb::Database::<f32>::open(&path.to_string_lossy(), 2).unwrap();
+        db.set_hook(FfiHook::load(library.to_str().unwrap()).unwrap())
+            .unwrap();
+        if asynchronous {
+            assert!(db.close_timeout(std::time::Duration::from_secs(5)).unwrap());
+        } else {
+            db.close().unwrap();
+        }
+        std::fs::remove_file(&library).expect("关闭完成后必须释放 Hook 动态库映射");
+        std::hint::black_box(db);
+    }
+}
+
 #[derive(serde::Deserialize)]
 struct SharedFfiContract {
     schema_version: u32,

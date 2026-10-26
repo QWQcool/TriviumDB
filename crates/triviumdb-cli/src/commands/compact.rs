@@ -9,7 +9,7 @@ use crate::db_handle::DbHandle;
 use crate::util::human_bytes;
 
 pub fn run(handle: &mut DbHandle) -> CliResult {
-    let nodes = handle.node_count();
+    let nodes = handle.node_count()?;
     let before = handle.estimated_memory();
 
     let start = Instant::now();

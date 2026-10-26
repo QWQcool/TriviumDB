@@ -76,7 +76,7 @@ fn 测试_深层页撕裂_模拟写入一半断电截断() {
     // 加载可能 Err(Corrupted)，或者是 fallback 清空
     if let Ok(db) = load_res {
         // 如果它强行加载了，那至少不能是原本的 100个 节点，或者它的节点数应为 0（降级重建）
-        if db.node_count() == 100 {
+        if db.node_count().unwrap() == 100 {
             panic!(
                 "引擎毫无察觉地加载了一个被残忍撕裂的文件！存在极大概率访问未初始化的 Mmap 页！"
             );

@@ -31,7 +31,7 @@ fn flush_marker_v1_v2兼容且v3完整字段边界_marker_crc和未知版本矩�
         std::fs::write(format!("{source}.flush_ok"), legacy).unwrap();
         std::fs::write(&payload_path, "旧标记必须忽略残留 sidecar".as_bytes()).unwrap();
         let database = Database::<f32>::open_read_only(&source, DIM).unwrap();
-        assert_eq!(database.node_count(), 8);
+        assert_eq!(database.node_count().unwrap(), 8);
         drop(database);
         assert_read_only_zero_write(&source);
     }

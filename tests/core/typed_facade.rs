@@ -22,7 +22,7 @@ fn writer门面保留完整写能力并可发布generation() {
     let id = writer
         .insert(&[1.0, 0.0], json!({"kind": "typed"}))
         .unwrap();
-    assert_eq!(writer.get(id).unwrap().payload["kind"], "typed");
+    assert_eq!(writer.get(id).unwrap().unwrap().payload["kind"], "typed");
     let manifest = writer
         .publish_generation_manifest("typed-generation")
         .unwrap();
@@ -44,8 +44,8 @@ fn reader门面支持共享只读和完整查询能力() {
     let reader2 = DatabaseReader::<f32>::open_read_only(&path, 2).unwrap();
     assert_eq!(reader1.search(&[1.0, 0.0], 1, 0, 0.0).unwrap()[0].id, id);
     assert_eq!(reader2.search_exact(&[1.0, 0.0], 1).unwrap()[0].id, id);
-    assert_eq!(reader1.node_count(), 1);
-    assert!(reader1.contains(id));
+    assert_eq!(reader1.node_count().unwrap(), 1);
+    assert!(reader1.contains(id).unwrap());
     cleanup(&path);
 }
 

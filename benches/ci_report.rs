@@ -295,7 +295,7 @@ fn main() {
         metrics: Vec::new(),
         peak_rss: rss_bytes(),
     };
-    let ids = db.all_node_ids();
+    let ids = db.all_node_ids().unwrap();
     let anchor = ids[ids.len() / 2];
 
     measure(
@@ -306,12 +306,12 @@ fn main() {
         path,
         db.estimated_memory(),
         || {
-            let i = db.node_count();
+            let i = db.node_count().unwrap();
             let vector = vec![0.01f32; DIM];
             let id = db
                 .insert(&vector, json!({"idx": i, "type": "bench_insert"}))
                 .unwrap();
-            if db.contains(id) {
+            if db.contains(id).unwrap() {
                 "ok".to_string()
             } else {
                 "missing_insert".to_string()
@@ -319,7 +319,7 @@ fn main() {
         },
     );
 
-    let update_ids = db.all_node_ids();
+    let update_ids = db.all_node_ids().unwrap();
     let mut update_pos = 0usize;
     measure(
         &mut state,
@@ -337,7 +337,7 @@ fn main() {
             db.update_vector(id, &vec![0.02f32; DIM]).unwrap();
             db.link(id, dst, "bench", 0.5).unwrap();
             db.unlink(id, dst).unwrap();
-            match db.get_payload(id) {
+            match db.get_payload(id).unwrap() {
                 Some(payload)
                     if payload.get("type").and_then(|v| v.as_str()) == Some("updated") =>
                 {
@@ -356,11 +356,11 @@ fn main() {
         path,
         db.estimated_memory(),
         || {
-            let id = 1_000_000 + db.node_count() as u64;
+            let id = 1_000_000 + db.node_count().unwrap() as u64;
             let mut tx = db.begin_tx();
             tx.insert_with_id(id, &vec![0.03f32; DIM], json!({"type": "tx"}));
             tx.commit().unwrap();
-            if db.contains(id) {
+            if db.contains(id).unwrap() {
                 "ok".to_string()
             } else {
                 "missing_tx".to_string()
@@ -378,7 +378,7 @@ fn main() {
         || {
             db.flush().unwrap();
             db.compact().unwrap();
-            let count = db.node_count();
+            let count = db.node_count().unwrap();
             drop(Database::<f32>::open(path, DIM).err());
             format!("nodes={count}")
         },
@@ -395,11 +395,11 @@ fn main() {
         || {
             let id = ids[read_pos % ids.len()];
             read_pos += 1;
-            let ok = db.get(id).is_some()
-                && db.get_payload(id).is_some()
-                && db.contains(id)
-                && !db.get_edges(id).is_empty()
-                && !db.neighbors(id, 2).is_empty();
+            let ok = db.get(id).unwrap().is_some()
+                && db.get_payload(id).unwrap().is_some()
+                && db.contains(id).unwrap()
+                && !db.get_edges(id).unwrap().is_empty()
+                && !db.neighbors(id, 2).unwrap().is_empty();
             if ok {
                 "ok".to_string()
             } else {
@@ -588,7 +588,7 @@ fn main() {
         path,
         db.estimated_memory(),
         || {
-            let ns = db.neighbors(anchor, 3);
+            let ns = db.neighbors(anchor, 3).unwrap();
             let communities = db.leiden_cluster(3, Some(8), Some(true)).unwrap();
             format!(
                 "neighbors={},clusters={}",
@@ -609,7 +609,7 @@ fn main() {
             let migrate_path = "target/bench-reports/ci_entry_coverage_migrated.tdb";
             cleanup(migrate_path);
             let (migrated, migrated_ids) = db.migrate_to(migrate_path, 64).unwrap();
-            let count = migrated.node_count();
+            let count = migrated.node_count().unwrap();
             drop(migrated);
             cleanup(migrate_path);
             format!("nodes={count},ids={}", migrated_ids.len())
@@ -626,9 +626,9 @@ fn main() {
         || {
             format!(
                 "nodes={},dim={},ids={},memory={}",
-                db.node_count(),
+                db.node_count().unwrap(),
                 db.dim(),
-                db.all_node_ids().len(),
+                db.all_node_ids().unwrap().len(),
                 db.estimated_memory()
             )
         },

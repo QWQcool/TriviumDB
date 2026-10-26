@@ -140,20 +140,20 @@ fn 发布前中断必须恢复旧基础与全部增量并支持再次持久化()
         assert_eq!(fixture.files(), before, "拒绝只读打开时必须保持字节级零写");
         let mut database = fixture.open(StorageMode::Mmap);
         for _ in 0..2 {
-            let mut ids = database.all_node_ids();
+            let mut ids = database.all_node_ids().unwrap();
             ids.sort_unstable();
             assert_eq!(ids, (1..=33).filter(|id| *id != 2).collect::<Vec<_>>());
             for id in ids {
                 assert_eq!(
-                    database.get(id).unwrap().vector,
+                    database.get(id).unwrap().unwrap().vector,
                     if id == 1 { vec![-1.0; DIM] } else { vector(id) }
                 );
                 assert_eq!(
-                    database.get_payload(id).unwrap(),
+                    database.get_payload(id).unwrap().unwrap(),
                     json!({"id": id, "版本": if id == 1 || id == 33 { "新" } else { "旧" }})
                 );
             }
-            let edges = database.get_edges(1);
+            let edges = database.get_edges(1).unwrap();
             assert_eq!(edges.len(), 1);
             assert_eq!(
                 (edges[0].target_id, edges[0].label.as_str(), edges[0].weight),
@@ -231,8 +231,8 @@ fn marker提交后必须保留新代_新代损坏也不得回滚旧代() {
             assert_eq!(fixture.files(), before, "不能用旧代掩盖已提交新代的损坏");
         } else {
             let database = fixture.open(StorageMode::Mmap);
-            assert_eq!(database.node_count(), 33);
-            assert_eq!(database.get(33).unwrap().vector, vector(33));
+            assert_eq!(database.node_count().unwrap(), 33);
+            assert_eq!(database.get(33).unwrap().unwrap().vector, vector(33));
         }
     }
 }

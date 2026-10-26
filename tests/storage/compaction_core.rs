@@ -23,7 +23,7 @@ fn vector_for_idx(idx: u32) -> [f32; DIM] {
 }
 
 fn seed_committed_graph(db: &mut Database<f32>, count: u32) -> Vec<ExpectedNode> {
-    let start = db.node_count() as u32;
+    let start = db.node_count().unwrap() as u32;
     let mut expected = Vec::new();
     for offset in 0..count {
         let idx = start + offset;
@@ -50,12 +50,15 @@ fn link_expected_batches(db: &mut Database<f32>, left: &[ExpectedNode], right: &
 
 fn assert_committed_graph(db: &Database<f32>, expected: &[ExpectedNode]) {
     assert_eq!(
-        db.node_count(),
+        db.node_count().unwrap(),
         expected.len(),
         "恢复后不能丢失或额外生成已提交节点"
     );
     for item in expected {
-        let node = db.get(item.id).expect("已提交节点必须能按 ID 读取");
+        let node = db
+            .get(item.id)
+            .unwrap()
+            .expect("已提交节点必须能按 ID 读取");
         assert_eq!(node.vector, item.vector, "节点向量必须完整恢复");
         assert_eq!(
             node.payload.get("idx").and_then(|value| value.as_u64()),
@@ -69,7 +72,7 @@ fn assert_committed_graph(db: &Database<f32>, expected: &[ExpectedNode]) {
         );
     }
     for pair in expected.windows(2) {
-        let edges = db.get_edges(pair[0].id);
+        let edges = db.get_edges(pair[0].id).unwrap();
         assert!(
             edges.iter().any(|edge| {
                 edge.target_id == pair[1].id && edge.label == "next" && edge.weight == 1.0
@@ -169,12 +172,12 @@ fn COV_01_auto_compaction_启动停止() {
     db.disable_auto_compaction();
 
     // 验证数据完好
-    assert_eq!(db.node_count(), 50);
+    assert_eq!(db.node_count().unwrap(), 50);
     drop(db);
 
     // 重新打开验证持久化
     let db = Database::<f32>::open(&path, DIM).unwrap();
-    assert_eq!(db.node_count(), 50, "auto-compaction 后数据应完好");
+    assert_eq!(db.node_count().unwrap(), 50, "auto-compaction 后数据应完好");
 
     cleanup(&path);
 }
@@ -194,7 +197,7 @@ fn COV_02_manual_compact_删除后压实() {
     let size_before = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0) + payload_size(&path);
 
     // 删除 80 个节点
-    let ids = db.all_node_ids();
+    let ids = db.all_node_ids().unwrap();
     for &id in ids.iter().take(80) {
         db.delete(id).unwrap();
     }
@@ -202,7 +205,7 @@ fn COV_02_manual_compact_删除后压实() {
     db.compact().unwrap();
 
     let size_after = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0) + payload_size(&path);
-    assert_eq!(db.node_count(), 20);
+    assert_eq!(db.node_count().unwrap(), 20);
     assert!(
         size_after < size_before,
         "compact 后文件应缩小: before={}B, after={}B",
@@ -220,7 +223,7 @@ fn COV_03_empty_compact() {
 
     let mut db = Database::<f32>::open(&path, DIM).unwrap();
     db.compact().unwrap();
-    assert_eq!(db.node_count(), 0);
+    assert_eq!(db.node_count().unwrap(), 0);
 
     cleanup(&path);
 }
@@ -240,11 +243,11 @@ fn COV_04_triple_compact() {
     db.compact().unwrap();
     db.compact().unwrap();
 
-    assert_eq!(db.node_count(), 20, "3 轮 compact 后数据应不变");
+    assert_eq!(db.node_count().unwrap(), 20, "3 轮 compact 后数据应不变");
 
     drop(db);
     let db = Database::<f32>::open(&path, DIM).unwrap();
-    assert_eq!(db.node_count(), 20, "重新打开后数据完好");
+    assert_eq!(db.node_count().unwrap(), 20, "重新打开后数据完好");
 
     cleanup(&path);
 }
@@ -422,7 +425,7 @@ fn COV_05_open_with_config_sync() {
     .unwrap();
     db.insert(&[1.0, 0.0, 0.0, 0.0], serde_json::json!({}))
         .unwrap();
-    assert_eq!(db.node_count(), 1);
+    assert_eq!(db.node_count().unwrap(), 1);
 
     cleanup(&path);
 }
@@ -466,7 +469,7 @@ fn COV_07_memory_limit_rejects_without_auto_flush() {
     }
 
     assert!(inserted < 100, "内存预算必须在增长前拒绝");
-    assert_eq!(db.node_count(), inserted);
+    assert_eq!(db.node_count().unwrap(), inserted);
     assert!(
         !std::path::Path::new(&path).exists(),
         "内存预算不得触发全量 checkpoint"
@@ -493,7 +496,7 @@ fn COV_08_set_sync_mode() {
         .unwrap();
     db.insert(&[2.0, 0.0, 0.0, 0.0], serde_json::json!({}))
         .unwrap();
-    assert_eq!(db.node_count(), 2);
+    assert_eq!(db.node_count().unwrap(), 2);
 
     cleanup(&path);
 }
@@ -511,7 +514,7 @@ fn COV_09_hook_lifecycle() {
     // 自定义 hook
     struct TestHook;
     impl triviumdb::hook::SearchHook for TestHook {}
-    db.set_hook(TestHook);
+    db.set_hook(TestHook).unwrap();
     let _ = db.hook();
 
     // 清除 hook
@@ -587,12 +590,12 @@ fn COV_12_get_edges() {
 
     db.link(id1, id2, "knows", 0.9).unwrap();
 
-    let edges = db.get_edges(id1);
+    let edges = db.get_edges(id1).unwrap();
     assert_eq!(edges.len(), 1);
     assert_eq!(edges[0].target_id, id2);
 
     // 不存在的节点
-    let edges_none = db.get_edges(999);
+    let edges_none = db.get_edges(999).unwrap();
     assert!(edges_none.is_empty());
 
     cleanup(&path);
@@ -612,10 +615,10 @@ fn COV_13_unlink() {
         .unwrap();
 
     db.link(id1, id2, "knows", 1.0).unwrap();
-    assert_eq!(db.get_edges(id1).len(), 1);
+    assert_eq!(db.get_edges(id1).unwrap().len(), 1);
 
     db.unlink(id1, id2).unwrap();
-    assert_eq!(db.get_edges(id1).len(), 0);
+    assert_eq!(db.get_edges(id1).unwrap().len(), 0);
 
     cleanup(&path);
 }
@@ -701,7 +704,7 @@ fn COV_17_in_memory_storage_mode() {
         ..Default::default()
     };
     let db = Database::<f32>::open_with_config(&path, config).unwrap();
-    assert_eq!(db.node_count(), 20);
+    assert_eq!(db.node_count().unwrap(), 20);
 
     cleanup(&path);
 }
@@ -786,7 +789,7 @@ fn COV_21_search_advanced_params() {
     };
     let hits = db.search_advanced(&[15.0, 0.0, 0.0, 0.0], &config).unwrap();
     for h in &hits {
-        let p = db.get_payload(h.id).unwrap();
+        let p = db.get_payload(h.id).unwrap().unwrap();
         let score = p["score"].as_f64().unwrap();
         assert!(score > 10.0, "过滤后所有结果 score 应 > 10");
     }
@@ -842,7 +845,7 @@ fn COV_23_get_all_ids() {
         .insert(&[0.0, 1.0, 0.0, 0.0], serde_json::json!({}))
         .unwrap();
 
-    let all_ids = db.get_all_ids();
+    let all_ids = db.get_all_ids().unwrap();
     assert!(all_ids.contains(&id1));
     assert!(all_ids.contains(&id2));
     assert_eq!(all_ids.len(), 2);

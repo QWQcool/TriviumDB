@@ -51,8 +51,14 @@ fn current原子切换后新reader读新代旧reader保持旧代() {
     let new = store.open_current::<f32>(2).unwrap();
     assert_eq!(old.generation_id(), "generation-1");
     assert_eq!(new.generation_id(), "generation-2");
-    assert_eq!(old.get(1).unwrap().payload["generation"], "generation-1");
-    assert_eq!(new.get(1).unwrap().payload["generation"], "generation-2");
+    assert_eq!(
+        old.get(1).unwrap().unwrap().payload["generation"],
+        "generation-1"
+    );
+    assert_eq!(
+        new.get(1).unwrap().unwrap().payload["generation"],
+        "generation-2"
+    );
     drop(old);
     drop(new);
     std::fs::remove_dir_all(root).unwrap();
@@ -236,7 +242,7 @@ fn 不可变generation目录只读时仍可通过外部runtime打开() {
     std::fs::set_permissions(&generation, std::fs::Permissions::from_mode(0o555)).unwrap();
     let store = GenerationStore::with_runtime_dir(&root, &runtime);
     let reader = store.open_current::<f32>(2).unwrap();
-    assert_eq!(reader.node_count(), 1);
+    assert_eq!(reader.node_count().unwrap(), 1);
     drop(reader);
     std::fs::set_permissions(&generation, std::fs::Permissions::from_mode(old_mode)).unwrap();
     std::fs::remove_dir_all(root).unwrap();

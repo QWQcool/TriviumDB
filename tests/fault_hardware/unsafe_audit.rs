@@ -42,7 +42,11 @@ fn assert_empty_database_after_explicit_removal(path: &str) {
     // 这里只验证显式删除后新建数据库，不能将它计入原数据恢复证据。
     cleanup(path);
     let db = Database::<f32>::open(path, DIM).unwrap();
-    assert_eq!(db.node_count(), 0, "清理后同路径重建不能携带脏状态");
+    assert_eq!(
+        db.node_count().unwrap(),
+        0,
+        "清理后同路径重建不能携带脏状态"
+    );
     cleanup(path);
 }
 

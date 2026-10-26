@@ -105,7 +105,7 @@ fn 测试_WAL丢失TxCommit的幽灵事务_被正确截断并保护后续追加(
     {
         let mut db = Database::<f32>::open(&path, DIM).unwrap();
         // 因为被截断了，所以 0 个节点
-        assert_eq!(db.node_count(), 0, "幽灵事务中的数据应被丢弃");
+        assert_eq!(db.node_count().unwrap(), 0, "幽灵事务中的数据应被丢弃");
 
         // 追加正常数据！如果截断没做好，这个追加会紧随在未闭合的事务后面
         db.insert(&[2.0, 2.0], serde_json::json!({"valid": true}))
@@ -115,8 +115,8 @@ fn 测试_WAL丢失TxCommit的幽灵事务_被正确截断并保护后续追加(
     // 3. 第二次恢复：验证后面追加的正常数据能够被安全读取，没有被幽灵事务“误吞”
     {
         let db = Database::<f32>::open(&path, DIM).unwrap();
-        assert_eq!(db.node_count(), 1, "后续正常追加的数据应该存活");
-        let payload = db.get_payload(1).unwrap();
+        assert_eq!(db.node_count().unwrap(), 1, "后续正常追加的数据应该存活");
+        let payload = db.get_payload(1).unwrap().unwrap();
         assert_eq!(payload["valid"], true);
     }
 
@@ -149,7 +149,7 @@ fn 测试_WAL遇尾部乱码死字节_精确截除防止污染() {
     // 3. 第一次恢复：正常数据保留，乱码被识别并截断
     {
         let mut db = Database::<f32>::open(&path, DIM).unwrap();
-        assert_eq!(db.node_count(), 1, "前半段正常数据应该被恢复");
+        assert_eq!(db.node_count().unwrap(), 1, "前半段正常数据应该被恢复");
 
         // 紧接着插入新数据
         db.insert(&[3.0, 3.0], serde_json::json!({"safe": "yes"}))
@@ -159,7 +159,11 @@ fn 测试_WAL遇尾部乱码死字节_精确截除防止污染() {
     // 4. 第二次恢复：新数据没有被原先的乱码阻挡，完美读取
     {
         let db = Database::<f32>::open(&path, DIM).unwrap();
-        assert_eq!(db.node_count(), 2, "乱码被截除，后续的新数据完美恢复");
+        assert_eq!(
+            db.node_count().unwrap(),
+            2,
+            "乱码被截除，后续的新数据完美恢复"
+        );
     }
 
     cleanup(&path);
@@ -179,13 +183,13 @@ fn 测试_大规模写入_安全触发Mmap多次扩容() {
             .unwrap();
     }
     assert_eq!(
-        db.node_count(),
+        db.node_count().unwrap(),
         15000,
         "Mmap 动态扩容（甚至多次翻倍）未导致数据截断"
     );
 
     // 随机抽查扩容后的数据完好度（ID=15000 的记录是循环中的第 14999 次迭代写入的）
-    let p = db.get_payload(15000).unwrap();
+    let p = db.get_payload(15000).unwrap().unwrap();
     assert_eq!(p["seq"], 14999);
 
     cleanup(&path);
@@ -315,7 +319,7 @@ fn 测试_巨型恶意载荷拦截_防OOM与日志撑爆() {
     db.insert(&[1.0, 1.0], serde_json::json!({"status": "ok"}))
         .unwrap();
     assert_eq!(
-        db.node_count(),
+        db.node_count().unwrap(),
         1,
         "恶意载荷彻底被拦截且未污染任何游标，正常写入不受影响"
     );

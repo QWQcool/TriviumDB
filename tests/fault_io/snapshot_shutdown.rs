@@ -145,7 +145,7 @@ fn 关闭等待超时不释放正在刷盘的锁与配额() {
     assert!(db.close_timeout(Duration::from_secs(5)).unwrap());
     assert_eq!(db.shutdown_status().phase, ShutdownPhase::Closed);
     let mut reopened = Database::<f32>::open(&path, 3).unwrap();
-    assert!(reopened.contains(1));
+    assert!(reopened.contains(1).unwrap());
     reopened.close().unwrap();
 }
 

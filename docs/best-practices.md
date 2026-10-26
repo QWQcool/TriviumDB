@@ -829,7 +829,7 @@ SM状态随构图生成；增量插入只追加新节点的紧凑位码与幅值
 | 低于当前维度的动态阈值 | **BruteForce** | 100% 精确召回 |
 | 达到动态阈值 + 首次构建完成 | **QuIVer (BQ构图 + SM-L2导航)** | 紧凑位码和图常驻，原始向量按预算做余弦精排 |
 
-动态阈值为 `ceil(8,000,000 / dim)`，并限制在 2,500–10,000 节点。例如 768 维为 10,000，1536 维约 5,209，3072 维约 2,605。
+动态阈值为 `ceil(666,667 / dim)`，并限制在 209–834 节点。例如 768 维为 834，1536 维为 435，3072 维为 218。
 
 ### 快速达到 QuIVer 激活
 
@@ -997,7 +997,7 @@ impl SearchHook for AuthHook {
 // 注册 Hook
 db.set_hook(AuthHook {
     allowed_user_ids: vec!["admin".into(), "agent_001".into()],
-});
+})?;
 
 // 使用带上下文的检索
 let mut hook_ctx = HookContext::new();

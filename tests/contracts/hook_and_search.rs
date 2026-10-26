@@ -84,7 +84,7 @@ fn COV3_01_composite_hook_all_stages() {
         db.insert(&[i as f32, 0.0, 0.0, 0.0], serde_json::json!({}))
             .unwrap();
     }
-    db.set_hook(composite);
+    db.set_hook(composite).unwrap();
 
     let config = SearchConfig {
         top_k: 5,
@@ -145,7 +145,7 @@ fn COV3_02_composite_hook_abort() {
         db.insert(&[i as f32, 0.0, 0.0, 0.0], serde_json::json!({}))
             .unwrap();
     }
-    db.set_hook(AbortHook);
+    db.set_hook(AbortHook).unwrap();
 
     let hits = db.search(&[1.0, 0.0, 0.0, 0.0], 5, 0, 0.0).unwrap();
     assert!(hits.is_empty(), "Abort hook 应导致空结果");
@@ -177,7 +177,8 @@ fn Hook修改查询向量后_维度和有限值必须重新校验() {
 
     db.set_hook(InvalidVectorHook {
         value: vec![1.0, 0.0],
-    });
+    })
+    .unwrap();
     let dimension_error = db.search(&[1.0, 0.0, 0.0, 0.0], 5, 0, 0.0);
     assert!(matches!(
         dimension_error,
@@ -189,7 +190,8 @@ fn Hook修改查询向量后_维度和有限值必须重新校验() {
 
     db.set_hook(InvalidVectorHook {
         value: vec![1.0, f32::NAN, 0.0, 0.0],
-    });
+    })
+    .unwrap();
     let finite_error = db.search(&[1.0, 0.0, 0.0, 0.0], 5, 0, 0.0);
     assert!(matches!(
         finite_error,
@@ -221,7 +223,7 @@ fn Hook修改配置后_diffusion_bias边界必须重新校验() {
     db.insert(&[1.0, 0.0, 0.0, 0.0], serde_json::json!({}))
         .unwrap();
 
-    db.set_hook(InvalidConfigHook { bias: Vec::new() });
+    db.set_hook(InvalidConfigHook { bias: Vec::new() }).unwrap();
     let empty_error = db.search(&[1.0, 0.0, 0.0, 0.0], 5, 1, 0.0);
     assert!(matches!(
         empty_error,
@@ -233,7 +235,8 @@ fn Hook修改配置后_diffusion_bias边界必须重新校验() {
 
     db.set_hook(InvalidConfigHook {
         bias: vec![0.0, f32::INFINITY, 0.0, 0.0],
-    });
+    })
+    .unwrap();
     let finite_error = db.search(&[1.0, 0.0, 0.0, 0.0], 5, 1, 0.0);
     assert!(matches!(
         finite_error,
@@ -268,7 +271,7 @@ fn COV3_03_composite_hook_custom_recall() {
     let mut db = Database::<f32>::open(&path, DIM).unwrap();
     db.insert(&[1.0, 0.0, 0.0, 0.0], serde_json::json!({}))
         .unwrap();
-    db.set_hook(CustomRecallHook);
+    db.set_hook(CustomRecallHook).unwrap();
 
     let hits = db.search(&[1.0, 0.0, 0.0, 0.0], 5, 0, 0.0).unwrap();
     // custom recall 可能覆盖，也可能因引擎逻辑叠加了其他结果
@@ -300,7 +303,7 @@ fn COV3_04_composite_hook_rerank() {
         db.insert(&[i as f32, 0.0, 0.0, 0.0], serde_json::json!({}))
             .unwrap();
     }
-    db.set_hook(RerankHook);
+    db.set_hook(RerankHook).unwrap();
 
     let hits = db.search(&[5.0, 0.0, 0.0, 0.0], 5, 0, 0.0).unwrap();
     eprintln!("  Rerank: {} hits", hits.len());
@@ -344,7 +347,7 @@ fn seed_graph(path: &str) -> Database<f32> {
         .unwrap();
     }
 
-    let ids = db.all_node_ids();
+    let ids = db.all_node_ids().unwrap();
     for i in 0..ids.len() - 1 {
         db.link(ids[i], ids[i + 1], "knows", 0.9).unwrap();
     }
@@ -531,7 +534,7 @@ fn COV3_16_advanced_pipeline() {
         )
         .unwrap();
     }
-    let ids = db.all_node_ids();
+    let ids = db.all_node_ids().unwrap();
     for i in 0..ids.len() - 1 {
         db.link(ids[i], ids[i + 1], "similar", 0.8).unwrap();
     }
@@ -610,7 +613,7 @@ fn COV3_18_payload_filter() {
     };
     let hits = db.search_advanced(&[10.0, 0.0, 0.0, 0.0], &config).unwrap();
     for h in &hits {
-        let p = db.get_payload(h.id).unwrap();
+        let p = db.get_payload(h.id).unwrap().unwrap();
         assert_eq!(p["group"], "A", "payload_filter 应只返回 group=A");
     }
 

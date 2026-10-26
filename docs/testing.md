@@ -2,7 +2,7 @@
 
 > 从单元测试到属性测试、从覆盖率度量到变异测试：TriviumDB 的多层防御测试体系详解。
 >
-> 本文说明 `0.9.0-beta.1` 的测试与验收方法，见[变更说明](changes/0.9.0-beta.1.md)。
+> 本文说明当前开发分支的测试与验收方法，基于 `0.9.0-beta.1`，见[未发布变更](changes/unreleased.md)。
 
 ---
 
@@ -89,6 +89,41 @@ cargo mutants --file src/filter.rs --timeout 60
 ```
 
 ---
+
+## 关闭与资源所有权回归
+
+以下检查随普通 Rust 测试以及三平台原生绑定 CI 执行：
+
+```bash
+cargo test --lib database::lifecycle::tests
+cargo test --test core lifecycle_resources
+cargo test --test contracts 关闭
+cargo test --features test-hooks --test fault_io lifecycle_resources -- --test-threads=1
+python tests/python/test_resource_lifecycle.py
+npm run test:resource-lifecycle
+```
+
+`tests/core/lifecycle_resources.rs` 覆盖 f32/f16/u64、Mmap/Rom、同步与异步关闭，保留关闭对象并重新打开、移动目录；Windows 使用独占文件打开验证数据库句柄已释放。另有 manifest 内容保持、索引变更持久化、关闭后读取拒绝及分组提交 panic 后强制进程退出的恢复检查。故障注入验证最终 WAL 同步失败保留数据、锁、Hook 与原始错误，并可重试。
+
+Python 测试覆盖 `with` 的正常和异常退出、强引用、Hook 循环 GC 与动态库卸载。Node 通过 `--expose-gc` 验证清除、替换、关闭、对象回收和循环引用的 Hook 释放，并覆盖注册失败保留旧 Hook、冻结包装对象、`dispose`、`Symbol.dispose`、Worker 退出与 FFI 动态库释放。FFI 测试在临时目录使用 `rustc` 构建最小插件，绑定 CI 与 npm 发布校验均准备 Rust 工具链。Node 还以原生回调屏障固定占用任务名额，验证数据访问返回完整的 `QueueFull` 预算字段，且被拒绝的 Hook 注册保留原扩展。
+
+Linux TSan 继续执行生命周期单元测试；Windows 本地结果对应原生文件句柄和语言 GC 验收，跨平台结果由 CI 提供。
+
+## 自动阈值与进程退出验收
+
+自动阈值用例检查全部 `1..=3072` 维度相对原阈值按十二分之一向上取整，并覆盖单调性、上下界、禁用配置与连续视图入口。`core/quiver_threshold.rs` 在阈值前后实际执行查询，通过 `vector_route_quiver` 观测验证路由；矩阵覆盖三种 dtype、Mmap/Rom、最高合法维度和持久化重载。
+
+```bash
+cargo test --test unit quiver自动
+cargo test --test core quiver_threshold
+npm run test:process-lifecycle
+```
+
+进程生命周期套件使用独立 Node 原生子进程，包含 30 万节点、32 维的 WAL 原会话、跳过析构后的恢复、检查点重开，以及 4000 节点、2048 维的 QuIVer 刷盘与重开内存采样。恢复后验证全部节点的 Payload 和确定性校验和，并抽查原始向量。WAL 回放前后检查逻辑堆结构一致，映射重开保持紧凑结构；RSS 记录用于比较启动路径和页驻留。
+
+三平台均执行 30 万节点的关闭排空：原生回调屏障保持在途查询，周期维护因读锁延期，宿主发起关闭后观察 `draining`，再释放查询。Linux 额外由父进程向独立宿主发送真实 SIGTERM，覆盖待检查点 WAL 与在途查询加周期维护两种情形。退出前检查关闭状态、配额与任务清零；父进程验证自然退出、全部数据恢复及文件组可移动。
+
+子进程有界等待用于捕获卡死。采样包含 RSS、内核堆估算、关闭阶段、活跃操作与维护状态；CI 上传 `process-lifecycle-<runner>` artifact，其中的 `process-lifecycle.json` 保存每个子进程的结果与诊断。共享运行时可继续保留其线程池，实例关闭后归还数据库配额和任务登记。
 
 ## 测试分层架构
 
@@ -189,7 +224,7 @@ fn tx_insert_和_commit() {
     assert_eq!(tx.pending_count(), 2);
     let ids = tx.commit().unwrap();
     assert_eq!(ids.len(), 2);
-    assert_eq!(db.node_count(), 2);
+    assert_eq!(db.node_count().unwrap(), 2);
 }
 
 #[test]
@@ -198,7 +233,7 @@ fn tx_insert_NaN向量报错() {
     let mut tx = db.begin_tx();
     tx.insert(&[f32::NAN, 0.0, 0.0], json!({}));
     assert!(tx.commit().is_err());
-    assert_eq!(db.node_count(), 0, "失败的事务不应改变状态");
+    assert_eq!(db.node_count().unwrap(), 0, "失败的事务不应改变状态");
 }
 
 #[test]

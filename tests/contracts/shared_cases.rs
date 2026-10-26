@@ -89,7 +89,10 @@ fn 共享json契约由rust适配器完整执行() {
     for case in contract.cases {
         match case.operation.as_str() {
             "get_payload" => {
-                let payload = database.get_payload(case.node_id.unwrap()).unwrap();
+                let payload = database
+                    .get_payload(case.node_id.unwrap())
+                    .unwrap()
+                    .unwrap();
                 let field = case.expected["field"].as_str().unwrap();
                 assert_eq!(payload[field], case.expected["value"], "{}", case.name);
             }

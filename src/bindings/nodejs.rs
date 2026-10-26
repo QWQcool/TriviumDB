@@ -7,18 +7,14 @@
 #[allow(clippy::module_inception)]
 pub mod nodejs {
     use crate::database::Database as GenericDatabase;
-    use napi::bindgen_prelude::Function;
-    use napi::{Env, JsObject, Ref};
+    use napi::bindgen_prelude::{Function, This};
+    use napi::{Env, JsObject};
     use napi_derive::napi;
 
     struct JsNativeHook {
-        env: Env,
-        object: Ref<()>,
+        object: super::super::node_hook_refs::HookReference,
         owner_thread: std::thread::ThreadId,
     }
-
-    unsafe impl Send for JsNativeHook {}
-    unsafe impl Sync for JsNativeHook {}
 
     impl JsNativeHook {
         fn invoke(
@@ -33,7 +29,7 @@ pub mod nodejs {
                 ));
                 return None;
             }
-            let object: JsObject = match self.env.get_reference_value(&self.object) {
+            let object: JsObject = match self.object.get() {
                 Ok(value) => value,
                 Err(error) => {
                     ctx.error = Some(format!("Node Hook {name} 引用无效: {error}"));
@@ -1069,14 +1065,19 @@ pub mod nodejs {
         // ── Hook 管理 ──
 
         #[napi]
-        pub fn set_hook(&mut self, env: Env, hook: JsObject) -> napi::Result<()> {
-            let wrapper = JsNativeHook {
-                env,
-                object: env.create_reference(hook)?,
-                owner_thread: std::thread::current().id(),
-            };
-            dispatch!(self, mut db => db.set_hook(wrapper));
-            Ok(())
+        pub fn set_hook(
+            &mut self,
+            env: Env,
+            this: This<JsObject>,
+            hook: JsObject,
+        ) -> napi::Result<()> {
+            dispatch!(self, mut db => db.set_hook_with(
+                || Ok(JsNativeHook {
+                    object: super::super::node_hook_refs::HookReference::new(env, this, hook)?,
+                    owner_thread: std::thread::current().id(),
+                }),
+                |error| to_resource_error(env, error),
+            ))
         }
 
         /// 加载 C/C++ 动态库作为检索管线 Hook
@@ -1093,8 +1094,7 @@ pub mod nodejs {
         pub fn load_ffi_hook(&mut self, lib_path: String) -> napi::Result<()> {
             let ffi_hook = crate::hook::FfiHook::load(&lib_path)
                 .map_err(|e| napi::Error::from_reason(format!("加载 FFI Hook 失败: {}", e)))?;
-            dispatch!(self, mut db => db.set_hook(ffi_hook));
-            Ok(())
+            dispatch!(self, mut db => db.set_hook(ffi_hook)).map_err(to_napi_error)
         }
 
         /// 清除当前已注册的 Hook，恢复为默认的零开销 NoopHook
@@ -1487,14 +1487,14 @@ pub mod nodejs {
         }
 
         #[napi]
-        pub fn graph_stats(&self) -> napi::Result<serde_json::Value> {
-            serde_json::to_value(dispatch!(self, db => db.graph_stats()))
+        pub fn graph_stats(&self, env: Env) -> napi::Result<serde_json::Value> {
+            serde_json::to_value(dispatch!(self, db => db.graph_stats().map_err(|error| to_resource_error(env, error))?))
                 .map_err(|error| napi::Error::from_reason(error.to_string()))
         }
 
         #[napi]
-        pub fn validate_graph(&self) -> napi::Result<serde_json::Value> {
-            serde_json::to_value(dispatch!(self, db => db.validate_graph()))
+        pub fn validate_graph(&self, env: Env) -> napi::Result<serde_json::Value> {
+            serde_json::to_value(dispatch!(self, db => db.validate_graph().map_err(|error| to_resource_error(env, error))?))
                 .map_err(|error| napi::Error::from_reason(error.to_string()))
         }
 
@@ -1507,70 +1507,81 @@ pub mod nodejs {
         }
 
         #[napi]
-        pub fn get(&self, id: f64) -> Option<JsNodeView> {
-            let id = id as u64;
-            match &self.inner {
-                DbBackend::F32(db) => db.get(id).map(|n| {
-                    let num_edges = n.edges.len() as u32;
-                    let edges_arr = n
-                        .edges
-                        .into_iter()
-                        .map(|e| JsEdge {
-                            target_id: e.target_id as f64,
-                            label: e.label.clone(),
-                            weight: round_api_f32(e.weight),
-                            metadata: e.metadata.clone(),
-                        })
-                        .collect();
-                    JsNodeView {
-                        id: n.id as f64,
-                        vector: n.vector.iter().map(|&x| x as f64).collect(),
-                        payload: n.payload,
-                        edges: edges_arr,
-                        num_edges,
-                    }
-                }),
-                DbBackend::F16(db) => db.get(id).map(|n| {
-                    let num_edges = n.edges.len() as u32;
-                    let edges_arr = n
-                        .edges
-                        .into_iter()
-                        .map(|e| JsEdge {
-                            target_id: e.target_id as f64,
-                            label: e.label.clone(),
-                            weight: round_api_f32(e.weight),
-                            metadata: e.metadata.clone(),
-                        })
-                        .collect();
-                    JsNodeView {
-                        id: n.id as f64,
-                        vector: n.vector.iter().map(|x| x.to_f64()).collect(),
-                        payload: n.payload,
-                        edges: edges_arr,
-                        num_edges,
-                    }
-                }),
-                DbBackend::U64(db) => db.get(id).map(|n| {
-                    let num_edges = n.edges.len() as u32;
-                    let edges_arr = n
-                        .edges
-                        .into_iter()
-                        .map(|e| JsEdge {
-                            target_id: e.target_id as f64,
-                            label: e.label.clone(),
-                            weight: round_api_f32(e.weight),
-                            metadata: e.metadata.clone(),
-                        })
-                        .collect();
-                    JsNodeView {
-                        id: n.id as f64,
-                        vector: n.vector.iter().map(|&x| x as f64).collect(),
-                        payload: n.payload,
-                        edges: edges_arr,
-                        num_edges,
-                    }
-                }),
-            }
+        pub fn get(&self, env: Env, id: f64) -> napi::Result<Option<JsNodeView>> {
+            Ok({
+                let id = id as u64;
+                match &self.inner {
+                    DbBackend::F32(db) => db
+                        .get(id)
+                        .map_err(|error| to_resource_error(env, error))?
+                        .map(|n| {
+                            let num_edges = n.edges.len() as u32;
+                            let edges_arr = n
+                                .edges
+                                .into_iter()
+                                .map(|e| JsEdge {
+                                    target_id: e.target_id as f64,
+                                    label: e.label.clone(),
+                                    weight: round_api_f32(e.weight),
+                                    metadata: e.metadata.clone(),
+                                })
+                                .collect();
+                            JsNodeView {
+                                id: n.id as f64,
+                                vector: n.vector.iter().map(|&x| x as f64).collect(),
+                                payload: n.payload,
+                                edges: edges_arr,
+                                num_edges,
+                            }
+                        }),
+                    DbBackend::F16(db) => db
+                        .get(id)
+                        .map_err(|error| to_resource_error(env, error))?
+                        .map(|n| {
+                            let num_edges = n.edges.len() as u32;
+                            let edges_arr = n
+                                .edges
+                                .into_iter()
+                                .map(|e| JsEdge {
+                                    target_id: e.target_id as f64,
+                                    label: e.label.clone(),
+                                    weight: round_api_f32(e.weight),
+                                    metadata: e.metadata.clone(),
+                                })
+                                .collect();
+                            JsNodeView {
+                                id: n.id as f64,
+                                vector: n.vector.iter().map(|x| x.to_f64()).collect(),
+                                payload: n.payload,
+                                edges: edges_arr,
+                                num_edges,
+                            }
+                        }),
+                    DbBackend::U64(db) => db
+                        .get(id)
+                        .map_err(|error| to_resource_error(env, error))?
+                        .map(|n| {
+                            let num_edges = n.edges.len() as u32;
+                            let edges_arr = n
+                                .edges
+                                .into_iter()
+                                .map(|e| JsEdge {
+                                    target_id: e.target_id as f64,
+                                    label: e.label.clone(),
+                                    weight: round_api_f32(e.weight),
+                                    metadata: e.metadata.clone(),
+                                })
+                                .collect();
+                            JsNodeView {
+                                id: n.id as f64,
+                                vector: n.vector.iter().map(|&x| x as f64).collect(),
+                                payload: n.payload,
+                                edges: edges_arr,
+                                num_edges,
+                            }
+                        }),
+                }
+            })
         }
 
         /// 更新节点元数据
@@ -1677,12 +1688,20 @@ pub mod nodejs {
         }
 
         #[napi]
-        pub fn get_edge(&self, src: f64, dst: f64, label: String) -> Option<JsEdge> {
-            dispatch!(self, db => db.get_edge(src as u64, dst as u64, &label)).map(|edge| JsEdge {
+        pub fn get_edge(
+            &self,
+            env: Env,
+            src: f64,
+            dst: f64,
+            label: String,
+        ) -> napi::Result<Option<JsEdge>> {
+            Ok({
+                dispatch!(self, db => db.get_edge(src as u64, dst as u64, &label).map_err(|error| to_resource_error(env, error))?).map(|edge| JsEdge {
                 target_id: edge.target_id as f64,
                 label: edge.label,
                 weight: round_api_f32(edge.weight),
                 metadata: edge.metadata,
+            })
             })
         }
 
@@ -1748,15 +1767,18 @@ pub mod nodejs {
         #[napi]
         pub fn neighbors(
             &self,
+            env: Env,
             id: f64,
             depth: Option<u32>,
             labels: Option<Vec<String>>,
-        ) -> Vec<f64> {
-            let depth = depth.unwrap_or(1) as usize;
-            dispatch!(self, db => db.neighbors_with_labels(id as u64, depth, labels.as_deref()))
+        ) -> napi::Result<Vec<f64>> {
+            Ok({
+                let depth = depth.unwrap_or(1) as usize;
+                dispatch!(self, db => db.neighbors_with_labels(id as u64, depth, labels.as_deref()).map_err(|error| to_resource_error(env, error))?)
                 .into_iter()
                 .map(|id| id as f64)
                 .collect()
+            })
         }
 
         #[napi]
@@ -2383,8 +2405,10 @@ pub mod nodejs {
         }
 
         #[napi]
-        pub fn list_unique_indexes(&self) -> Vec<Vec<String>> {
-            dispatch!(self, db => db.list_unique_indexes())
+        pub fn list_unique_indexes(&self, env: Env) -> napi::Result<Vec<Vec<String>>> {
+            Ok(
+                dispatch!(self, db => db.list_unique_indexes().map_err(|error| to_resource_error(env, error))?),
+            )
         }
 
         #[napi]
@@ -2441,8 +2465,8 @@ pub mod nodejs {
         }
 
         #[napi]
-        pub fn index_info(&self) -> napi::Result<serde_json::Value> {
-            dispatch!(self, db => serde_json::to_value(db.index_info()))
+        pub fn index_info(&self, env: Env) -> napi::Result<serde_json::Value> {
+            dispatch!(self, db => serde_json::to_value(db.index_info().map_err(|error| to_resource_error(env, error))?))
                 .map_err(|error| napi::Error::from_reason(error.to_string()))
         }
 
@@ -2456,28 +2480,38 @@ pub mod nodejs {
 
         /// 获取节点的 payload（不含向量，比 get() 更轻量）
         #[napi]
-        pub fn get_payload(&self, id: f64) -> Option<serde_json::Value> {
-            dispatch!(self, db => db.get_payload(id as u64))
+        pub fn get_payload(&self, env: Env, id: f64) -> napi::Result<Option<serde_json::Value>> {
+            Ok(
+                dispatch!(self, db => db.get_payload(id as u64).map_err(|error| to_resource_error(env, error))?),
+            )
         }
 
         /// 获取节点的出边列表
         #[napi]
-        pub fn get_edges(&self, id: f64) -> Vec<JsEdge> {
-            dispatch!(self, db => db.get_edges(id as u64))
-                .into_iter()
-                .map(|e| JsEdge {
-                    target_id: e.target_id as f64,
-                    label: e.label,
-                    weight: round_api_f32(e.weight),
-                    metadata: e.metadata,
-                })
-                .collect()
+        pub fn get_edges(&self, env: Env, id: f64) -> napi::Result<Vec<JsEdge>> {
+            Ok({
+                dispatch!(self, db => db.get_edges(id as u64).map_err(|error| to_resource_error(env, error))?)
+                    .into_iter()
+                    .map(|e| JsEdge {
+                        target_id: e.target_id as f64,
+                        label: e.label,
+                        weight: round_api_f32(e.weight),
+                        metadata: e.metadata,
+                    })
+                    .collect()
+            })
         }
 
         /// 获取节点完整入边，可按标签过滤。
         #[napi]
-        pub fn get_incoming_edges(&self, id: f64, label: Option<String>) -> Vec<JsIncomingEdge> {
-            dispatch!(self, db => db.get_incoming_edges(id as u64, label.as_deref()))
+        pub fn get_incoming_edges(
+            &self,
+            env: Env,
+            id: f64,
+            label: Option<String>,
+        ) -> napi::Result<Vec<JsIncomingEdge>> {
+            Ok({
+                dispatch!(self, db => db.get_incoming_edges(id as u64, label.as_deref()).map_err(|error| to_resource_error(env, error))?)
                 .into_iter()
                 .map(|edge| JsIncomingEdge {
                     source_id: edge.source_id as f64,
@@ -2487,6 +2521,7 @@ pub mod nodejs {
                     metadata: edge.metadata,
                 })
                 .collect()
+            })
         }
 
         // ── TQL 统一查询 ──
@@ -2631,8 +2666,9 @@ pub mod nodejs {
 
         /// 停止后台自动压缩
         #[napi]
-        pub fn clear_search_state(&self) {
-            dispatch!(self, db => db.clear_search_state());
+        pub fn clear_search_state(&self, env: Env) -> napi::Result<()> {
+            dispatch!(self, db => db.clear_search_state())
+                .map_err(|error| to_resource_error(env, error))
         }
 
         #[napi]
@@ -2692,17 +2728,22 @@ pub mod nodejs {
 
         /// 获取节点总数
         #[napi]
-        pub fn node_count(&self) -> u32 {
-            dispatch!(self, db => db.node_count()) as u32
+        pub fn node_count(&self, env: Env) -> napi::Result<u32> {
+            Ok({
+                dispatch!(self, db => db.node_count().map_err(|error| to_resource_error(env, error))?)
+                    as u32
+            })
         }
 
         /// 获取所有活跃节点 ID
         #[napi]
-        pub fn all_node_ids(&self) -> Vec<f64> {
-            dispatch!(self, db => db.all_node_ids())
-                .into_iter()
-                .map(|id| id as f64)
-                .collect()
+        pub fn all_node_ids(&self, env: Env) -> napi::Result<Vec<f64>> {
+            Ok({
+                dispatch!(self, db => db.all_node_ids().map_err(|error| to_resource_error(env, error))?)
+                    .into_iter()
+                    .map(|id| id as f64)
+                    .collect()
+            })
         }
 
         /// 维度迁移：结构复制到新维度数据库，返回需要更新向量的节点 ID 列表
@@ -2738,28 +2779,47 @@ pub mod nodejs {
 
         /// 检查节点是否存在
         #[napi]
-        pub fn contains(&self, id: f64) -> bool {
-            dispatch!(self, db => db.contains(id as u64))
+        pub fn contains(&self, env: Env, id: f64) -> napi::Result<bool> {
+            Ok(
+                dispatch!(self, db => db.contains(id as u64).map_err(|error| to_resource_error(env, error))?),
+            )
         }
 
         #[napi]
-        pub fn request_shutdown(&mut self, env: Env) -> napi::Result<serde_json::Value> {
+        pub fn request_shutdown(
+            &mut self,
+            env: Env,
+            this: This<JsObject>,
+        ) -> napi::Result<serde_json::Value> {
             let status = dispatch!(self, mut db => db.request_shutdown())
                 .map_err(|e| to_extended_error(env, e))?;
+            super::super::node_hook_refs::flush(env, &this)?;
             serde_json::to_value(status).map_err(|e| napi::Error::from_reason(e.to_string()))
         }
 
         #[napi]
-        pub fn shutdown_status(&self) -> napi::Result<serde_json::Value> {
+        pub fn shutdown_status(
+            &self,
+            env: Env,
+            this: This<JsObject>,
+        ) -> napi::Result<serde_json::Value> {
+            super::super::node_hook_refs::flush(env, &this)?;
             serde_json::to_value(dispatch!(self, db => db.shutdown_status()))
                 .map_err(|e| napi::Error::from_reason(e.to_string()))
         }
 
         #[napi]
-        pub fn close_timeout(&mut self, env: Env, timeout_ms: f64) -> napi::Result<bool> {
+        pub fn close_timeout(
+            &mut self,
+            env: Env,
+            this: This<JsObject>,
+            timeout_ms: f64,
+        ) -> napi::Result<bool> {
             let milliseconds = parse_safe_usize(timeout_ms, "timeoutMs")?;
-            dispatch!(self, mut db => db.close_timeout(std::time::Duration::from_millis(milliseconds as u64)))
-                .map_err(|e| to_extended_error(env, e))
+            let closed = dispatch!(self, mut db => db.close_timeout(std::time::Duration::from_millis(milliseconds as u64)))
+                .map_err(|e| to_extended_error(env, e))?;
+            super::super::node_hook_refs::flush(env, &this)?;
+            Ok(closed)
         }
 
         #[napi]
@@ -2777,11 +2837,13 @@ pub mod nodejs {
 
         /// 显式关闭数据库（落盘后释放资源）
         #[napi]
-        pub fn close(&mut self, env: Env) -> napi::Result<()> {
-            match dispatch!(self, mut db => db.close()) {
+        pub fn close(&mut self, env: Env, this: This<JsObject>) -> napi::Result<()> {
+            let result = match dispatch!(self, mut db => db.close()) {
                 Ok(()) | Err(crate::error::TriviumError::DatabaseClosed) => Ok(()),
                 Err(error) => Err(to_resource_error(env, error)),
-            }
+            };
+            super::super::node_hook_refs::flush(env, &this)?;
+            result
         }
     } // impl TriviumDB
 } // mod nodejs

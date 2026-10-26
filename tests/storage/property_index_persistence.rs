@@ -103,7 +103,7 @@ fn 复合与_bitmap_索引_v4_重启更新删除无幽灵命中() {
         "composite_property_index"
     );
     assert_eq!(explain[0]["plan"].payload["estimated_rows"], 0);
-    assert!(db.list_indexes().contains(&"state".to_owned()));
+    assert!(db.list_indexes().unwrap().contains(&"state".to_owned()));
     drop(db);
     cleanup(&path);
 }
@@ -116,7 +116,7 @@ fn 属性索引重启后直接恢复并保持负命中语义() {
 
     assert!(std::path::Path::new(&format!("{path}.pidx")).exists());
     let db = Database::<f32>::open(&path, DIM).unwrap();
-    assert_eq!(db.list_indexes(), vec!["kind", "rank"]);
+    assert_eq!(db.list_indexes().unwrap(), vec!["kind", "rank"]);
     assert_eq!(
         db.tql_nodes(r#"FIND {kind: "person"} RETURN *"#)
             .unwrap()
@@ -188,7 +188,7 @@ fn 旧数据库没有属性索引_sidecar_仍可兼容打开() {
     std::fs::remove_file(format!("{path}.pidx")).unwrap();
 
     let db = Database::<f32>::open(&path, DIM).unwrap();
-    assert!(db.list_indexes().is_empty());
+    assert!(db.list_indexes().unwrap().is_empty());
     assert_eq!(
         db.tql_nodes(r#"FIND {kind: "person"} RETURN *"#)
             .unwrap()
@@ -210,7 +210,7 @@ fn 损坏属性索引按策略回退或报错() {
     std::fs::write(&sidecar, bytes).unwrap();
 
     let db = Database::<f32>::open(&path, DIM).unwrap();
-    assert!(db.list_indexes().is_empty());
+    assert!(db.list_indexes().unwrap().is_empty());
     assert_eq!(
         db.tql_nodes(r#"FIND {kind: "event"} RETURN *"#)
             .unwrap()
@@ -323,7 +323,7 @@ fn 唯一约束由主文件恢复且_sidecar_缺失时仍然生效() {
     std::fs::remove_file(format!("{path}.pidx")).unwrap();
     let mut reopened = Database::<f32>::open(&path, DIM).unwrap();
     assert_eq!(
-        reopened.list_unique_indexes(),
+        reopened.list_unique_indexes().unwrap(),
         vec![vec!["email".to_owned()]]
     );
     assert!(matches!(
@@ -448,6 +448,7 @@ fn ngram_子串索引维护持久化并精确复核() {
     assert!(
         reopened
             .index_info()
+            .unwrap()
             .iter()
             .any(|info| info.kind == triviumdb::index::property::PropertyIndexKind::Ngram)
     );
@@ -477,7 +478,7 @@ fn 只读与不可变模式加载属性索引且零副作用() {
         },
     )
     .unwrap();
-    assert_eq!(read_only.list_indexes(), vec!["kind", "rank"]);
+    assert_eq!(read_only.list_indexes().unwrap(), vec!["kind", "rank"]);
     let memory = read_only.index_memory_stats();
     assert!(memory.mapped_bytes > (3 * DIM * std::mem::size_of::<f32>()) as u64);
     assert!(memory.posting_entries >= 6);
@@ -499,7 +500,7 @@ fn 只读与不可变模式加载属性索引且零副作用() {
         },
     )
     .unwrap();
-    assert_eq!(immutable.list_indexes(), vec!["kind", "rank"]);
+    assert_eq!(immutable.list_indexes().unwrap(), vec!["kind", "rank"]);
     drop(immutable);
     assert_eq!(std::fs::read(&sidecar).unwrap(), before);
     cleanup(&path);

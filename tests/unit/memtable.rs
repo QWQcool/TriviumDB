@@ -21,14 +21,22 @@ fn make_mt() -> MemTable<f32> {
 
 #[test]
 fn quiver自动阈值随维度下降并保持上下界() {
-    assert_eq!(auto_quiver_node_threshold(0), 10_000);
-    assert_eq!(auto_quiver_node_threshold(128), 10_000);
-    assert_eq!(auto_quiver_node_threshold(768), 10_000);
-    assert_eq!(auto_quiver_node_threshold(1024), 7_813);
-    assert_eq!(auto_quiver_node_threshold(1536), 5_209);
-    assert_eq!(auto_quiver_node_threshold(2048), 3_907);
-    assert_eq!(auto_quiver_node_threshold(3072), 2_605);
-    assert_eq!(auto_quiver_node_threshold(usize::MAX), 2_500);
+    assert_eq!(auto_quiver_node_threshold(0), 834);
+    assert_eq!(auto_quiver_node_threshold(128), 834);
+    assert_eq!(auto_quiver_node_threshold(768), 834);
+    assert_eq!(auto_quiver_node_threshold(1024), 652);
+    assert_eq!(auto_quiver_node_threshold(1536), 435);
+    assert_eq!(auto_quiver_node_threshold(2048), 326);
+    assert_eq!(auto_quiver_node_threshold(3072), 218);
+    assert_eq!(auto_quiver_node_threshold(usize::MAX), 209);
+    let mut previous = usize::MAX;
+    for dim in 1..=3072 {
+        let original = 8_000_000_usize.div_ceil(dim).clamp(2_500, 10_000);
+        let actual = auto_quiver_node_threshold(dim);
+        assert_eq!(actual, original.div_ceil(12), "维度 {dim}");
+        assert!(actual <= previous);
+        previous = actual;
+    }
 }
 
 #[test]
@@ -48,6 +56,11 @@ fn quiver自动构建严格遵守动态阈值与禁用配置() {
     assert!(below.auto_quiver_build_needed());
     below.set_auto_build_quiver(false);
     assert!(!below.auto_quiver_build_needed());
+    below.ensure_vectors_cache(false);
+    assert!(below.quiver().is_none());
+    below.set_auto_build_quiver(true);
+    below.ensure_vectors_cache(false);
+    assert!(below.quiver().is_some());
 }
 
 #[test]

@@ -216,7 +216,7 @@ fn 测试_恢复next_id耗尽后插入应返回错误而非回绕() {
     }));
     assert!(result.is_ok());
     assert!(result.unwrap().is_err());
-    assert_eq!(db.node_count(), 0);
+    assert_eq!(db.node_count().unwrap(), 0);
     cleanup(&path);
 }
 

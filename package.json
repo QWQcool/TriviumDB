@@ -16,6 +16,8 @@
     "build": "napi build --platform --release --features nodejs",
     "build:debug": "napi build --platform --features nodejs",
     "test:lifecycle": "node tests/node/lifecycle.js",
+    "test:resource-lifecycle": "node --expose-gc tests/node/resource_lifecycle.js",
+    "test:process-lifecycle": "node --expose-gc tests/node/process_lifecycle.js",
     "test:public-api": "node tests/node/public_api.js",
     "prepublishOnly": "napi build --platform --release --features nodejs"
   },

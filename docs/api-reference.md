@@ -1,6 +1,6 @@
 # TriviumDB API 完整参考
 
-> **版本**: `0.9.0-beta.1` 公共 API；见[变更说明](changes/0.9.0-beta.1.md)。
+> **版本**: 当前开发分支，基于 `0.9.0-beta.1` 公共 API；见[未发布变更](changes/unreleased.md)。
 > **语言**: Rust 核心 + Python 绑定 (PyO3) + Node.js 绑定 (napi-rs)  
 > **许可**: Apache-2.0
 
@@ -235,10 +235,12 @@ let mut db = Database::<f32>::open_with_config("my_data.tdb", Config {
 })?;
 
 // 运行时切换同步模式
-db.set_sync_mode(SyncMode::Off);
+db.set_sync_mode(SyncMode::Off)?;
 ```
 
-`close()` 会先进入 `Closing`，拒绝新操作并等待已经进入的操作结束，再执行最终 flush。只有 flush 成功后才释放文件锁并进入 `Closed`；flush 失败会恢复为 `Open` 且继续持有文件锁。关闭后的旧对象不能再次用于查询、写入或 flush。
+`close()` 先进入 `Closing`，拒绝新操作并等待已有操作结束，完成必要检查点及最终 WAL 同步，再释放 WAL、mmap、Payload、数据库持有的 Hook 与文件锁并进入 `Closed`。关闭成功后，即使包装对象仍被持有，数据库自身的文件资源也已释放；没有其他占用时可以立即移动、删除文件组或重新打开。持久化失败会返回原始错误，恢复为 `Open` 并保留内存和文件锁供重试。
+
+数据访问统一执行生命周期检查：Rust 的 `get`、`get_payload`、`get_edge`、`get_edges`、`get_incoming_edges`、`get_all_ids`、`all_node_ids`、`node_count`、`contains`、`neighbors`、`neighbors_with_labels`、`shortest_path`、`graph_stats`、`validate_graph`、`list_indexes`、`list_unique_indexes`、`index_info` 与 `clear_search_state` 返回 `Result`；`set_hook` 也返回 `Result<()>`。调用方使用 `?` 或显式处理错误。Python/Node 的打开状态返回类型保持一致，关闭后抛错。状态、资源统计和配置诊断继续可读。
 
 Mmap `flush()` 在发布新事实前流式备份旧 `.tdb/.vec/.flush_ok` 并发布 `.publish` 撤销日志，因此额外磁盘读写与临时空间随旧主文件和向量文件大小增长。ReadWrite `open()` 在加载前恢复未完成发布，再回放 WAL；已提交的新 marker 不会回滚。主文件 v9、marker v3 保持不变；损坏日志或备份返回 `CorruptedFile`。详见[恢复协议](security.md#8-mmap-三文件一致性标记flush_ok-v3)。
 
@@ -391,7 +393,7 @@ if node:
 
 **Rust：**
 ```rust
-if let Some(view) = db.get(42) {
+if let Some(view) = db.get(42)? {
     println!("ID={}, edges={}", view.id, view.edges.len());
     println!("payload={:?}", view.payload);
 }
@@ -943,12 +945,12 @@ const results = db.search(queryVec)  // 自动经过 C++ Hook
 use triviumdb::hook::FfiHook;
 
 let ffi_hook = FfiHook::load("./libmy_plugin.so")?;
-db.set_hook(ffi_hook);
+db.set_hook(ffi_hook)?;
 ```
 
 ### clear_hook — 清除已注册 Hook
 
-清除当前的 Hook，恢复为默认的零开销 `NoopHook`。
+清除当前的 Hook，恢复为默认的空实现 `NoopHook`。
 
 **Python：**
 ```python
@@ -1048,10 +1050,10 @@ impl SearchHook for MyHook {
 }
 
 // 注册 Hook
-db.set_hook(MyHook);
+db.set_hook(MyHook)?;
 ```
 
-> 💡 **零开销设计**：未注册 Hook 时，默认的 `NoopHook` 的所有方法均为空实现，编译器会将它们完全内联消除，对无 Hook 的普通检索完全零开销。
+默认 `NoopHook` 的回调为空实现。查询通过共享 Hook 槽取得本次执行的所有权，调用方可按需注册和替换扩展。
 
 > ⚠️ **FFI 插件安全提示**：`FfiHook` 加载的动态库将在进程内执行任意代码，请确保动态库来源可信。
 
@@ -1505,7 +1507,7 @@ print(f"共 {len(ids)} 个节点")
 
 **Rust：**
 ```rust
-let ids = db.all_node_ids();     // Vec<NodeId>
+let ids = db.all_node_ids()?;    // Vec<NodeId>
 ```
 
 ### QuIVer 自动索引说明
@@ -1521,7 +1523,7 @@ QuIVer 是自研 ANN 图索引，常规查询自动选择与维护索引。从 `
 
 完整模式、生命周期与度量限制见 [QuIVer 架构说明](quiver.md)。
 
-自动阈值按 `ceil(8,000,000 / dim)` 计算并限制在 2,500–10,000 节点；384/768 维为 10,000，1024 维约 7,813，1536 维约 5,209，3072 维约 2,605。
+自动阈值按 `ceil(666,667 / dim)` 计算并限制在 209–834 节点；384/768 维为 834，1024 维为 652，1536 维为 435，3072 维为 218。
 
 QuIVer 支持增量 Insert/Delete/Update，并保护入口导航树，入口升层时连接旧树。旧索引通过重建应用 `0.8.10` 的签名多样性和连通性规则；查询召回率由数据、搜索参数与精排预算共同决定。索引以 `.tdb.quiver` 持久化，并通过 `.tdb.quiver.meta` 的主数据代际、文件尺寸、节点数、维度与 CRC 校验后 mmap 加载。有效图按保存的邻接表加载，默认 SM 状态从原始向量池流式恢复，启动时读取相应冷向量；断连图按缺失索引策略重建或返回错误。显式评分模式由宿主重新配置。TextIndex 对应 `.tdb.text` 和 `.tdb.text.meta`。
 

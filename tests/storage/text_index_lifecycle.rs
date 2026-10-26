@@ -115,7 +115,7 @@ fn 未加载文本索引的flush与close保留文件并绑定新主文件() {
         let db = open(&path, mode, true);
         assert_eq!(search(&db, "alpha"), vec![1]);
         assert_eq!(search(&db, "共同别名"), vec![2]);
-        assert_eq!(db.node_count(), 3);
+        assert_eq!(db.node_count().unwrap(), 3);
     }
 }
 
@@ -430,7 +430,7 @@ fn 延期加载与删除预留遵守预算且失败不追加WAL() {
     ));
     assert_eq!(std::fs::read(format!("{path}.wal")).unwrap(), before_wal);
     assert_eq!(std::fs::read(format!("{path}.text")).unwrap(), before_text);
-    assert!(db.get(1).is_some());
+    assert!(db.get(1).unwrap().is_some());
     db.set_memory_limit(0).unwrap();
     db.build_text_index().unwrap();
     assert_eq!(search(&db, "alpha"), vec![1]);

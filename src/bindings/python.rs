@@ -650,8 +650,7 @@ pub mod python {
             let ffi_hook = crate::hook::FfiHook::load(lib_path).map_err(|e| {
                 pyo3::exceptions::PyRuntimeError::new_err(format!("加载 FFI Hook 失败: {}", e))
             })?;
-            dispatch!(self, mut db => db.set_hook(ffi_hook));
-            Ok(())
+            dispatch!(self, mut db => db.set_hook(ffi_hook)).map_err(to_py_error)
         }
 
         /// 清除当前已注册的 Hook，恢复为默认的零开销 NoopHook
@@ -675,9 +674,29 @@ pub mod python {
         ///
         /// db.set_hook(MyHook())
         /// ```
-        fn set_hook(&mut self, hook: PyObject) {
+        fn set_hook(&mut self, hook: PyObject) -> PyResult<()> {
             let wrapper = PySearchHookWrapper { py_hook: hook };
-            dispatch!(self, mut db => db.set_hook(wrapper));
+            dispatch!(self, mut db => db.set_hook(wrapper)).map_err(to_py_error)
+        }
+
+        fn __traverse__(
+            &self,
+            visit: pyo3::PyVisit<'_>,
+        ) -> std::result::Result<(), pyo3::PyTraverseError> {
+            // GC 遍历不获取 GIL，也不等待正在关闭的 Hook 槽。
+            dispatch!(self, db => db.try_with_hook(|hook| {
+                // 原生查询仍持有 Hook 时，该引用属于 GC 图之外的活动根。
+                if std::sync::Arc::strong_count(hook) == 1
+                    && let Some(wrapper) = (hook.as_ref() as &dyn std::any::Any).downcast_ref::<PySearchHookWrapper>()
+                {
+                    visit.call(&wrapper.py_hook)?;
+                }
+                Ok(())
+            })).unwrap_or(Ok(()))
+        }
+
+        fn __clear__(&mut self) {
+            dispatch!(self, mut db => db.clear_hook());
         }
 
         /// 带 Hook 上下文的检索：返回 (hits, context)
@@ -849,12 +868,22 @@ pub mod python {
             dispatch!(self, mut db => db.link(src, dst, label, weight)).map_err(to_py_error)
         }
 
-        fn get_edge(&self, py: Python<'_>, src: u64, dst: u64, label: &str) -> Option<PyEdge> {
-            dispatch!(self, db => db.get_edge(src, dst, label)).map(|edge| PyEdge {
-                target_id: edge.target_id,
-                label: edge.label,
-                weight: round_api_f32(edge.weight),
-                metadata: json_to_pyobject(py, &edge.metadata),
+        fn get_edge(
+            &self,
+            py: Python<'_>,
+            src: u64,
+            dst: u64,
+            label: &str,
+        ) -> PyResult<Option<PyEdge>> {
+            Ok({
+                dispatch!(self, db => db.get_edge(src, dst, label).map_err(to_py_error)?).map(
+                    |edge| PyEdge {
+                        target_id: edge.target_id,
+                        label: edge.label,
+                        weight: round_api_f32(edge.weight),
+                        metadata: json_to_pyobject(py, &edge.metadata),
+                    },
+                )
             })
         }
 
@@ -1393,8 +1422,8 @@ pub mod python {
                 .map_err(to_py_error)
         }
 
-        fn list_unique_indexes(&self) -> Vec<Vec<String>> {
-            dispatch!(self, db => db.list_unique_indexes())
+        fn list_unique_indexes(&self) -> PyResult<Vec<Vec<String>>> {
+            Ok(dispatch!(self, db => db.list_unique_indexes().map_err(to_py_error)?))
         }
 
         fn create_index(&mut self, field: &str) -> PyResult<()> {
@@ -1431,8 +1460,11 @@ pub mod python {
         }
 
         fn index_info(&self, py: Python<'_>) -> PyResult<PyObject> {
-            let value = dispatch!(self, db => serde_json::to_value(db.index_info()))
-                .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
+            let value =
+                dispatch!(self, db => serde_json::to_value(db.index_info().map_err(to_py_error)?))
+                    .map_err(|error| {
+                        pyo3::exceptions::PyRuntimeError::new_err(error.to_string())
+                    })?;
             Ok(json_to_pyobject(py, &value))
         }
 
@@ -1445,21 +1477,26 @@ pub mod python {
         // ════════ 轻量级单字段查询 ════════
 
         /// 获取节点的 payload（不含向量，比 get() 更轻量）
-        fn get_payload(&self, py: Python<'_>, id: u64) -> Option<PyObject> {
-            dispatch!(self, db => db.get_payload(id)).map(|p| json_to_pyobject(py, &p))
+        fn get_payload(&self, py: Python<'_>, id: u64) -> PyResult<Option<PyObject>> {
+            Ok({
+                dispatch!(self, db => db.get_payload(id).map_err(to_py_error)?)
+                    .map(|p| json_to_pyobject(py, &p))
+            })
         }
 
         /// 获取节点的出边列表
-        fn get_edges(&self, py: Python<'_>, id: u64) -> Vec<PyEdge> {
-            dispatch!(self, db => db.get_edges(id))
-                .into_iter()
-                .map(|e| PyEdge {
-                    target_id: e.target_id,
-                    label: e.label,
-                    weight: round_api_f32(e.weight),
-                    metadata: json_to_pyobject(py, &e.metadata),
-                })
-                .collect()
+        fn get_edges(&self, py: Python<'_>, id: u64) -> PyResult<Vec<PyEdge>> {
+            Ok({
+                dispatch!(self, db => db.get_edges(id).map_err(to_py_error)?)
+                    .into_iter()
+                    .map(|e| PyEdge {
+                        target_id: e.target_id,
+                        label: e.label,
+                        weight: round_api_f32(e.weight),
+                        metadata: json_to_pyobject(py, &e.metadata),
+                    })
+                    .collect()
+            })
         }
 
         #[pyo3(signature = (id, label=None))]
@@ -1468,23 +1505,25 @@ pub mod python {
             py: Python<'_>,
             id: u64,
             label: Option<&str>,
-        ) -> Vec<PyIncomingEdge> {
-            dispatch!(self, db => db.get_incoming_edges(id, label))
-                .into_iter()
-                .map(|edge| PyIncomingEdge {
-                    source_id: edge.source_id,
-                    target_id: edge.target_id,
-                    label: edge.label,
-                    weight: round_api_f32(edge.weight),
-                    metadata: json_to_pyobject(py, &edge.metadata),
-                })
-                .collect()
+        ) -> PyResult<Vec<PyIncomingEdge>> {
+            Ok({
+                dispatch!(self, db => db.get_incoming_edges(id, label).map_err(to_py_error)?)
+                    .into_iter()
+                    .map(|edge| PyIncomingEdge {
+                        source_id: edge.source_id,
+                        target_id: edge.target_id,
+                        label: edge.label,
+                        weight: round_api_f32(edge.weight),
+                        metadata: json_to_pyobject(py, &edge.metadata),
+                    })
+                    .collect()
+            })
         }
 
         fn get(&self, py: Python<'_>, id: u64) -> PyResult<Option<PyNodeView>> {
             match &self.inner {
                 DbBackend::F32(db) => {
-                    if let Some(n) = db.get(id) {
+                    if let Some(n) = db.get(id).map_err(to_py_error)? {
                         return Ok(Some(PyNodeView {
                             id: n.id,
                             vector: n.vector.into_pyobject(py).unwrap().into_any().unbind(),
@@ -1504,7 +1543,7 @@ pub mod python {
                     }
                 }
                 DbBackend::F16(db) => {
-                    if let Some(n) = db.get(id) {
+                    if let Some(n) = db.get(id).map_err(to_py_error)? {
                         let f32_vec: Vec<f32> = n.vector.into_iter().map(|f| f.to_f32()).collect();
                         return Ok(Some(PyNodeView {
                             id: n.id,
@@ -1525,7 +1564,7 @@ pub mod python {
                     }
                 }
                 DbBackend::U64(db) => {
-                    if let Some(n) = db.get(id) {
+                    if let Some(n) = db.get(id).map_err(to_py_error)? {
                         return Ok(Some(PyNodeView {
                             id: n.id,
                             vector: n.vector.into_pyobject(py).unwrap().into_any().unbind(),
@@ -1549,8 +1588,15 @@ pub mod python {
         }
 
         #[pyo3(signature = (id, depth=1, labels=None))]
-        fn neighbors(&self, id: u64, depth: usize, labels: Option<Vec<String>>) -> Vec<u64> {
-            dispatch!(self, db => db.neighbors_with_labels(id, depth, labels.as_deref()))
+        fn neighbors(
+            &self,
+            id: u64,
+            depth: usize,
+            labels: Option<Vec<String>>,
+        ) -> PyResult<Vec<u64>> {
+            Ok({
+                dispatch!(self, db => db.neighbors_with_labels(id, depth, labels.as_deref()).map_err(to_py_error)?)
+            })
         }
 
         #[pyo3(signature = (id, min_depth=1, max_depth=1, labels=None, direction="outgoing", max_visited_nodes=10_000, max_results=10_000, max_edges=50_000))]
@@ -1750,14 +1796,19 @@ pub mod python {
         }
 
         fn graph_stats(&self, py: Python<'_>) -> PyResult<PyObject> {
-            let value = serde_json::to_value(dispatch!(self, db => db.graph_stats()))
-                .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
+            let value =
+                serde_json::to_value(dispatch!(self, db => db.graph_stats().map_err(to_py_error)?))
+                    .map_err(|error| {
+                        pyo3::exceptions::PyRuntimeError::new_err(error.to_string())
+                    })?;
             Ok(json_to_pyobject(py, &value))
         }
 
         fn validate_graph(&self, py: Python<'_>) -> PyResult<PyObject> {
-            let value = serde_json::to_value(dispatch!(self, db => db.validate_graph()))
-                .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
+            let value = serde_json::to_value(
+                dispatch!(self, db => db.validate_graph().map_err(to_py_error)?),
+            )
+            .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
             Ok(json_to_pyobject(py, &value))
         }
 
@@ -1769,8 +1820,8 @@ pub mod python {
             Ok(json_to_pyobject(py, &value))
         }
 
-        fn node_count(&self) -> usize {
-            dispatch!(self, db => db.node_count())
+        fn node_count(&self) -> PyResult<usize> {
+            Ok(dispatch!(self, db => db.node_count().map_err(to_py_error)?))
         }
 
         fn flush(&mut self) -> PyResult<()> {
@@ -1790,8 +1841,8 @@ pub mod python {
         }
 
         /// 获取所有活跃节点的 ID 列表
-        fn all_node_ids(&self) -> Vec<u64> {
-            dispatch!(self, db => db.all_node_ids())
+        fn all_node_ids(&self) -> PyResult<Vec<u64>> {
+            Ok(dispatch!(self, db => db.all_node_ids().map_err(to_py_error)?))
         }
 
         /// 维度迁移：将当前数据库的所有节点和边迁移到一个新维度的数据库。
@@ -1838,8 +1889,8 @@ pub mod python {
             dispatch!(self, mut db => db.set_auto_build_quiver(enabled)).map_err(to_py_error)
         }
 
-        fn clear_search_state(&self) {
-            dispatch!(self, db => db.clear_search_state());
+        fn clear_search_state(&self) -> PyResult<()> {
+            dispatch!(self, db => db.clear_search_state()).map_err(to_py_error)
         }
 
         fn disable_auto_compaction(&mut self) {
@@ -1890,19 +1941,21 @@ pub mod python {
             dispatch!(self, db => db.estimated_memory())
         }
 
-        fn __len__(&self) -> usize {
+        fn __len__(&self) -> PyResult<usize> {
             self.node_count()
         }
 
-        fn __contains__(&self, id: u64) -> bool {
-            dispatch!(self, db => db.contains(id))
+        fn __contains__(&self, id: u64) -> PyResult<bool> {
+            Ok(dispatch!(self, db => db.contains(id).map_err(to_py_error)?))
         }
 
         fn __repr__(&self) -> String {
             format!(
                 "TriviumDB(dtype={}, nodes={}, dim={})",
                 self.dtype,
-                self.node_count(),
+                self.node_count()
+                    .map(|count| count.to_string())
+                    .unwrap_or_else(|_| "已关闭".into()),
                 self.dim()
             )
         }

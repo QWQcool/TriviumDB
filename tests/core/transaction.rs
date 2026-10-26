@@ -38,7 +38,7 @@ fn 事务_ID耗尽预检失败且不写入状态() {
         tx.commit()
     };
     assert!(result.is_err());
-    assert_eq!(db.node_count(), 0);
+    assert_eq!(db.node_count().unwrap(), 0);
     cleanup(&path);
 }
 
@@ -57,8 +57,8 @@ fn 事务_基本提交_返回正确的生成ID() {
 
     assert_eq!(ids.len(), 2, "提交 2 个 insert 应返回 2 个 ID");
     assert!(ids[0] != ids[1], "两个 ID 不应相同");
-    assert!(db.contains(ids[0]), "alice 应存在");
-    assert!(db.contains(ids[1]), "bob 应存在");
+    assert!(db.contains(ids[0]).unwrap(), "alice 应存在");
+    assert!(db.contains(ids[1]).unwrap(), "bob 应存在");
 
     cleanup(&path);
 }
@@ -83,7 +83,7 @@ fn 事务_指定标签断边_仅删除匹配边() {
         tx.commit().unwrap();
     }
 
-    let edges = db.get_edges(a);
+    let edges = db.get_edges(a).unwrap();
     assert_eq!(edges.len(), 1);
     assert_eq!(edges[0].label, "works");
     cleanup(&path);
@@ -109,7 +109,7 @@ fn 事务_非法边权在WAL前拒绝且状态不变() {
     };
 
     assert!(result.is_err());
-    assert!(db.get_edges(a).is_empty());
+    assert!(db.get_edges(a).unwrap().is_empty());
     assert_eq!(
         std::fs::metadata(format!("{}.wal", path)).unwrap().len(),
         wal_len
@@ -130,8 +130,8 @@ fn 事务_insert_with_id_ID0拒绝且无状态残留() {
     };
 
     assert!(result.is_err());
-    assert!(!db.contains(0));
-    assert_eq!(db.node_count(), 0);
+    assert!(!db.contains(0).unwrap());
+    assert_eq!(db.node_count().unwrap(), 0);
     cleanup(&path);
 }
 
@@ -154,7 +154,7 @@ fn 事务_插入边_可以查询() {
         tx.commit().unwrap();
     }
 
-    let edges = db.get_edges(ids[0]);
+    let edges = db.get_edges(ids[0]).unwrap();
     assert_eq!(edges.len(), 1, "A 应有 1 条出边");
     assert_eq!(edges[0].target_id, ids[1]);
     assert_eq!(edges[0].label, "knows");
@@ -174,14 +174,14 @@ fn 事务_delete_节点后_contains返回false() {
         tx.commit().unwrap()
     };
     let id = ids[0];
-    assert!(db.contains(id));
+    assert!(db.contains(id).unwrap());
 
     {
         let mut tx = db.begin_tx();
         tx.delete(id);
         tx.commit().unwrap();
     }
-    assert!(!db.contains(id), "删除后 contains 应返回 false");
+    assert!(!db.contains(id).unwrap(), "删除后 contains 应返回 false");
 
     cleanup(&path);
 }
@@ -200,7 +200,7 @@ fn 事务_dry_run_维度不匹配_应拒绝整个事务() {
     };
 
     assert!(result.is_err(), "Dry-Run 应检测到维度不匹配并拒绝整个事务");
-    assert_eq!(db.node_count(), 0, "事务整体回滚，节点数应为 0");
+    assert_eq!(db.node_count().unwrap(), 0, "事务整体回滚，节点数应为 0");
 
     cleanup(&path);
 }
@@ -264,7 +264,7 @@ fn 事务唯一约束支持键交换与删除后复用() {
         tx.insert(&[0.0, 0.0, 1.0, 0.0], serde_json::json!({"key": "b"}));
         tx.commit().unwrap();
     }
-    assert_eq!(db.node_count(), 2);
+    assert_eq!(db.node_count().unwrap(), 2);
     cleanup(&path);
 }
 
@@ -286,7 +286,7 @@ fn 事务批内唯一冲突在_wal_前拒绝() {
         result,
         Err(TriviumError::UniqueConstraintViolation { .. })
     ));
-    assert_eq!(db.node_count(), 0);
+    assert_eq!(db.node_count().unwrap(), 0);
     assert_eq!(
         std::fs::metadata(format!("{path}.wal")).unwrap().len(),
         wal_len
@@ -326,10 +326,10 @@ fn 条件更新与原子批量删除保持稳定失败语义() {
         db.delete_many_atomic(&[first, 999_999]),
         Err(TriviumError::NodeNotFound(999_999))
     ));
-    assert!(db.contains(first));
-    assert!(db.contains(second));
+    assert!(db.contains(first).unwrap());
+    assert!(db.contains(second).unwrap());
     assert_eq!(db.delete_many_atomic(&[second, first, second]).unwrap(), 2);
-    assert_eq!(db.node_count(), 0);
+    assert_eq!(db.node_count().unwrap(), 0);
     cleanup(&path);
 }
 
@@ -347,7 +347,7 @@ fn 事务_update_payload_正常工作() {
 
     db.update_payload(ids[0], serde_json::json!({"v": 2}))
         .unwrap();
-    let payload = db.get_payload(ids[0]).unwrap();
+    let payload = db.get_payload(ids[0]).unwrap().unwrap();
     assert_eq!(payload["v"], 2);
 
     cleanup(&path);
@@ -366,7 +366,7 @@ fn 事务_update_vector_正常工作() {
     };
 
     db.update_vector(ids[0], &[0.0, 0.0, 0.0, 1.0]).unwrap();
-    let node = db.get(ids[0]).unwrap();
+    let node = db.get(ids[0]).unwrap().unwrap();
     assert!((node.vector[3] - 1.0).abs() < 1e-6);
 
     cleanup(&path);
@@ -390,10 +390,10 @@ fn 事务_unlink_正常移除边() {
         tx.link(ids[0], ids[1], "rel", 1.0);
         tx.commit().unwrap();
     }
-    assert_eq!(db.get_edges(ids[0]).len(), 1);
+    assert_eq!(db.get_edges(ids[0]).unwrap().len(), 1);
 
     db.unlink(ids[0], ids[1]).unwrap();
-    assert_eq!(db.get_edges(ids[0]).len(), 0, "unlink 后边应消失");
+    assert_eq!(db.get_edges(ids[0]).unwrap().len(), 0, "unlink 后边应消失");
 
     cleanup(&path);
 }
@@ -412,9 +412,9 @@ fn 事务_跨操作依赖_先insert再link() {
         tx.commit().unwrap();
     }
 
-    assert!(db.contains(10));
-    assert!(db.contains(20));
-    let edges = db.get_edges(10);
+    assert!(db.contains(10).unwrap());
+    assert!(db.contains(20).unwrap());
+    let edges = db.get_edges(10).unwrap();
     assert_eq!(edges.len(), 1);
     assert_eq!(edges[0].target_id, 20);
     assert!((edges[0].weight - 0.9).abs() < 1e-6);

@@ -565,7 +565,7 @@ Python/Node 绑定应通过中央转换器保留核心错误类别；控制流�
 
 2. **调用隔离**：所有 FFI 回调在 Rust 侧包装，返回值经过有效性检查后才被消费。C 侧返回的 `null` 指针会被安全处理。
 
-3. **库生命周期**：`FfiHook` 持有 `libloading::Library` 的所有权，`clear_hook()` 或 `Database::drop()` 时自动卸载动态库。不会出现悬垂函数指针。
+3. **库生命周期**：`FfiHook` 持有 `libloading::Library` 的所有权，清除、替换 Hook 或成功关闭数据库后，在最后一个 Hook 所有者释放时卸载动态库；关闭失败保留原 Hook。已进入的查询持有 Hook，保证调用期间动态库有效。
 
 **使用建议**：
 
@@ -586,7 +586,7 @@ db.clear_hook()
 
 ### 31. Hook 回调的线程安全约束
 
-**实现位置**：`hook.rs:trait SearchHook: Send + Sync`
+**实现位置**：`hook.rs:trait SearchHook: Send + Sync + Any`
 
 `SearchHook` trait 要求实现 `Send + Sync`，这是编译器层面的强制约束。任何自定义 Hook 实现如果包含非线程安全的内部状态，编译器将直接拒绝编译。
 

@@ -262,7 +262,7 @@ TriviumDB 采用**全自动双引擎路由**，无需编译期 Feature 选择，
 - **精确度**：100% 精确召回，零误差
 - **并行化**：rayon `par_chunks` 多核线性加速
 - **原理**：对整个 SoA 向量池做并行余弦相似度扫描
-- **激活条件**：节点数低于按 `ceil(8,000,000 / dim)` 计算并限制在 2,500–10,000 的动态阈值，或 QuIVer 索引尚未构建完成
+- **激活条件**：节点数低于按 `ceil(666,667 / dim)` 计算并限制在 209–834 的动态阈值，或 QuIVer 索引尚未构建完成
 
 ```rust
 // 内部实现伪码
@@ -291,7 +291,7 @@ flat_vectors
 | 增量维护 | 向量池直接更新 | Insert / Tombstone Delete / Update，并同步默认 SM 状态 |
 | 持久化 | 主数据与向量池 | `.tdb.quiver` 图文件及一致性元数据；默认 SM 重载后流式恢复 |
 | 热组件 | 扫描所需工作区 | 保留的 BQ、SM 位码/幅值、图、ID/slot 映射及线程工作区 |
-| 激活方式 | 小规模默认 | 达到 2,500–10,000 节点的维度相关阈值时构建 |
+| 激活方式 | 小规模默认 | 达到 209–834 节点的维度相关阈值时构建 |
 
 默认 `QuIVerSearchConfig` 的精排预算为 64，实际受候选宽度约束，并至少覆盖 `top_k`；显式预算继续生效。低 `ef` 不会令普通默认查询静默回退 BQ。校正/锚点模式、显式原生 L2 与自定义 TSNG scorer 各有独立语义，见 [QuIVer 架构与配置](quiver.md)。
 
@@ -587,7 +587,7 @@ WAL 文件以 `TVWL + u16 version` 版本头开场；历史无头 WAL 不再猜�
 
 资源不足时，内核返回携带 `resource/requested/used/limit` 的预算错误。维护诊断区分排空等待、准入延期、写锁繁忙与执行失败。内存采样遇到 MemTable 写锁时返回暂不可用状态，任务名额用满时仍可读取诊断。
 
-关闭按 `open → draining → flushing → closed` 推进；失败状态保存结构化原因供重试。目录快照通过有界复制、逐文件同步、manifest 校验、目录 rename 和父目录同步发布，包含主文件、向量、冷载荷与所需索引制品。
+关闭按 `open → draining → flushing → closed` 推进；成功完成时释放 WAL、mmap、Payload、数据库持有的 Hook 与文件锁，失败状态保存结构化原因供重试。数据访问统一检查生命周期，Rust 返回 `Result`，Python/Node 在关闭后抛错。目录快照通过有界复制、逐文件同步、manifest 校验、目录 rename 和父目录同步发布，包含主文件、向量、冷载荷与所需索引制品。
 
 配置示例与统计口径见[共享资源运行时](resource-runtime.md)，关闭与目录协议见[生命周期和快照](lifecycle-snapshots.md)。
 
@@ -672,7 +672,7 @@ TriviumDB 的 Hook 系统允许开发者在构建 RAG 系统时，通过 6 个�
 
 ### 设计原则
 
-1. **零开销可选**：默认 `NoopHook` 的所有方法为空实现，编译器内联消除全部调用开销
+1. **可选扩展**：默认 `NoopHook` 的回调为空实现，注册后在对应阶段调用自定义逻辑
 2. **按需覆写**：所有方法都有默认空实现，开发者只需覆写感兴趣的阶段
 3. **FFI 友好**：`FfiHook` 支持 `extern "C"` 函数签名的 C/C++ 动态库加载
 
@@ -680,7 +680,7 @@ TriviumDB 的 Hook 系统允许开发者在构建 RAG 系统时，通过 6 个�
 
 ```
 SearchHook (trait)
-├── NoopHook        — 零开销默认实现（编译器内联消除）
+├── NoopHook        — 默认空回调实现
 ├── CompositeHook   — 多 Hook 组合（按注册顺序链式调用）
 └── FfiHook         — C/C++ 动态库加载（libloading）
 ```

@@ -9,3 +9,6 @@ mod wal_midwrite;
 
 #[cfg(feature = "test-hooks")]
 mod snapshot_shutdown;
+
+#[cfg(feature = "test-hooks")]
+mod lifecycle_resources;

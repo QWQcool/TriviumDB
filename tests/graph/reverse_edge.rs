@@ -28,11 +28,11 @@ fn test_reverse_edge_avalanche_deletion() {
         fan_ids.push(fan_id);
     }
 
-    assert_eq!(db.node_count(), num_fans as usize + 1);
+    assert_eq!(db.node_count().unwrap(), num_fans as usize + 1);
 
     // Verify center is heavily linked
     for fan_id in &fan_ids {
-        let fan_node = db.get(*fan_id).unwrap();
+        let fan_node = db.get(*fan_id).unwrap().unwrap();
         assert_eq!(fan_node.edges.len(), 1);
         assert_eq!(fan_node.edges[0].target_id, center_id);
     }
@@ -56,12 +56,12 @@ fn test_reverse_edge_avalanche_deletion() {
     }
 
     // Verify correctness: center is gone
-    assert!(db.get(center_id).is_none());
-    assert_eq!(db.node_count(), num_fans as usize);
+    assert!(db.get(center_id).unwrap().is_none());
+    assert_eq!(db.node_count().unwrap(), num_fans as usize);
 
     // Verify correctness: all fans have NO outgoing edges pointing to center!
     for fan_id in &fan_ids {
-        let fan_node = db.get(*fan_id).unwrap();
+        let fan_node = db.get(*fan_id).unwrap().unwrap();
         assert!(
             fan_node.edges.is_empty(),
             "Fan should not have any remaining edges to the deleted center"
@@ -75,7 +75,7 @@ fn test_reverse_edge_avalanche_deletion() {
     db.unlink(node_a, node_b).unwrap();
     // After unlink, deleting B should theoretically not need to touch A anymore.
     db.delete(node_b).unwrap();
-    let a_node = db.get(node_a).unwrap();
+    let a_node = db.get(node_a).unwrap().unwrap();
     assert!(a_node.edges.is_empty());
 
     // Cleanup

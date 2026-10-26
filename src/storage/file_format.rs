@@ -812,12 +812,52 @@ fn save_tdb<T: VectorType>(
 
 pub fn load<T: VectorType>(
     path: &str,
-    _mode: StorageMode,
+    mode: StorageMode,
     load_text_sidecar: bool,
     repair_sidecars: bool,
     missing_index_policy: crate::database::MissingIndexPolicy,
     mmap_property_postings: bool,
 ) -> Result<MemTable<T>> {
+    let (mut memtable, version) = load_inner(
+        path,
+        mode,
+        load_text_sidecar,
+        repair_sidecars,
+        missing_index_policy,
+        mmap_property_postings,
+    )?;
+    // 当前格式的完整检查点可直接复用；历史格式保留关闭时迁移的契约。
+    if version == CURRENT_VERSION {
+        memtable.mark_checkpoint_clean();
+    }
+    Ok(memtable)
+}
+
+/// 主文件与 WAL 检查点共同成功后，才确认内存中的持久化变更已排空。
+pub(crate) fn checkpoint<T: VectorType>(
+    memtable: &mut MemTable<T>,
+    wal: &mut crate::storage::wal::Wal,
+    path: &str,
+    mode: StorageMode,
+    skip_clean: bool,
+) -> Result<()> {
+    wal.ensure_writable()?;
+    if !skip_clean || memtable.needs_checkpoint() {
+        save(memtable, path, mode)?;
+        wal.clear()?;
+        memtable.mark_checkpoint_clean();
+    }
+    Ok(())
+}
+
+fn load_inner<T: VectorType>(
+    path: &str,
+    _mode: StorageMode,
+    load_text_sidecar: bool,
+    repair_sidecars: bool,
+    missing_index_policy: crate::database::MissingIndexPolicy,
+    mmap_property_postings: bool,
+) -> Result<(MemTable<T>, u16)> {
     let file = File::open(path).map_err(TriviumError::Io)?;
 
     let mmap = unsafe { Mmap::map(&file) }.map_err(TriviumError::Io)?;
@@ -944,7 +984,7 @@ pub fn load<T: VectorType>(
             } else if Path::new(&text_index_path_from_db(path)).exists() {
                 mt.defer_text_index(path);
             }
-            Ok(mt)
+            Ok((mt, version))
         } else {
             Err(TriviumError::CorruptedFile(
                 "拒绝不完整的 .tdb/.vec generation：.flush_ok 缺失或不匹配，WAL 不能证明基础向量可完整重建"
@@ -980,7 +1020,7 @@ pub fn load<T: VectorType>(
         } else if Path::new(&text_index_path_from_db(path)).exists() {
             mt.defer_text_index(path);
         }
-        Ok(mt)
+        Ok((mt, version))
     }
 }
 

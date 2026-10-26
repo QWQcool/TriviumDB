@@ -269,6 +269,32 @@ pub struct WalStats {
 }
 
 impl Wal {
+    pub(crate) fn ensure_writable(&self) -> Result<()> {
+        if self.writer.is_some() {
+            Ok(())
+        } else {
+            Err(TriviumError::WalClosed)
+        }
+    }
+
+    /// 同步成功才释放句柄；失败时保留写入器供关闭协议报告原始错误。
+    pub(crate) fn close_writer(&mut self) -> Result<()> {
+        let writer = self.writer.as_mut().ok_or(TriviumError::WalClosed)?;
+        writer.flush()?;
+        #[cfg(feature = "test-hooks")]
+        crate::test_hooks::io_result(crate::test_hooks::IoPoint::WalSync)?;
+        writer.get_ref().sync_all()?;
+        self.release_writer();
+        Ok(())
+    }
+
+    /// 无法确认同步结果时关闭写入能力，后续写入必须显式失败。
+    pub(crate) fn release_writer(&mut self) {
+        self.writer.take();
+        self.group_commit_active = false;
+        self.group_commit_pending = false;
+    }
+
     pub fn disabled(db_path: &str, sync_mode: SyncMode) -> Self {
         Self {
             wal_path: PathBuf::from(format!("{}.wal", db_path)),

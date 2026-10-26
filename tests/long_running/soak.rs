@@ -94,7 +94,7 @@ fn SOAK_01_连续运行5分钟_内存不泄漏() {
         }
 
         // 删除前半部分
-        let ids = db.all_node_ids();
+        let ids = db.all_node_ids().unwrap();
         let to_delete: Vec<u64> = ids.iter().take(ids.len() / 2).copied().collect();
         for id in to_delete {
             db.delete(id).unwrap();
@@ -175,7 +175,7 @@ fn SOAK_02_连续flush_500轮_文件大小不膨胀() {
         }
 
         // 删除最旧的 50 个
-        let ids = db.all_node_ids();
+        let ids = db.all_node_ids().unwrap();
         let to_delete: Vec<u64> = ids.iter().take(50.min(ids.len())).copied().collect();
         for id in to_delete {
             let _ = db.delete(id);

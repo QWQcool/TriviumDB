@@ -866,7 +866,7 @@ export class TriviumDB {
   instanceStats(): InstanceStats;
   requestShutdown(): ShutdownStatus;
   shutdownStatus(): ShutdownStatus;
-  /** 超时返回 false；后台继续持有数据和文件锁，true 表示关闭已完成 */
+  /** 超时返回 false；后台继续持有数据和文件锁，true 表示持久化及数据库文件、Hook 资源释放完成 */
   closeTimeout(timeoutMs: number): boolean;
   /** 创建新的独立快照目录；已有目标返回 TDB_SNAPSHOT_EXISTS */
   createSnapshot(destination: string, generationId: string): SnapshotManifest;
@@ -889,7 +889,7 @@ export class TriviumDB {
   /** 返回存储内的所有活跃点数量 */
   nodeCount(): number;
 
-  /** 显式关闭数据库（落盘后释放资源）；关闭后该对象的后续数据库操作会抛出错误 */
+  /** 显式关闭并释放 WAL、mmap、Payload 与数据库持有的 Hook；关闭后数据访问抛错，状态与配置诊断仍可读取 */
   close(): void;
 
   /** `close()` 的幂等资源释放别名，供不支持 Explicit Resource Management 的环境调用 */

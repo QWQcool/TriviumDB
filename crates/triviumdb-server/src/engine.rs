@@ -500,13 +500,14 @@ impl EngineHandle {
         .await
     }
 
-    pub fn index_fields(&self) -> Vec<String> {
+    pub fn index_fields(&self) -> Result<Vec<String>, ApiError> {
         let database = read_or_recover(&self.inner.database);
-        database
+        Ok(database
             .index_info()
+            .map_err(ApiError::from)?
             .into_iter()
             .flat_map(|index| index.fields)
-            .collect()
+            .collect())
     }
 
     pub async fn indexed_lookup(
@@ -544,7 +545,7 @@ impl EngineHandle {
         let versions = self.inner.versions.clone();
         let control = QueryControl::with_deadline(deadline);
         self.run_read(deadline, control.clone(), move |database| {
-            let node = database.get(id).ok_or_else(|| {
+            let node = database.get(id).map_err(ApiError::from)?.ok_or_else(|| {
                 ApiError::new(
                     StatusCode::NOT_FOUND,
                     "NODE_NOT_FOUND",
@@ -596,7 +597,7 @@ impl EngineHandle {
                 if index & 0xff == 0 {
                     control.check().map_err(ApiError::from)?;
                 }
-                if let Some(node) = database.get(id) {
+                if let Some(node) = database.get(id).map_err(ApiError::from)? {
                     nodes.push(node);
                 }
             }
@@ -653,14 +654,14 @@ impl EngineHandle {
         let versions = self.inner.versions.clone();
         let control = QueryControl::with_deadline(deadline);
         self.run_read(deadline, control, move |database| {
-            if database.get(id).is_none() {
+            if database.get(id).map_err(ApiError::from)?.is_none() {
                 return Err(ApiError::from(
                     triviumdb::error::TriviumError::NodeNotFound(id),
                 ));
             }
             let mut edges = Vec::new();
             if direction != triviumdb::graph::reachability::ReachabilityDirection::Incoming {
-                for edge in database.get_edges(id) {
+                for edge in database.get_edges(id).map_err(ApiError::from)? {
                     if label.as_ref().is_none_or(|label| label == &edge.label) {
                         edges.push(SubgraphEdge {
                             source_id: id,
@@ -673,7 +674,10 @@ impl EngineHandle {
                 }
             }
             if direction != triviumdb::graph::reachability::ReachabilityDirection::Outgoing {
-                for edge in database.get_incoming_edges(id, label.as_deref()) {
+                for edge in database
+                    .get_incoming_edges(id, label.as_deref())
+                    .map_err(ApiError::from)?
+                {
                     edges.push(SubgraphEdge {
                         source_id: edge.source_id,
                         target_id: edge.target_id,
@@ -748,8 +752,12 @@ impl EngineHandle {
         }
     }
 
-    pub fn index_info(&self) -> Vec<triviumdb::index::property::PropertyIndexStats> {
-        read_or_recover(&self.inner.database).index_info()
+    pub fn index_info(
+        &self,
+    ) -> Result<Vec<triviumdb::index::property::PropertyIndexStats>, ApiError> {
+        read_or_recover(&self.inner.database)
+            .index_info()
+            .map_err(ApiError::from)
     }
 
     pub async fn build_quiver(&self, deadline: Instant) -> Result<bool, ApiError> {
