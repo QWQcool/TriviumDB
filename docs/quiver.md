@@ -67,4 +67,4 @@ cargo test --lib index::quiver::connectivity_tests
 RAYON_NUM_THREADS=1 cargo bench --features ablation --bench bench_quiver_connectivity
 ```
 
-这些命令检查默认路由、预算、维度、增量/slot 复用、重载、原生 L2 和基础图查询。连通性基准覆盖七组合成数据和四个查询宽度，逐轮指标见 [基准记录](benchmarks/quiver-connectivity-20261021.json)。可设置 `TRIVIUM_NO_AVX512=1` 验证禁用 AVX-512 的路径。
+这些命令检查默认路由、预算、维度、增量/slot 复用、重载、原生 L2 和基础图查询。[连通性基准](../benches/bench_quiver_connectivity.rs)覆盖七组合成数据和四个查询宽度，运行时输出逐轮召回、耗时和热内存指标。可设置 `TRIVIUM_NO_AVX512=1` 验证禁用 AVX-512 的路径。

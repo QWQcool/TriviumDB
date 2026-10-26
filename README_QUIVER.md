@@ -23,7 +23,7 @@ cargo test --lib index::quiver::tests::test_quiver_中等规模搜索 -- --exact
 cargo test --lib index::quiver::connectivity_tests
 ```
 
-These checks establish implementation contracts, not million-scale performance. Entry reachability does not guarantee exact recall under bounded search budgets. The [synthetic connectivity report](docs/benchmarks/quiver-connectivity-20261021.json) records seven datasets, four search widths, recall, timing and hot-memory costs; it is not the frozen ICDE evaluation.
+These checks establish implementation contracts, not million-scale performance. Entry reachability does not guarantee exact recall under bounded search budgets. The [synthetic connectivity benchmark](benches/bench_quiver_connectivity.rs) covers seven datasets and four search widths, and records recall, timing and hot-memory costs; it is not the frozen ICDE evaluation.
 
 ## ICDE evaluation protocol and evidence
 
