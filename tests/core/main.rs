@@ -16,3 +16,4 @@ mod transaction_state;
 mod typed_facade;
 mod vector_types;
 mod workflow;
+mod write_boundaries;

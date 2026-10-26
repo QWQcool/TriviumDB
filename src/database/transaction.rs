@@ -553,14 +553,14 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         }
 
         let mut unique_changes =
-            std::collections::BTreeMap::<NodeId, Option<serde_json::Value>>::new();
+            std::collections::BTreeMap::<NodeId, Option<&serde_json::Value>>::new();
         for op in &ops {
             match op {
                 TxOp::InsertWithId { id, payload, .. } => {
-                    unique_changes.insert(*id, Some(payload.clone()));
+                    unique_changes.insert(*id, Some(payload));
                 }
                 TxOp::UpdatePayload { id, payload } => {
-                    unique_changes.insert(*id, Some(payload.clone()));
+                    unique_changes.insert(*id, Some(payload));
                 }
                 TxOp::Delete { id } => {
                     unique_changes.insert(*id, None);
@@ -568,22 +568,46 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                 _ => {}
             }
         }
-        mt.validate_unique_changes(
-            unique_changes
-                .iter()
-                .map(|(id, payload)| (*id, payload.as_ref())),
-        )?;
 
         let delete_count = ops
             .iter()
             .filter(|op| matches!(op, TxOp::Delete { .. }))
             .count();
-        mt.reserve_text_deletes(delete_count)?;
         let insert_count = ops
             .iter()
             .filter(|op| matches!(op, TxOp::InsertWithId { .. }))
             .count();
-        let estimated_bytes = mt.estimate_reserve_bytes(insert_count)?;
+        let mut estimated_bytes = mt.estimate_reserve_bytes(insert_count)?;
+        for op in &ops {
+            let (value, vector_bytes) = match op {
+                TxOp::InsertWithId {
+                    payload, vector, ..
+                } => (
+                    Some(payload),
+                    vector.len().saturating_mul(std::mem::size_of::<T>()),
+                ),
+                TxOp::UpdatePayload { payload, .. } => (Some(payload), 0),
+                TxOp::Link { metadata, .. } => (Some(metadata), 0),
+                TxOp::UpdateVector { vector, .. } => {
+                    (None, vector.len().saturating_mul(std::mem::size_of::<T>()))
+                }
+                _ => (None, 0),
+            };
+            estimated_bytes = estimated_bytes.saturating_add(vector_bytes);
+            if let Some(value) = value {
+                let encoded = crate::storage::payload_store::json_encoded_len(value)?;
+                if !matches!(op, TxOp::Link { .. }) && encoded > 8 * 1024 * 1024 {
+                    return Err(TriviumError::PayloadTooLarge {
+                        size_bytes: encoded,
+                        max_bytes: 8 * 1024 * 1024,
+                    });
+                }
+                // 同时计入 WAL 编码、原始存储和解析缓存的暂存峰值。
+                estimated_bytes = estimated_bytes
+                    .saturating_add(encoded.saturating_mul(2))
+                    .saturating_add(crate::storage::payload_store::estimate_json_memory(value));
+            }
+        }
         let current_bytes = mt.estimated_memory_bytes();
         if self.memory_limit > 0
             && current_bytes.saturating_add(estimated_bytes) > self.memory_limit
@@ -595,6 +619,8 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                 memory_limit: self.memory_limit,
             });
         }
+        mt.validate_unique_changes(unique_changes.iter().map(|(id, payload)| (*id, *payload)))?;
+        mt.reserve_text_deletes(delete_count)?;
         mt.try_reserve_for_insert(insert_count)?;
 
         // ════════ 第二阶段：构建 WAL 条目（不触碰 memtable） ════════

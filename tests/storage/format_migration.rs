@@ -156,6 +156,8 @@ fn rewrite_v6_as_v5(path: &Path, chunks: usize) {
         }
     }
     std::fs::write(path, rewritten).unwrap();
+    // v5 样本只携带该历史格式的事实文件；当前图 sidecar 绑定转换前的主文件。
+    std::fs::remove_file(format!("{}.gidx", path.display())).unwrap();
     refresh_flush_marker(path);
 }
 

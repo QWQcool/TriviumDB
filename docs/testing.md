@@ -676,3 +676,11 @@ cargo test --features test-hooks --test concurrency 显式连续视图交错
 cargo test --test storage text_index_lifecycle -- --test-threads=1
 cargo test --test contracts 共享json契约由rust适配器完整执行
 ```
+
+
+## 写入边界与索引事实一致性
+
+- `tests/core/write_boundaries.rs` 覆盖三种 dtype、Rom/Mmap、解析缓存开启/关闭的 JSON 深度边界，验证当前读取、WAL 独立回放及关闭重开；更新入口同时验证预算拒绝后的原值、向量和 WAL。`$inc` 通过固定独立数值样例检查精确整数、跨符号边界、小数、溢出和整份补丁原子性。
+- `tests/fault_io/wal_failure_state.rs` 在 `test-hooks` 下分别注入 WAL flush/fsync 故障，子进程直接退出，再验证此前确认记录、隔离后的所有拒绝结果及恢复后的再次持久化。未确认操作允许按已持久化日志恢复；已确认数据要求完整核对。
+- `tests/storage/sidecar_facts.rs` 验证同长度 Payload 更新与边内容更新后混入旧 sidecar 的处理，检查严格拒绝、属性索引扫描回退、历史索引重建、平行边入度、分数顺序与只读零写。
+- `tests/node/write_boundaries.js` 与 `tests/python/write_boundaries.py` 由各端公共 API 入口执行，覆盖直接/批量/事务、查询、完整整数边界、合法容器往返，以及无效输入拒绝后的内容和 WAL。

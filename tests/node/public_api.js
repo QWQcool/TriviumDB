@@ -324,6 +324,7 @@ async function main() {
     runResourceContract(root)
     runSharedContract(root)
     runTransactionContract(root)
+    await require('./write_boundaries.js')(root, TriviumDB)
     runTextRecoveryContract(root)
     await runAsyncResourceContract(root)
     assert.throws(
@@ -396,7 +397,7 @@ async function main() {
 
     const storage = db.storageInfo()
     assert.equal(storage.database_format_current, 9)
-    assert.equal(storage.property_index_format, 6)
+    assert.equal(storage.property_index_format, 7)
     assert.equal(storage.node_count, 2)
 
     const vectorPrepared = db.prepareTql('SEARCH VECTOR [$x, $y] TOP 1 RETURN *')

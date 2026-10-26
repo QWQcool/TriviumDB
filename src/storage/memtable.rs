@@ -22,6 +22,72 @@ const AUTO_QUIVER_TARGET_COMPONENTS: usize = 666_667;
 const AUTO_QUIVER_MIN_NODES: usize = 209;
 const AUTO_QUIVER_MAX_NODES: usize = 834;
 
+fn increment_json_number(
+    current: &serde_json::Value,
+    delta: &serde_json::Value,
+) -> Result<serde_json::Value> {
+    let invalid = || {
+        TriviumError::InvalidInput(
+            "$inc 要求数值且结果可精确表示 (Increment requires numbers and a representable result)"
+                .into(),
+        )
+    };
+    let integer = |value: &serde_json::Value| {
+        value
+            .as_i64()
+            .map(i128::from)
+            .or_else(|| value.as_u64().map(i128::from))
+    };
+    if let (Some(a), Some(b)) = (integer(current), integer(delta)) {
+        let sum = a + b;
+        return if sum < 0 {
+            i64::try_from(sum)
+                .map(serde_json::Value::from)
+                .map_err(|_| invalid())
+        } else {
+            u64::try_from(sum)
+                .map(serde_json::Value::from)
+                .map_err(|_| invalid())
+        };
+    }
+    let exact_float = |value: &serde_json::Value| -> Result<f64> {
+        let f = value.as_f64().ok_or_else(invalid)?;
+        if let Some(i) = integer(value)
+            && f as i128 != i
+        {
+            return Err(invalid());
+        }
+        Ok(f)
+    };
+    let a = exact_float(current)?;
+    let b = exact_float(delta)?;
+    if a.fract() == 0.0
+        && b.fract() == 0.0
+        && a >= i64::MIN as f64
+        && a < u64::MAX as f64
+        && b >= i64::MIN as f64
+        && b < u64::MAX as f64
+    {
+        let sum = a as i128 + b as i128;
+        return if sum < 0 {
+            i64::try_from(sum)
+                .map(serde_json::Value::from)
+                .map_err(|_| invalid())
+        } else {
+            u64::try_from(sum)
+                .map(serde_json::Value::from)
+                .map_err(|_| invalid())
+        };
+    }
+    let sum = a + b;
+    if (b != 0.0 && sum == a) || (a != 0.0 && sum == b) {
+        return Err(invalid());
+    }
+    serde_json::Number::from_f64(sum)
+        .map(serde_json::Value::Number)
+        .ok_or_else(invalid)
+}
+
 /// 根据暴力检索的近似向量分量工作量计算自动 QuIVer 节点阈值。
 pub fn auto_quiver_node_threshold(dim: usize) -> usize {
     AUTO_QUIVER_TARGET_COMPONENTS
@@ -805,6 +871,7 @@ impl<T: VectorType> MemTable<T> {
     /// 插入具有原生三维度属性的节点，保证原子性。
     pub fn insert(&mut self, vector: &[T], payload: serde_json::Value) -> Result<NodeId> {
         self.validate_insert(vector)?;
+        crate::storage::payload_store::json_encoded_len(&payload)?;
 
         let id = self.next_id;
         let next_id = id
@@ -872,6 +939,7 @@ impl<T: VectorType> MemTable<T> {
         payload: serde_json::Value,
     ) -> Result<()> {
         self.validate_insert_with_id(id, vector)?;
+        crate::storage::payload_store::json_encoded_len(&payload)?;
         let advanced_next_id = if id >= self.next_id {
             Some(
                 id.checked_add(1)
@@ -1010,6 +1078,7 @@ impl<T: VectorType> MemTable<T> {
         metadata: serde_json::Value,
     ) -> Result<()> {
         self.validate_link(src, dst)?;
+        crate::storage::payload_store::json_encoded_len(&metadata)?;
         if !weight.is_finite() {
             return Err(TriviumError::InvalidInput(
                 "边权重必须是有限浮点数 (Edge weight must be finite)".into(),
@@ -1080,7 +1149,13 @@ impl<T: VectorType> MemTable<T> {
         let mut dangling_edges = 0;
         let mut duplicate_edges = 0;
 
-        for (&src, edges) in &self.edges {
+        for src in self
+            .edges
+            .keys()
+            .copied()
+            .chain(self.mapped_graph.iter().flat_map(|graph| graph.sources()))
+        {
+            let edges = self.get_edges(src).unwrap_or(&[]);
             let mut seen = HashSet::new();
             for edge in edges {
                 if !self.payloads.contains_key(&src) || !self.payloads.contains_key(&edge.target_id)
@@ -1105,13 +1180,17 @@ impl<T: VectorType> MemTable<T> {
         }
 
         let actual_incoming: HashMap<NodeId, HashSet<NodeId>> = self
-            .incoming_edges
+            .mapped_graph
+            .as_ref()
+            .map_or(&self.incoming_edges, |graph| graph.incoming_index())
             .iter()
             .map(|(&id, sources)| (id, sources.iter().copied().collect()))
             .filter(|(_, sources): &(NodeId, HashSet<NodeId>)| !sources.is_empty())
             .collect();
         let actual_labels: HashMap<String, HashSet<(NodeId, NodeId)>> = self
-            .label_index
+            .mapped_graph
+            .as_ref()
+            .map_or(&self.label_index, |graph| graph.label_index())
             .iter()
             .map(|(label, pairs)| {
                 (
@@ -1709,6 +1788,17 @@ impl<T: VectorType> MemTable<T> {
         self.payloads.get_value(id)
     }
 
+    pub(crate) fn try_get_payload(
+        &self,
+        id: NodeId,
+    ) -> Result<Option<std::sync::Arc<serde_json::Value>>> {
+        self.payloads.try_get_value(id)
+    }
+
+    pub(crate) fn payload_fingerprint(&self) -> (u64, u32) {
+        self.payloads.fingerprint()
+    }
+
     pub(crate) fn get_payload_raw(&self, id: NodeId) -> Option<&[u8]> {
         self.payloads.raw(id)
     }
@@ -1765,10 +1855,9 @@ impl<T: VectorType> MemTable<T> {
         self.incoming_edges.clear();
         self.label_index.clear();
         self.in_degrees.clear();
-        for target in self.all_node_ids() {
-            let degree = graph.incoming(target).len();
-            if degree > 0 {
-                self.in_degrees.insert(target, degree);
+        for pairs in graph.label_index().values() {
+            for &(_, target) in pairs {
+                *self.in_degrees.entry(target).or_default() += 1;
             }
         }
         self.mapped_graph = Some(graph);
@@ -2515,6 +2604,7 @@ impl<T: VectorType> MemTable<T> {
 
     /// 更新节点的元数据（Payload），不影响向量和图谱
     pub fn update_payload(&mut self, id: NodeId, payload: serde_json::Value) -> Result<()> {
+        crate::storage::payload_store::json_encoded_len(&payload)?;
         match self.get_payload(id).map(|payload| (*payload).clone()) {
             Some(old_payload) => {
                 let sig = calculate_json_signature(&payload);
@@ -2565,7 +2655,7 @@ impl<T: VectorType> MemTable<T> {
             .map(|payload| (*payload).clone())
             .ok_or(TriviumError::NodeNotFound(id))?;
 
-        let mut new_payload = old_payload.clone();
+        let mut new_payload = old_payload;
 
         // 确保 payload 是 Object 类型
         let obj = new_payload
@@ -2587,21 +2677,11 @@ impl<T: VectorType> MemTable<T> {
                 && let Some(inc_map) = inc_val.as_object()
             {
                 for (k, v) in inc_map {
-                    let delta = v.as_f64().unwrap_or(0.0);
-                    let current = obj.get(k).and_then(|v| v.as_f64()).unwrap_or(0.0);
-                    let new_val = current + delta;
-                    // 如果结果是整数，保持整数类型
-                    if new_val.fract() == 0.0
-                        && new_val >= i64::MIN as f64
-                        && new_val <= i64::MAX as f64
-                    {
-                        obj.insert(
-                            k.clone(),
-                            serde_json::Value::Number(serde_json::Number::from(new_val as i64)),
-                        );
-                    } else {
-                        obj.insert(k.clone(), serde_json::json!(new_val));
-                    }
+                    let current = obj
+                        .get(k)
+                        .unwrap_or(&serde_json::Value::Number(0.into()))
+                        .clone();
+                    obj.insert(k.clone(), increment_json_number(&current, v)?);
                 }
             }
 

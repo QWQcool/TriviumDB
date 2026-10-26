@@ -15,7 +15,7 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 const MAGIC: &[u8; 4] = b"TGIX";
-pub const VERSION: u16 = 2;
+pub const VERSION: u16 = 3;
 const HEADER_SIZE: usize = 24;
 
 #[derive(Debug)]
@@ -69,6 +69,21 @@ impl MappedGraphStore {
         }
 
         let mut cursor = HEADER_SIZE;
+        if version >= 3 {
+            let main_size = read_u64(&mmap, cursor, "main_size")?;
+            let main_crc = read_u32(&mmap, cursor + 8, "main_crc")?;
+            cursor += 12;
+            if main_size != std::fs::metadata(db_path)?.len()
+                || main_crc != crate::storage::file_format::file_crc32(db_path)?
+            {
+                return Err(corrupted(
+                    "图索引与主文件事实不匹配 (Graph index does not match main file facts)",
+                ));
+            }
+        } else {
+            // 旧格式缺少事实绑定，由调用方保留主文件中已读取的权威图。
+            return Ok(None);
+        }
         let mut blocks = HashMap::with_capacity(block_count);
         let mut incoming: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
         let mut labels: HashMap<String, Vec<(NodeId, NodeId)>> = HashMap::new();
@@ -273,6 +288,16 @@ impl MappedGraphStore {
         self.labels.get(label).map(Vec::as_slice).unwrap_or(&[])
     }
 
+    pub(crate) fn incoming_index(&self) -> &HashMap<NodeId, Vec<NodeId>> {
+        &self.incoming
+    }
+    pub(crate) fn label_index(&self) -> &HashMap<String, Vec<(NodeId, NodeId)>> {
+        &self.labels
+    }
+    pub(crate) fn sources(&self) -> impl Iterator<Item = NodeId> + '_ {
+        self.blocks.keys().copied()
+    }
+
     pub fn mapped_bytes(&self) -> usize {
         self.mmap.len()
     }
@@ -303,6 +328,8 @@ pub fn save<T: crate::VectorType>(
     bytes.extend_from_slice(&0u16.to_le_bytes());
     bytes.extend_from_slice(&(memtable.node_count() as u64).to_le_bytes());
     bytes.extend_from_slice(&(sources.len() as u64).to_le_bytes());
+    bytes.extend_from_slice(&std::fs::metadata(db_path)?.len().to_le_bytes());
+    bytes.extend_from_slice(&crate::storage::file_format::file_crc32(db_path)?.to_le_bytes());
     for &source in &sources {
         let edges = memtable.get_edges(source).unwrap_or(&[]);
         let data = encode_edges(edges)?;

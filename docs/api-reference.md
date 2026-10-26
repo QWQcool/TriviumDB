@@ -1327,8 +1327,8 @@ db.dropIndex('name')
 
 ```python
 info = db.storage_info()
-print(info["database_format_current"])  # 7
-print(info["property_index_format"])    # 4
+print(info["database_format_current"])  # 9
+print(info["property_index_format"])    # 7
 print(info["sidecars"])
 ```
 
@@ -1553,7 +1553,7 @@ QuIVer 支持增量 Insert/Delete/Update，并保护入口导航树，入口升�
 
 ## 维度迁移
 
-> 文件格式兼容边界：当前 `.tdb` 为 v9，可读取 v5–v9；可写句柄在后续持久化时按当前格式发布。Mmap v9 的 raw Payload 位于 generation 绑定的 `.pld`，详见[持久化布局](features.md)。ReadOnly/Immutable 不升级、不写制品。早于 v5 的主文件必须通过旧内核导出迁移；未来版本明确拒绝。sidecar 独立版本化：`.pidx v6`、`.gidx v2`、`.text v2`、`.quiver v1`。
+> 文件格式兼容边界：当前 `.tdb` 为 v9，可读取 v5–v9；可写句柄在后续持久化时按当前格式发布。Mmap v9 的 raw Payload 位于 generation 绑定的 `.pld`，详见[持久化布局](features.md)。ReadOnly/Immutable 不升级、不写制品。早于 v5 的主文件必须通过旧内核导出迁移；未来版本明确拒绝。sidecar 独立版本化：`.pidx v7`、`.gidx v3`、`.text v2`、`.quiver v1`。
 
 当需要更换 Embedding 模型（维度发生变化）时，使用 `migrate` 将旧库的结构迁移到新维度。
 
@@ -1690,3 +1690,16 @@ Hook 管线执行上下文，通过 `search_with_context()` 返回。
 | `timings` | `timings` | `stage_timings` | `dict` / `Object` / `Vec<(String, Duration)>` | 各管线阶段的耗时（Python/JS 单位毫秒） |
 | `custom_data` | `customData` | `custom_data` | `dict` / `Object` / `serde_json::Value` | Hook 注入的自定义数据 |
 | `aborted` | `aborted` | `abort` | `bool` | 管线是否被 Hook 提前终止 |
+
+
+## 写入与数值边界
+
+Payload 与边元数据采用 JSON 解码一致的容器深度边界，最多 127 层。直接写入、事务、Upsert、条件更新及 `$set` 补丁在追加 WAL 前校验最终值；单个 Payload 的编码大小上限为 8 MiB。`get()`、`get_payload()` 的解码异常返回结构化损坏错误。Payload 更新、补丁和事务的预算准入计入编码缓冲、原始字节与解析值的增量暂存，失败时保留节点、索引与 WAL。
+
+`$inc` 对整数执行精确的有符号/无符号加法，结果覆盖 `i64::MIN..=u64::MAX`；负结果使用 `i64`，非负整数结果使用 `u64`。缺失字段从零开始递增。小数参与运算时检查整数到浮点的精确转换、有限结果与有效增量。溢出、类型错误及精度损失返回参数错误，整份补丁保持原子性。
+
+Python 的直接写入、批量与事务按 dtype 提取向量，`u64` 分量保留 `0..=2**64-1` 的整数精度。Payload 支持 `None`、布尔、`i64/u64` 整数、有限浮点数、字符串、列表、元组和字符串键字典；元组保存为 JSON 数组。超范围整数、非有限数、非字符串键、循环引用和其他对象在写入前返回异常。读取 JSON 的无符号整数时返回精确 Python `int`。
+
+Node 的数值节点 ID 使用 `0..=Number.MAX_SAFE_INTEGER` 内的整数，所有读写和图接口共用此校验，插入 ID 继续遵守内核的非零约束。`u64` 向量分量要求有限、非负、整数且小于 `2**64`，直接操作、批量、事务与各检索入口采用一致校验。JavaScript `number` 使用 IEEE 754 binary64；大于安全整数范围的输入按调用方实际传入且能表示的数值处理。
+
+WAL 追加、flush 或同步失败时返回原始错误并隔离该 writer。后续写入与检查点返回 `WalClosed`；调用方释放数据库句柄并重新打开后继续使用。恢复保留此前已确认数据，失败操作的结果按实际持久化的完整日志确定。业务方可使用稳定 ID 核对该操作后再重试。

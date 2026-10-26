@@ -9,6 +9,7 @@ import shutil
 import tempfile
 
 import triviumdb
+from write_boundaries import run_write_boundaries
 
 
 def run_transaction_contract(root: str) -> None:
@@ -365,6 +366,7 @@ def main() -> None:
         run_resource_contract(root)
         run_shared_contract(root)
         run_transaction_contract(root)
+        run_write_boundaries(root)
         run_text_recovery_contract(root)
         run_query_budget_contract(root)
         path = os.path.join(root, "api.tdb")
@@ -430,7 +432,7 @@ def main() -> None:
 
         storage = db.storage_info()
         assert storage["database_format_current"] == 9
-        assert storage["property_index_format"] == 6
+        assert storage["property_index_format"] == 7
         assert storage["node_count"] == 2
 
         vector_prepared = db.prepare_tql(

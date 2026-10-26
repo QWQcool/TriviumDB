@@ -7,6 +7,7 @@
 // 辅助类型定义
 // ==========================================
 
+/** u64 分量要求有限非负整数且小于 2**64；number 按 binary64 精度表示。 */
 export type Vector = number[];
 
 export type SyncMode = 'full' | 'normal' | 'off';

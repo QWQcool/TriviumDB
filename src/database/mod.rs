@@ -1205,6 +1205,22 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         Ok(())
     }
 
+    fn admit_payload(&self, payload: &serde_json::Value) -> Result<()> {
+        let encoded = crate::storage::payload_store::json_encoded_len(payload)?;
+        if encoded > 8 * 1024 * 1024 {
+            return Err(TriviumError::PayloadTooLarge {
+                size_bytes: encoded,
+                max_bytes: 8 * 1024 * 1024,
+            });
+        }
+        self.ensure_incremental_memory_budget(
+            encoded
+                .saturating_mul(2)
+                .saturating_add(crate::storage::payload_store::estimate_json_memory(payload))
+                .saturating_add(256),
+        )
+    }
+
     /// 内部方法：达到预算后只释放冷 mmap 页，不触发无法降低索引堆占用的全量重写。
     fn check_memory_pressure(&mut self) {
         if self.memory_limit > 0 {
@@ -1306,6 +1322,7 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         self.require_write_access("insert")?;
         let _operation = self.enter_operation()?;
         reject_hook_reentrant_write()?;
+        self.admit_payload(&payload)?;
         let payload_str = payload.to_string();
         if payload_str.len() > 8 * 1024 * 1024 {
             return Err(crate::error::TriviumError::PayloadTooLarge {
@@ -1347,6 +1364,7 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
     ) -> Result<()> {
         self.require_write_access("insert_with_id")?;
         let _operation = self.enter_operation()?;
+        self.admit_payload(&payload)?;
         let payload_str = payload.to_string();
         reject_hook_reentrant_write()?;
         if payload_str.len() > 8 * 1024 * 1024 {
@@ -1538,7 +1556,7 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                 "条件更新字段不能为空 (Conditional update field cannot be empty)".into(),
             ));
         }
-        self.ensure_incremental_memory_budget(replacement.to_string().len().saturating_add(128))?;
+        self.admit_payload(&replacement)?;
         let _operation = self.enter_operation()?;
         reject_hook_reentrant_write()?;
         let mut mt = write_or_recover(&self.memtable);
@@ -1557,6 +1575,19 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
             )
         })?;
         object.insert(field.to_owned(), replacement);
+        let encoded = crate::storage::payload_store::json_encoded_len(&payload)?;
+        let additional = encoded.saturating_mul(2).saturating_add(
+            crate::storage::payload_store::estimate_json_memory(&payload),
+        );
+        let current_bytes = mt.estimated_memory_bytes();
+        if self.memory_limit > 0 && current_bytes.saturating_add(additional) > self.memory_limit {
+            return Err(TriviumError::CapacityReservationRejected {
+                requested_nodes: 1,
+                estimated_bytes: additional,
+                current_bytes,
+                memory_limit: self.memory_limit,
+            });
+        }
         let payload_str = payload.to_string();
         if payload_str.len() > 8 * 1024 * 1024 {
             return Err(TriviumError::PayloadTooLarge {
@@ -1672,6 +1703,7 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         let _operation = self.enter_operation()?;
         self.require_write_access("update_payload")?;
         reject_hook_reentrant_write()?;
+        self.admit_payload(&payload)?;
         let payload_str = payload.to_string();
         if payload_str.len() > 8 * 1024 * 1024 {
             return Err(crate::error::TriviumError::PayloadTooLarge {
@@ -1714,10 +1746,13 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         self.require_write_access("patch_payload")?;
         let _operation = self.enter_operation()?;
         reject_hook_reentrant_write()?;
+        self.admit_payload(&patch)?;
         let final_payload = {
             let mt = read_or_recover(&self.memtable);
             mt.preview_patch_payload(id, &patch)?
         };
+
+        self.admit_payload(&final_payload)?;
 
         let payload_str = final_payload.to_string();
         if payload_str.len() > 8 * 1024 * 1024 {
@@ -1882,8 +1917,9 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
     pub fn get_payload(&self, id: NodeId) -> Result<Option<serde_json::Value>> {
         self.read_operation(|| {
             let mt = read_or_recover(&self.memtable);
-            mt.get_payload(id).map(|payload| (*payload).clone())
-        })
+            mt.try_get_payload(id)
+                .map(|payload| payload.map(|payload| (*payload).clone()))
+        })?
     }
 
     pub fn get_edges(&self, id: NodeId) -> Result<Vec<crate::node::Edge>> {
@@ -2076,16 +2112,23 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
     pub fn get(&self, id: NodeId) -> Result<Option<crate::node::NodeView<T>>> {
         self.read_operation(|| {
             let mt = read_or_recover(&self.memtable);
-            let payload = (*mt.get_payload(id)?).clone();
-            let vector = mt.get_vector(id)?.to_vec();
+            let Some(payload) = mt.try_get_payload(id)? else {
+                return Ok(None);
+            };
+            let vector = mt
+                .get_vector(id)
+                .ok_or_else(|| {
+                    TriviumError::CorruptedFile("节点缺少向量 (Node vector is missing)".into())
+                })?
+                .to_vec();
             let edges = mt.get_edges(id).unwrap_or(&[]).to_vec();
-            Some(crate::node::NodeView {
+            Ok(Some(crate::node::NodeView {
                 id,
                 vector,
-                payload,
+                payload: (*payload).clone(),
                 edges,
-            })
-        })
+            }))
+        })?
     }
 
     pub fn neighbors_with_labels(

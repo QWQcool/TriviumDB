@@ -397,25 +397,50 @@ impl PayloadStore {
         self.entries.get(&id).map(|entry| entry.raw.bytes())
     }
 
+    pub(crate) fn fingerprint(&self) -> (u64, u32) {
+        let mut ids = self.ids().collect::<Vec<_>>();
+        ids.sort_unstable();
+        let mut bytes = 0u64;
+        let mut hash = crc32fast::Hasher::new();
+        for id in ids {
+            let raw = self.entries[&id].raw.bytes();
+            hash.update(&id.to_le_bytes());
+            hash.update(&(raw.len() as u64).to_le_bytes());
+            hash.update(raw);
+            bytes = bytes.saturating_add(raw.len() as u64);
+        }
+        (bytes, hash.finalize())
+    }
+
     pub fn get_value(&self, id: NodeId) -> Option<Arc<serde_json::Value>> {
+        self.try_get_value(id).ok().flatten()
+    }
+
+    pub(crate) fn try_get_value(&self, id: NodeId) -> Result<Option<Arc<serde_json::Value>>> {
         {
             let mut cache = self.cache.lock().unwrap_or_else(|p| p.into_inner());
             cache.lookups = cache.lookups.saturating_add(1);
             if let Some(value) = cache.values.get(&id).map(|entry| Arc::clone(&entry.value)) {
                 cache.hits = cache.hits.saturating_add(1);
                 cache.touch(id);
-                return Some(value);
+                return Ok(Some(value));
             }
             cache.misses = cache.misses.saturating_add(1);
         }
-        let raw = self.raw(id)?;
-        let value = Arc::new(serde_json::from_slice(raw).ok()?);
+        let Some(raw) = self.raw(id) else {
+            return Ok(None);
+        };
+        let value = Arc::new(serde_json::from_slice(raw).map_err(|error| {
+            TriviumError::CorruptedFile(format!(
+                "Payload JSON 解码失败 (Payload JSON decoding failed): id={id}, {error}"
+            ))
+        })?);
         {
             let mut cache = self.cache.lock().unwrap_or_else(|p| p.into_inner());
             cache.parsed_bytes = cache.parsed_bytes.saturating_add(raw.len() as u64);
         }
         self.cache_insert(id, Arc::clone(&value));
-        Some(value)
+        Ok(Some(value))
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (NodeId, Arc<serde_json::Value>)> + '_ {
@@ -541,13 +566,61 @@ fn read_u64(bytes: &[u8], offset: usize, field: &str) -> Result<u64> {
 }
 
 fn validate_json(raw: &[u8]) -> Result<()> {
-    use serde::Deserialize;
-    let mut deserializer = serde_json::Deserializer::from_slice(raw);
-    serde::de::IgnoredAny::deserialize(&mut deserializer)
-        .map_err(|error| TriviumError::CorruptedFile(format!("Payload JSON 无效: {error}")))?;
-    deserializer
-        .end()
-        .map_err(|error| TriviumError::CorruptedFile(format!("Payload JSON 尾部无效: {error}")))
+    serde_json::from_slice::<serde_json::Value>(raw)
+        .map(|_| ())
+        .map_err(|error| {
+            TriviumError::CorruptedFile(format!(
+                "Payload JSON 无效 (Invalid payload JSON): {error}"
+            ))
+        })
+}
+
+/// 与默认 JSON 解码器保持相同的容器深度边界，计数过程不分配编码缓冲区。
+pub(crate) fn json_encoded_len(value: &serde_json::Value) -> Result<usize> {
+    fn validate_depth(value: &serde_json::Value, depth: usize) -> Result<()> {
+        match value {
+            serde_json::Value::Array(values) => {
+                if depth >= 127 {
+                    return Err(TriviumError::InvalidInput(
+                        "JSON 容器嵌套超过 127 层 (JSON container nesting exceeds 127 levels)"
+                            .into(),
+                    ));
+                }
+                for value in values {
+                    validate_depth(value, depth + 1)?;
+                }
+            }
+            serde_json::Value::Object(values) => {
+                if depth >= 127 {
+                    return Err(TriviumError::InvalidInput(
+                        "JSON 容器嵌套超过 127 层 (JSON container nesting exceeds 127 levels)"
+                            .into(),
+                    ));
+                }
+                for value in values.values() {
+                    validate_depth(value, depth + 1)?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+    struct Counter(usize);
+    impl Write for Counter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 = self.0.saturating_add(bytes.len());
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    validate_depth(value, 0)?;
+    let mut counter = Counter(0);
+    serde_json::to_writer(&mut counter, value).map_err(|error| {
+        TriviumError::InvalidInput(format!("JSON 编码失败 (JSON encoding failed): {error}"))
+    })?;
+    Ok(counter.0)
 }
 
 pub(crate) fn estimate_json_memory(value: &serde_json::Value) -> usize {

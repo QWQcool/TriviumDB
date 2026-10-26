@@ -240,6 +240,18 @@ pub const PROPERTY_HEADER: &[FieldSpec] = &[
         width: 4,
         encoding: FieldEncoding::U32Le,
     },
+    FieldSpec {
+        name: "payload_bytes",
+        offset: 36,
+        width: 8,
+        encoding: FieldEncoding::U64Le,
+    },
+    FieldSpec {
+        name: "payload_crc",
+        offset: 44,
+        width: 4,
+        encoding: FieldEncoding::U32Le,
+    },
 ];
 
 pub const GRAPH_HEADER: &[FieldSpec] = &[
@@ -273,6 +285,18 @@ pub const GRAPH_HEADER: &[FieldSpec] = &[
         width: 8,
         encoding: FieldEncoding::U64Le,
     },
+    FieldSpec {
+        name: "main_size",
+        offset: 24,
+        width: 8,
+        encoding: FieldEncoding::U64Le,
+    },
+    FieldSpec {
+        name: "main_crc",
+        offset: 32,
+        width: 4,
+        encoding: FieldEncoding::U32Le,
+    },
 ];
 
 #[test]
@@ -281,8 +305,8 @@ fn 所有固定规格字段不重叠且完全落在声明头部内() {
         ("tdb", TDB_HEADER, 58),
         ("flush", FLUSH_MARKER_V3, 53),
         ("wal", WAL_HEADER, 6),
-        ("property", PROPERTY_HEADER, 36),
-        ("graph", GRAPH_HEADER, 24),
+        ("property", PROPERTY_HEADER, 48),
+        ("graph", GRAPH_HEADER, 36),
     ] {
         assert_eq!(fields.last().unwrap().end(), size, "{name} 头部大小漂移");
         for pair in fields.windows(2) {

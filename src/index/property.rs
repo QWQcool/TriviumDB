@@ -19,7 +19,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 const MAGIC: &[u8; 4] = b"TPDX";
-pub const FORMAT_VERSION: u16 = 6;
+pub const FORMAT_VERSION: u16 = 7;
 const KEY_ENCODING_VERSION: u16 = 2;
 const HEADER_SIZE: usize = 36;
 const MAX_FIELD_BYTES: usize = 1024 * 1024;
@@ -448,6 +448,7 @@ pub struct PropertyIndexRegistry {
     unique_composite_indexes: HashSet<CompositeDefinition>,
     mapped: Option<Arc<MappedPostingStore>>,
     key_encoding_version: u16,
+    pub(crate) fact_bound: bool,
 }
 
 impl Default for PropertyIndexRegistry {
@@ -462,6 +463,7 @@ impl Default for PropertyIndexRegistry {
             unique_composite_indexes: HashSet::new(),
             mapped: None,
             key_encoding_version: KEY_ENCODING_VERSION,
+            fact_bound: true,
         }
     }
 }
@@ -1456,6 +1458,7 @@ pub fn save_sidecar(
     registry: &PropertyIndexRegistry,
     db_path: &str,
     node_count: usize,
+    payload_fingerprint: (u64, u32),
 ) -> Result<()> {
     let sidecar_path = format!("{db_path}.pidx");
     if registry.is_empty() {
@@ -1523,6 +1526,9 @@ pub fn save_sidecar(
     bytes.extend_from_slice(&(fields.len() as u32).to_le_bytes());
     bytes.extend_from_slice(&0u32.to_le_bytes());
 
+    bytes.extend_from_slice(&payload_fingerprint.0.to_le_bytes());
+    bytes.extend_from_slice(&payload_fingerprint.1.to_le_bytes());
+
     for (field, index, unique) in fields {
         bytes.push(index.kind());
         bytes.push(u8::from(unique));
@@ -1571,6 +1577,7 @@ pub fn load_sidecar(
     db_path: &str,
     expected_node_count: usize,
     prefer_mmap_postings: bool,
+    payload_fingerprint: (u64, u32),
 ) -> Result<Option<PropertyIndexRegistry>> {
     let sidecar_path = format!("{db_path}.pidx");
     let path = Path::new(&sidecar_path);
@@ -1618,6 +1625,16 @@ pub fn load_sidecar(
     let node_count = read_u64(&bytes, &mut offset, "node_count")?;
     let field_count = read_u32(&bytes, &mut offset, "field_count")? as usize;
     let _reserved = read_u32(&bytes, &mut offset, "reserved")?;
+    if version >= 7 {
+        let payload_bytes = read_u64(&bytes, &mut offset, "payload_bytes")?;
+        let payload_crc = read_u32(&bytes, &mut offset, "payload_crc")?;
+        if (payload_bytes, payload_crc) != payload_fingerprint {
+            return Err(TriviumError::CorruptedFile(
+                "属性索引与 Payload 事实不匹配 (Property index does not match payload facts)"
+                    .into(),
+            ));
+        }
+    }
     let actual_main_size = std::fs::metadata(db_path)?.len();
     let actual_main_crc = file_crc32(Path::new(db_path))?;
     if main_size != actual_main_size
@@ -1636,6 +1653,7 @@ pub fn load_sidecar(
 
     let mut registry = PropertyIndexRegistry {
         key_encoding_version: key_version,
+        fact_bound: version >= 7,
         ..Default::default()
     };
     let mut all_mapped_blocks = BTreeMap::new();

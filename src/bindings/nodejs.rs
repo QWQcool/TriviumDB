@@ -375,11 +375,11 @@ pub mod nodejs {
                     db.search_batch(&queries, &self.search_config, &self.batch_config)
                 }
                 SearchBackendHandle::U64(db) => {
-                    let queries = self
+                    let queries: Vec<Vec<u64>> = self
                         .queries
                         .iter()
-                        .map(|query| query.iter().map(|value| *value as u64).collect())
-                        .collect::<Vec<Vec<u64>>>();
+                        .map(|query| parse_u64_vector(query))
+                        .collect::<napi::Result<_>>()?;
                     db.search_batch(&queries, &self.search_config, &self.batch_config)
                 }
             })
@@ -723,6 +723,27 @@ pub mod nodejs {
         pub context: JsHookContext,
     }
 
+    fn parse_node_id(value: f64, name: &str) -> napi::Result<u64> {
+        Ok(parse_safe_usize(value, name)? as u64)
+    }
+
+    fn parse_u64_component(value: f64) -> napi::Result<u64> {
+        if !value.is_finite()
+            || value < 0.0
+            || value.fract() != 0.0
+            || value >= 18_446_744_073_709_551_616.0
+        {
+            return Err(napi::Error::from_reason(
+                "u64 向量分量必须是 [0, 2^64) 内的有限整数 (u64 vector components must be finite integers in [0, 2^64))",
+            ));
+        }
+        Ok(value as u64)
+    }
+
+    fn parse_u64_vector(values: &[f64]) -> napi::Result<Vec<u64>> {
+        values.iter().copied().map(parse_u64_component).collect()
+    }
+
     fn parse_safe_usize(value: f64, name: &str) -> napi::Result<usize> {
         if !value.is_finite()
             || value < 0.0
@@ -731,7 +752,7 @@ pub mod nodejs {
             || value > usize::MAX as f64
         {
             return Err(napi::Error::from_reason(format!(
-                "{name} 必须是 JavaScript 安全范围内的非负整数"
+                "{name} 必须是 JavaScript 安全范围内的非负整数 ({name} must be a non-negative JavaScript safe integer)"
             )));
         }
         Ok(value as usize)
@@ -786,7 +807,7 @@ pub mod nodejs {
 
     fn build_transaction<T: crate::VectorType>(
         operations: &[serde_json::Value],
-        convert: fn(f64) -> T,
+        convert: fn(f64) -> napi::Result<T>,
     ) -> napi::Result<crate::database::TxBuilder<T>> {
         let mut tx = crate::database::TxBuilder::new();
         for operation in operations {
@@ -810,8 +831,8 @@ pub mod nodejs {
                     .map(|value| {
                         value
                             .as_f64()
-                            .map(convert)
                             .ok_or_else(|| napi::Error::from_reason("vector 必须是数字数组"))
+                            .and_then(convert)
                     })
                     .collect()
             };
@@ -1207,7 +1228,7 @@ pub mod nodejs {
                     db.search_hybrid_with_context(q_text, Some(&v), &core_config)
                 }
                 DbBackend::U64(db) => {
-                    let v: Vec<u64> = query_vector.iter().map(|&x| x as u64).collect();
+                    let v: Vec<u64> = parse_u64_vector(&query_vector)?;
                     db.search_hybrid_with_context(q_text, Some(&v), &core_config)
                 }
             }
@@ -1279,7 +1300,7 @@ pub mod nodejs {
                         .map_err(|error| to_resource_error(env, error))
                 }
                 DbBackend::U64(db) => {
-                    let v: Vec<u64> = vector.iter().map(|&x| x as u64).collect();
+                    let v: Vec<u64> = parse_u64_vector(&vector)?;
                     db.insert(&v, payload)
                         .map(|id| id as f64)
                         .map_err(|error| to_resource_error(env, error))
@@ -1327,9 +1348,9 @@ pub mod nodejs {
                 }
                 DbBackend::U64(db) => {
                     let converted: Vec<Vec<u64>> = vectors
-                        .into_iter()
-                        .map(|vector| vector.into_iter().map(|value| value as u64).collect())
-                        .collect();
+                        .iter()
+                        .map(|vector| parse_u64_vector(vector))
+                        .collect::<napi::Result<_>>()?;
                     let mut tx = crate::database::TxBuilder::new();
                     for (vector, payload) in converted.iter().zip(payloads) {
                         tx.insert(vector, payload);
@@ -1390,9 +1411,9 @@ pub mod nodejs {
                 }
                 DbBackend::U64(db) => {
                     let converted: Vec<Vec<u64>> = vectors
-                        .into_iter()
-                        .map(|vector| vector.into_iter().map(|value| value as u64).collect())
-                        .collect();
+                        .iter()
+                        .map(|vector| parse_u64_vector(vector))
+                        .collect::<napi::Result<_>>()?;
                     let mut tx = crate::database::TxBuilder::new();
                     for ((id, vector), payload) in
                         parsed_ids.iter().zip(converted.iter()).zip(payloads)
@@ -1429,7 +1450,7 @@ pub mod nodejs {
                         .map_err(|error| to_resource_error(env, error))
                 }
                 DbBackend::U64(db) => {
-                    let v: Vec<u64> = vector.iter().map(|&x| x as u64).collect();
+                    let v: Vec<u64> = parse_u64_vector(&vector)?;
                     db.insert_with_id(id, &v, payload)
                         .map_err(|error| to_resource_error(env, error))
                 }
@@ -1462,10 +1483,7 @@ pub mod nodejs {
                     db.upsert_with_id(id, &vector, payload)
                 }
                 DbBackend::U64(db) => {
-                    let vector = vector
-                        .into_iter()
-                        .map(|value| value as u64)
-                        .collect::<Vec<_>>();
+                    let vector = parse_u64_vector(&vector)?;
                     db.upsert_with_id(id, &vector, payload)
                 }
             }
@@ -1481,13 +1499,13 @@ pub mod nodejs {
         ) -> napi::Result<Vec<f64>> {
             let ids = match &mut self.inner {
                 DbBackend::F32(db) => {
-                    db.commit_tx(build_transaction(&operations, |value| value as f32)?)
+                    db.commit_tx(build_transaction(&operations, |value| Ok(value as f32))?)
                 }
-                DbBackend::F16(db) => {
-                    db.commit_tx(build_transaction(&operations, half::f16::from_f64)?)
-                }
+                DbBackend::F16(db) => db.commit_tx(build_transaction(&operations, |value| {
+                    Ok(half::f16::from_f64(value))
+                })?),
                 DbBackend::U64(db) => {
-                    db.commit_tx(build_transaction(&operations, |value| value as u64)?)
+                    db.commit_tx(build_transaction(&operations, parse_u64_component)?)
                 }
             }
             .map_err(|error| to_resource_error(env, error))?;
@@ -1517,7 +1535,7 @@ pub mod nodejs {
         #[napi]
         pub fn get(&self, env: Env, id: f64) -> napi::Result<Option<JsNodeView>> {
             Ok({
-                let id = id as u64;
+                let id = parse_node_id(id, "id")?;
                 match &self.inner {
                     DbBackend::F32(db) => db
                         .get(id)
@@ -1600,7 +1618,7 @@ pub mod nodejs {
             id: f64,
             payload: serde_json::Value,
         ) -> napi::Result<()> {
-            dispatch!(self, mut db => db.update_payload(id as u64, payload))
+            dispatch!(self, mut db => db.update_payload(parse_node_id(id, "id")?, payload))
                 .map_err(|error| to_resource_error(env, error))
         }
 
@@ -1621,14 +1639,14 @@ pub mod nodejs {
             id: f64,
             patch: serde_json::Value,
         ) -> napi::Result<()> {
-            dispatch!(self, mut db => db.patch_payload(id as u64, patch))
+            dispatch!(self, mut db => db.patch_payload(parse_node_id(id, "id")?, patch))
                 .map_err(|error| to_resource_error(env, error))
         }
 
         /// 更新节点向量
         #[napi]
         pub fn update_vector(&mut self, env: Env, id: f64, vector: Vec<f64>) -> napi::Result<()> {
-            let id = id as u64;
+            let id = parse_node_id(id, "id")?;
             match &mut self.inner {
                 DbBackend::F32(db) => {
                     let v: Vec<f32> = vector.iter().map(|&x| x as f32).collect();
@@ -1642,7 +1660,7 @@ pub mod nodejs {
                         .map_err(|error| to_resource_error(env, error))
                 }
                 DbBackend::U64(db) => {
-                    let v: Vec<u64> = vector.iter().map(|&x| x as u64).collect();
+                    let v: Vec<u64> = parse_u64_vector(&vector)?;
                     db.update_vector(id, &v)
                         .map_err(|error| to_resource_error(env, error))
                 }
@@ -1651,7 +1669,10 @@ pub mod nodejs {
 
         #[napi]
         pub fn delete_many_atomic(&mut self, env: Env, ids: Vec<f64>) -> napi::Result<u32> {
-            let ids = ids.into_iter().map(|id| id as u64).collect::<Vec<_>>();
+            let ids = ids
+                .into_iter()
+                .map(|id| parse_node_id(id, "id"))
+                .collect::<napi::Result<Vec<_>>>()?;
             let deleted = dispatch!(self, mut db => db.delete_many_atomic(&ids))
                 .map_err(|error| to_resource_error(env, error))?;
             u32::try_from(deleted).map_err(|_| napi::Error::from_reason("删除数量超出 u32"))
@@ -1666,14 +1687,14 @@ pub mod nodejs {
             expected: serde_json::Value,
             replacement: serde_json::Value,
         ) -> napi::Result<()> {
-            dispatch!(self, mut db => db.compare_and_set_payload_field(id as u64, &field, &expected, replacement))
+            dispatch!(self, mut db => db.compare_and_set_payload_field(parse_node_id(id, "id")?, &field, &expected, replacement))
                 .map_err(|error| to_resource_error(env, error))
         }
 
         /// 删除节点（三层原子联删：向量 + Payload + 所有关联边）
         #[napi]
         pub fn delete(&mut self, env: Env, id: f64) -> napi::Result<()> {
-            dispatch!(self, mut db => db.delete(id as u64))
+            dispatch!(self, mut db => db.delete(parse_node_id(id, "id")?))
                 .map_err(|error| to_resource_error(env, error))
         }
 
@@ -1691,7 +1712,7 @@ pub mod nodejs {
         ) -> napi::Result<()> {
             let label = label.as_deref().unwrap_or("related");
             let weight = weight.unwrap_or(1.0) as f32;
-            dispatch!(self, mut db => db.link(src as u64, dst as u64, label, weight))
+            dispatch!(self, mut db => db.link(parse_node_id(src, "src")?, parse_node_id(dst, "dst")?, label, weight))
                 .map_err(|error| to_resource_error(env, error))
         }
 
@@ -1704,7 +1725,7 @@ pub mod nodejs {
             label: String,
         ) -> napi::Result<Option<JsEdge>> {
             Ok({
-                dispatch!(self, db => db.get_edge(src as u64, dst as u64, &label).map_err(|error| to_resource_error(env, error))?).map(|edge| JsEdge {
+                dispatch!(self, db => db.get_edge(parse_node_id(src, "src")?, parse_node_id(dst, "dst")?, &label).map_err(|error| to_resource_error(env, error))?).map(|edge| JsEdge {
                 target_id: edge.target_id as f64,
                 label: edge.label,
                 weight: round_api_f32(edge.weight),
@@ -1724,8 +1745,8 @@ pub mod nodejs {
             metadata: Option<serde_json::Value>,
         ) -> napi::Result<()> {
             dispatch!(self, mut db => db.upsert_edge(
-                src as u64,
-                dst as u64,
+                parse_node_id(src, "src")?,
+                parse_node_id(dst, "dst")?,
                 &label,
                 weight as f32,
                 metadata.unwrap_or(serde_json::Value::Null),
@@ -1744,8 +1765,8 @@ pub mod nodejs {
             metadata: Option<serde_json::Value>,
         ) -> napi::Result<()> {
             dispatch!(self, mut db => db.update_edge(
-                src as u64,
-                dst as u64,
+                parse_node_id(src, "src")?,
+                parse_node_id(dst, "dst")?,
                 &label,
                 weight.map(|value| value as f32),
                 metadata,
@@ -1764,9 +1785,9 @@ pub mod nodejs {
         ) -> napi::Result<()> {
             match label {
                 Some(label) => {
-                    dispatch!(self, mut db => db.unlink_label(src as u64, dst as u64, &label))
+                    dispatch!(self, mut db => db.unlink_label(parse_node_id(src, "src")?, parse_node_id(dst, "dst")?, &label))
                 }
-                None => dispatch!(self, mut db => db.unlink(src as u64, dst as u64)),
+                None => dispatch!(self, mut db => db.unlink(parse_node_id(src, "src")?, parse_node_id(dst, "dst")?)),
             }
             .map_err(|error| to_resource_error(env, error))
         }
@@ -1782,7 +1803,7 @@ pub mod nodejs {
         ) -> napi::Result<Vec<f64>> {
             Ok({
                 let depth = depth.unwrap_or(1) as usize;
-                dispatch!(self, db => db.neighbors_with_labels(id as u64, depth, labels.as_deref()).map_err(|error| to_resource_error(env, error))?)
+                dispatch!(self, db => db.neighbors_with_labels(parse_node_id(id, "id")?, depth, labels.as_deref()).map_err(|error| to_resource_error(env, error))?)
                 .into_iter()
                 .map(|id| id as f64)
                 .collect()
@@ -1797,7 +1818,7 @@ pub mod nodejs {
             options: Option<JsReachabilityOptions>,
         ) -> napi::Result<Vec<JsReachabilityResult>> {
             let config = parse_reachability_options(options)?;
-            dispatch!(self, db => db.reachable(id as u64, &config))
+            dispatch!(self, db => db.reachable(parse_node_id(id, "id")?, &config))
                 .map(|results| results.into_iter().map(to_js_reachability).collect())
                 .map_err(|error| to_resource_error(env, error))
         }
@@ -1810,8 +1831,9 @@ pub mod nodejs {
             options: Option<JsReachabilityOptions>,
         ) -> napi::Result<JsReachabilityOutput> {
             let config = parse_reachability_options(options)?;
-            let output = dispatch!(self, db => db.reachable_detailed(id as u64, &config))
-                .map_err(|error| to_resource_error(env, error))?;
+            let output =
+                dispatch!(self, db => db.reachable_detailed(parse_node_id(id, "id")?, &config))
+                    .map_err(|error| to_resource_error(env, error))?;
             Ok(JsReachabilityOutput {
                 results: output.results.into_iter().map(to_js_reachability).collect(),
                 visited_nodes: output.visited_nodes as f64,
@@ -1828,8 +1850,9 @@ pub mod nodejs {
             options: Option<JsReachabilityOptions>,
         ) -> napi::Result<JsSubgraphResult> {
             let config = parse_reachability_options(options)?;
-            let output = dispatch!(self, db => db.query_subgraph(id as u64, &config))
-                .map_err(|error| to_resource_error(env, error))?;
+            let output =
+                dispatch!(self, db => db.query_subgraph(parse_node_id(id, "id")?, &config))
+                    .map_err(|error| to_resource_error(env, error))?;
             Ok(JsSubgraphResult {
                 nodes: output
                     .nodes
@@ -1867,7 +1890,7 @@ pub mod nodejs {
         ) -> napi::Result<Vec<JsSearchHit>> {
             let anchors: Vec<u64> = anchor_ids
                 .into_iter()
-                .map(|id| parse_safe_usize(id, "anchorId").map(|id| id as u64))
+                .map(|id| parse_node_id(id, "anchorId"))
                 .collect::<napi::Result<_>>()?;
             let max_anchor_nodes = max_anchor_nodes
                 .map(|value| parse_safe_usize(value, "maxAnchorNodes"))
@@ -1886,7 +1909,7 @@ pub mod nodejs {
                     db.search_graph_first(&query, &anchors, top_k as usize, max_anchor_nodes)
                 }
                 DbBackend::U64(db) => {
-                    let query: Vec<u64> = query_vector.iter().map(|value| *value as u64).collect();
+                    let query: Vec<u64> = parse_u64_vector(&query_vector)?;
                     db.search_graph_first(&query, &anchors, top_k as usize, max_anchor_nodes)
                 }
             }
@@ -1921,7 +1944,7 @@ pub mod nodejs {
                     db.search_exact(&query, top_k as usize)
                 }
                 DbBackend::U64(db) => {
-                    let query: Vec<u64> = query_vector.iter().map(|value| *value as u64).collect();
+                    let query: Vec<u64> = parse_u64_vector(&query_vector)?;
                     db.search_exact(&query, top_k as usize)
                 }
             }
@@ -2045,7 +2068,7 @@ pub mod nodejs {
                     db.search_hybrid(None, Some(&v), &search_config)
                 }
                 DbBackend::U64(db) => {
-                    let v: Vec<u64> = query_vector.iter().map(|&x| x as u64).collect();
+                    let v: Vec<u64> = parse_u64_vector(&query_vector)?;
                     db.search_hybrid(None, Some(&v), &search_config)
                 }
             }
@@ -2098,7 +2121,7 @@ pub mod nodejs {
                     db.search_hybrid_grouped(None, Some(&vector), &config)
                 }
                 DbBackend::U64(db) => {
-                    let vector: Vec<u64> = query_vector.iter().map(|&value| value as u64).collect();
+                    let vector: Vec<u64> = parse_u64_vector(&query_vector)?;
                     db.search_hybrid_grouped(None, Some(&vector), &config)
                 }
             }
@@ -2240,7 +2263,7 @@ pub mod nodejs {
                     db.search_hybrid(q_text, Some(&v), &core_config)
                 }
                 DbBackend::U64(db) => {
-                    let v: Vec<u64> = query_vector.iter().map(|&x| x as u64).collect();
+                    let v: Vec<u64> = parse_u64_vector(&query_vector)?;
                     db.search_hybrid(q_text, Some(&v), &core_config)
                 }
             }
@@ -2306,7 +2329,7 @@ pub mod nodejs {
                     db.search_hybrid(Some(&query_text), Some(&v), &core_config)
                 }
                 DbBackend::U64(db) => {
-                    let v: Vec<u64> = query_vector.iter().map(|&x| x as u64).collect();
+                    let v: Vec<u64> = parse_u64_vector(&query_vector)?;
                     db.search_hybrid(Some(&query_text), Some(&v), &core_config)
                 }
             }
@@ -2327,14 +2350,14 @@ pub mod nodejs {
         /// 对节点建立用于双路召回的长文本 BM25 索引
         #[napi]
         pub fn index_text(&mut self, env: Env, id: f64, text: String) -> napi::Result<()> {
-            dispatch!(self, mut db => db.index_text(id as u64, &text))
+            dispatch!(self, mut db => db.index_text(parse_node_id(id, "id")?, &text))
                 .map_err(|error| to_resource_error(env, error))
         }
 
         /// 对节点建立用于精确命中的 AC自动机 高级关键词索引
         #[napi]
         pub fn index_keyword(&mut self, env: Env, id: f64, keyword: String) -> napi::Result<()> {
-            dispatch!(self, mut db => db.index_keyword(id as u64, &keyword))
+            dispatch!(self, mut db => db.index_keyword(parse_node_id(id, "id")?, &keyword))
                 .map_err(|error| to_resource_error(env, error))
         }
 
@@ -2511,7 +2534,7 @@ pub mod nodejs {
         #[napi]
         pub fn get_payload(&self, env: Env, id: f64) -> napi::Result<Option<serde_json::Value>> {
             Ok(
-                dispatch!(self, db => db.get_payload(id as u64).map_err(|error| to_resource_error(env, error))?),
+                dispatch!(self, db => db.get_payload(parse_node_id(id, "id")?).map_err(|error| to_resource_error(env, error))?),
             )
         }
 
@@ -2519,7 +2542,7 @@ pub mod nodejs {
         #[napi]
         pub fn get_edges(&self, env: Env, id: f64) -> napi::Result<Vec<JsEdge>> {
             Ok({
-                dispatch!(self, db => db.get_edges(id as u64).map_err(|error| to_resource_error(env, error))?)
+                dispatch!(self, db => db.get_edges(parse_node_id(id, "id")?).map_err(|error| to_resource_error(env, error))?)
                     .into_iter()
                     .map(|e| JsEdge {
                         target_id: e.target_id as f64,
@@ -2540,7 +2563,7 @@ pub mod nodejs {
             label: Option<String>,
         ) -> napi::Result<Vec<JsIncomingEdge>> {
             Ok({
-                dispatch!(self, db => db.get_incoming_edges(id as u64, label.as_deref()).map_err(|error| to_resource_error(env, error))?)
+                dispatch!(self, db => db.get_incoming_edges(parse_node_id(id, "id")?, label.as_deref()).map_err(|error| to_resource_error(env, error))?)
                 .into_iter()
                 .map(|edge| JsIncomingEdge {
                     source_id: edge.source_id as f64,
@@ -2683,7 +2706,7 @@ pub mod nodejs {
             interval_secs: Option<u32>,
         ) -> napi::Result<()> {
             let secs = interval_secs.unwrap_or(7200);
-            dispatch!(self, mut db => db.enable_auto_compaction(std::time::Duration::from_secs(secs as u64)))
+            dispatch!(self, mut db => db.enable_auto_compaction(std::time::Duration::from_secs(u64::from(secs))))
                 .map_err(|error| to_resource_error(env, error))
         }
 
@@ -2810,7 +2833,7 @@ pub mod nodejs {
         #[napi]
         pub fn contains(&self, env: Env, id: f64) -> napi::Result<bool> {
             Ok(
-                dispatch!(self, db => db.contains(id as u64).map_err(|error| to_resource_error(env, error))?),
+                dispatch!(self, db => db.contains(parse_node_id(id, "id")?).map_err(|error| to_resource_error(env, error))?),
             )
         }
 

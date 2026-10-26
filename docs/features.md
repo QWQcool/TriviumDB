@@ -493,7 +493,7 @@ TQL 的 FIND 入口底层采用三层加速策略：
 
 ## 持久化属性索引体系
 
-属性索引由 `PropertyIndexRegistry` 统一管理，并持久化到 `.tdb.pidx`（当前 v6，旧格式按加载器支持范围处理）。posting 使用稳定 NodeId/slot 映射，CRUD、slot 复用、重启与 ReadOnly/Immutable 均有专项测试。
+属性索引由 `PropertyIndexRegistry` 统一管理，并持久化到 `.tdb.pidx`（当前 v7，旧格式按加载器支持范围处理）。posting 使用稳定 NodeId/slot 映射，CRUD、slot 复用、重启与 ReadOnly/Immutable 均有专项测试。
 
 **数值键编码 v2**：Ordered/Composite ART 的有序键使用统一的数值全序编码——`i64`/`u64`/`f64` 共享同一数值顺序，整数范围查询（如 `age: {$gte: 30}`）与浮点阈值不再因键前缀不同而错配为空集。等值索引（Hash/Bitmap）继续保留 JSON 数字的精确类型与值，可区分超过 f64 精度的相邻大整数；Filter 的范围比较也使用精确整数比较。超出 f64 精确整数范围（±2^53 之外）的有序范围边界不参与索引剪枝，自动回退精确扫描。旧 key v1 编码的 `.pidx` 在打开时有界读取并按索引定义在内存中重建为 v2 编码：ReadOnly/Immutable 保持零写，Writer 在下一次显式 flush 发布 v2 sidecar。
 
@@ -781,3 +781,10 @@ v0.6.0 新增 ARM64 (aarch64) NEON SIMD 支持，与已有的 x86 AVX2 并列，
 
 编译时自动选择最优路径，零开销回退，无需用户配置。
 
+
+
+### 派生索引的事实绑定
+
+`.pidx v7` 同时记录主文件长度/CRC、节点数和按 NodeId 排序的原始 Payload 字节指纹。Payload 存放于 `.pld` 时，同长度更新也参与索引身份校验。失配由 `MissingIndexPolicy` 选择结构化报错或查询规划器扫描事实；旧版索引根据定义在内存中重建，ReadOnly 保持文件零写。
+
+`.gidx v3` 在节点数之外记录主文件长度与 CRC，绑定边权、标签和元数据所在的事实文件。失配返回损坏错误；Writer 可通过 `repair_graph_indexes()` 重建并持久化。历史 v1/v2 图索引由主文件图数据提供读取结果，后续显式持久化发布当前格式。只读图的入度按边数计算，多标签平行边共享来源时仍分别计数，查询分数、排序和完整性检查与可写图一致。
