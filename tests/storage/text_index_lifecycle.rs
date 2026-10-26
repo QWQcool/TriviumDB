@@ -251,6 +251,151 @@ fn 延期索引元数据发布失败后同句柄重试可恢复() {
 }
 
 #[test]
+fn 文本已写入但属性发布失败后重开恢复完整文件组() {
+    let dir = TestDir::new();
+    for mode in [StorageMode::Rom, StorageMode::Mmap] {
+        let path = dir.path(&format!("group_{mode:?}.tdb"));
+        seed(&path, mode);
+        let old_text = std::fs::read(format!("{path}.text")).unwrap();
+        let mut db = open(&path, mode, true);
+        db.create_index("kind").unwrap();
+        db.insert_with_id(3, &[0., 0., 1.], json!({"kind":"新增"}))
+            .unwrap();
+        db.update_payload(1, json!({"kind":"更新"})).unwrap();
+        db.delete(2).unwrap();
+        db.index_text(1, "uncommitted replacement").unwrap();
+        let obstacle = format!("{path}.pidx.tmp");
+        std::fs::create_dir(&obstacle).unwrap();
+        assert!(db.flush().is_err());
+        assert!(Path::new(&format!("{path}.publish")).exists());
+        drop(db);
+        std::fs::remove_dir(&obstacle).unwrap();
+        assert!(matches!(
+            Database::<f32>::open_read_only(&path, 3),
+            Err(triviumdb::TriviumError::RecoveryRequired { .. })
+        ));
+        let mut db = open(&path, mode, true);
+        assert_eq!(db.node_count().unwrap(), 2);
+        assert_eq!(db.get_payload(1).unwrap().unwrap(), json!({"kind":"更新"}));
+        assert_eq!(db.get_payload(3).unwrap().unwrap(), json!({"kind":"新增"}));
+        assert_eq!(std::fs::read(format!("{path}.text")).unwrap(), old_text);
+        assert_eq!(search(&db, "alpha 旧别名"), vec![1]);
+        assert!(search(&db, "replacement beta 共同别名").is_empty());
+        db.flush().unwrap();
+        db.close().unwrap();
+        let db = open(&path, mode, true);
+        assert_eq!(search(&db, "alpha 旧别名"), vec![1]);
+        assert_eq!(db.node_count().unwrap(), 2);
+    }
+}
+
+#[cfg(feature = "test-hooks")]
+#[test]
+fn 延期保存失败后新增文本修改仍有完整撤销备份() {
+    use triviumdb::test_hooks::{IoPoint, fail_io_at};
+    let dir = TestDir::new();
+    let path = dir.path("enlist.tdb");
+    seed(&path, StorageMode::Mmap);
+    let mut db = open(&path, StorageMode::Mmap, false);
+    db.insert_with_id(3, &[0., 0., 1.], json!({})).unwrap();
+    {
+        let _failure = fail_io_at(IoPoint::TextMetadataWrite);
+        assert!(db.flush().is_err());
+    }
+    db.index_text(1, "replacement").unwrap();
+    {
+        let _failure = fail_io_at(IoPoint::GraphSidecarWrite);
+        assert!(db.flush().is_err());
+    }
+    drop(db);
+    let mut db = open(&path, StorageMode::Mmap, true);
+    assert_eq!(db.node_count().unwrap(), 3);
+    assert_eq!(search(&db, "alpha 旧别名"), vec![1]);
+    assert!(search(&db, "replacement").is_empty());
+    db.flush().unwrap();
+    db.close().unwrap();
+}
+
+#[test]
+fn 文本重建验证完整输入与预算后替换并遵守只读权限() {
+    use triviumdb::index::text::TextIndexDocument;
+    let dir = TestDir::new();
+    let path = dir.path("rebuild-validation.tdb");
+    seed(&path, StorageMode::Mmap);
+    let mut db = open(&path, StorageMode::Mmap, true);
+    let document = || TextIndexDocument {
+        id: 1,
+        text: "rebuilt".into(),
+        keywords: vec!["新别名".into()],
+    };
+    assert!(db.rebuild_text_index(&[document(), document()]).is_err());
+    assert!(
+        db.rebuild_text_index(&[TextIndexDocument {
+            keywords: vec![String::new()],
+            ..document()
+        }])
+        .is_err()
+    );
+    db.set_memory_limit(1024 * 1024).unwrap();
+    assert!(
+        db.rebuild_text_index(&[TextIndexDocument {
+            text: "大正文".repeat(20000),
+            ..document()
+        }])
+        .is_err()
+    );
+    assert_eq!(search(&db, "alpha 旧别名"), vec![1]);
+    db.close().unwrap();
+    let mut reader = Database::<f32>::open_read_only(&path, 3).unwrap();
+    assert!(matches!(
+        reader.rebuild_text_index(&[]),
+        Err(triviumdb::TriviumError::ReadOnlyViolation { .. })
+    ));
+    reader.close().unwrap();
+}
+
+#[test]
+fn 延期文本解码执行共享工作区准入且拒绝后保持原文件() {
+    use triviumdb::resources::{ResourceLimits, ResourceRuntime};
+    let dir = TestDir::new();
+    let path = dir.path("text-runtime.tdb");
+    let mut db = open(&path, StorageMode::Mmap, false);
+    db.insert_with_id(1, &[1., 0., 0.], json!({})).unwrap();
+    let text = (0..4000)
+        .map(|index| format!("term{index:04}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    db.index_text(1, &text).unwrap();
+    db.close().unwrap();
+    let original = std::fs::read(format!("{path}.text")).unwrap();
+    let runtime = ResourceRuntime::new(ResourceLimits {
+        memory_limit: 12 * 1024 * 1024,
+        maintenance_memory_limit: 1024 * 1024,
+        ..Default::default()
+    })
+    .unwrap();
+    let mut db = Database::<f32>::open_with_runtime(
+        &path,
+        Config {
+            dim: 3,
+            memory_limit: 8 * 1024 * 1024,
+            load_text_index: false,
+            ..Default::default()
+        },
+        runtime.clone(),
+    )
+    .unwrap();
+    assert!(matches!(
+        db.build_text_index(),
+        Err(triviumdb::TriviumError::ResourceBudgetExceeded { .. })
+    ));
+    assert_eq!(std::fs::read(format!("{path}.text")).unwrap(), original);
+    assert_eq!(runtime.stats().reserved_workspace_bytes, 0);
+    assert!(runtime.stats().peak_reserved_bytes <= runtime.stats().memory_limit);
+    db.close().unwrap();
+}
+
+#[test]
 fn 只读未加载句柄保持全部文件字节不变() {
     let dir = TestDir::new();
     let path = dir.path("readonly.tdb");
@@ -372,6 +517,232 @@ fn 历史v2快照去重并保留现有字节布局() {
     assert!(!terms.contains_key("alpha"));
     assert_eq!(terms["beta"][&1], 1);
     assert_eq!(lengths[&1], 1);
+}
+
+#[test]
+fn 发布版0810文件组升级后可写且保留正文关键词() {
+    let dir = TestDir::new();
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/v0810_text_mmap");
+    for missing_meta in [false, true] {
+        let path = dir.path(&format!("upgrade_{missing_meta}.tdb"));
+        for suffix in [
+            "",
+            ".vec",
+            ".flush_ok",
+            ".pld.2",
+            ".text",
+            ".text.meta",
+            ".wal",
+        ] {
+            if missing_meta && suffix == ".text.meta" {
+                continue;
+            }
+            std::fs::copy(
+                source.join(format!("sample.tdb{suffix}")),
+                format!("{path}{suffix}"),
+            )
+            .unwrap();
+        }
+        let mut db = Database::<f32>::open(&path, 4).unwrap();
+        assert_eq!(db.node_count().unwrap(), 4);
+        db.insert_with_id(5, &[0., 0., 1., 0.], json!({"content":"新增"}))
+            .unwrap();
+        db.flush().unwrap();
+        db.build_text_index().unwrap();
+        assert_eq!(search(&db, "alpha"), vec![1, 2, 3, 4]);
+        assert_eq!(
+            db.tql_nodes(r#"TEXT AC "测试别名0" TOP 10 AS hits WITH hits RETURN hits"#)
+                .unwrap()
+                .iter()
+                .map(|row| row["hits"].id)
+                .collect::<Vec<_>>(),
+            vec![1]
+        );
+        db.close().unwrap();
+        let mut db = Database::<f32>::open_with_config(
+            &path,
+            Config {
+                dim: 4,
+                load_text_index: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(db.node_count().unwrap(), 5);
+        assert_eq!(
+            db.tql_nodes(r#"TEXT AC "测试别名3" TOP 10 AS hits WITH hits RETURN hits"#)
+                .unwrap()
+                .iter()
+                .map(|row| row["hits"].id)
+                .collect::<Vec<_>>(),
+            vec![4]
+        );
+        db.delete(2).unwrap();
+        db.flush().unwrap();
+        db.close().unwrap();
+        let db = Database::<f32>::open_with_config(
+            &path,
+            Config {
+                dim: 4,
+                load_text_index: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(search(&db, "alpha"), vec![1, 3, 4]);
+    }
+}
+
+#[test]
+fn 历史元数据缺失与主库长度变化均可加载合并和清理() {
+    let dir = TestDir::new();
+    for mode in [StorageMode::Rom, StorageMode::Mmap] {
+        for load in [false, true] {
+            for missing in [false, true] {
+                let path = dir.path(&format!("legacy_{mode:?}_{load}_{missing}.tdb"));
+                seed(&path, mode);
+                let meta_path = format!("{path}.text.meta");
+                if missing {
+                    std::fs::remove_file(&meta_path).unwrap();
+                } else {
+                    let mut bytes = std::fs::read(&meta_path).unwrap();
+                    bytes[8..16].copy_from_slice(&u64::MAX.to_le_bytes());
+                    std::fs::write(&meta_path, bytes).unwrap();
+                }
+                let mut db = open(&path, mode, load);
+                db.insert_with_id(3, &[0., 0., 1.], json!({"正文":"独立载荷"}))
+                    .unwrap();
+                db.delete(1).unwrap();
+                db.flush().unwrap();
+                db.build_text_index().unwrap();
+                assert_eq!(search(&db, "beta 共同别名"), vec![2]);
+                assert!(search(&db, "alpha 旧别名").is_empty());
+                db.close().unwrap();
+                let db = open(&path, mode, true);
+                assert_eq!(db.node_count().unwrap(), 2);
+                assert_eq!(search(&db, "beta 共同别名"), vec![2]);
+            }
+        }
+    }
+}
+
+#[test]
+fn 显式加载历史文本后关闭补齐元数据且只读打开保持原文件() {
+    let dir = TestDir::new();
+    for mode in [StorageMode::Rom, StorageMode::Mmap] {
+        let path = dir.path(&format!("legacy-close-{mode:?}.tdb"));
+        seed(&path, mode);
+        let meta = format!("{path}.text.meta");
+        std::fs::remove_file(&meta).unwrap();
+        let original = std::fs::read(format!("{path}.text")).unwrap();
+        let mut reader = Database::<f32>::open_with_config(
+            &path,
+            Config {
+                dim: 3,
+                access_mode: AccessMode::ReadOnly,
+                load_text_index: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(search(&reader, "alpha 旧别名"), vec![1]);
+        reader.close().unwrap();
+        assert!(!Path::new(&meta).exists());
+        assert_eq!(std::fs::read(format!("{path}.text")).unwrap(), original);
+        let mut db = open(&path, mode, true);
+        db.close().unwrap();
+        let bytes = std::fs::read(&meta).unwrap();
+        assert_eq!(bytes.len(), 28);
+        assert_eq!(
+            &bytes[8..16],
+            &std::fs::metadata(&path).unwrap().len().to_le_bytes()
+        );
+        assert_eq!(
+            &bytes[24..28],
+            &crc32fast::hash(&std::fs::read(format!("{path}.text")).unwrap()).to_le_bytes()
+        );
+        assert_eq!(search(&open(&path, mode, true), "alpha 旧别名"), vec![1]);
+    }
+}
+
+#[test]
+fn 损坏索引原样保留且显式重建可恢复正文和关键词() {
+    use triviumdb::index::text::TextIndexDocument;
+    let dir = TestDir::new();
+    for mode in [StorageMode::Rom, StorageMode::Mmap] {
+        for corrupt in ["crc", "size", "metadata", "trailing", "truncated"] {
+            let path = dir.path(&format!("rebuild_{mode:?}_{corrupt}.tdb"));
+            seed(&path, mode);
+            let text = format!("{path}.text");
+            let meta = format!("{path}.text.meta");
+            match corrupt {
+                "metadata" => std::fs::write(&meta, b"TMET").unwrap(),
+                "crc" => {
+                    let mut bytes = std::fs::read(&text).unwrap();
+                    let end = bytes.len() - 1;
+                    bytes[end] ^= 1;
+                    std::fs::write(&text, bytes).unwrap();
+                }
+                "size" => {
+                    let mut bytes = std::fs::read(&text).unwrap();
+                    bytes.push(0);
+                    std::fs::write(&text, bytes).unwrap();
+                }
+                _ => {
+                    std::fs::remove_file(&meta).unwrap();
+                    let mut bytes = std::fs::read(&text).unwrap();
+                    if corrupt == "trailing" {
+                        bytes.push(0);
+                    } else {
+                        bytes.truncate(10);
+                    }
+                    std::fs::write(&text, bytes).unwrap();
+                }
+            }
+            let original = std::fs::read(&text).unwrap();
+            let mut db = open(&path, mode, true);
+            assert_eq!(std::fs::read(&text).unwrap(), original);
+            let error = db.build_text_index().unwrap_err();
+            assert!(matches!(
+                error,
+                triviumdb::TriviumError::ImmutableArtifactInvalid { .. }
+            ));
+            db.insert_with_id(3, &[0., 0., 1.], json!({})).unwrap();
+            db.flush().unwrap();
+            assert_eq!(std::fs::read(&text).unwrap(), original);
+            db.rebuild_text_index(&[
+                TextIndexDocument {
+                    id: 1,
+                    text: "恢复正文 repaired".into(),
+                    keywords: vec!["恢复别名".into()],
+                },
+                TextIndexDocument {
+                    id: 2,
+                    text: "beta survivor".into(),
+                    keywords: vec!["共同别名".into()],
+                },
+            ])
+            .unwrap();
+            assert_eq!(search(&db, "repaired 恢复别名"), vec![1]);
+            assert_eq!(search(&db, "beta"), vec![2]);
+            assert!(search(&db, "alpha 旧别名").is_empty());
+            let invalid = TextIndexDocument {
+                id: 999,
+                text: "无效".into(),
+                keywords: vec![],
+            };
+            assert!(db.rebuild_text_index(&[invalid]).is_err());
+            assert_eq!(search(&db, "恢复别名"), vec![1]);
+            db.close().unwrap();
+            let mut db = open(&path, mode, true);
+            assert_eq!(search(&db, "repaired 恢复别名"), vec![1]);
+            db.rebuild_text_index(&[]).unwrap();
+            db.close().unwrap();
+            assert!(!Path::new(&text).exists());
+            assert!(!Path::new(&meta).exists());
+            assert_eq!(open(&path, mode, true).node_count().unwrap(), 3);
+        }
+    }
 }
 
 #[test]

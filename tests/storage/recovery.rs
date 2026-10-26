@@ -112,7 +112,7 @@ fn P0_TextIndex精确持久化_重启后不从Payload猜测重建() {
 }
 
 #[test]
-fn TextIndex_sidecar损坏时安全清理并降级为空索引() {
+fn TextIndex_sidecar损坏时保留原文件并支持显式重建() {
     let path = tmp_db("text_sidecar_corrupt");
     cleanup(&path);
     {
@@ -125,6 +125,7 @@ fn TextIndex_sidecar损坏时安全清理并降级为空索引() {
         db.flush().unwrap();
     }
     std::fs::write(format!("{}.text", path), b"corrupt").unwrap();
+    let original_meta = std::fs::read(format!("{path}.text.meta")).unwrap();
     let config = Config {
         dim: DIM,
         load_text_index: true,
@@ -132,7 +133,7 @@ fn TextIndex_sidecar损坏时安全清理并降级为空索引() {
     };
     let result = std::panic::catch_unwind(|| Database::<f32>::open_with_config(&path, config));
     assert!(result.is_ok());
-    let db = result.unwrap().unwrap();
+    let mut db = result.unwrap().unwrap();
     let search_config = triviumdb::database::SearchConfig {
         top_k: 5,
         expand_depth: 0,
@@ -145,8 +146,37 @@ fn TextIndex_sidecar损坏时安全清理并降级为空索引() {
             .unwrap()
             .is_empty()
     );
-    assert!(!Path::new(&format!("{}.text", path)).exists());
-    assert!(!Path::new(&format!("{}.text.meta", path)).exists());
+    assert_eq!(std::fs::read(format!("{path}.text")).unwrap(), b"corrupt");
+    assert_eq!(
+        std::fs::read(format!("{path}.text.meta")).unwrap(),
+        original_meta
+    );
+    assert!(db.build_text_index().is_err());
+    db.rebuild_text_index(&[triviumdb::index::text::TextIndexDocument {
+        id: 1,
+        text: "安全目标词".into(),
+        keywords: vec!["恢复别名".into()],
+    }])
+    .unwrap();
+    db.close().unwrap();
+    let mut db = Database::<f32>::open_with_config(
+        &path,
+        Config {
+            dim: DIM,
+            load_text_index: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        db.search_hybrid(Some("安全目标词"), None, &search_config)
+            .unwrap()
+            .iter()
+            .map(|hit| hit.id)
+            .collect::<Vec<_>>(),
+        vec![1]
+    );
+    db.close().unwrap();
     cleanup(&path);
 }
 

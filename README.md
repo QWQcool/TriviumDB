@@ -180,15 +180,15 @@ pnpm add triviumdb
 cargo add triviumdb
 ```
 
-`0.9.0-beta.1` 的共享资源、受控关闭和目录快照可通过以下 Beta 版本安装：
+`0.9.0-beta.2` 提供关闭后的完整资源释放、流式 WAL 恢复、文本索引重建与文件组原子发布，并提前 QuIVer 自动构建阈值：
 
 ```bash
-pip install "triviumdb==0.9.0b1"
-npm install triviumdb@0.9.0-beta.1
-cargo add triviumdb@0.9.0-beta.1
+pip install "triviumdb==0.9.0b2"
+npm install triviumdb@0.9.0-beta.2
+cargo add triviumdb@0.9.0-beta.2
 ```
 
-版本内容见 [0.9.0-beta.1 变更说明](docs/changes/0.9.0-beta.1.md)。
+版本内容见 [0.9.0-beta.2 变更说明](docs/changes/0.9.0-beta.2.md)。
 
 > 🧪 **尝鲜：HTTP 服务端版（nightly）** —— TriviumDB 的正式产品形态始终是**嵌入式数据库**（进程内 Library，即装即用，无需部署）。仓库中的 `triviumdb-server` 提供了一个可选的 HTTP 壳（多客户端并发读写、OCC、流式 NDJSON 等），目前处于 **nightly 预览状态**，仅供尝鲜和跟踪演进方向，协议随时可能变更，请勿用于生产。详见 [Server 说明（nightly）](docs/server.md)；一切 API 与用法说明仍以嵌入式版本为准。
 
@@ -374,7 +374,7 @@ finally:
 
 内存预算按声明配额和已接入的工作区预留核算。部署时结合 mmap 驻留、页缓存、线程栈及语言运行时开销配置进程或容器限额。Python 预算异常与 Node 的 `QueueFull` 错误均提供 `resource`、`requested`、`used`、`limit` 字段，便于宿主限流、退避和释放闲置实例。
 
-当前开发分支加强了关闭完成后的文件资源释放、Hook 回收、分组提交异常处理及关闭后的数据访问检查。Rust 数据读取与 `set_hook()` 使用 `Result` 传播错误，Python/Node 在关闭后抛错。迁移方式见[未发布变更](docs/changes/unreleased.md)。
+`0.9.0-beta.2` 的关闭完成点涵盖文件句柄、内存映射、数据库 Hook 与配额释放，并支持分组提交异常后的状态恢复。Rust 数据读取与 `set_hook()` 使用 `Result` 传播错误，Python/Node 在关闭后抛出关闭错误。迁移方式见[版本变更](docs/changes/0.9.0-beta.2.md#生命周期与-rust-api-迁移)。
 
 详见[共享资源与实例诊断](docs/resource-runtime.md)和[关闭、快照与恢复](docs/lifecycle-snapshots.md)。
 
@@ -384,7 +384,7 @@ finally:
 
 **QuIVer**（Quantized Index for Vector Retrieval）是 TriviumDB 自研的近似最近邻（ANN）图索引。使用 **BQ 快速构图 + 无训练 SM-L2 导航 + 原始向量余弦精排**；导航结合两位编码与每向量幅值信息计算重建平方 L2，召回和吞吐取决于数据、参数与精排预算。
 
-> 📖 [QuIVer 架构与配置](docs/quiver.md) · [基准测试指南](benches/README.md) · [0.9.0-beta.1 变更说明](docs/changes/0.9.0-beta.1.md)
+> 📖 [QuIVer 架构与配置](docs/quiver.md) · [基准测试指南](benches/README.md) · [0.9.0-beta.2 变更说明](docs/changes/0.9.0-beta.2.md)
 
 > ⚠️ **维度建议：强烈建议数据库向量维度不超过 3072。** TriviumDB 的通用存储与精确 BruteForce 检索允许更高维度，但 QuIVer 的 BQ 签名安全上限是 3072 维。超过该维度时引擎不会自动构建 QuIVer，检索会稳定回退到 BruteForce；手动构建 QuIVer 会返回明确错误。高维数据库仍可使用，但无法获得 QuIVer ANN 加速，内存和计算开销也会显著增加。
 
@@ -643,6 +643,7 @@ TriviumDB/
 
 | 文档                                          | 说明                                                   |
 | --------------------------------------------- | ------------------------------------------------------ |
+| **[LLM 项目索引](llms.txt)**                  | 产品概览、功能、使用场景与文档入口                       |
 | **[API 完整参考](docs/api-reference.md)**     | 全部 Python / Node.js / Rust API、参数说明、返回值类型 |
 | **[支持特性详解](docs/features.md)**          | 架构设计、存储引擎、索引策略、崩溃恢复等技术细节       |
 | **[最佳实践](docs/best-practices.md)**        | 数据建模范式、性能调优、Hook 使用指南、避坑指南        |

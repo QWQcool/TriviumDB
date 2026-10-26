@@ -20,7 +20,16 @@ function record(directory, phase, data = {}) {
 
 function sample(db, directory, phase) {
   global.gc()
-  record(directory, phase, { memory: process.memoryUsage(), estimated: db.estimatedMemory(), nodes: db.nodeCount() })
+  let linuxMemory = null
+  if (process.platform === 'linux') {
+    const status = fs.readFileSync('/proc/self/status', 'utf8')
+    linuxMemory = Object.fromEntries(['VmHWM', 'RssAnon', 'RssFile', 'RssShmem'].map(field => {
+      const matched = status.match(new RegExp(`^${field}:\\s+(\\d+) kB$`, 'm'))
+      return [field, matched ? Number(matched[1]) * 1024 : null]
+    }))
+  }
+  record(directory, phase, { memory: process.memoryUsage(), peakRss: process.resourceUsage().maxRSS * 1024,
+    linuxMemory, estimated: db.estimatedMemory(), nodes: db.nodeCount() })
 }
 
 function seed(db, nodes = NODES, dim = DIM) {
@@ -104,13 +113,16 @@ async function child(mode, directory) {
         }
         db.insertWithId(id, vector, { id })
       }
-      db.search(vector, 1, 0, -1)
+      const hits = db.search(vector, 5, 0, -1)
+      fs.writeFileSync(path.join(directory, 'quiver-query.json'), JSON.stringify({ vector, hits }))
       db.flush()
     }
     assert.equal(db.nodeCount(), 4000)
     assert(fs.existsSync(file + '.quiver'), '内存对照必须包含已持久化 QuIVer')
     sample(db, directory, mode)
     assert(db.estimatedMemory() < 4000 * dim * 4, '重开应保持紧凑索引与映射向量结构')
+    const expected = JSON.parse(fs.readFileSync(path.join(directory, 'quiver-query.json'), 'utf8'))
+    assert.deepEqual(db.search(expected.vector, 5, 0, -1), expected.hits, '冷页回收与重开应保持查询结果和分数')
     db.close()
     globalThis.closedDatabase = db
     return

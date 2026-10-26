@@ -13,6 +13,37 @@ const { TriviumDB, ResourceRuntime, verifySnapshot, restoreSnapshot } = require(
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'triviumdb-node-public-api-'))
 const file = path.join(root, 'api.tdb')
 
+function runTextRecoveryContract(root) {
+  const source = path.join(__dirname, '..', 'fixtures', 'v0810_text_mmap')
+  for (const missing of [false, true]) {
+    const target = path.join(root, `text-upgrade-${missing}.tdb`)
+    for (const suffix of ['', '.vec', '.flush_ok', '.pld.2', '.text', '.text.meta', '.wal']) {
+      if (missing && suffix === '.text.meta') continue
+      fs.copyFileSync(path.join(source, `sample.tdb${suffix}`), target + suffix)
+    }
+    const db = new TriviumDB(target, { dim: 4, autoBuildQuiver: false })
+    db.insertWithId(5, [0, 0, 1, 0], {})
+    db.flush()
+    db.buildTextIndex()
+    assert.deepEqual(db.tql('TEXT BM25 "alpha" TOP 10 AS hits WITH hits RETURN hits')
+      .map(row => row.hits.id).sort(), ['1', '2', '3', '4'])
+    db.close()
+    fs.writeFileSync(target + '.text', 'corrupt')
+    const repair = new TriviumDB(target, { dim: 4, loadTextIndex: true, autoBuildQuiver: false })
+    assert.equal(fs.readFileSync(target + '.text', 'utf8'), 'corrupt')
+    assert.throws(() => repair.buildTextIndex())
+    repair.rebuildTextIndex([{ id: 1, text: 'restoredtoken', keywords: ['restoredanchor'] }])
+    repair.close()
+    const reader = new TriviumDB(target, { dim: 4, loadTextIndex: true, accessMode: 'readOnly' })
+    assert.equal(reader.nodeCount(), 5)
+    assert.deepEqual(reader.tql('TEXT BM25 "restoredtoken" TOP 10 AS hits WITH hits RETURN hits')
+      .map(row => row.hits.id), ['1'])
+    assert.deepEqual(reader.tql('TEXT AC "restoredanchor" TOP 10 AS hits WITH hits RETURN hits')
+      .map(row => row.hits.id), ['1'])
+    reader.close()
+  }
+}
+
 function runLifecycleContract(root) {
   const test = require('../contracts/lifecycle_cases.json')
   for (const dtype of test.dtypes) {
@@ -188,12 +219,29 @@ function runSharedContract(root) {
           assert.equal(db.tql(check.query).length, check.count, testCase.name)
         }
       }
+    } else if (testCase.operation === 'text_rebuild') {
+      for (const id of [-1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+        assert.throws(() => db.rebuildTextIndex([{ id, text: 'invalid' }]))
+      }
+      db.rebuildTextIndex(testCase.documents)
+      for (const check of expected.checks) {
+        assert.equal(db.tql(check.query).length, check.count, testCase.name)
+      }
     } else {
       throw new Error(`未知共享契约操作: ${testCase.operation}`)
     }
   }
   db.close()
   assert.throws(() => db.buildTextIndex(), /closed|关闭/i)
+  assert.throws(() => db.rebuildTextIndex([]), /closed|关闭/i)
+  const reader = new TriviumDB(path.join(root, 'shared-contract.tdb'), {
+    dim: contract.setup.dimension, loadTextIndex: true, accessMode: 'readOnly',
+  })
+  for (const check of contract.cases.find(item => item.operation === 'text_rebuild').expected.checks) {
+    assert.equal(reader.tql(check.query).length, check.count)
+  }
+  assert.throws(() => reader.rebuildTextIndex([]), /read.only|只读/i)
+  reader.close()
 }
 
 async function runAsyncResourceContract(root) {
@@ -232,6 +280,7 @@ async function main() {
     runLifecycleContract(root)
     runResourceContract(root)
     runSharedContract(root)
+    runTextRecoveryContract(root)
     await runAsyncResourceContract(root)
     assert.throws(
       () => new TriviumDB(file, 2),

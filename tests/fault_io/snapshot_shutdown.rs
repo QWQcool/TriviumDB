@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 use triviumdb::storage::snapshot::{restore_snapshot, verify_snapshot};
-use triviumdb::test_hooks::{ConcurrencyPoint, IoPoint, fail_io_at, pause_at};
+use triviumdb::test_hooks::{ConcurrencyPoint, IoPoint, fail_io_at, pause_at_path};
 use triviumdb::{Database, ShutdownPhase, TriviumError};
 
 fn root() -> std::path::PathBuf {
@@ -127,7 +127,11 @@ fn 关闭等待超时不释放正在刷盘的锁与配额() {
     let mut db = Database::<f32>::open(&path, 3).unwrap();
     db.insert_with_id(1, &[1.0, 0.0, 0.0], serde_json::json!({}))
         .unwrap();
-    let pause = pause_at(ConcurrencyPoint::BeforeFlushMarkerRename);
+    let scope = root.canonicalize().unwrap().join("live.tdb");
+    let pause = pause_at_path(
+        ConcurrencyPoint::BeforeFlushMarkerRename,
+        scope.to_str().unwrap(),
+    );
     assert!(!db.close_timeout(Duration::ZERO).unwrap());
     pause.wait_until_arrived();
     let status = db.shutdown_status();

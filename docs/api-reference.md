@@ -1,6 +1,6 @@
 # TriviumDB API 完整参考
 
-> **版本**: 当前开发分支，基于 `0.9.0-beta.1` 公共 API；见[未发布变更](changes/unreleased.md)。
+> **版本**: `0.9.0-beta.2` 公共 API；见[变更说明](changes/0.9.0-beta.2.md)。
 > **语言**: Rust 核心 + Python 绑定 (PyO3) + Node.js 绑定 (napi-rs)  
 > **许可**: Apache-2.0
 
@@ -242,7 +242,7 @@ db.set_sync_mode(SyncMode::Off)?;
 
 数据访问统一执行生命周期检查：Rust 的 `get`、`get_payload`、`get_edge`、`get_edges`、`get_incoming_edges`、`get_all_ids`、`all_node_ids`、`node_count`、`contains`、`neighbors`、`neighbors_with_labels`、`shortest_path`、`graph_stats`、`validate_graph`、`list_indexes`、`list_unique_indexes`、`index_info` 与 `clear_search_state` 返回 `Result`；`set_hook` 也返回 `Result<()>`。调用方使用 `?` 或显式处理错误。Python/Node 的打开状态返回类型保持一致，关闭后抛错。状态、资源统计和配置诊断继续可读。
 
-Mmap `flush()` 在发布新事实前流式备份旧 `.tdb/.vec/.flush_ok` 并发布 `.publish` 撤销日志，因此额外磁盘读写与临时空间随旧主文件和向量文件大小增长。ReadWrite `open()` 在加载前恢复未完成发布，再回放 WAL；已提交的新 marker 不会回滚。主文件 v9、marker v3 保持不变；损坏日志或备份返回 `CorruptedFile`。详见[恢复协议](security.md#8-mmap-三文件一致性标记flush_ok-v3)。
+`flush()` 通过 `.publish` 撤销日志管理主数据、向量、QuIVer、文本、属性与图索引文件组。Mmap 在各文件同步后提交 marker，Rom 在同步后提交日志状态；ReadWrite `open()` 先完成中断恢复，再流式回放 WAL。备份使用有界缓冲，额外磁盘空间与纳入发布的旧文件组大小对应。主文件使用 v9、marker 使用 v3、发布日志使用 v2，并支持读取历史 v1 日志。协议见[恢复说明](security.md#8-mmap-三文件一致性标记flush_ok-v3)。
 
 **泛型类型参数 `T`：**
 
@@ -1332,7 +1332,7 @@ print(info["property_index_format"])    # 4
 print(info["sidecars"])
 ```
 
-历史 API 不再静默翻译：`tql_mut` 读查询、patch 普通对象简写、Node 数字构造参数分别返回迁移错误；Rust `open_with_sync` 已删除。历史无头 WAL 返回 `UnsupportedWalVersion`；带记录的旧版本 WAL 需用旧内核恢复并 flush。恰好只有版本头、没有记录的旧 WAL 可由 ReadWrite 打开流程原子升级，ReadOnly/Immutable 保持零写并要求先由 Writer 完成升级。
+`tql_mut` 读查询、patch 普通对象简写、Node 数字构造参数分别返回迁移错误；Rust 同步配置通过 `Config.sync_mode` 提供。ReadWrite 打开支持完整校验并原子迁移 v2 WAL，当前 v3 WAL 按帧流式恢复。ReadOnly/Immutable 保持物理零写，旧格式升级由 Writer 完成。无头、未知版本及非法迁移输入返回结构化错误。
 
 ## 持久化与压缩
 
@@ -1490,6 +1490,24 @@ db.build_text_index()
 `load_text_index=True` 会在打开时加载持久化的全文索引。默认 `False` 省略加载，后续纯向量写入、`flush()` 和 `close()` 保留已有文本文件；显式文本登记或预热会先加载原索引并合并修改。延期加载与清理受内核内存预算约束，超限会先返回错误。
 
 文本登记通过 `flush()` 或可写句柄的 `close()` 持久化，尚不属于 `Transaction` 的 WAL 操作。应用需保留权威正文与别名来源，以便重新登记。
+
+历史 `.text`（TIDX v2）快照缺少 `.text.meta` 时，完整格式校验通过后可恢复正文与关键词，并在保存时补齐长度和 CRC。已有元数据中的文本长度和 CRC 用于校验内容；主文件长度随存储布局和节点变化更新。加载异常时保留原文本文件，错误消息区分长度、CRC、元数据格式与快照格式。
+
+### rebuild_text_index — 按完整集合重建文本索引
+
+Rust 使用 `rebuild_text_index(&[TextIndexDocument])`，Python 使用 `rebuild_text_index(documents)`，Node.js 使用 `rebuildTextIndex(documents)`。每条记录包含 `id`、`text` 与可选的 `keywords`。
+
+```python
+db.rebuild_text_index([
+    {"id": 42, "text": "完整正文", "keywords": ["实体别名", "产品名称"]},
+    {"id": 43, "text": "另一篇正文", "keywords": []},
+])
+db.flush()
+```
+
+提供的集合构成重建后的完整文本索引，空集合清空全部正文与关键词。内核验证节点、重复记录、关键词和工作区预算，构建成功后整体替换内存索引，随后通过 `flush()` 或可写关闭持久化。宿主可用保存的权威正文和别名恢复文本检索。
+
+检查点将主数据、文本及其元数据、属性索引和图索引纳入发布恢复组。可写打开先恢复中断的文件组，再回放 WAL。Mmap 在索引同步完成后提交 `.flush_ok`；Rom 在完整文件组同步后提交发布日志。
 
 ---
 

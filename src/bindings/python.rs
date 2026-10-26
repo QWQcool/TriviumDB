@@ -7,6 +7,7 @@
 #[allow(clippy::module_inception)]
 pub mod python {
     use crate::database::Database as GenericDatabase;
+    use pyo3::exceptions::PyValueError;
     use pyo3::prelude::*;
     use pyo3::types::{PyDict, PyList};
 
@@ -1364,6 +1365,37 @@ pub mod python {
 
         fn build_text_index(&mut self) -> PyResult<()> {
             dispatch!(self, mut db => db.build_text_index()).map_err(to_py_error)
+        }
+
+        /// 从完整正文与关键词集合重建文本索引，通过 flush 或 close 持久化。
+        fn rebuild_text_index(&mut self, documents: Vec<Bound<'_, PyDict>>) -> PyResult<()> {
+            let documents = documents
+                .iter()
+                .map(|document| {
+                    for key in document.keys() {
+                        let key = key.extract::<String>()?;
+                        if !matches!(key.as_str(), "id" | "text" | "keywords") {
+                            return Err(PyValueError::new_err(format!("文本重建字段无效：{key}")));
+                        }
+                    }
+                    Ok(crate::index::text::TextIndexDocument {
+                        id: document
+                            .get_item("id")?
+                            .ok_or_else(|| PyValueError::new_err("文本重建记录缺少 id"))?
+                            .extract()?,
+                        text: document
+                            .get_item("text")?
+                            .ok_or_else(|| PyValueError::new_err("文本重建记录缺少 text"))?
+                            .extract()?,
+                        keywords: document
+                            .get_item("keywords")?
+                            .map(|value| value.extract())
+                            .transpose()?
+                            .unwrap_or_default(),
+                    })
+                })
+                .collect::<PyResult<Vec<_>>>()?;
+            dispatch!(self, mut db => db.rebuild_text_index(&documents)).map_err(to_py_error)
         }
 
         // ════════ 属性二级索引 ════════

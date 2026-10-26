@@ -45,6 +45,7 @@ assert_type(hits[0].score, float)
 assert_type(db.get(1), NodeView | None)
 assert_type(db.get_edges(1), list[Edge])
 assert_type(db.node_count(), int)
+assert_type(db.rebuild_text_index([{"id": 1, "text": "完整正文", "keywords": ["别名"]}]), None)
 assert_type(db.instance_stats(), dict[str, Any])
 
 # 资源异常保留内核预算字段。

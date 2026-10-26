@@ -589,6 +589,14 @@ pub mod nodejs {
         }
     }
 
+    /// 完整文本索引重建的节点正文与关键词。
+    #[napi(object)]
+    pub struct JsTextIndexDocument {
+        pub id: f64,
+        pub text: String,
+        pub keywords: Option<Vec<String>>,
+    }
+
     /// 数据库打开与容量规划配置。
     #[napi(object)]
     pub struct JsDatabaseOptions {
@@ -2334,6 +2342,27 @@ pub mod nodejs {
         #[napi]
         pub fn build_text_index(&mut self, env: Env) -> napi::Result<()> {
             dispatch!(self, mut db => db.build_text_index())
+                .map_err(|error| to_resource_error(env, error))
+        }
+
+        /// 从完整正文与关键词集合重建文本索引，通过 flush 或 close 持久化。
+        #[napi]
+        pub fn rebuild_text_index(
+            &mut self,
+            env: Env,
+            documents: Vec<JsTextIndexDocument>,
+        ) -> napi::Result<()> {
+            let documents = documents
+                .into_iter()
+                .map(|document| {
+                    Ok(crate::index::text::TextIndexDocument {
+                        id: parse_safe_usize(document.id, "文本重建节点 ID")? as u64,
+                        text: document.text,
+                        keywords: document.keywords.unwrap_or_default(),
+                    })
+                })
+                .collect::<napi::Result<Vec<_>>>()?;
+            dispatch!(self, mut db => db.rebuild_text_index(&documents))
                 .map_err(|error| to_resource_error(env, error))
         }
 

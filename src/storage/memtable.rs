@@ -2849,6 +2849,10 @@ impl<T: VectorType> MemTable<T> {
         self.vec_pool.advise_dontneed();
     }
 
+    pub(crate) fn finish_vector_loading(&mut self) -> Result<()> {
+        self.vec_pool.finish_loading()
+    }
+
     pub(crate) fn mmap_vector_bytes(&self) -> usize {
         self.vec_pool.mmap_bytes()
     }
@@ -2887,6 +2891,62 @@ impl<T: VectorType> MemTable<T> {
     pub(crate) fn try_build_text_index(&mut self) -> Result<()> {
         self.checkpoint_dirty = true;
         self.text_index.try_build()
+    }
+
+    pub(crate) fn rebuild_text_index(
+        &mut self,
+        documents: &[crate::index::text::TextIndexDocument],
+    ) -> Result<()> {
+        let estimate = documents
+            .iter()
+            .try_fold(64 * 1024usize, |total, document| {
+                std::iter::once(document.text.len())
+                    .chain(document.keywords.iter().map(String::len))
+                    .try_fold(total, |total, length| {
+                        length
+                            .checked_mul(64)
+                            .and_then(|bytes| bytes.checked_add(512))
+                            .and_then(|bytes| total.checked_add(bytes))
+                    })
+            })
+            .ok_or_else(|| TriviumError::CapacityAllocationFailed {
+                reason: "文本重建工作区估算溢出".into(),
+            })?;
+        self.check_text_memory_budget(estimate)?;
+        let runtime = self.resource_runtime.clone();
+        let _workspace = if runtime.is_maintenance_task() {
+            runtime.reserve_maintenance_workspace(estimate)?
+        } else {
+            runtime.reserve_workspace(estimate)?
+        };
+        let mut seen = HashSet::new();
+        seen.try_reserve(documents.len()).map_err(|error| {
+            TriviumError::CapacityAllocationFailed {
+                reason: format!("文本重建节点目录预留失败：{error}"),
+            }
+        })?;
+        for document in documents {
+            self.validate_update_payload(document.id)?;
+            if !seen.insert(document.id) {
+                return Err(TriviumError::InvalidInput(format!(
+                    "文本重建节点重复：{}",
+                    document.id
+                )));
+            }
+            if document.keywords.iter().any(String::is_empty) {
+                return Err(TriviumError::InvalidInput("关键词不能为空".into()));
+            }
+        }
+        let mut index = TextIndex::new();
+        for document in documents {
+            index.add_text(document.id, &document.text);
+            for keyword in &document.keywords {
+                index.add_keyword(document.id, keyword);
+            }
+        }
+        index.try_build()?;
+        self.set_text_index(index);
+        Ok(())
     }
 
     pub(crate) fn set_text_index(&mut self, text_index: TextIndex) {
@@ -2971,18 +3031,22 @@ impl<T: VectorType> MemTable<T> {
         let Some(path) = self.deferred_text_path.as_deref() else {
             return Ok(());
         };
-        if self.text_memory_limit > 0 {
-            let bytes = std::fs::metadata(format!("{path}.text"))?.len();
-            // 保守计入解码、词典、posting 与自动机工作区，超预算先拒绝再解码。
-            let estimate = usize::try_from(bytes)
-                .ok()
-                .and_then(|bytes| bytes.checked_mul(32))
-                .and_then(|bytes| bytes.checked_add(64 * 1024))
-                .ok_or_else(|| TriviumError::CapacityAllocationFailed {
-                    reason: "文本索引加载峰值估算溢出".into(),
-                })?;
-            self.check_text_memory_budget(estimate)?;
-        }
+        let bytes = std::fs::metadata(format!("{path}.text"))?.len();
+        // 解码前同时执行实例预算和共享运行时工作区准入。
+        let estimate = usize::try_from(bytes)
+            .ok()
+            .and_then(|bytes| bytes.checked_mul(32))
+            .and_then(|bytes| bytes.checked_add(64 * 1024))
+            .ok_or_else(|| TriviumError::CapacityAllocationFailed {
+                reason: "文本索引加载峰值估算溢出".into(),
+            })?;
+        self.check_text_memory_budget(estimate)?;
+        let runtime = self.resource_runtime.clone();
+        let _workspace = if runtime.is_maintenance_task() {
+            runtime.reserve_maintenance_workspace(estimate)?
+        } else {
+            runtime.reserve_workspace(estimate)?
+        };
         let mut index =
             crate::storage::file_format::read_deferred_text_index(path, self.deferred_text_meta)?;
         for mutation in &self.pending_text_mutations {

@@ -17,6 +17,15 @@ fn directory(name: &str) -> PathBuf {
 }
 
 fn assert_released(root: &Path) {
+    #[cfg(target_os = "linux")]
+    {
+        let prefix = format!("{}/", root.canonicalize().unwrap().display());
+        let maps = std::fs::read("/proc/self/maps").unwrap();
+        assert!(
+            !String::from_utf8_lossy(&maps).contains(&prefix),
+            "关闭后仍保留数据库文件映射：{prefix}"
+        );
+    }
     #[cfg(windows)]
     for entry in std::fs::read_dir(root).unwrap() {
         use std::os::windows::fs::OpenOptionsExt;
@@ -74,6 +83,220 @@ fn 三种后端关闭后保留对象仍释放完整文件组() {
     run_close::<f32>("f32");
     run_close::<half::f16>("f16");
     run_close::<u64>("u64");
+}
+
+fn retained_values<T: VectorType + serde::Serialize + serde::de::DeserializeOwned>(name: &str) {
+    use triviumdb::resources::{ResourceLimits, ResourceRuntime};
+    for mode in [StorageMode::Mmap, StorageMode::Rom] {
+        let root = directory(&format!("持有查询结果-{name}-{mode:?}"));
+        let path = root.join("sample.tdb").to_string_lossy().into_owned();
+        let runtime = ResourceRuntime::new(ResourceLimits {
+            memory_limit: 64 * 1024 * 1024,
+            maintenance_memory_limit: 8 * 1024 * 1024,
+            max_threads: 2,
+            ..Default::default()
+        })
+        .unwrap();
+        let config = || Config {
+            dim: 4,
+            storage_mode: mode,
+            memory_limit: 8 * 1024 * 1024,
+            auto_build_quiver: false,
+            load_text_index: true,
+            ..Default::default()
+        };
+        let mut db = Database::<T>::open_with_runtime(&path, config(), runtime.clone()).unwrap();
+        db.insert_with_id(
+            1,
+            &[T::from_f32(1.); 4],
+            json!({"kind":"old", "body":"独立正文"}),
+        )
+        .unwrap();
+        db.insert_with_id(2, &[T::from_f32(2.); 4], json!({"kind":"peer"}))
+            .unwrap();
+        db.link(1, 2, "关联", 2.).unwrap();
+        db.create_index("kind").unwrap();
+        db.index_text(1, "original").unwrap();
+        let prepared = db
+            .prepare_tql(r#"FIND {kind: "old"} AS n WITH n RETURN n"#)
+            .unwrap();
+        let rows = db
+            .execute_prepared_tql(&prepared, &Default::default())
+            .unwrap();
+        let node = db.get(1).unwrap().unwrap();
+        let payload = db.get_payload(1).unwrap().unwrap();
+        let edges = db.get_edges(1).unwrap();
+        let hits = db.search(&[T::from_f32(1.); 4], 2, 0, -1.).unwrap();
+        db.close().unwrap();
+        assert_eq!(runtime.stats().attached_databases, 0);
+        assert_eq!(runtime.stats().reserved_database_bytes, 0);
+        assert_eq!(runtime.stats().reserved_workspace_bytes, 0);
+        assert_released(&root);
+        let mut replacement =
+            Database::<T>::open_with_runtime(&path, config(), runtime.clone()).unwrap();
+        replacement
+            .update_payload(1, json!({"kind":"new"}))
+            .unwrap();
+        replacement.flush().unwrap();
+        // 旧对象的重复关闭和销毁须保持新实例的锁、配额与已写入数据。
+        assert!(matches!(db.close(), Err(TriviumError::DatabaseClosed)));
+        assert!(db.close_timeout(Duration::ZERO).unwrap());
+        drop(db);
+        assert_eq!(runtime.stats().attached_databases, 1);
+        assert_eq!(runtime.stats().reserved_database_bytes, 8 * 1024 * 1024);
+        assert!(matches!(
+            Database::<T>::open(&path, 4),
+            Err(TriviumError::DatabaseLocked(_))
+        ));
+        assert_eq!(
+            replacement.get_payload(1).unwrap().unwrap(),
+            json!({"kind":"new"})
+        );
+        assert!(
+            replacement
+                .execute_prepared_tql(&prepared, &Default::default())
+                .unwrap()
+                .is_empty()
+        );
+        let expected_payload = json!({"kind":"old", "body":"独立正文"});
+        assert_eq!(node.id, 1);
+        assert_eq!(node.vector, vec![T::from_f32(1.); 4]);
+        assert_eq!(node.payload, expected_payload);
+        assert_eq!(payload, expected_payload);
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].target_id, 2);
+        assert_eq!(edges[0].label, "关联");
+        assert_eq!(edges[0].weight, 2.);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].len(), 1);
+        let row = rows[0]["n"].as_node().expect("查询列 n 必须保留节点值");
+        assert_eq!(row.id, 1);
+        assert_eq!(row.payload, expected_payload);
+        assert_eq!(row.vector, vec![T::from_f32(1.); 4]);
+        let mut hit_ids = hits.iter().map(|hit| hit.id).collect::<Vec<_>>();
+        hit_ids.sort_unstable();
+        assert_eq!(hit_ids, vec![1, 2]);
+        for hit in &hits {
+            assert_eq!(
+                hit.payload,
+                match hit.id {
+                    1 => expected_payload.clone(),
+                    2 => json!({"kind":"peer"}),
+                    _ => unreachable!(),
+                }
+            );
+        }
+        replacement.close().unwrap();
+        assert_eq!(runtime.stats().attached_databases, 0);
+        assert_released(&root);
+        for file in std::fs::read_dir(&root).unwrap() {
+            std::fs::remove_file(file.unwrap().path()).unwrap();
+        }
+        std::fs::remove_dir(&root).unwrap();
+        std::hint::black_box((replacement, prepared, rows, node, payload, edges, hits));
+    }
+}
+
+#[test]
+fn 持有查询结果和预编译查询时关闭并复用路径保持实例隔离() {
+    retained_values::<f32>("f32");
+    retained_values::<half::f16>("f16");
+    retained_values::<u64>("u64");
+}
+
+fn retained_readers<T: VectorType + serde::Serialize + serde::de::DeserializeOwned>(name: &str) {
+    use triviumdb::DatabaseReader;
+    use triviumdb::database::AccessMode;
+    for mode in [StorageMode::Mmap, StorageMode::Rom] {
+        for access in [AccessMode::ReadOnly, AccessMode::Immutable] {
+            let root = directory(&format!("多读者-{name}-{mode:?}-{access:?}"));
+            let path = root.join("sample.tdb").to_string_lossy().into_owned();
+            let mut writer = Database::<T>::open_with_config(
+                &path,
+                Config {
+                    dim: 4,
+                    storage_mode: mode,
+                    auto_build_quiver: false,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            writer
+                .insert_with_id(1, &[T::from_f32(1.); 4], json!({"kind":"old"}))
+                .unwrap();
+            writer
+                .insert_with_id(2, &[T::from_f32(2.); 4], json!({"kind":"old"}))
+                .unwrap();
+            writer.link(1, 2, "共享图边", 1.).unwrap();
+            writer.create_index("kind").unwrap();
+            writer.index_text(1, "original").unwrap();
+            writer.publish_generation_manifest("多读者制品").unwrap();
+            writer.close().unwrap();
+            let open = || {
+                DatabaseReader::<T>::open_with_config(
+                    &path,
+                    Config {
+                        dim: 4,
+                        access_mode: access,
+                        load_text_index: true,
+                        auto_build_quiver: false,
+                        ..Default::default()
+                    },
+                )
+                .unwrap()
+            };
+            let mut first = open();
+            let mut second = open();
+            let saved = second.get(1).unwrap().unwrap();
+            first.close().unwrap();
+            assert_eq!(
+                second.get_payload(1).unwrap().unwrap(),
+                json!({"kind":"old"})
+            );
+            assert_eq!(second.get_edges(1).unwrap()[0].target_id, 2);
+            let mut hit_ids = second
+                .search(&[T::from_f32(1.); 4], 2, 0, -1.)
+                .unwrap()
+                .into_iter()
+                .map(|hit| hit.id)
+                .collect::<Vec<_>>();
+            hit_ids.sort_unstable();
+            assert_eq!(hit_ids, vec![1, 2]);
+            if access == AccessMode::ReadOnly {
+                assert!(matches!(
+                    Database::<T>::open(&path, 4),
+                    Err(TriviumError::DatabaseLocked(_))
+                ));
+            }
+            assert!(second.close_timeout(Duration::from_secs(5)).unwrap());
+            assert_released(&root);
+            let mut replacement = Database::<T>::open(&path, 4).unwrap();
+            assert!(matches!(first.close(), Err(TriviumError::DatabaseClosed)));
+            assert!(matches!(second.close(), Err(TriviumError::DatabaseClosed)));
+            assert!(matches!(
+                Database::<T>::open(&path, 4),
+                Err(TriviumError::DatabaseLocked(_))
+            ));
+            replacement
+                .update_payload(1, json!({"kind":"replacement"}))
+                .unwrap();
+            replacement.close().unwrap();
+            assert_eq!(saved.payload, json!({"kind":"old"}));
+            assert_released(&root);
+            for file in std::fs::read_dir(&root).unwrap() {
+                std::fs::remove_file(file.unwrap().path()).unwrap();
+            }
+            std::fs::remove_dir(&root).unwrap();
+            std::hint::black_box((writer, first, second, replacement, saved));
+        }
+    }
+}
+
+#[test]
+fn 多读者独立关闭且持有已关闭reader不阻止文件组释放() {
+    retained_readers::<f32>("f32");
+    retained_readers::<half::f16>("f16");
+    retained_readers::<u64>("u64");
 }
 
 #[test]

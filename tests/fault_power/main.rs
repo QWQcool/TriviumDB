@@ -8,6 +8,9 @@ use std::process::Command;
 use triviumdb::database::Database;
 
 #[cfg(feature = "test-hooks")]
+mod text_publication;
+
+#[cfg(feature = "test-hooks")]
 use triviumdb::test_hooks::{ConcurrencyPoint, pause_at};
 
 const DIM: usize = 4;

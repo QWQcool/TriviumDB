@@ -760,6 +760,9 @@ export class TriviumDB {
    */
   buildTextIndex(): void;
 
+  /** 从完整正文与关键词集合重建文本索引，通过 flush 或 close 持久化。 */
+  rebuildTextIndex(documents: Array<{ id: number; text: string; keywords?: string[] }>): void;
+
   // ── 属性二级索引 ──
 
   /**

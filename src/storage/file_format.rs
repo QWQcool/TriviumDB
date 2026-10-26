@@ -363,6 +363,8 @@ fn write_text_index_meta(db_path: &str) -> std::io::Result<()> {
 }
 
 fn write_text_index_meta_bytes(db_path: &str, bytes: &[u8]) -> std::io::Result<()> {
+    #[cfg(feature = "test-hooks")]
+    crate::test_hooks::io_result(crate::test_hooks::IoPoint::TextMetadataWrite)?;
     let meta_path = text_index_meta_path_from_db(db_path);
     let tmp = format!("{meta_path}.tmp");
     let mut file = File::create(&tmp)?;
@@ -372,41 +374,14 @@ fn write_text_index_meta_bytes(db_path: &str, bytes: &[u8]) -> std::io::Result<(
 }
 
 pub(crate) fn deferred_text_metadata(db_path: &str) -> Option<[u8; 28]> {
-    let bytes = std::fs::read(text_index_meta_path_from_db(db_path)).ok()?;
-    let meta: [u8; 28] = bytes.try_into().ok()?;
-    (meta[..4] == *b"TMET"
-        && meta[4..8] == 1u32.to_le_bytes()
-        && meta[8..16] == std::fs::metadata(db_path).ok()?.len().to_le_bytes()
-        && meta[16..24]
-            == std::fs::metadata(text_index_path_from_db(db_path))
-                .ok()?
-                .len()
-                .to_le_bytes())
-    .then_some(meta)
-}
-
-fn validate_text_index_meta(db_path: &str) -> bool {
-    let Ok(meta) = std::fs::read(text_index_meta_path_from_db(db_path)) else {
-        return false;
-    };
-    let text_path = text_index_path_from_db(db_path);
-    let Ok(text_size_actual) = std::fs::metadata(&text_path).map(|meta| meta.len()) else {
-        return false;
-    };
-    if meta.len() != 28 || &meta[0..4] != b"TMET" {
-        return false;
+    use std::io::Read;
+    let mut file = File::open(text_index_meta_path_from_db(db_path)).ok()?;
+    if file.metadata().ok()?.len() != 28 {
+        return None;
     }
-    let version = u32::from_le_bytes(meta[4..8].try_into().unwrap_or([0; 4]));
-    let tdb_size = u64::from_le_bytes(meta[8..16].try_into().unwrap_or([0; 8]));
-    let text_size = u64::from_le_bytes(meta[16..24].try_into().unwrap_or([0; 8]));
-    let text_crc = u32::from_le_bytes(meta[24..28].try_into().unwrap_or([0; 4]));
-    version == 1
-        && tdb_size
-            == std::fs::metadata(db_path)
-                .map(|m| m.len())
-                .unwrap_or(u64::MAX)
-        && text_size == text_size_actual
-        && text_crc == file_crc32(&text_path).unwrap_or(u32::MAX)
+    let mut meta = [0u8; 28];
+    file.read_exact(&mut meta).ok()?;
+    (meta[..4] == *b"TMET" && meta[4..8] == 1u32.to_le_bytes()).then_some(meta)
 }
 
 pub fn save<T: VectorType>(
@@ -436,24 +411,44 @@ fn save_inner<T: VectorType>(
     mode: StorageMode,
 ) -> Result<()> {
     // 在主文件发布前处理延期操作；失败时保留原 sidecar 与所有待合并记录。
-    let release_text_after_save =
+    let mut release_text_after_save =
         memtable.text_index_is_deferred() && memtable.text_index_has_pending_changes();
     if release_text_after_save {
         memtable.prepare_text_index()?;
+    } else if memtable.text_index_is_deferred()
+        && memtable.deferred_text_metadata().is_none()
+        && !Path::new(&text_index_meta_path_from_db(path)).exists()
+    {
+        // 历史文本快照经完整解码后补齐校验元数据；异常原文件继续保留。
+        match memtable.prepare_text_index() {
+            Ok(()) => release_text_after_save = true,
+            Err(error) => tracing::warn!("历史文本索引校验失败，保留原文件：{error}"),
+        }
     }
     // 保留原 CRC，不以重新计算校验和的方式“认可”未加载文件中的损坏。
     let preserved_text_meta = memtable.deferred_text_metadata();
-    match mode {
-        StorageMode::Mmap => save_mmap(memtable, path),
+    if mode == StorageMode::Rom && publication::pending(path) {
+        memtable.vec_pool_mut().detach_mmap();
+        publication::recover(path, true)?;
+    }
+    let retry = publication::resume(path, memtable.text_index_is_deferred())?;
+    let generation = match retry.or_else(|| read_marker_generation(&flush_ok_path_from_db(path))) {
+        Some(generation) if retry.is_some() => generation,
+        Some(previous) => previous
+            .checked_add(1)
+            .ok_or_else(|| TriviumError::InvalidInput("flush generation 已耗尽".into()))?,
+        None => 1,
+    };
+    if retry.is_none() {
+        publication::begin(path, generation, mode, memtable.text_index_is_deferred())?;
+    }
+    let marker = match mode {
+        StorageMode::Mmap => Some(save_mmap(memtable, path, generation, retry.is_some())?),
         StorageMode::Rom => {
-            if publication::pending(path) {
-                // Rom 本来就需要物化向量；先解除映射再恢复上次中断的 Mmap 发布。
-                memtable.vec_pool_mut().detach_mmap();
-                publication::recover(path, true)?;
-            }
-            save_rom(memtable, path)
+            save_rom(memtable, path)?;
+            None
         }
-    }?;
+    };
 
     // 顺便持久化 QuIVer 索引（如果已构建）
     let quiver_path = quiver_path_from_db(path);
@@ -480,19 +475,17 @@ fn save_inner<T: VectorType>(
     }
 
     let text_path = text_index_path_from_db(path);
+    let mut updated_text_meta = None;
     if memtable.text_index_is_deferred() {
         if let Some(mut meta) = preserved_text_meta {
             meta[8..16].copy_from_slice(&std::fs::metadata(path)?.len().to_le_bytes());
             write_text_index_meta_bytes(path, &meta)?;
-            memtable.update_deferred_text_metadata(meta);
+            updated_text_meta = Some(meta);
         }
     } else {
         memtable.text_index().save_to_file(Path::new(&text_path))?;
         if Path::new(&text_path).exists() {
             write_text_index_meta(path)?;
-            if release_text_after_save {
-                memtable.defer_text_index(path);
-            }
         } else {
             match std::fs::remove_file(text_index_meta_path_from_db(path)) {
                 Ok(()) => {}
@@ -502,28 +495,52 @@ fn save_inner<T: VectorType>(
         }
     }
 
+    #[cfg(feature = "test-hooks")]
+    crate::test_hooks::io_result(crate::test_hooks::IoPoint::PropertySidecarWrite)?;
     crate::index::property::save_sidecar(memtable.property_indexes(), path, memtable.node_count())?;
+    #[cfg(feature = "test-hooks")]
+    crate::test_hooks::io_result(crate::test_hooks::IoPoint::GraphSidecarWrite)?;
     crate::storage::graph_blocks::save(memtable, path)?;
+
+    #[cfg(feature = "test-hooks")]
+    crate::test_hooks::hit_for_path(
+        crate::test_hooks::ConcurrencyPoint::AfterSidecarsPersisted,
+        path,
+    );
+    if let Some(marker) = marker {
+        publish_mmap_marker(path, &marker)?;
+    } else {
+        publication::commit_rom(path)?;
+    }
+    #[cfg(feature = "test-hooks")]
+    crate::test_hooks::hit_for_path(
+        crate::test_hooks::ConcurrencyPoint::AfterPublicationCommitted,
+        path,
+    );
+    publication::cleanup(path).ok();
+    if generation > 1 {
+        std::fs::remove_file(payload_path_for_generation(path, generation - 1)).ok();
+    }
+    if let Some(meta) = updated_text_meta {
+        memtable.update_deferred_text_metadata(meta);
+    }
+    if release_text_after_save {
+        memtable.defer_text_index(path);
+    }
 
     Ok(())
 }
 
 /// Mmap 模式保存：分离向量到 .vec 文件，.tdb 纯元数据
-fn save_mmap<T: VectorType>(memtable: &mut MemTable<T>, path: &str) -> Result<()> {
-    let retry = publication::resume(path)?;
-    let marker_path = flush_ok_path_from_db(path);
-    let previous_generation = read_marker_generation(&marker_path);
-    let generation = match previous_generation {
-        Some(previous) => previous
-            .checked_add(1)
-            .ok_or_else(|| TriviumError::InvalidInput("flush generation 已耗尽".into()))?,
-        None => 1,
-    };
+fn save_mmap<T: VectorType>(
+    memtable: &mut MemTable<T>,
+    path: &str,
+    generation: u64,
+    retry: bool,
+) -> Result<FlushMarker> {
     if retry {
         // 保留原来的撤销基础；重写从当前 COW 映射与 delta 读取，不在堆中展开全库。
         memtable.vec_pool_mut().require_full_rewrite();
-    } else {
-        publication::begin(path, generation)?;
     }
     let vec_file_path = vec_path_from_db(path);
     let vec_count = memtable.vec_pool_mut().flush(Path::new(&vec_file_path))?;
@@ -553,7 +570,12 @@ fn save_mmap<T: VectorType>(memtable: &mut MemTable<T>, path: &str) -> Result<()
         vec_crc32: Some(file_crc32_or_empty(&vec_file_path)?),
         payload_crc32: Some(file_crc32(&payload_path)?),
     };
-    let marker_bytes = encode_flush_marker(&marker);
+    Ok(marker)
+}
+
+fn publish_mmap_marker(path: &str, marker: &FlushMarker) -> Result<()> {
+    let marker_path = flush_ok_path_from_db(path);
+    let marker_bytes = encode_flush_marker(marker);
     let marker_tmp = format!("{}.tmp", marker_path);
     {
         #[cfg(feature = "test-hooks")]
@@ -567,7 +589,10 @@ fn save_mmap<T: VectorType>(memtable: &mut MemTable<T>, path: &str) -> Result<()
         f.sync_all()?;
     }
     #[cfg(feature = "test-hooks")]
-    crate::test_hooks::hit(crate::test_hooks::ConcurrencyPoint::BeforeFlushMarkerRename);
+    crate::test_hooks::hit_for_path(
+        crate::test_hooks::ConcurrencyPoint::BeforeFlushMarkerRename,
+        path,
+    );
     #[cfg(feature = "test-hooks")]
     crate::test_hooks::io_result(crate::test_hooks::IoPoint::MarkerRename)?;
 
@@ -575,15 +600,6 @@ fn save_mmap<T: VectorType>(memtable: &mut MemTable<T>, path: &str) -> Result<()
 
     #[cfg(feature = "test-hooks")]
     crate::test_hooks::hit(crate::test_hooks::ConcurrencyPoint::AfterFlushMarkerRename);
-
-    // 提交后的清理失败只留下可验证的恢复日志，不能回滚已提交的新代。
-    publication::cleanup(path).ok();
-
-    // marker 已提交后旧 Payload generation 才失去可见性。Windows 上旧 mmap 可能暂时阻止删除，
-    // 因此回收必须是 best-effort，绝不能让已提交的新 generation 回滚或报错。
-    if let Some(previous) = previous_generation {
-        std::fs::remove_file(payload_path_for_generation(path, previous)).ok();
-    }
 
     Ok(())
 }
@@ -601,16 +617,13 @@ fn save_rom<T: VectorType>(memtable: &mut MemTable<T>, path: &str) -> Result<()>
 
     // 4. 清理残留的 .vec 和 .flush_ok
     let vec_file_path = vec_path_from_db(path);
-    if Path::new(&vec_file_path).exists() {
-        std::fs::remove_file(vec_file_path).ok();
-    }
     let marker_path = flush_ok_path_from_db(path);
-    let payload_generation = read_marker_generation(&marker_path);
-    if Path::new(&marker_path).exists() {
-        std::fs::remove_file(marker_path).ok();
-    }
-    if let Some(generation) = payload_generation {
-        std::fs::remove_file(payload_path_for_generation(path, generation)).ok();
+    for obsolete in [&vec_file_path, &marker_path] {
+        match std::fs::remove_file(obsolete) {
+            Ok(()) => crate::storage::fs::sync_parent_directory(Path::new(obsolete))?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
     }
 
     Ok(())
@@ -818,6 +831,26 @@ pub fn load<T: VectorType>(
     missing_index_policy: crate::database::MissingIndexPolicy,
     mmap_property_postings: bool,
 ) -> Result<MemTable<T>> {
+    load_with_payload_cache(
+        path,
+        mode,
+        load_text_sidecar,
+        repair_sidecars,
+        missing_index_policy,
+        mmap_property_postings,
+        None,
+    )
+}
+
+pub(crate) fn load_with_payload_cache<T: VectorType>(
+    path: &str,
+    mode: StorageMode,
+    load_text_sidecar: bool,
+    repair_sidecars: bool,
+    missing_index_policy: crate::database::MissingIndexPolicy,
+    mmap_property_postings: bool,
+    payload_cache: Option<(usize, usize)>,
+) -> Result<MemTable<T>> {
     let (mut memtable, version) = load_inner(
         path,
         mode,
@@ -825,9 +858,18 @@ pub fn load<T: VectorType>(
         repair_sidecars,
         missing_index_policy,
         mmap_property_postings,
+        payload_cache,
     )?;
+    // 索引恢复及完整性扫描结束后，向量映射恢复为按需驻留。
+    memtable.finish_vector_loading()?;
     // 当前格式的完整检查点可直接复用；历史格式保留关闭时迁移的契约。
-    if version == CURRENT_VERSION {
+    let text_metadata_needs_repair = load_text_sidecar
+        && !memtable.text_index_is_deferred()
+        && Path::new(&text_index_path_from_db(path)).exists()
+        && deferred_text_metadata(path).is_none_or(|meta| {
+            std::fs::metadata(path).is_ok_and(|main| meta[8..16] != main.len().to_le_bytes())
+        });
+    if version == CURRENT_VERSION && !text_metadata_needs_repair {
         memtable.mark_checkpoint_clean();
     }
     Ok(memtable)
@@ -857,6 +899,7 @@ fn load_inner<T: VectorType>(
     repair_sidecars: bool,
     missing_index_policy: crate::database::MissingIndexPolicy,
     mmap_property_postings: bool,
+    payload_cache: Option<(usize, usize)>,
 ) -> Result<(MemTable<T>, u16)> {
     let file = File::open(path).map_err(TriviumError::Io)?;
 
@@ -966,6 +1009,9 @@ fn load_inner<T: VectorType>(
                 .filter(|marker| marker.payload_size.is_some())
                 .map(|marker| marker.generation);
             install_payload_sidecar_if_present(&mut mt, path, payload_generation)?;
+            if let Some((max_bytes, max_entry_bytes)) = payload_cache {
+                mt.configure_payload_cache(max_bytes, max_entry_bytes);
+            }
             // 旧 BQ 块仅校验格式几何，不物化；Payload 就绪后恢复现用索引和约束。
             load_property_indexes(
                 &mut mt,
@@ -1004,6 +1050,9 @@ fn load_inner<T: VectorType>(
             version,
             &mmap,
         )?;
+        if let Some((max_bytes, max_entry_bytes)) = payload_cache {
+            mt.configure_payload_cache(max_bytes, max_entry_bytes);
+        }
         // 旧 BQ 块已校验，无需恢复未被当前查询使用的数组。
         load_property_indexes(
             &mut mt,
@@ -1555,22 +1604,40 @@ pub(crate) fn read_deferred_text_index(
     metadata: Option<[u8; 28]>,
 ) -> Result<crate::index::text::TextIndex> {
     let text_path = text_index_path_from_db(db_path);
-    let valid = metadata.is_some_and(|meta| {
-        std::fs::metadata(&text_path).is_ok_and(|text| meta[16..24] == text.len().to_le_bytes())
-            && file_crc32(&text_path).is_ok_and(|crc| meta[24..28] == crc.to_le_bytes())
-    });
-    if !valid {
-        return Err(TriviumError::ImmutableArtifactInvalid {
-            reason: "未加载的文本索引缺失、损坏或与主数据不匹配".into(),
-        });
+    let invalid = |reason: String| TriviumError::ImmutableArtifactInvalid { reason };
+    let text_size = std::fs::metadata(&text_path)
+        .map_err(|error| invalid(format!("文本索引文件不可读取：{text_path}：{error}")))?
+        .len();
+    if let Some(meta) = metadata {
+        let expected_size = read_u64_le(&meta, 16, "文本索引长度")?;
+        if text_size != expected_size {
+            return Err(invalid(format!(
+                "文本索引长度不匹配：期望 {expected_size}，实际 {text_size}"
+            )));
+        }
+        let expected_crc = read_u32_le(&meta, 24, "文本索引 CRC")?;
+        let actual_crc = file_crc32(&text_path)?;
+        if actual_crc != expected_crc {
+            return Err(invalid(format!(
+                "文本索引 CRC 不匹配：期望 {expected_crc:08x}，实际 {actual_crc:08x}"
+            )));
+        }
+    } else {
+        match std::fs::metadata(text_index_meta_path_from_db(db_path)) {
+            Ok(_) => return Err(invalid("文本索引元数据格式或版本无效".into())),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
     }
-    crate::index::text::TextIndex::load_from_file(Path::new(&text_path)).map_err(TriviumError::Io)
+    // 主库布局变化不改变独立登记的文本事实；内容由文本长度、CRC 与快照格式校验。
+    crate::index::text::TextIndex::load_from_file(Path::new(&text_path))
+        .map_err(|error| invalid(format!("文本索引快照格式校验失败：{error}")))
 }
 
 fn load_text_index<T: VectorType>(
     memtable: &mut MemTable<T>,
     db_path: &str,
-    repair_sidecars: bool,
+    _repair_sidecars: bool,
     policy: crate::database::MissingIndexPolicy,
 ) -> Result<()> {
     let text_path = text_index_path_from_db(db_path);
@@ -1583,38 +1650,14 @@ fn load_text_index<T: VectorType>(
         }
         return Ok(());
     }
-    if !validate_text_index_meta(db_path) {
-        tracing::warn!(
-            repair = repair_sidecars,
-            "TextIndex sidecar 元数据缺失或不匹配，已拒绝 (TextIndex sidecar metadata missing or mismatched, rejected)"
-        );
-        if repair_sidecars {
-            std::fs::remove_file(path).ok();
-            std::fs::remove_file(text_index_meta_path_from_db(db_path)).ok();
-        }
-        if policy == crate::database::MissingIndexPolicy::Error {
-            return Err(TriviumError::ImmutableArtifactInvalid {
-                reason: "TextIndex sidecar 元数据不匹配".into(),
-            });
-        }
-        return Ok(());
-    }
-    match crate::index::text::TextIndex::load_from_file(path) {
+    match read_deferred_text_index(db_path, deferred_text_metadata(db_path)) {
         Ok(index) => memtable.set_text_index(index),
         Err(error) => {
-            tracing::warn!(
-                "TextIndex 加载失败，已忽略 sidecar (TextIndex load failed): {}",
-                error
-            );
-            if repair_sidecars {
-                std::fs::remove_file(path).ok();
-                std::fs::remove_file(text_index_meta_path_from_db(db_path)).ok();
-            }
             if policy == crate::database::MissingIndexPolicy::Error {
-                return Err(TriviumError::ImmutableArtifactInvalid {
-                    reason: format!("TextIndex sidecar 损坏: {error}"),
-                });
+                return Err(error);
             }
+            tracing::warn!("文本索引加载失败，已保留原文件供恢复：{error}");
+            memtable.defer_text_index(db_path);
         }
     }
     Ok(())

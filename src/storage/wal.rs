@@ -11,7 +11,7 @@ use crate::storage::fs::robust_rename_and_sync;
 use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 const WAL_MAGIC: &[u8; 4] = b"TVWL";
 pub const WAL_VERSION: u16 = 3;
@@ -317,20 +317,32 @@ impl Wal {
         T: serde::de::DeserializeOwned + serde::Serialize,
     {
         let wal_path = PathBuf::from(format!("{}.wal", db_path));
-        let Ok(bytes) = std::fs::read(&wal_path) else {
-            return Ok(false);
+        let mut file = match File::open(&wal_path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error.into()),
         };
-        if bytes.len() < WAL_HEADER_SIZE as usize || &bytes[0..4] != WAL_MAGIC {
+        // 当前版本只需检查固定头部，避免每次开库先把整份 WAL 复制入堆。
+        let mut header = [0; WAL_HEADER_SIZE as usize];
+        match file.read_exact(&mut header) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(false),
+            Err(error) => return Err(error.into()),
+        }
+        if &header[..4] != WAL_MAGIC {
             return Ok(false);
         }
-        let found = u16::from_le_bytes([bytes[4], bytes[5]]);
+        let found = u16::from_le_bytes([header[4], header[5]]);
         if found == WAL_VERSION {
             return Ok(false);
         }
         if found != LEGACY_WAL_VERSION_V2 {
             return Ok(false);
         }
-        let entries = decode_legacy_v2_frames::<T>(&bytes[WAL_HEADER_SIZE as usize..])?;
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)?;
+        let entries = decode_legacy_v2_frames::<T>(&bytes)?;
+        drop(file);
         let tmp_path = PathBuf::from(format!("{}.upgrade.tmp", wal_path.to_string_lossy()));
         let write_result = (|| -> Result<()> {
             #[cfg(feature = "test-hooks")]
@@ -563,14 +575,35 @@ impl Wal {
     pub fn read_entries<T: serde::de::DeserializeOwned>(
         db_path: &str,
     ) -> Result<(Vec<WalEntry<T>>, u64)> {
-        let wal_path = format!("{}.wal", db_path);
-        if !Path::new(&wal_path).exists() {
-            return Ok((Vec::new(), 0));
-        }
+        let mut entries = Vec::new();
+        let offset = Self::replay_entries(db_path, |entry| {
+            entries.push(entry);
+            Ok(())
+        })?;
+        Ok((entries, offset))
+    }
 
-        let mut file = File::open(&wal_path)?;
+    /// 逐条交付已提交操作；只暂存当前事务，回调失败时立即停止。
+    pub(crate) fn replay_entries<T: serde::de::DeserializeOwned>(
+        db_path: &str,
+        visit: impl FnMut(WalEntry<T>) -> Result<()>,
+    ) -> Result<u64> {
+        let wal_path = format!("{}.wal", db_path);
+        let mut file = match File::open(&wal_path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+            Err(error) => return Err(error.into()),
+        };
         let mut prefix = [0u8; WAL_HEADER_SIZE as usize];
-        let read = file.read(&mut prefix)?;
+        let mut read = 0;
+        while read < prefix.len() {
+            match file.read(&mut prefix[read..]) {
+                Ok(0) => break,
+                Ok(count) => read += count,
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(error) => return Err(error.into()),
+            }
+        }
         if read >= 4 && &prefix[0..4] == WAL_MAGIC {
             if read < WAL_HEADER_SIZE as usize {
                 return Err(TriviumError::CorruptedFile(
@@ -584,8 +617,10 @@ impl Wal {
                     supported: WAL_VERSION,
                 });
             }
-            let (entries, offset) = Self::read_entries_from_reader(BufReader::new(file))?;
-            return Ok((entries, offset + WAL_HEADER_SIZE));
+            let offset = Self::replay_entries_from_reader(BufReader::new(file), visit)?;
+            return offset
+                .checked_add(WAL_HEADER_SIZE)
+                .ok_or_else(|| TriviumError::CorruptedFile("WAL 安全边界溢出".into()));
         }
 
         Err(TriviumError::UnsupportedWalVersion {
@@ -600,12 +635,29 @@ impl Wal {
     /// - 模糊测试（fuzzing）：传入 `Cursor<&[u8]>` 测试畸形数据
     /// - 单元测试：无需真实文件即可验证解析逻辑
     pub fn read_entries_from_reader<T: serde::de::DeserializeOwned>(
-        mut reader: impl Read,
+        reader: impl Read,
     ) -> Result<(Vec<WalEntry<T>>, u64)> {
-        let mut entries_with_offset = Vec::new();
-        let mut physical_offset: u64 = 0;
+        let mut entries = Vec::new();
+        let offset = Self::replay_entries_from_reader(reader, |entry| {
+            entries.push(entry);
+            Ok(())
+        })?;
+        Ok((entries, offset))
+    }
 
-        loop {
+    fn replay_entries_from_reader<T: serde::de::DeserializeOwned>(
+        mut reader: impl Read,
+        mut visit: impl FnMut(WalEntry<T>) -> Result<()>,
+    ) -> Result<u64> {
+        let mut data = Vec::new();
+        let mut physical_offset: u64 = 0;
+        let mut record_count = 0usize;
+        let mut pending_tx = Vec::new();
+        let mut current_tx_id = None;
+        let mut safe_commit_offset = 0;
+        let mut chunk = [0u8; 8192];
+
+        'frames: loop {
             // 读取 len
             let mut len_buf = [0u8; 4];
             match reader.read_exact(&mut len_buf) {
@@ -616,22 +668,38 @@ impl Wal {
             let len = u32::from_le_bytes(len_buf) as usize;
 
             // 合理性检查：单条不超过 256MB
-            if len > 256 * 1024 * 1024 {
+            if len > MAX_WAL_ENTRY_SIZE {
                 break; // 损坏的 len 字段
             }
 
-            // 读取 data
-            let mut data = vec![0u8; len];
-            match reader.read_exact(&mut data) {
-                Ok(_) => {}
-                Err(_) => break, // 截断的写入，安全丢弃
+            // 复用帧缓冲，并按实际读入量扩容；截断的恶意长度不会触发整帧分配。
+            data.clear();
+            while data.len() < len {
+                let wanted = (len - data.len()).min(chunk.len());
+                match reader.read(&mut chunk[..wanted]) {
+                    Ok(0) => break 'frames,
+                    Ok(count) => {
+                        data.try_reserve(count).map_err(|error| {
+                            TriviumError::CapacityAllocationFailed {
+                                reason: format!("WAL 帧缓冲预留失败：{error}"),
+                            }
+                        })?;
+                        data.extend_from_slice(&chunk[..count]);
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => {
+                        break 'frames;
+                    }
+                    Err(error) => return Err(error.into()),
+                }
             }
 
             // 读取 CRC32
             let mut crc_buf = [0u8; 4];
             match reader.read_exact(&mut crc_buf) {
                 Ok(_) => {}
-                Err(_) => break, // CRC 不完整，丢弃该条
+                Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => break,
+                Err(error) => return Err(error.into()),
             }
             let stored_crc = u32::from_le_bytes(crc_buf);
             let computed_crc = crc32fast::hash(&data);
@@ -640,7 +708,7 @@ impl Wal {
                 // CRC 不匹配 → 数据损坏，停止回放
                 tracing::error!(
                     "WAL CRC 校验不匹配 (CRC mismatch)，第 {} 条记录: 存储={:#010x}, 计算={:#010x}。停止恢复 (Stopping recovery)",
-                    entries_with_offset.len(),
+                    record_count,
                     stored_crc,
                     computed_crc
                 );
@@ -648,59 +716,54 @@ impl Wal {
             }
 
             // 成功读取一条物理上合法的记录，推进物理游标
-            physical_offset += 4 + (len as u64) + 4;
+            physical_offset = physical_offset
+                .checked_add(8 + len as u64)
+                .ok_or_else(|| TriviumError::CorruptedFile("WAL 帧偏移溢出".into()))?;
 
             // 反序列化
-            match bincode::deserialize::<WalEntry<T>>(&data) {
-                Ok(entry) => entries_with_offset.push((entry, physical_offset)),
+            let entry = match bincode::deserialize::<WalEntry<T>>(&data) {
+                Ok(entry) => entry,
                 Err(e) => {
                     tracing::error!(
                         "WAL 反序列化错误 (Deserialize error)，第 {} 条记录: {}。停止恢复 (Stopping recovery)",
-                        entries_with_offset.len(),
+                        record_count,
                         e
                     );
                     break;
                 }
-            }
-        }
-
-        // ====== 事务回放过滤（The Magic of ACID） ======
-        let mut committed = Vec::new();
-        let mut pending_tx = Vec::new();
-        let mut in_tx = false;
-        let mut current_tx_id = 0;
-        let mut safe_commit_offset = 0;
-
-        for (entry, offset) in entries_with_offset {
+            };
+            record_count = record_count.saturating_add(1);
             match entry {
                 WalEntry::TxBegin { tx_id } => {
-                    in_tx = true;
-                    current_tx_id = tx_id;
-                    pending_tx.clear(); // 清空，准备接纳新事务
-                    // 游标不推进：未提交事务不能视为安全边界
+                    current_tx_id = Some(tx_id);
+                    pending_tx.clear();
                 }
                 WalEntry::TxCommit { tx_id } => {
-                    if in_tx && tx_id == current_tx_id {
-                        // 发现正确的封条，安全转正！
-                        committed.append(&mut pending_tx);
-                        in_tx = false;
-                        safe_commit_offset = offset; // 整个事务完美闭环，安全推进物理游标
+                    if current_tx_id == Some(tx_id) {
+                        for operation in pending_tx.drain(..) {
+                            visit(operation)?;
+                        }
+                        current_tx_id = None;
+                        safe_commit_offset = physical_offset;
                     }
                 }
                 other => {
-                    if in_tx {
-                        // 如果处于事务包裹区，先暂存在 pending 里，游标暂时不动
+                    if current_tx_id.is_some() {
+                        pending_tx.try_reserve(1).map_err(|error| {
+                            TriviumError::CapacityAllocationFailed {
+                                reason: format!("WAL 待提交事务预留失败：{error}"),
+                            }
+                        })?;
                         pending_tx.push(other);
                     } else {
-                        // 兼容向后/独立的操作（旧版本数据或单个操作），立刻安全推进！
-                        committed.push(other);
-                        safe_commit_offset = offset;
+                        visit(other)?;
+                        safe_commit_offset = physical_offset;
                     }
                 }
             }
         }
 
-        if in_tx && !pending_tx.is_empty() {
+        if current_tx_id.is_some() && !pending_tx.is_empty() {
             tracing::warn!(
                 "丢弃了一个不完整事务 ({} 个操作)，缺少 TxCommit (Discarded partial transaction, {} ops, missing TxCommit)。WAL 截断至偏移 {}",
                 pending_tx.len(),
@@ -709,7 +772,7 @@ impl Wal {
             );
         }
 
-        Ok((committed, safe_commit_offset))
+        Ok(safe_commit_offset)
     }
 
     pub fn cumulative_written_bytes(&self) -> u64 {
@@ -786,5 +849,285 @@ impl Wal {
         bytes.len() != WAL_HEADER_SIZE as usize
             || &bytes[0..4] != WAL_MAGIC
             || u16::from_le_bytes([bytes[4], bytes[5]]) != WAL_VERSION
+    }
+}
+
+#[cfg(test)]
+mod streaming_tests {
+    use super::*;
+    use std::cell::Cell;
+    use std::io::Cursor;
+
+    thread_local! {
+        static LIVE: Cell<usize> = const { Cell::new(0) };
+        static PEAK: Cell<usize> = const { Cell::new(0) };
+    }
+
+    struct Tracked;
+
+    impl<'de> Deserialize<'de> for Tracked {
+        fn deserialize<D: serde::Deserializer<'de>>(
+            deserializer: D,
+        ) -> std::result::Result<Self, D::Error> {
+            let _ = f32::deserialize(deserializer)?;
+            LIVE.with(|live| {
+                live.set(live.get() + 1);
+                PEAK.with(|peak| peak.set(peak.get().max(live.get())));
+            });
+            Ok(Self)
+        }
+    }
+
+    impl Drop for Tracked {
+        fn drop(&mut self) {
+            LIVE.with(|live| live.set(live.get() - 1));
+        }
+    }
+
+    fn frame(bytes: &mut Vec<u8>, entry: WalEntry<f32>) -> usize {
+        let data = bincode::serialize(&entry).unwrap();
+        bytes.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&data);
+        bytes.extend_from_slice(&crc32fast::hash(&data).to_le_bytes());
+        bytes.len()
+    }
+
+    #[test]
+    fn 独立写入逐条释放解码向量且事务只保留当前批次() {
+        for transactional in [false, true] {
+            let mut bytes = Vec::new();
+            let batch = 7;
+            let dim = 32;
+            for group in 0..40 {
+                if transactional {
+                    frame(&mut bytes, WalEntry::TxBegin { tx_id: group });
+                }
+                for id in 0..batch {
+                    frame(
+                        &mut bytes,
+                        WalEntry::Insert {
+                            id: group * batch + id + 1,
+                            vector: vec![1.0; dim],
+                            payload: "{}".into(),
+                        },
+                    );
+                }
+                if transactional {
+                    frame(&mut bytes, WalEntry::TxCommit { tx_id: group });
+                }
+            }
+            LIVE.with(|live| assert_eq!(live.get(), 0));
+            PEAK.with(|peak| peak.set(0));
+            let mut delivered = 0;
+            let offset = Wal::replay_entries_from_reader::<Tracked>(Cursor::new(&bytes), |entry| {
+                assert!(matches!(entry, WalEntry::Insert { .. }));
+                delivered += 1;
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(delivered, 40 * batch);
+            assert_eq!(offset, bytes.len() as u64);
+            LIVE.with(|live| assert_eq!(live.get(), 0));
+            PEAK.with(|peak| {
+                assert_eq!(
+                    peak.get(),
+                    dim * if transactional { batch as usize } else { 1 }
+                )
+            });
+        }
+    }
+
+    #[test]
+    fn 逐字节截断及坏帧遵循独立指定的事务提交边界() {
+        let mut bytes = Vec::new();
+        let first = frame(&mut bytes, WalEntry::Delete { id: 1 });
+        frame(&mut bytes, WalEntry::TxBegin { tx_id: 7 });
+        frame(&mut bytes, WalEntry::Delete { id: 2 });
+        frame(&mut bytes, WalEntry::TxCommit { tx_id: 99 });
+        frame(&mut bytes, WalEntry::TxBegin { tx_id: 8 });
+        frame(&mut bytes, WalEntry::Delete { id: 3 });
+        frame(&mut bytes, WalEntry::TxCommit { tx_id: 7 });
+        frame(&mut bytes, WalEntry::Delete { id: 4 });
+        let committed = frame(&mut bytes, WalEntry::TxCommit { tx_id: 8 });
+        frame(&mut bytes, WalEntry::TxCommit { tx_id: 7 });
+        let standalone = frame(&mut bytes, WalEntry::Delete { id: 5 });
+        frame(&mut bytes, WalEntry::TxBegin { tx_id: 10 });
+        let empty = frame(&mut bytes, WalEntry::TxCommit { tx_id: 10 });
+        frame(&mut bytes, WalEntry::TxBegin { tx_id: 9 });
+        frame(&mut bytes, WalEntry::Delete { id: 6 });
+        let expected = |length| {
+            let ids = if length >= standalone {
+                vec![1, 3, 4, 5]
+            } else if length >= committed {
+                vec![1, 3, 4]
+            } else if length >= first {
+                vec![1]
+            } else {
+                vec![]
+            };
+            let offset = [first, committed, standalone, empty]
+                .into_iter()
+                .filter(|&offset| offset <= length)
+                .max()
+                .unwrap_or(0);
+            (ids, offset as u64)
+        };
+        let parse = |data: &[u8]| {
+            let mut ids = Vec::new();
+            let offset = Wal::replay_entries_from_reader::<f32>(Cursor::new(data), |entry| {
+                if let WalEntry::Delete { id } = entry {
+                    ids.push(id);
+                } else {
+                    panic!("事务标记不应交付给回放回调");
+                }
+                Ok(())
+            })
+            .unwrap();
+            (ids, offset)
+        };
+        for cut in 0..=bytes.len() {
+            assert_eq!(parse(&bytes[..cut]), expected(cut), "截断位置：{cut}");
+        }
+        let mut start = 0;
+        while start < bytes.len() {
+            let len = u32::from_le_bytes(bytes[start..start + 4].try_into().unwrap()) as usize;
+            let mut corrupted = bytes.clone();
+            corrupted[start + 4 + len] ^= 1;
+            assert_eq!(parse(&corrupted), expected(start), "坏帧位置：{start}");
+            // CRC 合法但枚举无法解码时，仍只能保留此前已提交前缀。
+            corrupted[start + 4..start + 8].copy_from_slice(&u32::MAX.to_le_bytes());
+            let crc = crc32fast::hash(&corrupted[start + 4..start + 4 + len]);
+            corrupted[start + 4 + len..start + 8 + len].copy_from_slice(&crc.to_le_bytes());
+            assert_eq!(parse(&corrupted), expected(start));
+            start += 8 + len;
+        }
+    }
+
+    struct FailingReader<'a> {
+        data: &'a [u8],
+        remaining: usize,
+    }
+
+    #[test]
+    fn 跨多个读取块的向量和中文正文允许短读及中断重试() {
+        struct Fragmented {
+            data: Cursor<Vec<u8>>,
+            interrupted: bool,
+        }
+        impl Read for Fragmented {
+            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+                self.interrupted = !self.interrupted;
+                if self.interrupted {
+                    return Err(std::io::ErrorKind::Interrupted.into());
+                }
+                let count = buffer.len().min(37);
+                self.data.read(&mut buffer[..count])
+            }
+        }
+        let vector = (0..4097).map(|axis| axis as f32 / 17.).collect::<Vec<_>>();
+        let payload = serde_json::json!({"正文":"分块恢复".repeat(4097)}).to_string();
+        let mut bytes = Vec::new();
+        frame(
+            &mut bytes,
+            WalEntry::Insert {
+                id: 1,
+                vector: vector.clone(),
+                payload: payload.clone(),
+            },
+        );
+        frame(&mut bytes, WalEntry::Delete { id: 2 });
+        let length = bytes.len() as u64;
+        let mut delivered = 0;
+        let offset = Wal::replay_entries_from_reader::<f32>(
+            Fragmented {
+                data: Cursor::new(bytes),
+                interrupted: false,
+            },
+            |entry| {
+                match (delivered, entry) {
+                    (
+                        0,
+                        WalEntry::Insert {
+                            id: 1,
+                            vector: actual,
+                            payload: text,
+                        },
+                    ) => {
+                        assert_eq!(actual, vector);
+                        assert_eq!(text, payload);
+                    }
+                    (1, WalEntry::Delete { id: 2 }) => {}
+                    _ => panic!("分块回放交付了错误的内容或顺序"),
+                }
+                delivered += 1;
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(delivered, 2);
+        assert_eq!(offset, length);
+    }
+
+    #[test]
+    fn 超大声明配短尾部只请求固定大小读取缓冲() {
+        struct ShortFrame(Cursor<Vec<u8>>);
+        impl Read for ShortFrame {
+            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+                assert!(buffer.len() <= 8192, "损坏帧不得按声明长度请求大缓冲");
+                self.0.read(buffer)
+            }
+        }
+        let mut bytes = (MAX_WAL_ENTRY_SIZE as u32).to_le_bytes().to_vec();
+        bytes.extend_from_slice(&[1, 2, 3]);
+        let offset = Wal::replay_entries_from_reader::<f32>(ShortFrame(Cursor::new(bytes)), |_| {
+            panic!("截断帧不得交付回放");
+        })
+        .unwrap();
+        assert_eq!(offset, 0);
+    }
+
+    impl Read for FailingReader<'_> {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            if self.remaining == 0 {
+                return Err(std::io::Error::other("模拟设备读取失败"));
+            }
+            let count = self.data.len().min(buffer.len()).min(self.remaining);
+            buffer[..count].copy_from_slice(&self.data[..count]);
+            self.data = &self.data[count..];
+            self.remaining -= count;
+            Ok(count)
+        }
+    }
+
+    #[test]
+    fn 帧内真实_io错误向上传播且回调失败不读取后续帧() {
+        let mut bytes = Vec::new();
+        frame(&mut bytes, WalEntry::Delete { id: 1 });
+        for cut in 0..bytes.len() {
+            let mut called = false;
+            let result = Wal::replay_entries_from_reader::<f32>(
+                FailingReader {
+                    data: &bytes,
+                    remaining: cut,
+                },
+                |_| {
+                    called = true;
+                    Ok(())
+                },
+            );
+            assert!(
+                matches!(result, Err(TriviumError::Io(_))),
+                "读取失败位置：{cut}"
+            );
+            assert!(!called);
+        }
+        let result = Wal::replay_entries_from_reader::<f32>(
+            FailingReader {
+                data: &bytes,
+                remaining: bytes.len(),
+            },
+            |_| Err(TriviumError::InvalidInput("模拟回放失败".into())),
+        );
+        assert!(matches!(result, Err(TriviumError::InvalidInput(_))));
     }
 }

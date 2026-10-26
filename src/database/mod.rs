@@ -660,19 +660,23 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
             crate::storage::snapshot::validate_manifest(path, std::any::type_name::<T>(), dim)?;
         }
         let mut memtable = if std::path::Path::new(path).exists() {
-            file_format::load(
+            file_format::load_with_payload_cache(
                 path,
                 config.storage_mode,
                 config.load_text_index,
                 config.access_mode == AccessMode::ReadWrite,
                 config.missing_index_policy,
                 config.access_mode != AccessMode::ReadWrite,
+                Some((config.payload_cache_bytes, config.payload_cache_entry_bytes)),
             )?
         } else {
             MemTable::new(dim)
         };
 
         memtable.set_text_memory_limit(config.memory_limit);
+        // 恢复必须从第一条记录开始使用调用方预算，避免先填充默认解析缓存再淘汰。
+        memtable
+            .configure_payload_cache(config.payload_cache_bytes, config.payload_cache_entry_bytes);
         if config.access_mode == AccessMode::ReadWrite {
             Wal::upgrade_legacy_wal::<T>(path)?;
         }
@@ -683,25 +687,25 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
             });
         }
         if Wal::needs_recovery(path) {
-            let (entries, valid_offset) = Wal::read_entries::<T>(path)?;
+            let mut entry_count = 0usize;
+            let valid_offset = Wal::replay_entries::<T>(path, |entry| {
+                transaction::replay_entry(&mut memtable, entry)?;
+                entry_count = entry_count.saturating_add(1);
+                Ok(())
+            })?;
 
-            // 执行极其关键的物理防串局截断（Truncation）！
+            // 内存恢复成功后才截断损坏或未提交尾部；回放失败保留原 WAL 供重试。
             let wal_path = format!("{}.wal", path);
             let wal_file = std::fs::OpenOptions::new().write(true).open(&wal_path)?;
             wal_file.set_len(valid_offset)?;
             wal_file.sync_all()?;
 
-            if !entries.is_empty() {
+            if entry_count > 0 {
                 tracing::info!(
-                    "正在从 WAL 恢复 {} 条记录，安全截断至偏移 {} (Recovering {} entries from WAL, truncated at offset {})",
-                    entries.len(),
-                    valid_offset,
-                    entries.len(),
+                    "已从 WAL 恢复 {} 条记录，安全截断至偏移 {}",
+                    entry_count,
                     valid_offset
                 );
-                for entry in entries {
-                    transaction::replay_entry(&mut memtable, entry)?;
-                }
             } else {
                 tracing::info!(
                     "已清除损坏/未提交的 WAL 数据，回退至偏移 {} (Cleared corrupt/uncommitted WAL, truncated to {})",
@@ -712,8 +716,6 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         }
 
         memtable.attach_resources(runtime.clone(), reservation);
-        memtable
-            .configure_payload_cache(config.payload_cache_bytes, config.payload_cache_entry_bytes);
 
         // TextIndex 由 sidecar 精确恢复；缺失时保持为空，避免打开数据库时
         // 无条件扫描全部 Payload 并改变用户显式 index_text() 的索引语义。
@@ -1864,6 +1866,17 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         let mut mt = write_or_recover(&self.memtable);
         mt.prepare_text_index()?;
         mt.try_build_text_index()
+    }
+
+    /// 根据提供的完整正文与关键词集合重建文本索引，成功后通过 flush 或 close 持久化。
+    pub fn rebuild_text_index(
+        &mut self,
+        documents: &[crate::index::text::TextIndexDocument],
+    ) -> Result<()> {
+        self.require_write_access("rebuild_text_index")?;
+        let _operation = self.enter_maintenance_operation()?;
+        reject_hook_reentrant_write()?;
+        write_or_recover(&self.memtable).rebuild_text_index(documents)
     }
 
     pub fn get_payload(&self, id: NodeId) -> Result<Option<serde_json::Value>> {

@@ -15,6 +15,16 @@ use std::sync::OnceLock;
 const TEXT_INDEX_MAGIC: &[u8; 4] = b"TIDX";
 pub const TEXT_INDEX_VERSION: u32 = 2;
 
+/// 完整重建时显式提供的节点正文与关键词。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TextIndexDocument {
+    pub id: NodeId,
+    pub text: String,
+    #[serde(default)]
+    pub keywords: Vec<String>,
+}
+
 #[derive(Serialize)]
 struct TextIndexSnapshotRef<'a> {
     keyword_to_nodes: &'a HashMap<String, Vec<NodeId>>,
@@ -324,8 +334,11 @@ impl TextIndex {
     }
 
     pub fn load_from_file(path: &Path) -> std::io::Result<Self> {
+        use bincode::Options;
         use std::io::Read;
-        let mut reader = BufReader::new(std::fs::File::open(path)?);
+        let file = std::fs::File::open(path)?;
+        let limit = file.metadata()?.len();
+        let mut reader = BufReader::new(file);
         let mut magic = [0u8; 4];
         reader.read_exact(&mut magic)?;
         if &magic != TEXT_INDEX_MAGIC {
@@ -342,8 +355,35 @@ impl TextIndex {
                 "TextIndex 版本不受支持",
             ));
         }
-        let snapshot: TextIndexSnapshot =
-            bincode::deserialize_from(reader).map_err(std::io::Error::other)?;
+        let snapshot: TextIndexSnapshot = bincode::DefaultOptions::new()
+            .with_fixint_encoding()
+            .with_limit(limit.saturating_sub(8))
+            .deserialize_from(&mut reader)
+            .map_err(std::io::Error::other)?;
+        let mut trailing = [0u8; 1];
+        if reader.read(&mut trailing)? != 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "文本索引存在尾部数据",
+            ));
+        }
+        if snapshot
+            .doc_lengths
+            .iter()
+            .any(|(id, length)| *id == 0 || *length == 0)
+            || snapshot.bm25_tf.iter().any(|(term, nodes)| {
+                term.is_empty() || nodes.iter().any(|(id, tf)| *id == 0 || *tf == 0)
+            })
+            || snapshot
+                .keyword_to_nodes
+                .iter()
+                .any(|(keyword, nodes)| keyword.is_empty() || nodes.contains(&0))
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "文本索引的节点、词频或文档长度无效",
+            ));
+        }
         let mut index = Self {
             ac_matcher: OnceLock::new(),
             keyword_to_nodes: snapshot.keyword_to_nodes,

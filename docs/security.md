@@ -1,6 +1,6 @@
 # TriviumDB 安全特性详解
 
-> 本文说明 `0.9.0-beta.1` 的并发、数据完整性、格式校验、资源预算、ReadOnly/Immutable、输入验证与跨平台 I/O 实现。版本记录见[变更说明](changes/0.9.0-beta.1.md)。
+> 本文说明 `0.9.0-beta.2` 的并发、数据完整性、格式校验、资源预算、ReadOnly/Immutable、输入验证与跨平台 I/O 实现。版本记录见[变更说明](changes/0.9.0-beta.2.md)。
 
 ---
 
@@ -95,9 +95,9 @@ QuIVer 构建：不得持有 MemTable guard 等待 singleflight Condvar
 
 ### 文本 sidecar 的完整性与恢复边界
 
-0.8.11 在默认不加载文本索引时保留已有 `.text` 内容；显式修改先验证原元数据的尺寸与 CRC，不会用新 CRC 认可已损坏的文件。延期加载与删除工作区受内存预算约束，需要预留的删除工作区在 WAL 前检查；文本保存及元数据发布错误向调用方返回。ReadOnly/Immutable 不为此写入或修复文件。
+默认延期加载时保存原有 `.text` 内容；显式修改先验证文本长度、CRC 与完整快照格式。历史快照缺少元数据时，可通过完整解码验证恢复正文与关键词。延期加载和重建工作区同时执行实例预算与共享运行时准入检查。读取异常保留原文件，Rust、Python、Node 提供完整正文与关键词集合重建接口。
 
-文本正文与别名登记不属于事务 WAL 操作，不能据此推断文本 sidecar 和事实数据具备完整的跨文件原子提交。应用应保留重建来源；已丢失的历史文本不会自动恢复。
+检查点将主数据、文本、属性和图索引纳入同一次文件组发布与恢复。文本登记通过检查点持久化；节点、向量、Payload 与业务边通过事务 WAL 确认。应用保存完整正文与别名来源，可在需要时调用 `rebuild_text_index` 重新生成文本索引。
 
 ### 5. WAL CRC32 逐条校验
 
@@ -110,7 +110,7 @@ QuIVer 构建：不得持有 MemTable guard 等待 singleflight Condvar
 [len: u32 (4B)] [bincode 序列化数据: len bytes] [crc32: u32 (4B)]
 ```
 
-WAL 必须包含 `TVWL + v3` 头。历史无头 WAL 不再自动猜测解析，返回 `UnsupportedWalVersion { found: 0 }`；带记录的旧版本 WAL 也必须使用对应旧内核恢复并 flush。只有恰好 6 字节、零记录的旧版本 WAL 可由持有排他锁的 ReadWrite 打开流程通过临时文件、fsync 与原子替换升级版本头；ReadOnly/Immutable 不执行该升级并保持字节级零写。未知未来版本同样在任何记录回放前拒绝。
+当前 WAL 使用 `TVWL + v3` 头。ReadWrite 持有排他锁时，可完整校验 v2 的帧、CRC 和记录格式，经临时文件、fsync 与原子替换迁移到 v3；Link 记录补齐 metadata。当前版本的开库检查读取固定六字节头部，恢复按帧流式读取和回放。ReadOnly/Immutable 保持物理零写，旧格式迁移由 Writer 完成。无头、未知版本与非法迁移输入返回结构化错误，并保留原始 WAL。
 
 写入时计算，读取（崩溃恢复）时验证：
 
@@ -158,10 +158,9 @@ if len > 256 * 1024 * 1024 {
 | TxBegin，无 TxCommit（掉电） | **整体丢弃，并物理截断 WAL 尾部（Partial Truncation）** |
 | 有当前版本头的独立操作 | 作为当前非事务 CRUD 记录直接回放，推进安全游标 |
 
-**极限防御：LSN (Log Sequence Number) 与物理截断**
-如果在回放时发现未闭合的事务（通常因为机器暴力断电），系统不仅在内存中丢弃它们，还会通过计算**最后一个完美闭环事务的精确物理字节偏移量 (safe_commit_offset)**，在重播前直接调用内置 `set_len()`。这彻底切断了具有传染性的“幽灵尾部”，防止系统下次启动接收正常追加后，由于 `in_tx=true` 的状态污染，将新的健康数据错吞进旧的失效事务里。
+**提交边界与物理截断**
 
-**保证**：要么全部回放，要么全部丢弃；不出现"插入了 5 条、应该 10 条"的部分状态。并且绝对防止失效事务封条污染后续追加数据。
+恢复逐帧验证并复用字节缓冲，只在匹配事务封条后交付该批操作，临时事务集合随当前待提交批次增长。已完成的事务与独立操作推进 `safe_commit_offset`。读取和回放均成功后，WAL 截断到最后确认边界，再接受后续追加；I/O 或回放错误保留原 WAL 供处理后重试。
 
 ---
 
@@ -169,7 +168,7 @@ if len > 256 * 1024 * 1024 {
 
 **实现位置**：`storage/file_format.rs`（写与读取）
 
-Mmap 模式下，`.tdb`、`.vec` 和 generation 化 `.pld.<generation>` 均落盘后，才原子写 `.flush_ok` 标记。v3 标记共 53 字节：
+Mmap 模式下，主数据、向量、generation 化 Payload 及索引文件均同步后，原子发布 `.flush_ok`。该标记校验 `.tdb`、`.vec` 和 `.pld.<generation>` 的代际与完整性。v3 标记共 53 字节：
 
 ```text
 magic(4) + version(1) + generation(8)
@@ -181,10 +180,10 @@ magic(4) + version(1) + generation(8)
 - 只有 v3 marker 明确声明的 Payload generation 才允许加载；v1/v2 marker 旁的游离 `.pld` 不参与旧快照。
 - v1（29 字节）与 v2（41 字节）保持只读兼容；ReadWrite 在下一次显式 flush 时升级为 v3，打开时不隐式迁移。
 - generation 化 Payload 文件避免 Windows 上替换仍被 Reader mmap 的同名文件；marker 提交后旧 generation 才失去可见性，并在引用释放后 best-effort 回收。
-- 发布新文件前，流式复制旧 `.tdb/.vec/.flush_ok` 到 `.publish.0/1/2`，fsync 后最后发布 `.publish` 撤销日志。日志采用 `TPUB` v1 固定 56 字节，包含目标 generation、三个文件的存在位/长度/CRC 和日志自身 CRC；首次 flush 明确记录旧文件不存在。
-- ReadWrite 持有排他锁后先检查日志：marker 尚未提交则校验备份、恢复旧事实文件，再回放 WAL；marker 已提交则验证新代，保留新代并清理日志。恢复复制不消耗备份，恢复完成并持久化删除日志后才回收备份，支持恢复途中再次断电。
+- 发布前流式保存旧文件组，随后同步并发布 `.publish` 撤销日志。当前 `TPUB` v2 日志为 136 字节，记录主文件、向量、marker、QuIVer 及其元数据、文本及其元数据、属性和图索引的存在状态、长度、CRC、代际、存储模式和提交状态，并校验日志自身 CRC。读取同时支持历史 v1 日志。延期保存且正文保持原样时，可保留原文本文件并省去正文备份复制。
+- Mmap 在全部索引同步后发布 marker；Rom 在文件组同步后原子更新日志提交状态，并记录新主文件的长度与 CRC。ReadWrite 打开时检查提交点：未提交则校验备份、恢复旧文件组并回放 WAL；已提交则验证新代并清理日志。恢复复制保留备份，全部恢复文件同步后才清理日志及备份，支持恢复途中再次中断。
 - ReadOnly/Immutable 不执行恢复或清理；有待恢复日志/WAL 时返回 `RecoveryRequired`，保持字节级零写。无有效恢复基础的文件损坏返回 `CorruptedFile`，不构造缺向量、缺 Payload 或空库的伪恢复状态；已提交新代损坏不能回滚旧代。
-- 正常 Mmap flush 的旧代备份增加 O(旧 `.tdb` + `.vec`) 磁盘读写和临时空间，复制不把全库读入堆。同一句柄失败重试保留最初备份，向量从现有 COW 映射和 delta 完整重写。主文件 v9、marker v3 保持不变；旧内核不识别新的恢复日志，未完成发布须用当前内核恢复后再迁移。
+- 旧代备份消耗纳入发布的文件组大小所对应的磁盘读写和临时空间，复制使用有界缓冲。同一句柄失败重试保留最初备份，向量从现有 COW 映射和 delta 完整重写。主文件使用 v9、marker 使用 v3；待恢复发布由支持对应日志版本的内核完成。
 - 默认 `storage::publication_recovery` 用独立日志字节 oracle 验证恢复、损坏拒绝、提交点与只读零写；`test-hooks` 强杀矩阵要求完整恢复所有 `Full` 模式已同步事务，打开失败不能算通过。
 
 ---

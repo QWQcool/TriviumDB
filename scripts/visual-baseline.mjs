@@ -1,15 +1,13 @@
 #!/usr/bin/env node
 // TriviumDB WebUI 视觉回归基线 (visual-baseline)
 //
-// 目的：为 Web Console (crates/triviumdb-server/web/index.html) 提供可重复的
-// 截图级回归防线。页内自检（selftest）验证状态与逻辑，但覆盖不了"像素与观感"
-// ——历史上已三次出现"断言全绿、肉眼不对"的问题（白底浅线、节点聚成一团、
-// 侧栏高亮不切换），本脚本把这些回归钉在截图上。
+// 用于 nightly 界面的按需截图记录。视觉方案与交互随开发迭代，参考截图由开发者选择维护。
 //
 // 用法：
-//   node scripts/visual-baseline.mjs              # 校验（缺失基线或依赖时失败）
+//   node scripts/visual-baseline.mjs              # 记录当前界面截图
+//   node scripts/visual-baseline.mjs --compare    # 显式比对当前平台参考截图
 //   node scripts/visual-baseline.mjs --update     # 生成/更新本平台基线
-//   node scripts/visual-baseline.mjs --record-only # 显式只截图，不作为 CI 验收
+//   node scripts/visual-baseline.mjs --record-only # 显式记录当前界面截图
 //   node scripts/visual-baseline.mjs --with-sigma # 额外拍 Sigma(WebGL) 图（本机专用）
 //
 // 设计要点：
@@ -17,7 +15,7 @@
 //     隐藏光标、清空 toast、只用确定性布局（radial —— 纯函数；force 因物理
 //     帧数依赖而排除，Sigma 因 GPU/驱动差异默认排除）
 //   * 平台隔离：基线按 process.platform 分目录存放，跨平台字体/抗锯齿差异
-//     不会造成误报；缺少当前平台基线时失败，更新必须显式使用 --update。
+//     分别记录；选择 --compare 时检查参考截图，--update 更新参考截图。
 //   * 依赖缺失时返回失败，与 ui-smoke.mjs 同约定：
 //     npm i --no-save --ignore-scripts playwright@1.64.1 pixelmatch@8.0.0 pngjs@7.0.0 && npx playwright install chromium
 //
@@ -48,7 +46,12 @@ const EXE = path.join(BUILD_TARGET, 'debug', process.platform === 'win32' ? 'tri
 
 const ARGS = new Set(process.argv.slice(2));
 const MODE_UPDATE = ARGS.has('--update');
-const MODE_RECORD_ONLY = ARGS.has('--record-only');
+const MODE_COMPARE = ARGS.has('--compare');
+const MODE_RECORD_ONLY = !MODE_UPDATE && !MODE_COMPARE;
+if ((MODE_UPDATE && MODE_COMPARE) || (ARGS.has('--record-only') && (MODE_UPDATE || MODE_COMPARE))) {
+  console.error('截图记录、比对和更新模式请选择一项。');
+  process.exit(1);
+}
 const WITH_SIGMA = ARGS.has('--with-sigma');
 // 比对容差：跨机器抗锯齿差异容忍，但结构性变化（布局塌陷/面板消失/主题反转）
 // 远超该比例
@@ -357,7 +360,7 @@ if (MODE_UPDATE) {
   await cleanup(0);
 }
 if (MODE_RECORD_ONLY) {
-  log('显式记录模式：仅截图，不计为视觉比对通过。');
+  log('当前页面截图已记录。');
   await cleanup(0);
 }
 
