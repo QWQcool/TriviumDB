@@ -121,7 +121,7 @@ fn Writer进展_持续并发读结束前写者最终取得写锁() {
     for reader in readers {
         reader.join().unwrap();
     }
-    assert_eq!(db.get(id).unwrap().vector, [0.0, 1.0, 0.0, 0.0]);
+    assert_eq!(db.get(id).unwrap().unwrap().vector, [0.0, 1.0, 0.0, 0.0]);
     drop(db);
     cleanup(&path);
 }
@@ -211,7 +211,7 @@ fn 并发读_冷Payload首次惰性解析只产生一致值() {
         threads.push(std::thread::spawn(move || {
             barrier.wait();
             for _ in 0..200 {
-                let payload = db.get_payload(id).expect("节点必须始终存在");
+                let payload = db.get_payload(id).unwrap().expect("节点必须始终存在");
                 assert_eq!(payload["版本"], 7);
                 assert_eq!(payload["nested"]["name"], "并发惰性解析");
             }
@@ -396,7 +396,7 @@ fn 容量规划_ReserveNodes零值与溢出均防呆拒绝() {
         Err(TriviumError::CapacityAllocationFailed { .. })
             | Err(TriviumError::CapacityReservationRejected { .. })
     ));
-    assert_eq!(db.node_count(), 0);
+    assert_eq!(db.node_count().unwrap(), 0);
     drop(db);
     cleanup(&path);
 }
@@ -421,7 +421,7 @@ fn 容量规划_事务预留拒绝前后WAL与代际完全不变() {
         .map(|meta| meta.len())
         .unwrap_or(0);
     assert_eq!(wal_after, wal_before);
-    assert_eq!(db.node_count(), 0);
+    assert_eq!(db.node_count().unwrap(), 0);
     db.set_memory_limit(0).unwrap();
     assert_eq!(db.insert(&[1.0, 0.0, 0.0, 0.0], json!({})).unwrap(), 1);
     drop(db);
@@ -455,7 +455,7 @@ fn 容量规划_更新与图边增长在WAL前统一拒绝() {
         Err(TriviumError::CapacityReservationRejected { .. })
     ));
     assert_eq!(db.storage_write_stats(), before);
-    assert!(db.get_edge(first, second, "blocked").is_none());
+    assert!(db.get_edge(first, second, "blocked").unwrap().is_none());
 
     db.set_memory_limit(0).unwrap();
     drop(db);
@@ -471,7 +471,7 @@ fn 容量规划_批次中非法向量不得产生半批数据() {
     tx.insert(&[1.0, 0.0, 0.0, 0.0], json!({"id": 1}));
     tx.insert(&[f32::NAN, 0.0, 0.0, 0.0], json!({"id": 2}));
     assert!(db.commit_tx(tx).is_err());
-    assert_eq!(db.node_count(), 0);
+    assert_eq!(db.node_count().unwrap(), 0);
     assert_eq!(db.insert(&[1.0, 0.0, 0.0, 0.0], json!({})).unwrap(), 1);
     drop(db);
     cleanup(&path);
@@ -499,12 +499,12 @@ fn 容量规划_已有Mmap库ExpectedNodes按目标总量补足() {
         },
     )
     .unwrap();
-    assert_eq!(db.node_count(), 32);
+    assert_eq!(db.node_count().unwrap(), 32);
     let vector = vec![half::f16::from_f32(0.5); 8];
     for id in 33..=64u64 {
         db.insert_with_id(id, &vector, json!({"id": id})).unwrap();
     }
-    assert_eq!(db.node_count(), 64);
+    assert_eq!(db.node_count().unwrap(), 64);
     drop(db);
     cleanup(&path);
 }
@@ -571,7 +571,7 @@ fn QuIVer导航树及遍历工作区必须提前计入构图预算() {
     let error = db.build_quiver_index(None).unwrap_err().to_string();
     assert!(error.contains("预计峰值"));
     assert!(error.contains("内存上限"));
-    assert_eq!(db.node_count(), 128, "预算拒绝不得修改已有节点");
+    assert_eq!(db.node_count().unwrap(), 128, "预算拒绝不得修改已有节点");
     drop(db);
     cleanup(&path);
 }
@@ -669,16 +669,19 @@ fn 串行提交基线_多线程写入后Flush重载不丢提交() {
         Err(_) => panic!("所有写线程必须已结束"),
     };
     let mut db = mutex.into_inner().unwrap();
-    assert_eq!(db.node_count(), 400);
+    assert_eq!(db.node_count().unwrap(), 400);
     db.flush().unwrap();
     drop(db);
 
     let reopened = Database::<f32>::open(&path, DIM).unwrap();
-    assert_eq!(reopened.node_count(), 400);
+    assert_eq!(reopened.node_count().unwrap(), 400);
     for writer in 0..8u64 {
         for seq in 0..50u64 {
             let id = writer * 1_000 + seq + 1;
-            let node = reopened.get(id).expect("所有成功提交的节点都必须可恢复");
+            let node = reopened
+                .get(id)
+                .unwrap()
+                .expect("所有成功提交的节点都必须可恢复");
             assert_eq!(node.payload["writer"], writer);
             assert_eq!(node.payload["seq"], seq);
             assert_eq!(node.vector, [writer as f32, seq as f32, 1.0, 0.0]);

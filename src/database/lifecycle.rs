@@ -42,6 +42,17 @@ pub struct InstanceStats {
 }
 
 impl<T: VectorType> Database<T> {
+    pub(super) fn reject_group_shutdown(&self) -> Result<()> {
+        if lock_or_recover(&self.lifecycle.0).group_commit_owner
+            == Some(std::thread::current().id())
+        {
+            return Err(TriviumError::InvalidInput(
+                "分组提交闭包内不能关闭数据库".into(),
+            ));
+        }
+        Ok(())
+    }
+
     pub fn instance_stats(&self) -> InstanceStats {
         let shutdown = self.shutdown_status();
         // 不持有生命周期锁去获取 MemTable 锁，避免与完成回调形成锁序环。
@@ -81,6 +92,7 @@ impl<T: VectorType> Database<T> {
     /// 拒绝新操作并登记关闭任务。已有操作和后台维护先排空，完成后才释放文件锁。
     pub fn request_shutdown(&mut self) -> Result<ShutdownStatus> {
         reject_hook_reentrant_write()?;
+        self.reject_group_shutdown()?;
         let mut state = lock_or_recover(&self.lifecycle.0);
         if state.lifecycle == DatabaseLifecycle::Closed
             || state.shutdown_job.is_some()
@@ -100,6 +112,7 @@ impl<T: VectorType> Database<T> {
         let background = self.compaction.take();
         let work = Arc::new(CloseWork {
             background,
+            hook: self.hook.clone(),
             memtable: self.memtable.clone(),
             wal: self.wal.clone(),
             file_lock: self._lock_file.clone(),
@@ -182,6 +195,7 @@ impl<T: VectorType> Database<T> {
 }
 
 struct CloseWork<T: VectorType> {
+    hook: HookSlot,
     background: Option<CompactionThread>,
     memtable: Arc<RwLock<MemTable<T>>>,
     wal: Arc<Mutex<Wal>>,
@@ -203,10 +217,13 @@ impl<T: VectorType> CloseWork<T> {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<()> {
             let mut mt = write_or_recover(&self.memtable);
             if self.access == AccessMode::ReadWrite {
-                file_format::save(&mut mt, &self.path, self.mode)?;
-                lock_or_recover(&self.wal).clear()?;
+                let mut wal = lock_or_recover(&self.wal);
+                file_format::checkpoint(&mut mt, &mut wal, &self.path, self.mode, true)?;
+                wal.close_writer()?;
             }
             mt.release_resource_storage();
+            drop(mt);
+            clear_hook_slot(&self.hook);
             lock_or_recover(&self.file_lock).take();
             Ok(())
         }))
@@ -256,6 +273,31 @@ mod tests {
     use super::*;
     use crate::resources::{ResourceLimits, ResourceRuntime};
     use std::sync::mpsc;
+
+    #[test]
+    fn 关闭后待执行查询句柄不保留_hook() {
+        struct Probe(Arc<std::sync::atomic::AtomicUsize>);
+        impl SearchHook for Probe {}
+        impl Drop for Probe {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+        let (mut db, _) = open();
+        let dropped = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        db.set_hook(Probe(dropped.clone())).unwrap();
+        let queued = db.search_handle();
+        assert!(db.close_timeout(Duration::from_secs(5)).unwrap());
+        assert_eq!(dropped.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(matches!(
+            queued.search_batch(
+                &[vec![1.0; 3]],
+                &SearchConfig::default(),
+                &BatchSearchConfig::default()
+            ),
+            Err(TriviumError::DatabaseClosed)
+        ));
+    }
 
     fn open() -> (Database<f32>, ResourceRuntime) {
         static NONCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -338,6 +380,69 @@ mod tests {
         assert!(db.close_timeout(Duration::from_secs(5)).unwrap());
         assert_eq!(runtime.stats().attached_databases, 0);
     }
+    #[test]
+    fn 注册_hook_准入或构造失败保留原扩展() {
+        let (mut db, runtime) = open();
+        let original = db.hook();
+        let (entered, arrived) = mpsc::channel();
+        let (release, wait) = mpsc::channel();
+        let holder = std::thread::spawn(move || {
+            let _task = runtime.enter_task().unwrap();
+            entered.send(()).unwrap();
+            wait.recv_timeout(Duration::from_secs(10)).unwrap();
+        });
+        arrived.recv_timeout(Duration::from_secs(10)).unwrap();
+        let mut called = false;
+        let result = db.set_hook_with(
+            || {
+                called = true;
+                Ok(NoopHook)
+            },
+            std::convert::identity,
+        );
+        release.send(()).unwrap();
+        holder.join().unwrap();
+        assert!(matches!(
+            result,
+            Err(TriviumError::ResourceBudgetExceeded { .. })
+        ));
+        assert!(!called);
+        assert!(Arc::ptr_eq(&original, &db.hook()));
+        let result = db.set_hook_with(
+            || Err::<NoopHook, _>(TriviumError::InvalidInput("模拟绑定创建失败".into())),
+            std::convert::identity,
+        );
+        assert!(result.is_err());
+        assert!(Arc::ptr_eq(&original, &db.hook()));
+        db.close().unwrap();
+    }
+
+    #[test]
+    fn 关闭请求登记不等待_wal_锁() {
+        let (mut db, _) = open();
+        let wal = db.wal.clone();
+        let (entered, arrived) = mpsc::channel();
+        let (release, wait) = mpsc::channel();
+        let holder = std::thread::spawn(move || {
+            let _writer = lock_or_recover(&wal);
+            entered.send(()).unwrap();
+            wait.recv_timeout(Duration::from_secs(10)).unwrap();
+        });
+        arrived.recv_timeout(Duration::from_secs(10)).unwrap();
+        let (requested, completed) = mpsc::channel();
+        let closer = std::thread::spawn(move || {
+            let status = db.request_shutdown();
+            requested.send(status).unwrap();
+            db.close_timeout(Duration::from_secs(10))
+        });
+        let status = completed.recv_timeout(Duration::from_secs(2));
+        // 先释放屏障再断言，即使回归出现阻塞，测试也能有界退出。
+        release.send(()).unwrap();
+        holder.join().unwrap();
+        assert!(closer.join().unwrap().unwrap());
+        assert!(status.unwrap().is_ok());
+    }
+
     impl SearchHook for Gate {
         fn on_pre_search(&self, _: &mut Vec<f32>, _: &mut SearchConfig, _: &mut HookContext) {
             self.entered.send(()).unwrap();
@@ -358,7 +463,8 @@ mod tests {
         db.set_hook(Gate {
             entered,
             release: Mutex::new(wait),
-        });
+        })
+        .unwrap();
         let handle = db.search_handle();
         let query = std::thread::spawn(move || {
             handle.search_batch(
@@ -394,7 +500,7 @@ mod tests {
         loop {
             match Database::<f32>::open(&path, 3) {
                 Ok(mut reopened) => {
-                    assert!(reopened.contains(1));
+                    assert!(reopened.contains(1).unwrap());
                     reopened.close().unwrap();
                     break;
                 }
@@ -425,10 +531,12 @@ mod tests {
         .unwrap();
         let (entered, arrived) = mpsc::channel();
         let (release, wait) = mpsc::channel();
-        first.set_hook(Gate {
-            entered,
-            release: Mutex::new(wait),
-        });
+        first
+            .set_hook(Gate {
+                entered,
+                release: Mutex::new(wait),
+            })
+            .unwrap();
         let handle = first.search_handle();
         let worker = std::thread::spawn(move || {
             handle.search_batch(

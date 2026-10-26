@@ -82,12 +82,15 @@ fn 快照提交点强杀后要么无目标要么完整可恢复() {
         let mut reader =
             Database::<f32>::open_immutable(&snapshot.join("database.tdb").to_string_lossy(), 4)
                 .unwrap();
-        assert_eq!(reader.node_count(), 1);
+        assert_eq!(reader.node_count().unwrap(), 1);
         assert_eq!(
-            reader.get_payload(1).unwrap(),
+            reader.get_payload(1).unwrap().unwrap(),
             serde_json::json!({"generation": "exact"})
         );
-        assert_eq!(reader.get(1).unwrap().vector, vec![1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(
+            reader.get(1).unwrap().unwrap().vector,
+            vec![1.0, 2.0, 3.0, 4.0]
+        );
         reader.close().unwrap();
     }
 }

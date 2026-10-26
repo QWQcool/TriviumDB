@@ -63,16 +63,16 @@ fn 两种存储模式的完整索引快照恢复后事实一致() {
             },
         )
         .unwrap();
-        assert_eq!(reader.node_count(), 32);
+        assert_eq!(reader.node_count().unwrap(), 32);
         for id in 1..=32u64 {
-            let node = reader.get(id).unwrap();
+            let node = reader.get(id).unwrap().unwrap();
             assert_eq!(node.vector, vec![id as f32, 2.0, 3.0]);
             assert_eq!(
                 node.payload,
                 serde_json::json!({"id": id, "name": format!("entity-{id}")})
             );
             if id < 32 {
-                assert_eq!(reader.get_edges(id)[0].target_id, id + 1);
+                assert_eq!(reader.get_edges(id).unwrap()[0].target_id, id + 1);
             }
         }
         assert_eq!(

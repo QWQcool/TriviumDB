@@ -35,8 +35,8 @@ fn seed_db(path: &str, count: usize) {
 }
 
 fn assert_payloads_from_seed(db: &Database<f32>, max_count: usize) {
-    for id in db.all_node_ids() {
-        let payload = db.get_payload(id).expect("恢复节点必须有 payload");
+    for id in db.all_node_ids().unwrap() {
+        let payload = db.get_payload(id).unwrap().expect("恢复节点必须有 payload");
         let idx = payload
             .get("idx")
             .and_then(|v| v.as_u64())
@@ -88,10 +88,16 @@ fn EMI_01_连续8字节全翻转_burst_error() {
 
     match result.unwrap() {
         Ok(db) => {
-            assert!(db.node_count() <= 30, "Burst error 降级不能产生额外节点");
+            assert!(
+                db.node_count().unwrap() <= 30,
+                "Burst error 降级不能产生额外节点"
+            );
             assert_payloads_from_seed(&db, 30);
             let hits = db.search(&[1.0, 0.0, 0.0, 0.0], 5, 0, 0.0).unwrap();
-            assert!(hits.len() <= db.node_count(), "搜索结果不能超过存活节点数");
+            assert!(
+                hits.len() <= db.node_count().unwrap(),
+                "搜索结果不能超过存活节点数"
+            );
         }
         Err(e) => assert_reject_has_diagnostic(e),
     }
@@ -130,7 +136,10 @@ fn EMI_02_向量数据区10_percent翻转_搜索降级不崩溃() {
     assert!(result.is_ok(), "大面积比特翻转不应导致 panic");
 
     if let Ok(Ok(db)) = result {
-        assert!(db.node_count() <= 50, "大面积翻转降级不能产生额外节点");
+        assert!(
+            db.node_count().unwrap() <= 50,
+            "大面积翻转降级不能产生额外节点"
+        );
         assert_payloads_from_seed(&db, 50);
         let search_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             db.search(&[1.0, 0.0, 0.0, 0.0], 10, 0, 0.0)
@@ -138,7 +147,10 @@ fn EMI_02_向量数据区10_percent翻转_搜索降级不崩溃() {
         assert!(search_result.is_ok(), "大面积损坏后搜索不应 panic");
         let hits = search_result.unwrap().unwrap();
         assert!(hits.len() <= 10, "搜索必须遵守 top_k 上限");
-        assert!(hits.len() <= db.node_count(), "搜索结果不能超过存活节点数");
+        assert!(
+            hits.len() <= db.node_count().unwrap(),
+            "搜索结果不能超过存活节点数"
+        );
     }
 
     cleanup(&path);
@@ -199,7 +211,7 @@ fn EMI_03_WAL单比特翻转_CRC检测率() {
         match result {
             Ok(Ok(db)) => {
                 // 加载成功，检查节点数是否异常
-                if db.node_count() != 20 {
+                if db.node_count().unwrap() != 20 {
                     // CRC 检测到损坏，只恢复了部分数据
                     detected += 1;
                 }
@@ -263,7 +275,7 @@ fn EMI_04_TDB全零覆写_安全拒绝() {
     cleanup(&path);
     let clean = Database::<f32>::open(&path, DIM).unwrap();
     assert_eq!(
-        clean.node_count(),
+        clean.node_count().unwrap(),
         0,
         "拒绝全零库后同路径重建不能携带脏状态"
     );

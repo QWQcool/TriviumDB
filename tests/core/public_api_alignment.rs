@@ -54,7 +54,7 @@ fn 四类属性索引和存储格式可结构化观测() {
         .unwrap();
     db.create_bitmap_index("region").unwrap();
 
-    let info = db.index_info();
+    let info = db.index_info().unwrap();
     assert_eq!(info.len(), 4);
     assert!(info.iter().any(|item| item.kind == PropertyIndexKind::Hash));
     assert!(

@@ -104,7 +104,7 @@ fn 旧键编码sidecar只读打开内存重建且保持零写() {
         },
     )
     .unwrap();
-    assert!(db.list_indexes().contains(&"bucket".to_owned()));
+    assert!(db.list_indexes().unwrap().contains(&"bucket".to_owned()));
     assert_eq!(ids(&db, r#"FIND {score: {$gte: 90}} RETURN *"#).len(), 10);
     drop(db);
     assert_eq!(std::fs::read(&sidecar).unwrap(), before);

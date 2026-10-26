@@ -530,18 +530,18 @@ fn WAL_端到端_文件物理截断后Database重新加载() {
             Ok(db) => {
                 // 至少 5 个已 flush 的节点应存活
                 assert!(
-                    db.node_count() >= 5,
+                    db.node_count().unwrap() >= 5,
                     "WAL 截断到 {}/{} 后节点数 {} < 5（已 flush 的节点丢失了）",
                     cut_at,
                     wal_len,
-                    db.node_count()
+                    db.node_count().unwrap()
                 );
                 assert!(
-                    db.node_count() <= 8,
+                    db.node_count().unwrap() <= 8,
                     "WAL 截断到 {}/{} 后节点数 {} > 8（凭空多出节点）",
                     cut_at,
                     wal_len,
-                    db.node_count()
+                    db.node_count().unwrap()
                 );
             }
             Err(e) => {

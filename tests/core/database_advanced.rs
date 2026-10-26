@@ -50,13 +50,13 @@ fn COV2_01_get_node_view() {
         .insert(&[1.0, 2.0, 3.0, 4.0], serde_json::json!({"name": "Alice"}))
         .unwrap();
 
-    let view = db.get(id).unwrap();
+    let view = db.get(id).unwrap().unwrap();
     assert_eq!(view.id, id);
     assert_eq!(view.payload["name"], "Alice");
     assert_eq!(view.vector.len(), 4);
 
     // 不存在的节点
-    assert!(db.get(999).is_none());
+    assert!(db.get(999).unwrap().is_none());
 
     cleanup(&path);
 }
@@ -74,14 +74,19 @@ fn COV2_02b_标签邻居稳定排序与完整入边() {
     db.link(a, b, "knows", 1.0).unwrap();
     db.link(b, d, "knows", 3.0).unwrap();
 
-    assert_eq!(db.neighbors_with_labels(a, 2, None), vec![b, c, d]);
+    assert_eq!(db.neighbors_with_labels(a, 2, None).unwrap(), vec![b, c, d]);
     assert_eq!(
-        db.neighbors_with_labels(a, 2, Some(&["knows".to_string()])),
+        db.neighbors_with_labels(a, 2, Some(&["knows".to_string()]))
+            .unwrap(),
         vec![b, d]
     );
-    assert!(db.neighbors_with_labels(a, 2, Some(&[])).is_empty());
+    assert!(
+        db.neighbors_with_labels(a, 2, Some(&[]))
+            .unwrap()
+            .is_empty()
+    );
 
-    let incoming = db.get_incoming_edges(b, None);
+    let incoming = db.get_incoming_edges(b, None).unwrap();
     assert_eq!(incoming.len(), 1);
     assert_eq!(incoming[0].source_id, a);
     assert_eq!(incoming[0].target_id, b);
@@ -114,18 +119,18 @@ fn COV2_02_neighbors() {
     db.link(c, d, "knows", 1.0).unwrap();
 
     // depth=1: 只有直接邻居
-    let n1 = db.neighbors(a, 1);
+    let n1 = db.neighbors(a, 1).unwrap();
     assert!(n1.contains(&b));
     assert!(!n1.contains(&c));
 
     // depth=2: 2 跳
-    let n2 = db.neighbors(a, 2);
+    let n2 = db.neighbors(a, 2).unwrap();
     assert!(n2.contains(&b));
     assert!(n2.contains(&c));
     assert!(!n2.contains(&d));
 
     // depth=0: 没有邻居
-    let n0 = db.neighbors(a, 0);
+    let n0 = db.neighbors(a, 0).unwrap();
     assert!(n0.is_empty());
 
     cleanup(&path);
@@ -143,7 +148,7 @@ fn COV2_03_close() {
 
     // 重新打开验证
     let db = Database::<f32>::open(&path, DIM).unwrap();
-    assert_eq!(db.node_count(), 1);
+    assert_eq!(db.node_count().unwrap(), 1);
 
     cleanup(&path);
 }
@@ -158,8 +163,8 @@ fn COV2_04_contains_and_dim() {
         .insert(&[1.0, 0.0, 0.0, 0.0], serde_json::json!({}))
         .unwrap();
 
-    assert!(db.contains(id));
-    assert!(!db.contains(999));
+    assert!(db.contains(id).unwrap());
+    assert!(!db.contains(999).unwrap());
     assert_eq!(db.dim(), DIM);
 
     cleanup(&path);
@@ -182,12 +187,12 @@ fn COV2_05_migrate_to() {
     db.flush().unwrap();
 
     let (new_db, migrated_ids) = db.migrate_to(&new_path, 8).unwrap();
-    assert_eq!(new_db.node_count(), 2);
+    assert_eq!(new_db.node_count().unwrap(), 2);
     assert_eq!(migrated_ids.len(), 2);
     assert_eq!(new_db.dim(), 8);
 
     // 验证 payload 迁移
-    let p = new_db.get_payload(id1).unwrap();
+    let p = new_db.get_payload(id1).unwrap().unwrap();
     assert_eq!(p["name"], "A");
 
     cleanup(&path);
@@ -244,7 +249,7 @@ fn seed_social_graph(path: &str) -> Database<f32> {
     }
 
     // 建立关系链: 1→2→3→4→5
-    let mut ids = db.all_node_ids();
+    let mut ids = db.all_node_ids().unwrap();
     ids.sort_unstable();
     for i in 0..ids.len() - 1 {
         db.link(ids[i], ids[i + 1], "knows", 0.9).unwrap();
@@ -436,12 +441,12 @@ fn COV2_15_tql_mut_delete() {
     let path = tmp_db("tql_delete");
     let mut db = seed_social_graph(&path);
 
-    let before = db.node_count();
+    let before = db.node_count().unwrap();
     let result = db
         .tql_mut(r#"MATCH (a {name: "user_0"}) DELETE a"#)
         .unwrap();
     assert!(result.affected >= 1);
-    assert!(db.node_count() < before);
+    assert!(db.node_count().unwrap() < before);
 
     cleanup(&path);
 }
@@ -452,12 +457,12 @@ fn COV2_16_tql_mut_detach_delete() {
     let path = tmp_db("tql_detach");
     let mut db = seed_social_graph(&path);
 
-    let before = db.node_count();
+    let before = db.node_count().unwrap();
     let result = db
         .tql_mut(r#"MATCH (a {name: "user_5"}) DETACH DELETE a"#)
         .unwrap();
     assert!(result.affected >= 1);
-    assert!(db.node_count() < before);
+    assert!(db.node_count().unwrap() < before);
 
     cleanup(&path);
 }
@@ -542,8 +547,8 @@ fn COV2_20_insert_with_id_happy() {
     )
     .unwrap();
 
-    assert!(db.contains(42));
-    let p = db.get_payload(42).unwrap();
+    assert!(db.contains(42).unwrap());
+    let p = db.get_payload(42).unwrap().unwrap();
     assert_eq!(p["custom_id"], 42);
 
     cleanup(&path);

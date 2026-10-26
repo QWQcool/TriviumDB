@@ -45,6 +45,8 @@ struct Case {
     tql: Option<String>,
     #[serde(default)]
     parameters: HashMap<String, Value>,
+    #[serde(default)]
+    documents: Vec<triviumdb::index::text::TextIndexDocument>,
     expected: Value,
 }
 
@@ -89,7 +91,10 @@ fn 共享json契约由rust适配器完整执行() {
     for case in contract.cases {
         match case.operation.as_str() {
             "get_payload" => {
-                let payload = database.get_payload(case.node_id.unwrap()).unwrap();
+                let payload = database
+                    .get_payload(case.node_id.unwrap())
+                    .unwrap()
+                    .unwrap();
                 let field = case.expected["field"].as_str().unwrap();
                 assert_eq!(payload[field], case.expected["value"], "{}", case.name);
             }
@@ -168,6 +173,20 @@ fn 共享json契约由rust适配器完整执行() {
                             case.name
                         );
                     }
+                }
+            }
+            "text_rebuild" => {
+                database.rebuild_text_index(&case.documents).unwrap();
+                for check in case.expected["checks"].as_array().unwrap() {
+                    assert_eq!(
+                        database
+                            .tql_values(check["query"].as_str().unwrap())
+                            .unwrap()
+                            .len() as u64,
+                        check["count"].as_u64().unwrap(),
+                        "{}",
+                        case.name
+                    );
                 }
             }
             other => panic!("未知共享契约操作：{other}"),

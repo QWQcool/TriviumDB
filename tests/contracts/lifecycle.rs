@@ -97,8 +97,15 @@ fn run<T: VectorType + serde::Serialize + serde::de::DeserializeOwned>(case: &Va
         runtime.clone(),
     )
     .unwrap();
-    assert_eq!(reader.get_payload(id).unwrap(), case["original_payload"]);
-    assert!(!reader.contains(case["later_node_id"].as_u64().unwrap()));
+    assert_eq!(
+        reader.get_payload(id).unwrap().unwrap(),
+        case["original_payload"]
+    );
+    assert!(
+        !reader
+            .contains(case["later_node_id"].as_u64().unwrap())
+            .unwrap()
+    );
     assert!(
         reader
             .close_timeout(std::time::Duration::from_millis(

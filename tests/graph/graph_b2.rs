@@ -275,7 +275,7 @@ fn 图统计在_link_unlink_delete_和重启后保持一致() {
     db.link(ids[0], ids[1], "a", 1.0).unwrap();
     db.link(ids[0], ids[2], "a", 1.0).unwrap();
     db.link(ids[2], ids[3], "b", 1.0).unwrap();
-    let stats = db.graph_stats();
+    let stats = db.graph_stats().unwrap();
     assert_eq!(stats.node_count, 4);
     assert_eq!(stats.edge_count, 3);
     assert_eq!(stats.avg_out_degree, 0.75);
@@ -293,15 +293,15 @@ fn 图统计在_link_unlink_delete_和重启后保持一致() {
     );
 
     db.unlink(ids[0], ids[1]).unwrap();
-    assert_eq!(db.graph_stats().edge_count, 2);
+    assert_eq!(db.graph_stats().unwrap().edge_count, 2);
     db.delete(ids[2]).unwrap();
-    assert_eq!(db.graph_stats().edge_count, 0);
+    assert_eq!(db.graph_stats().unwrap().edge_count, 0);
     db.flush().unwrap();
     drop(db);
 
     let reopened = Database::<f32>::open(&path, DIM).unwrap();
-    assert_eq!(reopened.graph_stats().edge_count, 0);
-    assert_eq!(reopened.graph_stats().node_count, 3);
+    assert_eq!(reopened.graph_stats().unwrap().edge_count, 0);
+    assert_eq!(reopened.graph_stats().unwrap().node_count, 3);
     drop(reopened);
     for suffix in ["", ".vec", ".wal", ".lock", ".flush_ok", ".pidx"] {
         std::fs::remove_file(format!("{path}{suffix}")).ok();

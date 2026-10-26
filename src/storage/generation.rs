@@ -105,7 +105,7 @@ impl GenerationStore {
                     reason: format!("manifest dtype 不受支持: {dtype}"),
                 });
             }
-        };
+        }?;
         if actual_node_count != manifest.node_count {
             return Err(TriviumError::ImmutableArtifactInvalid {
                 reason: format!(
@@ -186,12 +186,12 @@ impl GenerationStore {
             &current.generation_id,
         )?;
         let reader = DatabaseReader::open_immutable(&path.to_string_lossy(), dim)?;
-        if reader.node_count() != manifest.node_count {
+        let node_count = reader.node_count()?;
+        if node_count != manifest.node_count {
             return Err(TriviumError::ImmutableArtifactInvalid {
                 reason: format!(
                     "manifest node_count {} 与数据库 {} 不一致",
-                    manifest.node_count,
-                    reader.node_count()
+                    manifest.node_count, node_count
                 ),
             });
         }

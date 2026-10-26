@@ -1,0 +1,40 @@
+{
+  "package": "triviumdb",
+  "version": "0.8.10",
+  "distribution": "PyPI cp39-abi3-win_amd64",
+  "python": "3.12.12",
+  "platform": "Windows",
+  "dimension": 4,
+  "nodes": 4,
+  "generator": "generate.py",
+  "files": {
+    "sample.tdb.flush_ok": {
+      "size": 53,
+      "sha256": "81a94aed5bfd88e5af2039dd90c97c13eee17361509593b782446fa2a4c8c611"
+    },
+    "sample.tdb.vec": {
+      "size": 64,
+      "sha256": "908d6d8a6d3efc80b22d0937be35e1512f55c271dfe6489ea3926efce9465d3a"
+    },
+    "sample.tdb": {
+      "size": 1672,
+      "sha256": "81604526cf49a9a9af15deaf696d34b3bbe289e1232afb20932db1f7299dfdbb"
+    },
+    "sample.tdb.pld.2": {
+      "size": 340,
+      "sha256": "418c17f4c8a7c16e26e3397301c360a7d31d3e3288eb1ad0ac212d4d17bf0b9f"
+    },
+    "sample.tdb.wal": {
+      "size": 6,
+      "sha256": "4cb1780d5197f4afcfe53878bea73013217fe50815231501b29b261e42ac8e29"
+    },
+    "sample.tdb.text.meta": {
+      "size": 28,
+      "sha256": "ab2aa9eb5341ed1eb46e55b19d2dc5d2da3b8cbe730d767748e07aa6140adf43"
+    },
+    "sample.tdb.text": {
+      "size": 719,
+      "sha256": "8a7c06b1292763545d8809ba567a73bd1a45586f86c4ff571ef5555786842ebc"
+    }
+  }
+}

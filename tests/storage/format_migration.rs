@@ -185,14 +185,14 @@ fn v5_三十二chunk从零点七零可读并在flush后升级v6() {
     rewrite_v6_as_v5(&path, V5_LEGACY_CHUNKS);
     assert_eq!(version(&path), 5);
     let mut db = Database::<f32>::open(path.to_str().unwrap(), 128).unwrap();
-    assert_eq!(db.node_count(), 2);
-    assert_eq!(db.get_edges(1).len(), 1);
-    assert_eq!(db.get_payload(2).unwrap()["name"], "second");
+    assert_eq!(db.node_count().unwrap(), 2);
+    assert_eq!(db.get_edges(1).unwrap().len(), 1);
+    assert_eq!(db.get_payload(2).unwrap().unwrap()["name"], "second");
     db.flush().unwrap();
     assert_eq!(version(&path), CURRENT_VERSION);
     drop(db);
     let reopened = Database::<f32>::open(path.to_str().unwrap(), 128).unwrap();
-    assert_eq!(reopened.node_count(), 2);
+    assert_eq!(reopened.node_count().unwrap(), 2);
 }
 
 #[test]
@@ -209,7 +209,7 @@ fn v5_四十八chunk从零点七一后可读并在close后升级v6() {
         },
     )
     .unwrap();
-    assert_eq!(db.node_count(), 2);
+    assert_eq!(db.node_count().unwrap(), 2);
     db.close().unwrap();
     assert_eq!(version(&path), CURRENT_VERSION);
 }
@@ -300,7 +300,7 @@ fn v5_readonly可读但不会原地升级或改写() {
     let before_vec = std::fs::read(format!("{}.vec", path.display())).unwrap();
     let before_marker = std::fs::read(format!("{}.flush_ok", path.display())).unwrap();
     let reader = Database::<f32>::open_read_only(path.to_str().unwrap(), 128).unwrap();
-    assert_eq!(reader.node_count(), 2);
+    assert_eq!(reader.node_count().unwrap(), 2);
     drop(reader);
     assert_eq!(std::fs::read(&path).unwrap(), before_tdb);
     assert_eq!(

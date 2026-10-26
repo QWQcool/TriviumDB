@@ -1,0 +1,42 @@
+# TriviumDB
+
+> TriviumDB is a native tri-model embedded database engine written in Rust. Vector search, property graphs, and JSON documents share one storage kernel and NodeId space. A unified Cascades optimizer plans cross-model TQL query pipelines. Native APIs are available for Rust, Python, and Node.js. License: Apache-2.0.
+
+TriviumDB runs inside the host application. Applications use it for AI agent memory, AI companion memory, retrieval-augmented generation (RAG), local knowledge bases, and knowledge graphs. Independent database instances support per-agent, per-session, and per-tenant data organization in desktop applications and containers.
+
+- Native tri-model unification: vector, graph, and document operations share the same storage kernel, node identities, and transaction system. Each NodeId connects a stored vector, a JSON payload, indexed text, and graph edges. Applications combine semantic similarity, document predicates, and graph relationships over the same data.
+- Unified Cascades planning: TQL brings vector recall, document filtering, text retrieval, graph traversal, paths, set operations, aggregation, iteration, and reranking into one query pipeline. The same deterministic, cost-driven Cascades optimizer plans these cross-model pipelines using shared statistics, index availability, and resource budgets. MATCH, FIND, SEARCH, and WITH express the combined query.
+- Vector retrieval: f32, f16, and u64 storage; exact vector search; and the QuIVer approximate nearest-neighbor (ANN) index. QuIVer uses compact 2-bit representations, sign-magnitude SM-L2 navigation, and candidate reranking with stored vectors. Dimension-aware automatic index construction supports growing datasets. The engine supports vector dimensions from 1 to 65,536, with QuIVer ANN covering 1 to 3,072 dimensions.
+- Text retrieval: BM25 ranking and Aho-Corasick keyword matching support text search and hybrid recall. Text and vector recall can feed graph expansion and reranking.
+- Graph operations: directed labeled edges with weights and metadata; neighborhood expansion; reachability; shortest paths; PageRank; connected components; Leiden community detection; and spreading activation with personalized restart (SA-PPR).
+- Property indexes: persistent Hash, Ordered ART, Composite ART, and Roaring Bitmap indexes accelerate equality, range, prefix, composite, and low-cardinality set predicates.
+- Transactions and persistence: vector, JSON payload, and graph mutations share transactions and an append-only write-ahead log (WAL). Text-index registrations persist through flush() and writable close(). Checkpoints, recovery, and background compaction manage durable storage.
+- Storage modes: Rom packs vectors, JSON payloads, and edges into a portable .tdb data file. Mmap uses a .tdb main file, mapped .vec vectors, and generation-scoped .pld payload files. Tiered vector and Payload storage support on-demand reads and byte-bounded parsed JSON caching.
+- Instance management: a shared ResourceRuntime coordinates per-instance heap and workspace budgets, maintenance allocations, worker threads, and task slots. Diagnostics expose instance and resource usage. Controlled shutdown persists data and releases instance resources; directory snapshots support consistent backup and restore.
+- Search customization: six-stage search-pipeline hooks support custom recall, graph expansion, reranking, and result processing through Rust, Python, Node.js, and C/C++ FFI integrations.
+
+## Documentation
+
+- [English overview](https://raw.githubusercontent.com/YoKONCy/TriviumDB/master/README_EN.md): Product overview, installation, examples, and usage patterns.
+- [Chinese overview](https://raw.githubusercontent.com/YoKONCy/TriviumDB/master/README.md): Chinese product overview, installation, and examples.
+- [API reference](https://raw.githubusercontent.com/YoKONCy/TriviumDB/master/docs/api-reference.md): Rust, Python, and Node.js APIs, configuration, parameters, and return values.
+- [TQL reference](https://raw.githubusercontent.com/YoKONCy/TriviumDB/master/docs/tql-reference.md): Unified Cascades planning, cross-model query syntax, pipeline operators, graph algorithms, and data mutations.
+- [Features](https://raw.githubusercontent.com/YoKONCy/TriviumDB/master/docs/features.md): Native tri-model data model, shared storage kernel, indexing, transactions, and retrieval capabilities.
+- [QuIVer vector index](https://raw.githubusercontent.com/YoKONCy/TriviumDB/master/docs/quiver.md): Quantized graph navigation, vector reranking, automatic construction, and index configuration.
+- [Resource runtime](https://raw.githubusercontent.com/YoKONCy/TriviumDB/master/docs/resource-runtime.md): Shared resource budgets, thread pools, task admission, and instance diagnostics.
+- [Shutdown, snapshots, and restore](https://raw.githubusercontent.com/YoKONCy/TriviumDB/master/docs/lifecycle-snapshots.md): Instance lifecycle, consistent directory snapshots, verification, and restore.
+- [Best practices](https://raw.githubusercontent.com/YoKONCy/TriviumDB/master/docs/best-practices.md): Data modeling, application integration, retrieval patterns, and resource configuration.
+
+## Packages
+
+- [Rust crate](https://crates.io/crates/triviumdb): Embedded Rust API and package installation.
+- [Python package](https://pypi.org/project/triviumdb/): Python bindings and package installation.
+- [Node.js package](https://www.npmjs.com/package/triviumdb): Native Node.js bindings and TypeScript definitions.
+
+## Optional
+
+- [Hook guide](https://raw.githubusercontent.com/YoKONCy/TriviumDB/master/docs/hook-guide.md): Search-pipeline extensions, custom recall, reranking, and FFI integration.
+- [CLI guide](https://raw.githubusercontent.com/YoKONCy/TriviumDB/master/crates/triviumdb-cli/README.md): The tdb command-line tool, database inspection, REPL, and terminal UI.
+- [Storage integrity and concurrency](https://raw.githubusercontent.com/YoKONCy/TriviumDB/master/docs/security.md): Transaction atomicity, generation publication, concurrent access, and FFI contracts.
+- [Source repository](https://github.com/YoKONCy/TriviumDB): Rust engine, language bindings, and examples.
+- [Apache-2.0 license](https://raw.githubusercontent.com/YoKONCy/TriviumDB/master/LICENSE): Software license.

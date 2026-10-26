@@ -160,7 +160,7 @@ fn 只读句柄拒绝写入事务索引和持久化操作() {
         tx.commit(),
         Err(TriviumError::ReadOnlyViolation { .. })
     ));
-    assert_eq!(db.node_count(), 1);
+    assert_eq!(db.node_count().unwrap(), 1);
     assert_eq!(db.search(&[1.0, 0.0], 1, 0, 0.0).unwrap()[0].id, id);
     db.close().unwrap();
     cleanup(&path);

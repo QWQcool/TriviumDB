@@ -36,6 +36,8 @@ pub enum ConcurrencyPoint {
     AfterFlushMarkerRename,
     AfterPublicationPrepared,
     AfterPublicationRestore,
+    AfterSidecarsPersisted,
+    AfterPublicationCommitted,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,6 +55,11 @@ pub enum IoPoint {
     PublicationJournalSync,
     PublicationJournalRename,
     PublicationRestoreCopy,
+    PublicationCommitSync,
+    PublicationCommitRename,
+    TextMetadataWrite,
+    PropertySidecarWrite,
+    GraphSidecarWrite,
     WalFlush,
     WalSync,
     WalMigrationCreate,
@@ -205,14 +212,17 @@ impl Gate {
     }
 }
 
-fn registry() -> &'static Mutex<HashMap<ConcurrencyPoint, Arc<Gate>>> {
-    static REGISTRY: OnceLock<Mutex<HashMap<ConcurrencyPoint, Arc<Gate>>>> = OnceLock::new();
+type GateKey = (ConcurrencyPoint, Option<String>);
+type GateRegistry = Mutex<HashMap<GateKey, Arc<Gate>>>;
+
+fn registry() -> &'static GateRegistry {
+    static REGISTRY: OnceLock<GateRegistry> = OnceLock::new();
     REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 /// 某个交错点的测试端控制句柄。
 pub struct WaitHandle {
-    point: ConcurrencyPoint,
+    key: GateKey,
     gate: Arc<Gate>,
 }
 
@@ -236,33 +246,47 @@ impl WaitHandle {
 
     /// 释放目标线程并注销交错点。
     pub fn release(self) {
-        self.gate.release();
-        registry()
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .remove(&self.point);
+        drop(self);
     }
 }
 
 impl Drop for WaitHandle {
     fn drop(&mut self) {
-        self.gate.release();
-        registry()
+        let mut gates = registry()
             .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .remove(&self.point);
+            .unwrap_or_else(|poison| poison.into_inner());
+        if gates
+            .get(&self.key)
+            .is_some_and(|gate| Arc::ptr_eq(gate, &self.gate))
+        {
+            gates.remove(&self.key);
+        }
+        drop(gates);
+        self.gate.release();
     }
 }
 
 /// 注册一次性阻塞点。同一交错点不能同时注册两次。
 pub fn pause_at(point: ConcurrencyPoint) -> WaitHandle {
+    register_gate((point, None))
+}
+
+/// 只阻塞指定数据库规范路径，允许相同阶段的多个实例并行测试。
+pub fn pause_at_path(point: ConcurrencyPoint, path: &str) -> WaitHandle {
+    register_gate((point, Some(path.to_owned())))
+}
+
+fn register_gate(key: GateKey) -> WaitHandle {
     let gate = Arc::new(Gate::default());
-    let previous = registry()
+    let mut gates = registry()
         .lock()
-        .unwrap_or_else(|poison| poison.into_inner())
-        .insert(point, Arc::clone(&gate));
-    assert!(previous.is_none(), "同一个并发交错点不能重复注册");
-    WaitHandle { point, gate }
+        .unwrap_or_else(|poison| poison.into_inner());
+    if gates.contains_key(&key) {
+        drop(gates);
+        panic!("同一范围的并发交错点不能重复注册");
+    }
+    gates.insert(key.clone(), Arc::clone(&gate));
+    WaitHandle { key, gate }
 }
 
 /// 由生产路径调用：未注册时快速返回，注册时通知测试并等待释放。
@@ -270,7 +294,20 @@ pub fn hit(point: ConcurrencyPoint) {
     let gate = registry()
         .lock()
         .unwrap_or_else(|poison| poison.into_inner())
-        .get(&point)
+        .get(&(point, None))
+        .cloned();
+    if let Some(gate) = gate {
+        gate.arrive_and_wait();
+    }
+}
+
+/// 文件发布路径同时支持全局屏障与按数据库路径选择的屏障。
+pub fn hit_for_path(point: ConcurrencyPoint, path: &str) {
+    hit(point);
+    let gate = registry()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .get(&(point, Some(path.to_owned())))
         .cloned();
     if let Some(gate) = gate {
         gate.arrive_and_wait();

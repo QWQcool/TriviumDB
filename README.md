@@ -47,7 +47,7 @@ TriviumDB 是一个用纯 Rust 编写的**嵌入式三模数据库引擎**，将
 - 🧠 **为 AI 而生** —— 可选启用“AC自动机+BM25稀疏文本”与“Dense Vector稠密向量”的**多路召回**来触发图谱扩散检索，并内置多层认知管线（FISTA / DPP / PPR）
 - 🛡️ **四层数据安全保障** —— 原子替换 + WAL日志 + 事务干跑验证（Dry-Run）+ Mmap COW 隔离，`.flush_ok` v3 绑定 `.tdb/.vec/.pld`，发布前旧代备份与撤销日志支持中断恢复；备份增加磁盘读写与临时空间，损坏输入仍 fail-closed，详见[恢复协议](docs/security.md#8-mmap-三文件一致性标记flush_ok-v3)
 - 🐍 **Python / Node.js 原生** —— `pip install` 或 `npm install` 后直接使用，类 MongoDB 查询语法
-- ⚡ **高性能检索** —— rayon 并行暴力搜索（小规模 100% 精确）+ 自研 ANN 索引 **QuIVer**；默认采用无训练 SM-L2 导航与余弦精排，按向量工作量动态触发（2,500–10,000 节点）
+- ⚡ **高性能检索** —— rayon 并行暴力搜索（小规模 100% 精确）+ 自研 ANN 索引 **QuIVer**；默认采用无训练 SM-L2 导航与余弦精排，按向量工作量动态触发（209–834 节点）
 - 💾 **SSD 友好** —— Append-Only WAL + 后台 Compaction 线程 + QuIVer 索引独立持久化，杜绝随机写入磨损
 - 🔒 **共享只读打开** —— 多进程 Reader 共享锁并发查询已完成代际，Writer 继续保持排他锁与 WAL 安全边界
 - 🧩 **类型化访问能力** —— Rust `DatabaseReader` 在编译期隐藏写 API，`DatabaseWriter` 保留完整嵌入式写能力
@@ -180,15 +180,15 @@ pnpm add triviumdb
 cargo add triviumdb
 ```
 
-`0.9.0-beta.1` 的共享资源、受控关闭和目录快照可通过以下 Beta 版本安装：
+`0.9.0-beta.2` 提供关闭后的完整资源释放、流式 WAL 恢复、文本索引重建与文件组原子发布，并提前 QuIVer 自动构建阈值：
 
 ```bash
-pip install "triviumdb==0.9.0b1"
-npm install triviumdb@0.9.0-beta.1
-cargo add triviumdb@0.9.0-beta.1
+pip install "triviumdb==0.9.0b2"
+npm install triviumdb@0.9.0-beta.2
+cargo add triviumdb@0.9.0-beta.2
 ```
 
-版本内容见 [0.9.0-beta.1 变更说明](docs/changes/0.9.0-beta.1.md)。
+版本内容见 [0.9.0-beta.2 变更说明](docs/changes/0.9.0-beta.2.md)。
 
 > 🧪 **尝鲜：HTTP 服务端版（nightly）** —— TriviumDB 的正式产品形态始终是**嵌入式数据库**（进程内 Library，即装即用，无需部署）。仓库中的 `triviumdb-server` 提供了一个可选的 HTTP 壳（多客户端并发读写、OCC、流式 NDJSON 等），目前处于 **nightly 预览状态**，仅供尝鲜和跟踪演进方向，协议随时可能变更，请勿用于生产。详见 [Server 说明（nightly）](docs/server.md)；一切 API 与用法说明仍以嵌入式版本为准。
 
@@ -374,6 +374,8 @@ finally:
 
 内存预算按声明配额和已接入的工作区预留核算。部署时结合 mmap 驻留、页缓存、线程栈及语言运行时开销配置进程或容器限额。Python 预算异常与 Node 的 `QueueFull` 错误均提供 `resource`、`requested`、`used`、`limit` 字段，便于宿主限流、退避和释放闲置实例。
 
+`0.9.0-beta.2` 的关闭完成点涵盖文件句柄、内存映射、数据库 Hook 与配额释放，并支持分组提交异常后的状态恢复。Rust 数据读取与 `set_hook()` 使用 `Result` 传播错误，Python/Node 在关闭后抛出关闭错误。迁移方式见[版本变更](docs/changes/0.9.0-beta.2.md#生命周期与-rust-api-迁移)。
+
 详见[共享资源与实例诊断](docs/resource-runtime.md)和[关闭、快照与恢复](docs/lifecycle-snapshots.md)。
 
 ---
@@ -382,18 +384,18 @@ finally:
 
 **QuIVer**（Quantized Index for Vector Retrieval）是 TriviumDB 自研的近似最近邻（ANN）图索引。使用 **BQ 快速构图 + 无训练 SM-L2 导航 + 原始向量余弦精排**；导航结合两位编码与每向量幅值信息计算重建平方 L2，召回和吞吐取决于数据、参数与精排预算。
 
-> 📖 [QuIVer 架构与配置](docs/quiver.md) · [基准测试指南](benches/README.md) · [0.9.0-beta.1 变更说明](docs/changes/0.9.0-beta.1.md)
+> 📖 [QuIVer 架构与配置](docs/quiver.md) · [基准测试指南](benches/README.md) · [0.9.0-beta.2 变更说明](docs/changes/0.9.0-beta.2.md)
 
 > ⚠️ **维度建议：强烈建议数据库向量维度不超过 3072。** TriviumDB 的通用存储与精确 BruteForce 检索允许更高维度，但 QuIVer 的 BQ 签名安全上限是 3072 维。超过该维度时引擎不会自动构建 QuIVer，检索会稳定回退到 BruteForce；手动构建 QuIVer 会返回明确错误。高维数据库仍可使用，但无法获得 QuIVer ANN 加速，内存和计算开销也会显著增加。
 
-TriviumDB 采用**智能自适应双引擎**向量索引。自动 QuIVer 阈值按 `ceil(8,000,000 / dim)` 计算，并限制在 2,500–10,000 节点；低维数据保留更久的精确 BruteForce，高维数据更早切换 ANN：
+TriviumDB 采用**智能自适应双引擎**向量索引。自动 QuIVer 阈值按 `ceil(666,667 / dim)` 计算，并限制在 209–834 节点；低维数据保留更久的精确 BruteForce，高维数据更早切换 ANN：
 
 | 阶段 | 引擎 | 激活条件 | 特点 |
 |---|---|---|---|
 | **小规模热区** | BruteForce | 节点数低于当前维度的动态阈值，或 QuIVer 未就绪 | 100% 精确召回，rayon 多核 |
-| **大规模冷区** | **QuIVer** | 维度 ≤ 3072 且达到动态阈值（2,500–10,000 节点） | BQ 构图 + SM-L2 导航 + 原始向量余弦精排 |
+| **大规模冷区** | **QuIVer** | 维度 ≤ 3072 且达到动态阈值（209–834 节点） | BQ 构图 + SM-L2 导航 + 原始向量余弦精排 |
 
-例如 384/768 维仍在 10,000 节点触发，1024 维约 7,813，1536 维约 5,209，3072 维约 2,605。
+例如 384/768 维在 834 节点触发，1024 维为 652，1536 维为 435，3072 维为 218。达到阈值后，下一次符合条件的查询或预热会构建索引。
 
 ### QuIVer 的核心设计
 
@@ -594,7 +596,7 @@ TriviumDB/
 
 - [x] **统一 TQL 查询系统**：`FIND` / `MATCH` / `SEARCH`、`WITH` 可组合管线、Prepared 参数、表达式/聚合/路径/集合代数、科学计数法和原子 `SET VECTOR`
 - [x] **有界 Cascades 与图计算**：确定性、统计感知的物理计划，内嵌 PageRank / WCC / Leiden / Betweenness / Degree / Label Propagation / SA-PPR，并通过 `EXPLAIN ANALYZE` 暴露估算与实际指标
-- [x] **完整持久化索引体系**：Hash / Ordered ART / Composite ART / Bitmap、业务图块、AC+BM25 与 QuIVer sidecar；动态 QuIVer 阈值按向量工作量在 2,500–10,000 节点间自动选择
+- [x] **完整持久化索引体系**：Hash / Ordered ART / Composite ART / Bitmap、业务图块、AC+BM25 与 QuIVer sidecar；动态 QuIVer 阈值按向量工作量在 209–834 节点间自动选择
 - [x] **生产级存储与安全保证**：`.flush_ok` v3 绑定 `.tdb/.vec/.pld` generation、大小与 CRC；无生产可达 panic、ReadOnly/Immutable 字节级零写、WAL/代际原子发布、查询/遍历/内存/Payload 预算 fail-closed 与真实小型故障注入
 - [x] **Payload 冷热分离一期**：generation 化 `.pld` mmap raw base、内存 delta/tombstone、有界 LRU Parsed Cache、Late Materialization、ColdPayloadScan 与跨端 cache 配置
 - [x] **Rust/Python/Node 能力对齐**：一等 TQL 值、四类属性索引、Prepared TQL、六阶段 Hook 与 FFI ABI v2，清理静默历史兼容并提供稳定迁移错误
@@ -629,7 +631,7 @@ TriviumDB/
 
 1. **三合一原子性**：一个 `u64` ID 同时映射到向量、Payload、边表。插入原子、删除原子，永不出现 ID 不一致。
 2. **嵌入式优先**：数据库作为库运行在宿主进程内，应用通过 Rust、Python 或 Node.js API 管理数据与实例生命周期。
-3. **全自动性能路由**：按约 800 万向量分量工作量在 2,500–10,000 节点间动态选择阈值；低于阈值使用精确 BruteForce，达到阈值后自动构建并切换 QuIVer。
+3. **全自动性能路由**：按约 66.7 万向量分量工作量在 209–834 节点间动态选择阈值；低于阈值使用精确 BruteForce，达到阈值后自动构建并切换 QuIVer。
 4. **可预测的性能**：顺序 I/O only（WAL 追加写 + Compaction 顺序重写），SSD 寿命安全。
 5. **索引即加速层**：QuIVer 是可丢弃的派生数据（`.tdb.quiver` 独立文件），丢失后首次查询时自动重建，不依赖也不污染 WAL 真相源。
 6. **Rust 安全契约**：mmap、SIMD、裸指针和手工 `Send/Sync` 路径按长度、对齐、生命周期和并发条件审核，并结合 ASan、TSan 与 Miri 验证。执行范围见[安全文档](docs/security.md)与[测试实践](docs/testing.md)。
@@ -641,6 +643,7 @@ TriviumDB/
 
 | 文档                                          | 说明                                                   |
 | --------------------------------------------- | ------------------------------------------------------ |
+| **[LLM 项目索引](llms.txt)**                  | 产品概览、功能、使用场景与文档入口                       |
 | **[API 完整参考](docs/api-reference.md)**     | 全部 Python / Node.js / Rust API、参数说明、返回值类型 |
 | **[支持特性详解](docs/features.md)**          | 架构设计、存储引擎、索引策略、崩溃恢复等技术细节       |
 | **[最佳实践](docs/best-practices.md)**        | 数据建模范式、性能调优、Hook 使用指南、避坑指南        |

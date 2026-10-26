@@ -19,6 +19,8 @@ dist/
 # ══════ TriviumDB 运行产物 ══════
 *.tdb
 *.tdb.wal
+!tests/fixtures/v0810_text_mmap/sample.tdb
+!tests/fixtures/v0810_text_mmap/sample.tdb.wal
 
 # ══════ Node.js & napi-rs ══════
 node_modules/

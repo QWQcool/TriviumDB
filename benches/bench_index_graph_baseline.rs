@@ -402,7 +402,11 @@ fn run_track_b(
             "uniform_and_hub_edges",
             config.queries,
             config.warmup_queries,
-            |iteration| db.neighbors(ids[iteration % anchor_count], depth).len(),
+            |iteration| {
+                db.neighbors(ids[iteration % anchor_count], depth)
+                    .unwrap()
+                    .len()
+            },
         ));
     }
 
@@ -415,6 +419,7 @@ fn run_track_b(
             config.warmup_queries,
             |iteration| {
                 db.neighbors_with_labels(ids[iteration % anchor_count], depth, Some(&labels))
+                    .unwrap()
                     .len()
             },
         ));
@@ -437,6 +442,7 @@ fn run_track_b(
         |iteration| {
             let (source, target) = shortest_pairs[iteration % shortest_pairs.len()];
             db.shortest_path(source, target, 10, None)
+                .unwrap()
                 .map_or(0, |path| path.len())
         },
     ));
@@ -467,7 +473,7 @@ fn run_track_b(
         "degree_and_label_histograms",
         config.queries,
         config.warmup_queries,
-        |_| db.graph_stats().edge_count,
+        |_| db.graph_stats().unwrap().edge_count,
     ));
 
     let id_queries: Vec<String> = ids

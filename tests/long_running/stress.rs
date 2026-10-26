@@ -90,7 +90,7 @@ fn 测试_并发读写安全_单写多读互不恐慌() {
     writer_handle.join().unwrap();
 
     assert_eq!(
-        db.lock().unwrap().node_count(),
+        db.lock().unwrap().node_count().unwrap(),
         501,
         "高速并发读写混合后，节点数量应完全正确且无丢失"
     );
@@ -200,7 +200,7 @@ fn 测试_暴力中断随机重放_多轮假死不丢数据() {
     for loop_i in 0..4 {
         let mut db = Database::<f32>::open(&path, DIM).unwrap();
         assert_eq!(
-            db.node_count(),
+            db.node_count().unwrap(),
             total_inserted,
             "第 {} 次重载，节点数量必须与坠毁前强一致",
             loop_i
@@ -222,7 +222,7 @@ fn 测试_暴力中断随机重放_多轮假死不丢数据() {
 
     let db = Database::<f32>::open(&path, DIM).unwrap();
     assert_eq!(
-        db.node_count(),
+        db.node_count().unwrap(),
         800,
         "多轮暴力中断后，所有通过 WAL 预写追加的数据必须一粒不落地找回"
     );
@@ -313,13 +313,13 @@ fn 测试_Mmap到Rom热切换_数据不丢不裂() {
         };
         let mut db = Database::<f32>::open_with_config(&path, config).unwrap();
         assert_eq!(
-            db.node_count(),
+            db.node_count().unwrap(),
             50,
             "从 Mmap 切换到 Rom 后，节点数量必须一致"
         );
 
         // 验证数据可读
-        let p = db.get_payload(1).unwrap();
+        let p = db.get_payload(1).unwrap().unwrap();
         assert_eq!(p["mode"], "mmap");
 
         // 在 Rom 模式下继续写入新数据
@@ -339,7 +339,11 @@ fn 测试_Mmap到Rom热切换_数据不丢不裂() {
             ..Default::default()
         };
         let db = Database::<f32>::open_with_config(&path, config).unwrap();
-        assert_eq!(db.node_count(), 51, "双向模式热切换后数据必须完好无损");
+        assert_eq!(
+            db.node_count().unwrap(),
+            51,
+            "双向模式热切换后数据必须完好无损"
+        );
     }
 
     cleanup(&path);
@@ -408,7 +412,7 @@ fn 测试_空库极端操作_一切安全返回() {
     assert!(del_res.is_err(), "删除不存在的 ID 必须返回错误");
 
     // 对空库获取不存在的 payload
-    let payload = db.get_payload(99999);
+    let payload = db.get_payload(99999).unwrap();
     assert!(payload.is_none(), "空库 get_payload 应返回 None");
 
     // 对空库执行 compact
@@ -421,7 +425,7 @@ fn 测试_空库极端操作_一切安全返回() {
     let ids = db.begin_tx().commit().unwrap();
     assert!(ids.is_empty());
 
-    assert_eq!(db.node_count(), 0);
+    assert_eq!(db.node_count().unwrap(), 0);
     cleanup(&path);
 }
 
@@ -456,13 +460,18 @@ fn 测试_反复全删全插_墓碑与ID分配器绝不错位() {
             highest_id = id;
             ids.push(id);
         }
-        assert_eq!(db.node_count(), 100, "第 {} 轮插入后应有 100 节点", cycle);
+        assert_eq!(
+            db.node_count().unwrap(),
+            100,
+            "第 {} 轮插入后应有 100 节点",
+            cycle
+        );
 
         // 全部删除
         for &id in &ids {
             db.delete(id).unwrap();
         }
-        assert_eq!(db.node_count(), 0, "第 {} 轮全删后应归零", cycle);
+        assert_eq!(db.node_count().unwrap(), 0, "第 {} 轮全删后应归零", cycle);
 
         // 压实，清理墓碑
         db.compact().unwrap();
@@ -476,7 +485,7 @@ fn 测试_反复全删全插_墓碑与ID分配器绝不错位() {
         )
         .unwrap();
     assert!(final_id > highest_id);
-    assert_eq!(db.node_count(), 1);
+    assert_eq!(db.node_count().unwrap(), 1);
 
     cleanup(&path);
 }

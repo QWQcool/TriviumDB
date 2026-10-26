@@ -1,49 +1,25 @@
-# TriviumDB Web Console (WebUI) 端到端与视觉回归 CI
-#
-# 背景：WebUI 是 crates/triviumdb-server/web/index.html 单文件（include_str! 内嵌），
-# 页内自检（?selftest=1）与 ui-smoke 覆盖状态与逻辑，但覆盖不了"像素与观感"
-# ——历史上已三次出现"断言全绿、肉眼不对"（浅色主题边线不可见、退化布局聚成
-# 一点、侧栏高亮不切换）。本 workflow 把三层验证都放进 CI：
-#   1. 页内自检（selftest，chromium + webkit）
-#   2. ui-smoke 端到端（真实 server + 种子数据 + 独立临时库，双引擎）
-#   3. 视觉基线比对（scripts/visual-baseline.mjs，pixelmatch）
-#
-# 视觉基线的平台策略：基线按 platform 分目录存放（tests/visual/baseline/<platform>）。
-# CI 使用已有 win32 基线的平台进行强制比对；缺失基线或依赖时失败。
-# 显式更新基线后必须审阅并提交，所有截图与差异图均作为产物上传。
-#
-# 本地复现：
-#   npm i --no-save --ignore-scripts playwright@1.64.1 pixelmatch@8.0.0 pngjs@7.0.0 && npx playwright install chromium
-#   node scripts/ui-smoke.mjs            # SMOKE_BROWSER=webkit 跑第二引擎
-#   node scripts/visual-baseline.mjs     # --update 更新基线
+# nightly Server/WebUI 的手动开发诊断。界面与交互随开发调整，默认记录当前截图。
+# 开发者可按需运行交互自测，或显式选择历史截图比对与更新。
 
-name: WebUI
+name: Nightly WebUI Diagnostics
 
 on:
-  push:
-    paths:
-      - 'crates/triviumdb-server/web/**'
-      - 'scripts/ui-smoke.mjs'
-      - 'scripts/visual-baseline.mjs'
-      - 'tests/visual/baseline/**'
-      - '.github/workflows/webui.yml'
-  pull_request:
-    paths:
-      - 'crates/triviumdb-server/web/**'
-      - 'scripts/ui-smoke.mjs'
-      - 'scripts/visual-baseline.mjs'
-      - 'tests/visual/baseline/**'
-      - '.github/workflows/webui.yml'
   workflow_dispatch:
     inputs:
-      update_baseline:
-        description: '生成当前 runner 平台的视觉基线并上传为产物（提交后启用该平台门禁）'
+      run_smoke:
+        description: '执行当前页面的交互和页内自测'
         required: false
-        default: 'false'
+        default: false
+        type: boolean
+      visual_mode:
+        description: '截图记录、历史截图比对或更新参考截图'
+        required: false
+        default: 'record-only'
         type: choice
         options:
-          - 'false'
-          - 'true'
+          - 'record-only'
+          - 'compare'
+          - 'update'
 
 defaults:
   run:
@@ -55,7 +31,7 @@ env:
 
 jobs:
   webui:
-    name: WebUI E2E + Visual
+    name: WebUI Diagnostics (Manual)
     runs-on: windows-latest
     timeout-minutes: 40
 
@@ -82,23 +58,29 @@ jobs:
         run: cargo build -p triviumdb-server
 
       - name: 页内自检 + ui-smoke（chromium）
+        if: inputs.run_smoke
         run: node scripts/ui-smoke.mjs
 
       - name: 页内自检 + ui-smoke（webkit）
+        if: inputs.run_smoke
         env:
           SMOKE_BROWSER: webkit
         run: node scripts/ui-smoke.mjs
 
       - name: 视觉基线（生成模式，仅手动触发时）
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.update_baseline == 'true'
+        if: inputs.visual_mode == 'update'
         run: node scripts/visual-baseline.mjs --update
 
       - name: 视觉基线比对
-        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.update_baseline == 'true') }}
-        run: node scripts/visual-baseline.mjs
+        if: inputs.visual_mode == 'compare'
+        run: node scripts/visual-baseline.mjs --compare
+
+      - name: 记录当前页面截图
+        if: inputs.visual_mode == 'record-only'
+        run: node scripts/visual-baseline.mjs --record-only
 
       - name: 上传视觉基线产物（手动生成模式）
-        if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.update_baseline == 'true'
+        if: always() && inputs.visual_mode == 'update'
         uses: actions/upload-artifact@v4
         with:
           name: visual-baseline-${{ runner.os }}

@@ -74,10 +74,12 @@ fn 活动任务跨库拒绝且回调保持调用线程() {
         .unwrap();
     let (entered, arrived) = mpsc::channel();
     let (release, wait) = mpsc::channel();
-    first.set_hook(Gate {
-        entered,
-        release: Mutex::new(wait),
-    });
+    first
+        .set_hook(Gate {
+            entered,
+            release: Mutex::new(wait),
+        })
+        .unwrap();
     let worker = std::thread::spawn(move || {
         let id = std::thread::current().id();
         let result = first.search(&[1.0, 0.0, 0.0], 1, 0, 0.0);
@@ -98,7 +100,7 @@ fn 活动任务跨库拒绝且回调保持调用线程() {
         })
     ));
     independent_result.unwrap();
-    assert_eq!(second.node_count(), 0);
+    assert_eq!(second.node_count().unwrap(), 0);
     assert_eq!(shared.stats().active_tasks, 0);
     second
         .insert(&[0.0, 1.0, 0.0], serde_json::json!({}))
@@ -131,12 +133,12 @@ fn 工作区拒绝关闭时保留配额文件锁与可重试数据() {
     ));
     assert_eq!(shared.stats().reserved_database_bytes, 28 * MB);
     assert_eq!(shared.stats().reserved_workspace_bytes, 0);
-    assert!(first.contains(11));
+    assert!(first.contains(11).unwrap());
     assert!(Database::<f32>::open(&first_path, 3).is_err());
     second.set_memory_limit(4 * MB).unwrap();
     first.close().unwrap();
     let mut reopened = Database::<f32>::open(&first_path, 3).unwrap();
-    assert!(reopened.contains(11));
+    assert!(reopened.contains(11).unwrap());
     reopened.close().unwrap();
     second.close().unwrap();
     assert_eq!(shared.stats().attached_databases, 0);

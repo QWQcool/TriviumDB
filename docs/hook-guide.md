@@ -2,7 +2,7 @@
 
 > 面向深度定制固定检索管线的开发者。Hook 作用于 `search*` 工业检索管线；TQL 的 Cascades/NodeSet 管线通过查询算子和 EXPLAIN 扩展，不经过这些 Hook。
 >
-> 对应 `0.9.0-beta.1` 版本源码；本次不改变 Hook ABI。见[变更说明](changes/0.9.0-beta.1.md)。
+> 对应 `0.9.0-beta.2`；FFI Hook ABI 使用 v2。见[变更说明](changes/0.9.0-beta.2.md)。
 
 ---
 
@@ -35,7 +35,7 @@ TriviumDB v0.6.0 引入的 Hook 系统提供了 **6 个管线关键阶段的自�
 
 | 原则 | 说明 |
 |------|------|
-| **零开销可选** | 未注册 Hook 时默认 `NoopHook`，编译器内联消除全部调用开销 |
+| **可选扩展** | 默认使用空实现 `NoopHook`，注册后在对应阶段调用自定义逻辑 |
 | **按需覆写** | 所有方法都有默认空实现，开发者只需覆写感兴趣的阶段 |
 | **FFI 友好** | `FfiHook` 支持运行时加载 C/C++ `.so/.dll/.dylib` 动态库 |
 | **类型安全** | `SearchHook: Send + Sync` 编译器强制线程安全 |
@@ -241,7 +241,7 @@ db.clear_hook()
 ### SearchHook Trait 定义
 
 ```rust
-pub trait SearchHook: Send + Sync {
+pub trait SearchHook: Send + Sync + std::any::Any {
     /// #1 查询预处理
     fn on_pre_search(
         &self,
@@ -322,7 +322,7 @@ impl SearchHook for MetricsHook {
 db.set_hook(MetricsHook {
     total_queries: AtomicU64::new(0),
     total_results: AtomicU64::new(0),
-});
+})?;
 ```
 
 ### 示例：查询拦截 Hook（权限控制）
@@ -405,10 +405,18 @@ let composite = CompositeHook::new(vec![
     Arc::new(FfiHook::load("./libcustom_reranker.so")?),
 ]);
 
-db.set_hook(composite);
+db.set_hook(composite)?;
 ```
 
 调用顺序：`AuthHook → MetricsHook → FfiHook`，每个 Hook 的修改对后续 Hook 可见。
+
+### Hook 的所有权与释放
+
+Rust `set_hook()` 返回 `Result<()>`，通过生命周期检查后替换当前 Hook。已经进入的查询持有本次 Hook，替换或 `clear_hook()` 后在这些查询完成时释放旧 Hook。成功关闭会先排空查询，再清除数据库持有的 Hook；仅排队的查询句柄共享 Hook 槽，不额外保留旧 Hook。
+
+Python Hook 对象与数据库之间的循环引用参与 Python GC；Node 将 Hook 的强引用保存在 JS 数据库对象中，原生层采用弱引用，并在所属事件线程清理。清除、替换和成功关闭后，旧 Hook 可在语言运行时的正常 GC 中回收。
+
+FFI 动态库随最后一个 Hook 所有者释放而卸载。只有数据库持有插件时，成功关闭即完成卸载；Rust 调用方额外保留的 `Arc` 由调用方释放。关闭失败时保留原 Hook，便于修复持久化问题后重试。
 
 ---
 
@@ -458,7 +466,7 @@ A: 可以。Python 对象实现六个 `on_*` 方法后通过 `db.set_hook(obj)` 
 
 **Q: Hook 的性能开销是多少？**
 
-A: 未注册 Hook 时（默认 `NoopHook`）**零开销**——编译器会完全内联消除空方法调用。注册 Hook 后的开销等于 Hook 回调本身的执行时间，可通过 `search_with_context()` 的 `timings` 精确观测。
+A: 默认 `NoopHook` 的回调为空实现。查询仍需取得 Hook 的共享所有权；注册 Hook 后增加回调执行及跨语言转换的开销。可通过 `search_with_context()` 的 `timings` 观测各阶段耗时，并用完整查询基准评估总开销。
 
 **Q: 多个 `search()` 调用之间 Hook 状态是否共享？**
 

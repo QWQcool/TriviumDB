@@ -152,7 +152,7 @@ impl DbHandle {
         }
     }
 
-    pub fn node_count(&self) -> usize {
+    pub fn node_count(&self) -> Result<usize> {
         dispatch!(self, db => db.node_count())
     }
 
@@ -163,30 +163,30 @@ impl DbHandle {
     // 以下读方法构成 DbHandle 的完整读 API：部分由 REPL/TUI 使用，
     // 其余（contains / get_edges / neighbors）为后续图谱可视化功能预留。
     #[allow(dead_code)]
-    pub fn contains(&self, id: NodeId) -> bool {
+    pub fn contains(&self, id: NodeId) -> Result<bool> {
         dispatch!(self, db => db.contains(id))
     }
 
-    pub fn get(&self, id: NodeId) -> Option<CliNode> {
-        dispatch!(self, db => db.get(id).map(CliNode::from_view))
+    pub fn get(&self, id: NodeId) -> Result<Option<CliNode>> {
+        dispatch!(self, db => db.get(id).map(|node| node.map(CliNode::from_view)))
     }
 
     #[allow(dead_code)]
-    pub fn get_payload(&self, id: NodeId) -> Option<Value> {
+    pub fn get_payload(&self, id: NodeId) -> Result<Option<Value>> {
         dispatch!(self, db => db.get_payload(id))
     }
 
     #[allow(dead_code)]
-    pub fn get_edges(&self, id: NodeId) -> Vec<Edge> {
+    pub fn get_edges(&self, id: NodeId) -> Result<Vec<Edge>> {
         dispatch!(self, db => db.get_edges(id))
     }
 
-    pub fn get_all_ids(&self) -> Vec<NodeId> {
+    pub fn get_all_ids(&self) -> Result<Vec<NodeId>> {
         dispatch!(self, db => db.get_all_ids())
     }
 
     #[allow(dead_code)]
-    pub fn neighbors(&self, id: NodeId, depth: usize) -> Vec<NodeId> {
+    pub fn neighbors(&self, id: NodeId, depth: usize) -> Result<Vec<NodeId>> {
         dispatch!(self, db => db.neighbors(id, depth))
     }
 
@@ -355,11 +355,11 @@ mod tests {
         let id = h
             .insert_f32(&[1.0, 0.0, 0.0, 0.0], serde_json::json!({"name": "Alice"}))
             .unwrap();
-        assert_eq!(h.node_count(), 1);
+        assert_eq!(h.node_count().unwrap(), 1);
         assert_eq!(h.dim(), 4);
         assert_eq!(h.dtype(), DType::F32);
 
-        let node = h.get(id).unwrap();
+        let node = h.get(id).unwrap().unwrap();
         assert_eq!(node.payload["name"], "Alice");
         assert_eq!(node.vector.len(), 4);
     }
@@ -407,7 +407,7 @@ mod tests {
             .unwrap();
         h.link(a, b, "knows", 1.0).unwrap();
 
-        let edges = h.get_edges(a);
+        let edges = h.get_edges(a).unwrap();
         assert_eq!(edges.len(), 1);
         assert_eq!(edges[0].target_id, b);
         assert_eq!(edges[0].label, "knows");
@@ -422,7 +422,7 @@ mod tests {
             .unwrap();
         h.flush().unwrap();
         h.compact().unwrap();
-        assert_eq!(h.node_count(), 1);
+        assert_eq!(h.node_count().unwrap(), 1);
     }
 
     // ── sniff_header ───────────────────────────────────────────

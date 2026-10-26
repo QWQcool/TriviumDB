@@ -250,3 +250,94 @@ fn 映射几何溢出及零维在分配前拒绝() {
         ));
     }
 }
+
+#[test]
+fn 冷页回收保留COW更新与增量并可落盘重开() {
+    let dir = TestDir::new();
+    let path = dir.file("cold-pages.vec");
+    let mut pool = VecPool::<f32>::new(3);
+    pool.push(&[1., 2., 3.]);
+    pool.push(&[4., 5., 6.]);
+    pool.flush(std::path::Path::new(&path)).unwrap();
+    pool.advise_dontneed();
+    assert_eq!(pool.get(0).unwrap(), &[1., 2., 3.]);
+    pool.update(0, &[7., 8., 9.]);
+    pool.push(&[10., 11., 12.]);
+    pool.advise_dontneed();
+    assert_eq!(pool.get(0).unwrap(), &[7., 8., 9.]);
+    assert_eq!(pool.get(1).unwrap(), &[4., 5., 6.]);
+    assert_eq!(pool.get(2).unwrap(), &[10., 11., 12.]);
+    let disk = std::fs::read(&path).unwrap();
+    assert_eq!(f32::from_le_bytes(disk[..4].try_into().unwrap()), 1.);
+    pool.flush(std::path::Path::new(&path)).unwrap();
+    drop(pool);
+    let pool = VecPool::<f32>::open(std::path::Path::new(&path), 3, 3).unwrap();
+    pool.advise_dontneed();
+    assert_eq!(pool.get(0).unwrap(), &[7., 8., 9.]);
+    assert_eq!(pool.get(2).unwrap(), &[10., 11., 12.]);
+}
+
+#[test]
+fn wal与检查点索引恢复从开始遵守禁用解析缓存的配置() {
+    fn check<T: triviumdb::VectorType + serde::Serialize + serde::de::DeserializeOwned>() {
+        use triviumdb::storage::wal::{SyncMode, Wal, WalEntry};
+        let dir = TestDir::new();
+        for mode in [StorageMode::Rom, StorageMode::Mmap] {
+            for checkpoint in [false, true] {
+                let path = dir.file(&format!("{mode:?}-{checkpoint}.tdb"));
+                let config = Config {
+                    dim: 4,
+                    storage_mode: mode,
+                    auto_build_quiver: false,
+                    payload_cache_bytes: 0,
+                    ..Default::default()
+                };
+                let vector = [T::from_f32(1.); 4];
+                if checkpoint {
+                    let mut db = Database::<T>::open_with_config(&path, config).unwrap();
+                    for id in 1..=128 {
+                        db.insert_with_id(id, &vector, json!({"id":id})).unwrap();
+                    }
+                    db.create_unique_index("id").unwrap();
+                    db.close().unwrap();
+                } else {
+                    let mut wal = Wal::open_with_sync(&path, SyncMode::Off).unwrap();
+                    for id in 1..=128 {
+                        wal.append(&WalEntry::Insert {
+                            id,
+                            vector: vector.to_vec(),
+                            payload: json!({"id":id}).to_string(),
+                        })
+                        .unwrap();
+                    }
+                    wal.flush_writer();
+                }
+                let mut db = Database::<T>::open_with_config(&path, config).unwrap();
+                assert_eq!(db.node_count().unwrap(), 128);
+                let stats = db.payload_memory_stats();
+                assert_eq!(stats.parsed_cache_entries, 0);
+                assert_eq!(stats.parsed_cache_bytes, 0);
+                assert_eq!(
+                    stats.cache_evictions, 0,
+                    "禁用缓存时，恢复不得先填充默认缓存再淘汰"
+                );
+                for id in 1..=128 {
+                    assert_eq!(
+                        db.get_payload(id).unwrap().unwrap().get("id"),
+                        Some(&json!(id))
+                    );
+                }
+                if checkpoint {
+                    assert!(
+                        db.insert(&vector, json!({"id":1})).is_err(),
+                        "唯一约束必须恢复"
+                    );
+                }
+                db.close().unwrap();
+            }
+        }
+    }
+    check::<f32>();
+    check::<half::f16>();
+    check::<u64>();
+}
