@@ -604,7 +604,7 @@ TriviumDB 通过多条独立 GitHub Actions 工作流执行测试、故障注入
 - **Rust Test**：Linux/Windows/macOS x86_64、macOS ARM64，并以 QEMU 补充 Linux ARM64
 - **Test Hooks**：多平台补跑确定性交错、物理策略差分、定点 I/O 故障和发布阶段强杀；发布质量门禁同样执行这些套件
 - **Binding Lifecycle**：Python wheel + mypy/pyright；Node 原生绑定、生命周期测试与 npm tarball 的 TypeScript 消费运行验收
-- **Short Fuzz / ASan / Coverage**：解析器、WAL、QuIVer fuzz，unsafe 路径检测与行覆盖率 80% 门禁
+- **Short Fuzz / ASan / Coverage**：解析器、WAL、QuIVer fuzz，unsafe 路径检测与行覆盖率 80% 门禁。Unix 硬件崩溃样本的子进程按用例将所注入的 SEGV/BUS 或 FPE 信号交给操作系统直接处理，保留 ASan 内存插桩和其余选项；父测试进程沿用完整 ASan 配置，并验证异常终止与恢复内容
 - **TSan / Miri**：独立的数据竞争与内存安全子集检查；覆盖率任务同时启用 `test-hooks`
 - **Python Stubs / Lint**：存根生成漂移、stubtest、类型断言和 `clippy -D warnings`
 - **Manual Mutation / Benchmark**：benchmark 先编译全部目标，再运行无外部数据依赖的稳定套件并上传 `target/criterion/` 与 `target/bench-reports/`

@@ -329,6 +329,23 @@ fn run_crash_child_env(
     for (k, v) in extra_env {
         cmd.env(k, v);
     }
+    #[cfg(unix)]
+    {
+        // 故障样本由操作系统直接接收汇编触发的信号；保留 ASan 内存插桩与其余选项。
+        let signal_options = match mode {
+            "div_zero_after_flush" => "handle_sigfpe=0",
+            "null_deref_after_flush" => "handle_segv=0:handle_sigbus=0",
+            _ => "",
+        };
+        if !signal_options.is_empty() {
+            let mut options = std::env::var_os("ASAN_OPTIONS").unwrap_or_default();
+            if !options.is_empty() {
+                options.push(":");
+            }
+            options.push(signal_options);
+            cmd.env("ASAN_OPTIONS", options);
+        }
+    }
     let status = cmd.status().expect("启动子进程失败");
     #[cfg(unix)]
     {
