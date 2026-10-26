@@ -416,12 +416,12 @@ fn 延期加载与删除预留遵守预算且失败不追加WAL() {
     let mut db = open(&path, StorageMode::Mmap, false);
     let before_wal = std::fs::read(format!("{path}.wal")).unwrap();
     let before_text = std::fs::read(format!("{path}.text")).unwrap();
-    db.set_memory_limit(db.estimated_memory() + 1024);
+    db.set_memory_limit(db.estimated_memory() + 1024).unwrap();
     assert!(matches!(
         db.build_text_index(),
         Err(triviumdb::TriviumError::CapacityReservationRejected { .. })
     ));
-    db.set_memory_limit(1);
+    db.set_memory_limit(1).unwrap();
     let mut tx = db.begin_tx();
     tx.delete(1);
     assert!(matches!(
@@ -431,7 +431,7 @@ fn 延期加载与删除预留遵守预算且失败不追加WAL() {
     assert_eq!(std::fs::read(format!("{path}.wal")).unwrap(), before_wal);
     assert_eq!(std::fs::read(format!("{path}.text")).unwrap(), before_text);
     assert!(db.get(1).is_some());
-    db.set_memory_limit(0);
+    db.set_memory_limit(0).unwrap();
     db.build_text_index().unwrap();
     assert_eq!(search(&db, "alpha"), vec![1]);
 }

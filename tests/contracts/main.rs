@@ -3,5 +3,7 @@
 
 mod ffi_hook_v2;
 mod hook_and_search;
+mod lifecycle;
 mod public_matrix;
+mod resources;
 mod shared_cases;

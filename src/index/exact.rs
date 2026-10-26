@@ -62,6 +62,26 @@ pub fn search<T: VectorType>(
     query: &[T],
     top_k: usize,
 ) -> Result<Vec<SearchHit>> {
+    let runtime = db.resource_runtime();
+    let estimate = top_k
+        .min(db.internal_slot_count())
+        .checked_mul(std::mem::size_of::<Candidate>())
+        .and_then(|bytes| bytes.checked_mul(runtime.parallelism().saturating_add(1)))
+        .and_then(|bytes| bytes.checked_mul(2))
+        .ok_or_else(|| TriviumError::CapacityAllocationFailed {
+            reason: "精确查询工作区估算溢出".into(),
+        })?;
+    let _workspace = runtime.reserve_workspace(estimate)?;
+    runtime
+        .pool(runtime.parallelism())?
+        .install(|| search_inner(db, query, top_k))
+}
+
+fn search_inner<T: VectorType>(
+    db: &MemTable<T>,
+    query: &[T],
+    top_k: usize,
+) -> Result<Vec<SearchHit>> {
     if query.len() != db.dim() {
         return Err(TriviumError::DimensionMismatch {
             expected: db.dim(),

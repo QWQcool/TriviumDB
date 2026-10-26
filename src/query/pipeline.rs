@@ -467,6 +467,17 @@ pub fn execute_pipeline<T: VectorType>(
     context: &mut PipelineContext<'_, T>,
     operators: &[Box<dyn PipelineOperator<T> + '_>],
 ) -> Result<NodeSet> {
+    let rows = context.memtable.node_count().min(context.budget.max_nodes);
+    let estimate = rows
+        .checked_mul(std::mem::size_of::<NodeRow>() + 64)
+        .and_then(|bytes| bytes.checked_mul(4))
+        .ok_or_else(|| TriviumError::CapacityAllocationFailed {
+            reason: "管线工作区估算溢出".into(),
+        })?;
+    let _workspace = context
+        .memtable
+        .resource_runtime()
+        .reserve_workspace(estimate)?;
     let mut current = NodeSet::empty();
     for operator in operators {
         context.begin_stage()?;
@@ -775,6 +786,10 @@ impl<T: VectorType> PipelineOperator<T> for DppDiversify {
                 "DPP 超过临时内存预算 (DPP exceeds temporary memory budget)".into(),
             ));
         }
+        let _matrix_workspace = context
+            .memtable
+            .resource_runtime()
+            .reserve_workspace(temp_bytes)?;
         context.charge_vectors(input.len())?;
         let mut rows = input.into_rows();
         rows.sort_by_key(|row| row.id);
@@ -851,6 +866,10 @@ impl<T: VectorType> PipelineOperator<T> for FistaResidualRecall<T> {
                 "FISTA Gram 矩阵超过临时内存预算 (FISTA Gram matrix exceeds temporary memory budget)".into(),
             ));
         }
+        let _matrix_workspace = context
+            .memtable
+            .resource_runtime()
+            .reserve_workspace(gram_bytes)?;
         context.charge_vectors(input.len().saturating_add(context.memtable.node_count()))?;
         let entities = input
             .rows()
@@ -953,6 +972,10 @@ impl<T: VectorType> PipelineOperator<T> for NmfTopics {
                 "NMF 矩阵超过临时内存预算 (NMF matrices exceed temporary memory budget)".into(),
             ));
         }
+        let _matrix_workspace = context
+            .memtable
+            .resource_runtime()
+            .reserve_workspace(matrix_bytes)?;
         context.charge_vectors(input.len())?;
         let mut rows = input.into_rows();
         rows.sort_by_key(|row| row.id);
@@ -1021,7 +1044,7 @@ impl<T: VectorType> PipelineOperator<T> for PropertyLookup {
                     .memtable
                     .find_nodes_by_field(&self.field, &self.value)
             } else {
-                query_pool(threads)?.install(|| {
+                query_pool(context.memtable.resource_runtime(), threads)?.install(|| {
                     context
                         .memtable
                         .find_nodes_by_field_parallel(&self.field, &self.value, threads)
@@ -1073,7 +1096,7 @@ impl<T: VectorType> PipelineOperator<T> for ExactRerank<T> {
         input.rows = if threads == 1 {
             input.rows.into_iter().filter_map(score_row).collect()
         } else {
-            query_pool(threads)?
+            query_pool(context.memtable.resource_runtime(), threads)?
                 .install(|| input.rows.into_par_iter().filter_map(score_row).collect())
         };
         if let Some(top_k) = self.top_k {
@@ -1285,30 +1308,32 @@ impl<T: VectorType> PipelineOperator<T> for Expand {
             context.budget.parallelism.threads(estimated_reachable)
         };
         let outputs = if sources.len() == 1 && threads > 1 {
-            vec![query_pool(threads)?.install(|| {
-                let source_id = sources[0];
-                let reached = traverse_compact_parallel(context.memtable, source_id, &config)?;
-                Ok::<_, TriviumError>(ExpandSourceOutput {
-                    hits: reached
-                        .results
-                        .into_iter()
-                        .map(|target| ExpandHit {
-                            target_id: target.target_id,
-                            source_id,
-                            depth: target.depth,
-                        })
-                        .collect(),
-                    visited_nodes: reached.visited_nodes,
-                    examined_edges: reached.traversed_edges,
-                })
-            })?]
+            vec![
+                query_pool(context.memtable.resource_runtime(), threads)?.install(|| {
+                    let source_id = sources[0];
+                    let reached = traverse_compact_parallel(context.memtable, source_id, &config)?;
+                    Ok::<_, TriviumError>(ExpandSourceOutput {
+                        hits: reached
+                            .results
+                            .into_iter()
+                            .map(|target| ExpandHit {
+                                target_id: target.target_id,
+                                source_id,
+                                depth: target.depth,
+                            })
+                            .collect(),
+                        visited_nodes: reached.visited_nodes,
+                        examined_edges: reached.traversed_edges,
+                    })
+                })?,
+            ]
         } else if threads == 1 {
             sources
                 .iter()
                 .map(traverse_source)
                 .collect::<Result<Vec<_>>>()?
         } else {
-            query_pool(threads)?.install(|| {
+            query_pool(context.memtable.resource_runtime(), threads)?.install(|| {
                 sources
                     .par_iter()
                     .map(traverse_source)
@@ -1881,7 +1906,7 @@ impl<T: VectorType> PipelineOperator<T> for PageRankOperator {
                 context.budget.traversal.max_examined_edges,
             )?
         } else {
-            query_pool(threads)?.install(|| {
+            query_pool(context.memtable.resource_runtime(), threads)?.install(|| {
                 crate::graph::subset::subset_pagerank_parallel(
                     context.memtable,
                     &universe,
@@ -1936,7 +1961,7 @@ impl<T: VectorType> PipelineOperator<T> for DegreeCentralityOperator {
                 context.budget.traversal.max_examined_edges,
             )?
         } else {
-            query_pool(degree_threads)?.install(|| {
+            query_pool(context.memtable.resource_runtime(), degree_threads)?.install(|| {
                 crate::graph::subset::subset_degree_centrality_parallel(
                     context.memtable,
                     &universe,
@@ -1962,7 +1987,7 @@ impl<T: VectorType> PipelineOperator<T> for DegreeCentralityOperator {
         let rows = if degree_threads == 1 {
             scores.iter().filter_map(build_row).collect()
         } else {
-            query_pool(degree_threads)?
+            query_pool(context.memtable.resource_runtime(), degree_threads)?
                 .install(|| scores.par_iter().filter_map(build_row).collect())
         };
         Ok(NodeSet { rows })
@@ -1992,7 +2017,7 @@ impl<T: VectorType> PipelineOperator<T> for BetweennessOperator {
                 context.budget.traversal.max_examined_edges,
             )?
         } else {
-            query_pool(threads)?.install(|| {
+            query_pool(context.memtable.resource_runtime(), threads)?.install(|| {
                 crate::graph::subset::subset_betweenness_parallel(
                     context.memtable,
                     &universe,
@@ -2048,7 +2073,7 @@ impl<T: VectorType> PipelineOperator<T> for WccOperator {
                 context.budget.traversal.max_examined_edges,
             )?
         } else {
-            query_pool(threads)?.install(|| {
+            query_pool(context.memtable.resource_runtime(), threads)?.install(|| {
                 crate::graph::subset::subset_wcc_parallel(
                     context.memtable,
                     &universe,
@@ -2155,7 +2180,7 @@ impl<T: VectorType> PipelineOperator<T> for LabelPropagationOperator {
                 context.budget.traversal.max_examined_edges,
             )?
         } else {
-            query_pool(threads)?.install(|| {
+            query_pool(context.memtable.resource_runtime(), threads)?.install(|| {
                 crate::graph::subset::deterministic_label_propagation_parallel(
                     context.memtable,
                     &universe,

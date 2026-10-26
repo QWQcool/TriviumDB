@@ -29,6 +29,19 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> DatabaseRea
         Database::open_immutable(path, dim).map(|inner| Self { inner })
     }
 
+    pub fn open_with_runtime(
+        path: &str,
+        config: Config,
+        runtime: crate::resources::ResourceRuntime,
+    ) -> Result<Self> {
+        if config.access_mode == AccessMode::ReadWrite {
+            return Err(TriviumError::InvalidInput(
+                "DatabaseReader 只接受 ReadOnly 或 Immutable 配置".into(),
+            ));
+        }
+        Database::open_with_runtime(path, config, runtime).map(|inner| Self { inner })
+    }
+
     pub fn open_with_config(path: &str, config: Config) -> Result<Self> {
         if config.access_mode == AccessMode::ReadWrite {
             return Err(TriviumError::InvalidInput(
@@ -100,6 +113,14 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> DatabaseRea
         config: crate::tsng::IndustrialSearchConfig,
     ) -> Result<crate::tsng::TsngSearchResult> {
         self.inner.search_tsng_industrial(query, config)
+    }
+
+    pub fn resource_stats(&self) -> crate::resources::ResourceStats {
+        self.inner.resource_stats()
+    }
+
+    pub fn instance_stats(&self) -> super::InstanceStats {
+        self.inner.instance_stats()
     }
 
     pub fn index_memory_stats(&self) -> crate::observability::IndexMemoryStats {
@@ -274,6 +295,16 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> DatabaseRea
         self.inner.estimated_memory()
     }
 
+    pub fn request_shutdown(&mut self) -> Result<super::ShutdownStatus> {
+        self.inner.request_shutdown()
+    }
+    pub fn shutdown_status(&self) -> super::ShutdownStatus {
+        self.inner.shutdown_status()
+    }
+    pub fn close_timeout(&mut self, timeout: std::time::Duration) -> Result<bool> {
+        self.inner.close_timeout(timeout)
+    }
+
     pub fn close(&mut self) -> Result<()> {
         self.inner.close()
     }
@@ -286,6 +317,19 @@ pub struct DatabaseWriter<T: VectorType> {
 impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> DatabaseWriter<T> {
     pub fn open(path: &str, dim: usize) -> Result<Self> {
         Database::open(path, dim).map(|inner| Self { inner })
+    }
+
+    pub fn open_with_runtime(
+        path: &str,
+        config: Config,
+        runtime: crate::resources::ResourceRuntime,
+    ) -> Result<Self> {
+        if config.access_mode != AccessMode::ReadWrite {
+            return Err(TriviumError::InvalidInput(
+                "DatabaseWriter 只接受 ReadWrite 配置".into(),
+            ));
+        }
+        Database::open_with_runtime(path, config, runtime).map(|inner| Self { inner })
     }
 
     pub fn open_with_config(path: &str, config: Config) -> Result<Self> {

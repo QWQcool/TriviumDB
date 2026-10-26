@@ -1,8 +1,10 @@
 # TriviumDB API 完整参考
 
-> **版本**: v0.8.11 版本源码；见[变更说明](changes-0.8.11.md)。
+> **版本**: `0.9.0-beta.1` 公共 API；见[变更说明](changes/0.9.0-beta.1.md)。
 > **语言**: Rust 核心 + Python 绑定 (PyO3) + Node.js 绑定 (napi-rs)  
 > **许可**: Apache-2.0
+
+共享资源运行时、实例诊断、受控关闭和目录快照从 `0.9.0-beta.1` 起提供。配置与示例见[资源运行时](resource-runtime.md)和[关闭、快照与恢复](lifecycle-snapshots.md)。
 
 ---
 
@@ -11,23 +13,26 @@
 - [数据库生命周期](#数据库生命周期)
 - [节点 CRUD](#节点-crud)
 - [图谱操作](#图谱操作)
-- [向量检索](#向量检索)
+- [搜索与召回](#搜索与召回)
 - [Hook 扩展系统](#hook-扩展系统)
 - [元数据过滤](#元数据过滤)
-- [TQL、Prepared 与一等值](#tql-prepared-与一等值)
+- [TQL、Prepared 与一等值](#tqlprepared-与一等值)
 - [持久化索引管理与观测](#持久化索引管理与观测)
 - [存储格式观测与迁移错误](#存储格式观测与迁移错误)
 - [持久化与压缩](#持久化与压缩)
+- [多实例资源运行时与诊断](#多实例资源运行时与诊断)
 - [内存管理](#内存管理)
 - [工具方法](#工具方法)
 - [维度迁移](#维度迁移)
-- [事务支持](#事务支持-rust-only)
+- [事务支持](#事务支持)
 - [Pythonic 魔术方法](#pythonic-魔术方法)
 - [数据类型说明](#数据类型说明)
 
 ---
 
 ## 数据库生命周期
+
+实例通过同步关闭或受控关闭完成持久化与资源释放。独立目录快照支持捕获、校验和恢复已打开数据库的状态。
 
 ### Python
 
@@ -45,8 +50,9 @@ db = triviumdb.TriviumDB(
     sync_mode="normal",      # WAL 同步模式："full" | "normal" | "off"
     load_text_index=False,    # 打开时是否加载持久化全文索引
     auto_build_quiver=True,   # 是否允许查询自动构建 QuIVer；flush 不会触发 ANN 构建
-    expected_nodes=3_600_000, # 预计总节点数，仅本次进程预留，不是硬上限
+    expected_nodes=3_600_000, # 预计总节点数，用于本次打开的容量预留
     memory_limit_mb=28_672,   # 内核内存预算，0 表示不限制
+    runtime=None,            # 使用进程共享运行时，可传入自建 ResourceRuntime
 )
 
 # 推荐：使用上下文管理器（退出时自动 flush 落盘）
@@ -65,11 +71,12 @@ with triviumdb.TriviumDB("my_data.tdb", dim=1536) as db:
 | `sync_mode` | `str` | `"normal"` | WAL 写入安全级别，详见[持久化与压缩](#持久化与压缩) |
 | `load_text_index` | `bool` | `False` | 是否在打开时加载持久化全文索引 |
 | `auto_build_quiver` | `bool` | `True` | 是否允许查询准备阶段自动构建 QuIVer；纯 `flush()` 不构建 ANN |
-| `expected_nodes` | `int \| None` | `None` | 预计总节点数；仅预留核心容器、不持久化、不是硬上限 |
+| `expected_nodes` | `int \| None` | `None` | 预计总节点数，用于本次打开时预留核心容器容量 |
 | `memory_limit_mb` | `int` | `0` | TriviumDB 内核内存预算（MiB）；0 表示不限制 |
 | `payload_cache_mb` | `int` | `64` | Payload 解析缓存总预算（MiB）；0 表示禁用，淘汰不影响结果 |
 | `payload_cache_entry_mb` | `int` | `8` | 单条解析后 Payload 可进入缓存的最大估算大小（MiB）；超大条目不驻留 |
 | `access_mode` | `str` | `"read_write"` | `read_write` 使用排他锁；`read_only` 使用共享锁；`immutable` 验证 manifest 后无锁打开 |
+| `runtime` | `ResourceRuntime \| None` | `None` | 所属共享资源运行时；默认使用进程共享运行时 |
 
 `search_with_context` / `searchWithContext` 返回的上下文除阶段耗时和候选数外，还包含 `observations`：`estimated_heap_bytes`、`mmap_vector_bytes`、`node_count`、查询路由与 QuIVer `ef_search`；Linux 额外提供进程 RSS、累计主缺页和次缺页。缺页计数是进程累计值，调用方应计算相邻采样差值。
 
@@ -79,7 +86,7 @@ with triviumdb.TriviumDB("my_data.tdb", dim=1536) as db:
 
 只读模式面向已完成 `flush()` 的不可变数据库代际。多个进程可以同时以共享锁打开同一路径，但同路径 Reader 与 Writer 互斥。
 
-TriviumDB 采用单写多读模型。同一语言绑定实例可被多个线程调用且不会再抛出底层借用冲突，但写 API 仍应由调用方通过单一写队列、`Lock` / `Mutex` 或 actor 串行化；这不是并行多 Writer 提交能力。高并发读取应使用 ReadOnly/Immutable Reader。
+TriviumDB 采用单写多读模型。调用方通过单一写队列、`Lock` / `Mutex` 或 actor 串行化同一实例的写操作，ReadOnly/Immutable Reader 承担并发读取。
 
 ```python
 db = TriviumDB("generation-42/data.tdb", dim=768, access_mode="read_only")
@@ -242,6 +249,39 @@ Mmap `flush()` 在发布新事实前流式备份旧 `.tdb/.vec/.flush_ok` 并发
 | `f32` | 32 位浮点 | 标准 embedding（OpenAI、BGE 等） |
 | `half::f16` | 16 位半精度浮点 | 大规模数据集省内存 |
 | `u64` | 64 位无符号整数 | SimHash / 二值化向量 |
+
+---
+
+### 关闭请求与限时等待
+
+| Rust | Python | Node.js | 行为 |
+| --- | --- | --- | --- |
+| `request_shutdown()` | `request_shutdown()` | `requestShutdown()` | 停止新操作，登记排空与持久化任务，返回关闭状态 |
+| `shutdown_status()` | `shutdown_status()` | `shutdownStatus()` | 返回阶段、活动操作数、最近故障与关闭维护状态 |
+| `close_timeout(Duration)` | `close_timeout(timeout_ms)` | `closeTimeout(timeoutMs)` | 完成返回 `true`，等待超时返回 `false`，关闭失败返回错误 |
+| `close()` | `close()` | `close()` | 同步等待关闭完成 |
+
+`ShutdownStatus.phase` 为 `open`、`draining`、`flushing`、`failed` 或 `closed`。`last_failure` 提供故障分类和预算详情，`maintenance` 提供当前关闭登记的执行或延期信息。等待超时后，关闭任务继续持有所需资源并推进完成。
+
+```python
+db.request_shutdown()
+if not db.close_timeout(5000):
+    print("关闭进度：", db.shutdown_status())
+```
+
+Python 关闭等待释放 GIL。Node `closeTimeout()` 同步等待；需要继续处理事件循环时，可结合 `requestShutdown()`、`closeTimeout(0)` 和宿主定时器轮询。阶段转换、失败重试与关闭完成语义见[关闭协议](lifecycle-snapshots.md#关闭协议)。
+
+### 一致快照与恢复
+
+| Rust | Python | Node.js | 返回值 |
+| --- | --- | --- | --- |
+| `db.create_snapshot(destination, generation_id)` | 同名方法 | `db.createSnapshot(destination, generationId)` | generation manifest |
+| `storage::snapshot::verify_snapshot(directory)` | `triviumdb.verify_snapshot(directory, runtime=None)` | `verifySnapshot(directory, runtime?)` | 验证后的 manifest |
+| `storage::snapshot::restore_snapshot(source, destination)` | `triviumdb.restore_snapshot(source, destination, runtime=None)` | `restoreSnapshot(source, destination, runtime?)` | 恢复后的 manifest |
+
+Rust 独立校验与恢复提供接收 `&ResourceRuntime` 的 `_with_runtime` 版本。创建快照使用可写实例；目标采用已存在的父目录和全新的子目录。恢复目录中的数据库文件固定为 `database.tdb`，宿主按 manifest 中的维度和原数据库 dtype 显式打开。
+
+manifest 包含 generation ID、dtype、维度、节点数、制品长度和 CRC。已有目标、发布后目录同步失败及校验失败的错误映射见[一致快照](lifecycle-snapshots.md#一致快照)。
 
 ---
 
@@ -756,7 +796,7 @@ let results = db.search_batch(
 
 ### search_advanced — 认知管线检索
 
-内置认知管线的全功能便利入口。通过 `SearchConfig` 参数化控制 AC+BM25 文本召回、FISTA 残差寻隐、SA-PPR 有限深度扩散、DPP 多样性采样与疲劳不应期等高级特性。各组件仍可独立启停，但执行顺序是官方固定模板；需要自由改变无状态组件顺序时，使用 TQL 的 `TEXT`、`RESIDUAL`、`SA_PPR_CONFIG`、`DIVERSIFY` 和 `TOPICS`。两条入口共享底层算法，不是替代关系。SA-PPR 是带个性化重启的有限深度 Spreading Activation，不是迭代至收敛的标准 PageRank。
+内置认知管线的全功能便利入口。通过 `SearchConfig` 参数化控制 AC+BM25 文本召回、FISTA 残差寻隐、SA-PPR 有限深度扩散、DPP 多样性采样与疲劳不应期等高级特性。各组件独立启停，执行顺序采用官方固定模板。需要自由编排无状态组件时，使用 TQL 的 `TEXT`、`RESIDUAL`、`SA_PPR_CONFIG`、`DIVERSIFY` 和 `TOPICS`。两条入口共享底层算法；SA-PPR 采用带个性化重启的有限深度 Spreading Activation。
 
 **Python：**
 ```python
@@ -847,7 +887,7 @@ let results = db.search_advanced(&query_vec, &config)?;
 
 ---
 
-## 🔌 Hook 扩展系统
+## Hook 扩展系统
 
 TriviumDB v0.6.0 新增的检索管线 Hook 系统，允许开发者在 6 个关键阶段注入自定义逻辑，高度自定义检索管线。
 
@@ -1111,7 +1151,7 @@ let results = db.filter_where(&filter);
 
 ## TQL、Prepared 与一等值
 
-TQL 公共 API 暴露的是一套 **自由 DIY 混合查询能力**，而不是单一的混合搜索函数。调用者可以用一条查询按需组合向量源、属性索引、图扩展、图算法、路径、集合代数、迭代、聚合与重排；Prepared TQL 则让同一管线安全地重复绑定业务参数。
+TQL 公共 API 提供 **自由 DIY 混合查询能力**。调用者可以用一条查询按需组合向量源、属性索引、图扩展、图算法、路径、集合代数、迭代、聚合与重排；Prepared TQL 支持同一管线重复绑定业务参数。
 
 ### tql / tql_values
 
@@ -1321,18 +1361,18 @@ db.set_sync_mode("off")    # 批量导入时临时提速
 
 ### enable_auto_compaction — 后台自动压缩
 
-启动后台守护线程，定时在后台串行化执行数据压缩与全量落盘（包含 `flush` + WAL 截断清理）。
+向进程共享计时调度器登记周期压实任务，实际工作进入所属 `ResourceRuntime` 的计算池。任务取得维护名额与 MemTable 写锁后保存数据，成功后清理 WAL；资源不足或写锁繁忙时延期。`instance_stats().compaction` 报告执行次数、延期原因和最近故障。
 
 **Python：**
 ```python
 db.enable_auto_compaction(interval_secs=30)  # 间隔必须大于 0
 # db.enable_auto_compaction(interval_secs=0)  # ValueError：拒绝忙循环
-db.disable_auto_compaction()                 # 停止后台压缩线程
+db.disable_auto_compaction()                 # 撤销周期登记并等待已派发任务完成
 ```
 
 **Rust：**
 ```rust
-db.enable_auto_compaction(Duration::from_secs(30));
+db.enable_auto_compaction(Duration::from_secs(30))?;
 db.disable_auto_compaction();
 ```
 
@@ -1354,19 +1394,56 @@ db.compact()?;
 
 ---
 
+## 多实例资源运行时与诊断
+
+多个数据库通过 `open_with_runtime`（Rust）或构造参数 `runtime`（Python/Node）共享一个运行时。
+
+| Rust `ResourceLimits` | Python `ResourceRuntime` 参数 | Node `ResourceRuntime` 选项 | 含义 |
+| --- | --- | --- | --- |
+| `memory_limit` | `memory_limit_mb` | `memoryLimitMb` | 声明配额与已接入工作区的总预算；0 表示不限 |
+| `maintenance_memory_limit` | `maintenance_memory_limit_mb` | `maintenanceMemoryLimitMb` | 总预算中保护的维护额度；有限总额下 0 自动取八分之一，至少 1 字节 |
+| `max_threads` | `max_threads` | `maxThreads` | 工作线程总上限，最大 64；0 按可用并行度选择 |
+| `max_active_tasks` | `max_active_tasks` | `maxActiveTasks` | 前台根任务名额；0 表示不限 |
+
+Rust 内存参数单位为字节，Python/Node 参数单位为 MiB。有共享内存总额时，每个数据库声明非零实例配额。维护根任务按 `max_threads` 单独准入。默认数据库打开入口使用进程共享运行时，其数据库配额与任务名额不限，缓存计算池的工作线程总数最多为 64。
+
+| Rust / Python | Node.js | 返回内容 |
+| --- | --- | --- |
+| `runtime.stats()` | `runtime.stats()` | 共享配额、工作区、线程、任务、维护计数与可用预算余额 |
+| `db.resource_stats()` | `db.resourceStats()` | 所属运行时的共享统计 |
+| `db.instance_stats()` | `db.instanceStats()` | 本实例路径、配置配额、内存采样、关闭状态及周期压实状态 |
+
+`InstanceStats.memory` 包含 `reserved_database_bytes`、`estimated_memory_bytes`、`node_count`。MemTable 写锁繁忙时返回 `None` / `null`，表示本次采样暂不可用。共享余额由 `available_foreground_bytes`、`available_maintenance_bytes`、`available_task_slots` 提供，未设置对应上限时为 `None` / `null`。
+
+运行时资源拒绝在 Rust 中返回 `ResourceBudgetExceeded { resource, requested, used, limit }`；Python 抛出 `ResourceBudgetError`，Node 错误码为 `QueueFull`，两端均携带上述四个字段。Node `searchBatch()` 的 Promise 拒绝采用相同字段。
+
+```python
+from triviumdb import ResourceBudgetError
+
+try:
+    db.set_memory_limit(80)
+except ResourceBudgetError as error:
+    print("预算拒绝：", error.resource, error.requested, error.used, error.limit)
+print(db.instance_stats())
+```
+
+配置示例、完整统计口径与维护诊断见[多实例共享资源运行时](resource-runtime.md)。
+
+---
+
 ## 内存管理
 
 ### set_memory_limit — 内存预算控制
 
-设置 MemTable 内存使用上限。当估算内存超过限额时，写操作完成后自动触发 flush。
+设置本实例内存预算。写入增量、容量预留和已接入的大工作区在执行前检查预算。共享运行时先核对配额调整，成功后同步更新实例配置，失败时保留原配额。Rust `set_memory_limit(bytes)` 返回 `Result<()>`。
 
 **Python：**
 ```python
-db.set_memory_limit(mb=256)  # 限制为 256 MB
-db.set_memory_limit(mb=0)    # 取消限制（默认）
+db.set_memory_limit(mb=256)  # 设置为 256 MiB
+db.set_memory_limit(mb=0)    # 共享运行时内存总额不限时，可取消实例预算
 ```
 
-### estimated_memory — 查询当前内存占用
+### estimated_memory — 查询当前内核内存估算
 
 **Python：**
 ```python
@@ -1446,7 +1523,7 @@ QuIVer 是自研 ANN 图索引，常规查询自动选择与维护索引。从 `
 
 自动阈值按 `ceil(8,000,000 / dim)` 计算并限制在 2,500–10,000 节点；384/768 维为 10,000，1024 维约 7,813，1536 维约 5,209，3072 维约 2,605。
 
-QuIVer 支持增量 Insert/Delete/Update，并保护入口导航树，入口升层时连接旧树。旧索引需要重新构建才能应用 `0.8.10` 的签名多样性和连通性规则；全图可达不等于有限预算下的精确召回。索引以 `.tdb.quiver` 持久化，并通过 `.tdb.quiver.meta` 的主数据代际、文件尺寸、节点数、维度与 CRC 校验后 mmap 加载。有效图加载时不改邻接表，默认 SM 状态从原始向量池流式恢复，需要冷向量读取；断连图返回需要重建的错误，数据库按既有缺失索引策略重建或拒绝。显式评分覆盖不由旧文件自动恢复。TextIndex 对应 `.tdb.text` 和 `.tdb.text.meta`。
+QuIVer 支持增量 Insert/Delete/Update，并保护入口导航树，入口升层时连接旧树。旧索引通过重建应用 `0.8.10` 的签名多样性和连通性规则；查询召回率由数据、搜索参数与精排预算共同决定。索引以 `.tdb.quiver` 持久化，并通过 `.tdb.quiver.meta` 的主数据代际、文件尺寸、节点数、维度与 CRC 校验后 mmap 加载。有效图按保存的邻接表加载，默认 SM 状态从原始向量池流式恢复，启动时读取相应冷向量；断连图按缺失索引策略重建或返回错误。显式评分模式由宿主重新配置。TextIndex 对应 `.tdb.text` 和 `.tdb.text.meta`。
 
 批量导入可在构造时设置 `auto_build_quiver=False`，或运行时调用 `set_auto_build_quiver(False)`，避免导入中途因查询触发索引构建；导入完成后重新开启并执行一次查询，或显式调用 Rust `build_quiver_index()`。`flush()` 只负责持久化，不会隐式构建 QuIVer。无状态评测或独立查询之间可调用 `clear_search_state()` 清空疲劳状态。
 
@@ -1504,7 +1581,7 @@ new_db.flush()?;
 
 > 💡 如果希望同时切换 dtype（例如从 f32 换 f16），需在创建新库时指定 `dtype` 参数：`TriviumDB("new.tdb", dim=1536, dtype="f16")`。
 
-## 事务支持（Rust / Python）
+## 事务支持
 
 TriviumDB 提供轻量级事务，采用**验证前置（Dry-Run）架构**：所有操作先缓冲在内存中，`commit()` 分两阶段执行——首先在纯内存验证全部约束（维度、节点存在性、ID 冲突），全部通过后才一次性写入。
 

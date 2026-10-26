@@ -306,34 +306,20 @@ jobs:
           pattern: node-*
           merge-multiple: true
 
-      # 万能入口：运行时自动加载对应平台的二进制
-      - name: Generate JS Loader
+      - name: 验证待发布的 Node 包
         run: |
-          cat << 'EOF' > index.js
-          const { platform, arch } = process;
-          let nativeBinding = null;
-          try {
-            if (platform === 'win32') { nativeBinding = require('./triviumdb.win32-x64-msvc.node'); }
-            else if (platform === 'darwin' && arch === 'arm64') { nativeBinding = require('./triviumdb.darwin-arm64.node'); }
-            else if (platform === 'darwin') { nativeBinding = require('./triviumdb.darwin-x64.node'); }
-            else if (platform === 'linux' && arch === 'arm64') { nativeBinding = require('./triviumdb.linux-arm64-gnu.node'); }
-            else { nativeBinding = require('./triviumdb.linux-x64-gnu.node'); }
-          } catch (e) {
-            console.error(`TriviumDB 原生绑定加载失败 / Failed to load native binding for ${platform} ${arch}`, e);
-            throw e;
-          }
-          module.exports = nativeBinding;
-          EOF
+          npm install --ignore-scripts --no-audit --no-fund
+          npm run test:public-api
+          npm run test:lifecycle
 
       - name: Publish to NPM
         shell: bash
         run: |
-          npm install
           CHANNEL="${{ needs.version-gate.outputs.channel }}"
           if [[ "$CHANNEL" == "beta" ]]; then
-            npm publish --tag beta
+            npm publish --ignore-scripts --tag beta
           else
-            npm publish
+            npm publish --ignore-scripts
           fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

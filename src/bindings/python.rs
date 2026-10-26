@@ -32,8 +32,85 @@ pub mod python {
         pyo3::exceptions::PyRuntimeError
     );
 
+    pyo3::create_exception!(
+        triviumdb,
+        ResourceBudgetError,
+        pyo3::exceptions::PyRuntimeError
+    );
+
+    pyo3::create_exception!(
+        triviumdb,
+        SnapshotPublicationError,
+        pyo3::exceptions::PyRuntimeError
+    );
+
+    #[pyclass(name = "ResourceRuntime", frozen)]
+    pub struct PyResourceRuntime {
+        inner: crate::resources::ResourceRuntime,
+    }
+
+    #[pymethods]
+    impl PyResourceRuntime {
+        #[new]
+        #[pyo3(signature = (memory_limit_mb=0, max_threads=0, max_active_tasks=0, maintenance_memory_limit_mb=0))]
+        fn new(
+            memory_limit_mb: usize,
+            max_threads: usize,
+            max_active_tasks: usize,
+            maintenance_memory_limit_mb: usize,
+        ) -> PyResult<Self> {
+            let memory_limit = memory_limit_mb.checked_mul(1024 * 1024).ok_or_else(|| {
+                pyo3::exceptions::PyOverflowError::new_err("memory_limit_mb 换算溢出")
+            })?;
+            crate::resources::ResourceRuntime::new(crate::resources::ResourceLimits {
+                maintenance_memory_limit: maintenance_memory_limit_mb
+                    .checked_mul(1024 * 1024)
+                    .ok_or_else(|| {
+                        pyo3::exceptions::PyOverflowError::new_err("维护额度换算溢出")
+                    })?,
+                memory_limit,
+                max_threads,
+                max_active_tasks,
+            })
+            .map(|inner| Self { inner })
+            .map_err(to_py_error)
+        }
+
+        fn stats(&self, py: Python<'_>) -> PyResult<PyObject> {
+            let value = serde_json::to_value(self.inner.stats())
+                .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
+            Ok(json_to_pyobject(py, &value))
+        }
+    }
+
     fn to_py_error(error: crate::error::TriviumError) -> PyErr {
         match error {
+            crate::error::TriviumError::SnapshotPublicationUncertain { .. } => {
+                SnapshotPublicationError::new_err(error.to_string())
+            }
+            crate::error::TriviumError::SnapshotDestinationExists { .. } => {
+                pyo3::exceptions::PyFileExistsError::new_err(error.to_string())
+            }
+            crate::error::TriviumError::ResourceBudgetExceeded {
+                resource,
+                requested,
+                used,
+                limit,
+            } => {
+                let exception = ResourceBudgetError::new_err(error.to_string());
+                Python::with_gil(|py| {
+                    let value = exception.value(py);
+                    let attributes = value
+                        .setattr("resource", resource)
+                        .and_then(|_| value.setattr("requested", requested))
+                        .and_then(|_| value.setattr("used", used))
+                        .and_then(|_| value.setattr("limit", limit));
+                    match attributes {
+                        Ok(()) => exception,
+                        Err(error) => error,
+                    }
+                })
+            }
             crate::error::TriviumError::ReadOnlyViolation { .. } => {
                 ReadOnlyError::new_err(error.to_string())
             }
@@ -474,7 +551,7 @@ pub mod python {
     #[pymethods]
     impl PyTriviumDB {
         #[new]
-        #[pyo3(signature = (path, dim=1536, dtype="f32", sync_mode="normal", load_text_index=false, auto_build_quiver=true, expected_nodes=None, memory_limit_mb=0, payload_cache_mb=64, payload_cache_entry_mb=8, access_mode="read_write", missing_index_policy="fallback", max_query_rows=None, row_overflow="throw"))]
+        #[pyo3(signature = (path, dim=1536, dtype="f32", sync_mode="normal", load_text_index=false, auto_build_quiver=true, expected_nodes=None, memory_limit_mb=0, payload_cache_mb=64, payload_cache_entry_mb=8, access_mode="read_write", missing_index_policy="fallback", max_query_rows=None, row_overflow="throw", runtime=None))]
         fn new(
             path: &str,
             dim: usize,
@@ -490,6 +567,7 @@ pub mod python {
             missing_index_policy: &str,
             max_query_rows: Option<usize>,
             row_overflow: &str,
+            runtime: Option<PyRef<'_, PyResourceRuntime>>,
         ) -> PyResult<Self> {
             let sm = parse_sync_mode(sync_mode)?;
             let memory_limit = memory_limit_mb.checked_mul(1024 * 1024).ok_or_else(|| {
@@ -521,16 +599,21 @@ pub mod python {
                 row_overflow: parse_row_overflow(row_overflow)?,
                 ..Default::default()
             };
+            let runtime = runtime
+                .map(|runtime| runtime.inner.clone())
+                .unwrap_or_else(crate::resources::ResourceRuntime::shared_default);
             let inner = match dtype {
                 "f32" => DbBackend::F32(
-                    GenericDatabase::<f32>::open_with_config(path, config).map_err(to_py_error)?,
+                    GenericDatabase::<f32>::open_with_runtime(path, config, runtime.clone())
+                        .map_err(to_py_error)?,
                 ),
                 "f16" => DbBackend::F16(
-                    GenericDatabase::<half::f16>::open_with_config(path, config)
+                    GenericDatabase::<half::f16>::open_with_runtime(path, config, runtime.clone())
                         .map_err(to_py_error)?,
                 ),
                 "u64" => DbBackend::U64(
-                    GenericDatabase::<u64>::open_with_config(path, config).map_err(to_py_error)?,
+                    GenericDatabase::<u64>::open_with_runtime(path, config, runtime.clone())
+                        .map_err(to_py_error)?,
                 ),
                 _ => {
                     return Err(pyo3::exceptions::PyValueError::new_err(
@@ -547,8 +630,7 @@ pub mod python {
         /// 运行时切换 WAL 同步模式: "full" / "normal" / "off"
         fn set_sync_mode(&mut self, mode: &str) -> PyResult<()> {
             let sm = parse_sync_mode(mode)?;
-            dispatch!(self, mut db => db.set_sync_mode(sm))
-                .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))
+            dispatch!(self, mut db => db.set_sync_mode(sm)).map_err(to_py_error)
         }
 
         // ════════ Hook 管理 ════════
@@ -700,25 +782,16 @@ pub mod python {
             match &mut self.inner {
                 DbBackend::F32(db) => {
                     let vec: Vec<f32> = vector.extract()?;
-                    db.insert(&vec, json)
-                        .map_err(|e: crate::error::TriviumError| {
-                            pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
-                        })
+                    db.insert(&vec, json).map_err(to_py_error)
                 }
                 DbBackend::F16(db) => {
                     let vec: Vec<f32> = vector.extract()?;
                     let vec16: Vec<half::f16> = vec.into_iter().map(half::f16::from_f32).collect();
-                    db.insert(&vec16, json)
-                        .map_err(|e: crate::error::TriviumError| {
-                            pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
-                        })
+                    db.insert(&vec16, json).map_err(to_py_error)
                 }
                 DbBackend::U64(db) => {
                     let vec: Vec<u64> = vector.extract()?;
-                    db.insert(&vec, json)
-                        .map_err(|e: crate::error::TriviumError| {
-                            pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
-                        })
+                    db.insert(&vec, json).map_err(to_py_error)
                 }
             }
         }
@@ -746,7 +819,7 @@ pub mod python {
                     db.insert_with_id(id, &vec, json)
                 }
             }
-            .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))
+            .map_err(to_py_error)
         }
 
         fn upsert_with_id(
@@ -768,16 +841,12 @@ pub mod python {
                 }
                 DbBackend::U64(db) => db.upsert_with_id(id, &vector.extract::<Vec<u64>>()?, json),
             }
-            .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))
+            .map_err(to_py_error)
         }
 
         #[pyo3(signature = (src, dst, label="related", weight=1.0))]
         fn link(&mut self, src: u64, dst: u64, label: &str, weight: f32) -> PyResult<()> {
-            dispatch!(self, mut db => db.link(src, dst, label, weight)).map_err(
-                |e: crate::error::TriviumError| {
-                    pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
-                },
-            )
+            dispatch!(self, mut db => db.link(src, dst, label, weight)).map_err(to_py_error)
         }
 
         fn get_edge(&self, py: Python<'_>, src: u64, dst: u64, label: &str) -> Option<PyEdge> {
@@ -802,7 +871,7 @@ pub mod python {
                 .map(pyobject_to_json)
                 .unwrap_or(serde_json::Value::Null);
             dispatch!(self, mut db => db.upsert_edge(src, dst, label, weight, metadata))
-                .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))
+                .map_err(to_py_error)
         }
 
         #[pyo3(signature = (src, dst, label, weight=None, metadata=None))]
@@ -821,7 +890,7 @@ pub mod python {
                 weight,
                 metadata.map(pyobject_to_json),
             ))
-            .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))
+            .map_err(to_py_error)
         }
 
         #[pyo3(signature = (query_vector, top_k=5, recall_k=0, rerank_k=0, expand_depth=0, min_score=0.5, payload_filter=None, max_edges_per_node=0, min_edge_weight=0.0, edge_direction="out"))]
@@ -931,7 +1000,7 @@ pub mod python {
                     py.allow_threads(|| db.search_hybrid_grouped(None, Some(&vector), &config))
                 }
             }
-            .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
+            .map_err(to_py_error)?;
             Ok(PyGroupedSearchResult {
                 semantic_hits: result
                     .semantic_hits
@@ -994,7 +1063,7 @@ pub mod python {
                     py.allow_threads(|| db.search_batch(&queries, &config, &batch_config))
                 }
             }
-            .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
+            .map_err(to_py_error)?;
 
             Ok(results
                 .into_iter()
@@ -1167,9 +1236,7 @@ pub mod python {
                     py.allow_threads(|| db.search_hybrid(Some(&query_text), Some(&vec), &config))
                 }
             }
-            .map_err(|e: crate::error::TriviumError| {
-                pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
-            })?;
+            .map_err(to_py_error)?;
             Ok(results
                 .into_iter()
                 .map(|h| PySearchHit {
@@ -1198,9 +1265,7 @@ pub mod python {
         }
 
         fn delete(&mut self, id: u64) -> PyResult<()> {
-            dispatch!(self, mut db => db.delete(id)).map_err(|e: crate::error::TriviumError| {
-                pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
-            })
+            dispatch!(self, mut db => db.delete(id)).map_err(to_py_error)
         }
 
         #[pyo3(signature = (src, dst, label=None))]
@@ -1209,9 +1274,7 @@ pub mod python {
                 Some(label) => dispatch!(self, mut db => db.unlink_label(src, dst, label)),
                 None => dispatch!(self, mut db => db.unlink(src, dst)),
             }
-            .map_err(|e: crate::error::TriviumError| {
-                pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
-            })
+            .map_err(to_py_error)
         }
 
         fn update_payload(
@@ -1221,11 +1284,7 @@ pub mod python {
             payload: &Bound<'_, PyAny>,
         ) -> PyResult<()> {
             let json = pyobject_to_json(payload);
-            dispatch!(self, mut db => db.update_payload(id, json)).map_err(
-                |e: crate::error::TriviumError| {
-                    pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
-                },
-            )
+            dispatch!(self, mut db => db.update_payload(id, json)).map_err(to_py_error)
         }
 
         /// 部分更新节点 Payload（$set / $inc / $unset）
@@ -1246,61 +1305,36 @@ pub mod python {
             patch: &Bound<'_, PyAny>,
         ) -> PyResult<()> {
             let json = pyobject_to_json(patch);
-            dispatch!(self, mut db => db.patch_payload(id, json)).map_err(
-                |e: crate::error::TriviumError| {
-                    pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
-                },
-            )
+            dispatch!(self, mut db => db.patch_payload(id, json)).map_err(to_py_error)
         }
         fn update_vector(&mut self, vector: Bound<'_, PyAny>, id: u64) -> PyResult<()> {
             match &mut self.inner {
                 DbBackend::F32(db) => {
                     let vec: Vec<f32> = vector.extract()?;
-                    db.update_vector(id, &vec)
-                        .map_err(|e: crate::error::TriviumError| {
-                            pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
-                        })
+                    db.update_vector(id, &vec).map_err(to_py_error)
                 }
                 DbBackend::F16(db) => {
                     let vec: Vec<f32> = vector.extract()?;
                     let vec16: Vec<half::f16> = vec.into_iter().map(half::f16::from_f32).collect();
-                    db.update_vector(id, &vec16)
-                        .map_err(|e: crate::error::TriviumError| {
-                            pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
-                        })
+                    db.update_vector(id, &vec16).map_err(to_py_error)
                 }
                 DbBackend::U64(db) => {
                     let vec: Vec<u64> = vector.extract()?;
-                    db.update_vector(id, &vec)
-                        .map_err(|e: crate::error::TriviumError| {
-                            pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
-                        })
+                    db.update_vector(id, &vec).map_err(to_py_error)
                 }
             }
         }
 
         fn index_text(&mut self, id: u64, text: &str) -> PyResult<()> {
-            dispatch!(self, mut db => db.index_text(id, text)).map_err(
-                |e: crate::error::TriviumError| {
-                    pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
-                },
-            )
+            dispatch!(self, mut db => db.index_text(id, text)).map_err(to_py_error)
         }
 
         fn index_keyword(&mut self, id: u64, keyword: &str) -> PyResult<()> {
-            dispatch!(self, mut db => db.index_keyword(id, keyword)).map_err(
-                |e: crate::error::TriviumError| {
-                    pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
-                },
-            )
+            dispatch!(self, mut db => db.index_keyword(id, keyword)).map_err(to_py_error)
         }
 
         fn build_text_index(&mut self) -> PyResult<()> {
-            dispatch!(self, mut db => db.build_text_index()).map_err(
-                |e: crate::error::TriviumError| {
-                    pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
-                },
-            )
+            dispatch!(self, mut db => db.build_text_index()).map_err(to_py_error)
         }
 
         // ════════ 属性二级索引 ════════
@@ -1560,7 +1594,7 @@ pub mod python {
                         .map(|result| to_py_reachability(py, result))
                         .collect()
                 })
-                .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))
+                .map_err(to_py_error)
         }
 
         #[pyo3(signature = (id, min_depth=1, max_depth=1, labels=None, direction="outgoing", max_visited_nodes=10_000, max_results=10_000, max_edges=50_000))]
@@ -1597,8 +1631,8 @@ pub mod python {
                 max_frontier_size: 10_000,
                 exhaustion_policy: crate::graph::budget::BudgetExhaustionPolicy::Partial,
             };
-            let output = dispatch!(self, db => db.reachable_detailed(id, &config))
-                .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
+            let output =
+                dispatch!(self, db => db.reachable_detailed(id, &config)).map_err(to_py_error)?;
             let value = serde_json::to_value(output)
                 .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
             Ok(json_to_pyobject(py, &value))
@@ -1638,8 +1672,8 @@ pub mod python {
                 max_frontier_size: 10_000,
                 exhaustion_policy: crate::graph::budget::BudgetExhaustionPolicy::Partial,
             };
-            let output = dispatch!(self, db => db.query_subgraph(id, &config))
-                .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
+            let output =
+                dispatch!(self, db => db.query_subgraph(id, &config)).map_err(to_py_error)?;
             let value = serde_json::to_value(output)
                 .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
             Ok(json_to_pyobject(py, &value))
@@ -1670,7 +1704,7 @@ pub mod python {
                     db.search_graph_first(&query, &anchor_ids, top_k, max_anchor_nodes)
                 }
             }
-            .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
+            .map_err(to_py_error)?;
             Ok(hits
                 .into_iter()
                 .map(|hit| PySearchHit {
@@ -1704,7 +1738,7 @@ pub mod python {
                     db.search_exact(&query, top_k)
                 }
             }
-            .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
+            .map_err(to_py_error)?;
             Ok(hits
                 .into_iter()
                 .map(|hit| PySearchHit {
@@ -1728,8 +1762,8 @@ pub mod python {
         }
 
         fn repair_graph_indexes(&mut self, py: Python<'_>) -> PyResult<PyObject> {
-            let report = dispatch!(self, mut db => db.repair_graph_indexes())
-                .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
+            let report =
+                dispatch!(self, mut db => db.repair_graph_indexes()).map_err(to_py_error)?;
             let value = serde_json::to_value(report)
                 .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
             Ok(json_to_pyobject(py, &value))
@@ -1740,14 +1774,12 @@ pub mod python {
         }
 
         fn flush(&mut self) -> PyResult<()> {
-            dispatch!(self, mut db => db.flush()).map_err(|e: crate::error::TriviumError| {
-                pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
-            })
+            dispatch!(self, mut db => db.flush()).map_err(to_py_error)
         }
 
         fn publish_generation_manifest(&mut self, generation_id: &str) -> PyResult<PyObject> {
             let manifest = dispatch!(self, mut db => db.publish_generation_manifest(generation_id))
-                .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
+                .map_err(to_py_error)?;
             let value = serde_json::to_value(manifest)
                 .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
             Ok(Python::with_gil(|py| json_to_pyobject(py, &value)))
@@ -1779,27 +1811,15 @@ pub mod python {
         fn migrate(&self, new_path: &str, new_dim: usize) -> PyResult<Vec<u64>> {
             match &self.inner {
                 DbBackend::F32(db) => {
-                    let (_new_db, ids) = db.migrate_to(new_path, new_dim).map_err(
-                        |e: crate::error::TriviumError| {
-                            pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
-                        },
-                    )?;
+                    let (_new_db, ids) = db.migrate_to(new_path, new_dim).map_err(to_py_error)?;
                     Ok(ids)
                 }
                 DbBackend::F16(db) => {
-                    let (_new_db, ids) = db.migrate_to(new_path, new_dim).map_err(
-                        |e: crate::error::TriviumError| {
-                            pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
-                        },
-                    )?;
+                    let (_new_db, ids) = db.migrate_to(new_path, new_dim).map_err(to_py_error)?;
                     Ok(ids)
                 }
                 DbBackend::U64(db) => {
-                    let (_new_db, ids) = db.migrate_to(new_path, new_dim).map_err(
-                        |e: crate::error::TriviumError| {
-                            pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
-                        },
-                    )?;
+                    let (_new_db, ids) = db.migrate_to(new_path, new_dim).map_err(to_py_error)?;
                     Ok(ids)
                 }
             }
@@ -1808,12 +1828,14 @@ pub mod python {
         #[pyo3(signature = (interval_secs=7200))]
         fn enable_auto_compaction(&mut self, interval_secs: u64) -> PyResult<()> {
             dispatch!(self, mut db => db.enable_auto_compaction(std::time::Duration::from_secs(interval_secs)))
-                .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+                .map_err(|error| match error {
+                    crate::error::TriviumError::ResourceBudgetExceeded { .. } => to_py_error(error),
+                    _ => pyo3::exceptions::PyValueError::new_err(error.to_string()),
+                })
         }
 
         fn set_auto_build_quiver(&mut self, enabled: bool) -> PyResult<()> {
-            dispatch!(self, mut db => db.set_auto_build_quiver(enabled))
-                .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))
+            dispatch!(self, mut db => db.set_auto_build_quiver(enabled)).map_err(to_py_error)
         }
 
         fn clear_search_state(&self) {
@@ -1825,14 +1847,13 @@ pub mod python {
         }
 
         fn compact(&mut self) -> PyResult<()> {
-            dispatch!(self, mut db => db.compact()).map_err(|e: crate::error::TriviumError| {
-                pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
-            })
+            dispatch!(self, mut db => db.compact()).map_err(to_py_error)
         }
 
         /// 为后续插入主动预留额外节点容量。
         fn reserve_nodes(&mut self, additional: usize) -> PyResult<()> {
             dispatch!(self, db => db.reserve_nodes(additional)).map_err(|error| match error {
+                crate::error::TriviumError::ResourceBudgetExceeded { .. } => to_py_error(error),
                 crate::error::TriviumError::CapacityReservationRejected { .. }
                 | crate::error::TriviumError::CapacityAllocationFailed { .. } => {
                     pyo3::exceptions::PyMemoryError::new_err(error.to_string())
@@ -1847,11 +1868,24 @@ pub mod python {
             let bytes = mb.checked_mul(1024 * 1024).ok_or_else(|| {
                 pyo3::exceptions::PyOverflowError::new_err("内存上限换算字节时溢出")
             })?;
-            dispatch!(self, mut db => db.set_memory_limit(bytes));
-            Ok(())
+            dispatch!(self, mut db => db.set_memory_limit(bytes)).map_err(to_py_error)
         }
 
-        /// 查询当前估算内存占用（字节）
+        /// 读取多个数据库共享的配额、工作线程和任务统计。
+        fn resource_stats(&self, py: Python<'_>) -> PyResult<PyObject> {
+            let stats = dispatch!(self, db => db.resource_stats());
+            let value = serde_json::to_value(stats)
+                .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
+            Ok(json_to_pyobject(py, &value))
+        }
+
+        fn instance_stats(&self, py: Python<'_>) -> PyResult<PyObject> {
+            let stats = dispatch!(self, db => db.instance_stats());
+            let value = serde_json::to_value(stats)
+                .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
+            Ok(json_to_pyobject(py, &value))
+        }
+
         fn estimated_memory(&self) -> usize {
             dispatch!(self, db => db.estimated_memory())
         }
@@ -1880,11 +1914,12 @@ pub mod python {
         #[pyo3(signature = (_exc_type=None, _exc_val=None, _exc_tb=None))]
         fn __exit__(
             &mut self,
+            py: Python<'_>,
             _exc_type: Option<&Bound<'_, PyAny>>,
             _exc_val: Option<&Bound<'_, PyAny>>,
             _exc_tb: Option<&Bound<'_, PyAny>>,
         ) -> PyResult<bool> {
-            self.close()?;
+            self.close(py)?;
             Ok(false)
         }
 
@@ -1907,9 +1942,7 @@ pub mod python {
                         let vec: Vec<f32> = vec_obj.extract()?;
                         tx.insert(&vec, pyobject_to_json(&payload_obj));
                     }
-                    db.commit_tx(tx).map_err(|error| {
-                        pyo3::exceptions::PyRuntimeError::new_err(error.to_string())
-                    })
+                    db.commit_tx(tx).map_err(to_py_error)
                 }
                 DbBackend::F16(db) => {
                     let mut tx = crate::database::TxBuilder::new();
@@ -1920,9 +1953,7 @@ pub mod python {
                             vec.into_iter().map(half::f16::from_f32).collect();
                         tx.insert(&vec16, pyobject_to_json(&payload_obj));
                     }
-                    db.commit_tx(tx).map_err(|error| {
-                        pyo3::exceptions::PyRuntimeError::new_err(error.to_string())
-                    })
+                    db.commit_tx(tx).map_err(to_py_error)
                 }
                 DbBackend::U64(db) => {
                     let mut tx = crate::database::TxBuilder::new();
@@ -1931,9 +1962,7 @@ pub mod python {
                         let vec: Vec<u64> = vec_obj.extract()?;
                         tx.insert(&vec, pyobject_to_json(&payload_obj));
                     }
-                    db.commit_tx(tx).map_err(|error| {
-                        pyo3::exceptions::PyRuntimeError::new_err(error.to_string())
-                    })
+                    db.commit_tx(tx).map_err(to_py_error)
                 }
             }
         }
@@ -1958,9 +1987,7 @@ pub mod python {
                         let vec: Vec<f32> = vectors.get_item(i)?.extract()?;
                         tx.insert_with_id(ids[i], &vec, pyobject_to_json(&payload_obj));
                     }
-                    db.commit_tx(tx).map(|_| ()).map_err(|error| {
-                        pyo3::exceptions::PyRuntimeError::new_err(error.to_string())
-                    })
+                    db.commit_tx(tx).map(|_| ()).map_err(to_py_error)
                 }
                 DbBackend::F16(db) => {
                     let mut tx = crate::database::TxBuilder::new();
@@ -1970,9 +1997,7 @@ pub mod python {
                             vec.into_iter().map(half::f16::from_f32).collect();
                         tx.insert_with_id(ids[i], &vec16, pyobject_to_json(&payload_obj));
                     }
-                    db.commit_tx(tx).map(|_| ()).map_err(|error| {
-                        pyo3::exceptions::PyRuntimeError::new_err(error.to_string())
-                    })
+                    db.commit_tx(tx).map(|_| ()).map_err(to_py_error)
                 }
                 DbBackend::U64(db) => {
                     let mut tx = crate::database::TxBuilder::new();
@@ -1980,9 +2005,7 @@ pub mod python {
                         let vec: Vec<u64> = vectors.get_item(i)?.extract()?;
                         tx.insert_with_id(ids[i], &vec, pyobject_to_json(&payload_obj));
                     }
-                    db.commit_tx(tx).map(|_| ()).map_err(|error| {
-                        pyo3::exceptions::PyRuntimeError::new_err(error.to_string())
-                    })
+                    db.commit_tx(tx).map(|_| ()).map_err(to_py_error)
                 }
             }
         }
@@ -2066,27 +2089,15 @@ pub mod python {
 
             match &self.inner {
                 DbBackend::F32(db) => {
-                    let rows = db
-                        .tql_values(query)
-                        .map_err(|e: crate::error::TriviumError| {
-                            pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
-                        })?;
+                    let rows = db.tql_values(query).map_err(to_py_error)?;
                     convert_rows(py, rows)
                 }
                 DbBackend::F16(db) => {
-                    let rows = db
-                        .tql_values(query)
-                        .map_err(|e: crate::error::TriviumError| {
-                            pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
-                        })?;
+                    let rows = db.tql_values(query).map_err(to_py_error)?;
                     convert_rows(py, rows)
                 }
                 DbBackend::U64(db) => {
-                    let rows = db
-                        .tql_values(query)
-                        .map_err(|e: crate::error::TriviumError| {
-                            pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
-                        })?;
+                    let rows = db.tql_values(query).map_err(to_py_error)?;
                     convert_rows(py, rows)
                 }
             }
@@ -2148,11 +2159,7 @@ pub mod python {
         /// db.tql_mut('MATCH (a {name: "Alice"}) DELETE a')
         /// ```
         fn tql_mut(&mut self, py: Python<'_>, query: &str) -> PyResult<PyObject> {
-            let result = dispatch!(self, mut db => db.tql_mut(query)).map_err(
-                |e: crate::error::TriviumError| {
-                    pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
-                },
-            )?;
+            let result = dispatch!(self, mut db => db.tql_mut(query)).map_err(to_py_error)?;
             let dict = PyDict::new(py);
             let _ = dict.set_item("affected", result.affected);
             let created: Vec<u64> = result.created_ids;
@@ -2189,9 +2196,7 @@ pub mod python {
                 Some(max_iterations),
                 Some(compute_centroids),
             ))
-            .map_err(|e: crate::error::TriviumError| {
-                pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
-            })?;
+            .map_err(to_py_error)?;
 
             // 按社区分组: cluster_id -> [node_ids]
             let mut clusters: std::collections::HashMap<u32, Vec<u64>> =
@@ -2261,9 +2266,43 @@ pub mod python {
             })
         }
 
+        fn request_shutdown(&mut self, py: Python<'_>) -> PyResult<PyObject> {
+            let status = dispatch!(self, mut db => db.request_shutdown()).map_err(to_py_error)?;
+            let value = serde_json::to_value(status)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+            Ok(json_to_pyobject(py, &value))
+        }
+
+        fn shutdown_status(&self, py: Python<'_>) -> PyResult<PyObject> {
+            let value = serde_json::to_value(dispatch!(self, db => db.shutdown_status()))
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+            Ok(json_to_pyobject(py, &value))
+        }
+
+        fn close_timeout(&mut self, py: Python<'_>, timeout_ms: u64) -> PyResult<bool> {
+            py.allow_threads(|| dispatch!(self, mut db => db.close_timeout(std::time::Duration::from_millis(timeout_ms))))
+                .map_err(to_py_error)
+        }
+
+        fn create_snapshot(
+            &mut self,
+            py: Python<'_>,
+            destination: &str,
+            generation_id: &str,
+        ) -> PyResult<PyObject> {
+            let manifest = py
+                .allow_threads(
+                    || dispatch!(self, mut db => db.create_snapshot(destination, generation_id)),
+                )
+                .map_err(to_py_error)?;
+            let value = serde_json::to_value(manifest)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+            Ok(json_to_pyobject(py, &value))
+        }
+
         /// 显式关闭数据库（落盘后释放资源）
-        fn close(&mut self) -> PyResult<()> {
-            match dispatch!(self, mut db => db.close()) {
+        fn close(&mut self, py: Python<'_>) -> PyResult<()> {
+            match py.allow_threads(|| dispatch!(self, mut db => db.close())) {
                 Ok(()) | Err(crate::error::TriviumError::DatabaseClosed) => Ok(()),
                 Err(error) => Err(to_py_error(error)),
             }
@@ -2464,15 +2503,15 @@ pub mod python {
             let mut db_ref = self.db.borrow_mut(py);
 
             match (&mut db_ref.inner, builder) {
-                (DbBackend::F32(db), TxBuilderBackend::F32(b)) => db
-                    .commit_tx(b)
-                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
-                (DbBackend::F16(db), TxBuilderBackend::F16(b)) => db
-                    .commit_tx(b)
-                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
-                (DbBackend::U64(db), TxBuilderBackend::U64(b)) => db
-                    .commit_tx(b)
-                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+                (DbBackend::F32(db), TxBuilderBackend::F32(b)) => {
+                    db.commit_tx(b).map_err(to_py_error)
+                }
+                (DbBackend::F16(db), TxBuilderBackend::F16(b)) => {
+                    db.commit_tx(b).map_err(to_py_error)
+                }
+                (DbBackend::U64(db), TxBuilderBackend::U64(b)) => {
+                    db.commit_tx(b).map_err(to_py_error)
+                }
                 _ => Err(pyo3::exceptions::PyRuntimeError::new_err("dtype 不匹配")),
             }
         }
@@ -2781,6 +2820,51 @@ pub mod python {
             .try_init();
     }
 
+    #[pyfunction]
+    #[pyo3(signature = (directory, runtime=None))]
+    fn verify_snapshot(
+        py: Python<'_>,
+        directory: &str,
+        runtime: Option<PyRef<'_, PyResourceRuntime>>,
+    ) -> PyResult<PyObject> {
+        let runtime = runtime
+            .map(|r| r.inner.clone())
+            .unwrap_or_else(crate::resources::ResourceRuntime::shared_default);
+        let manifest = py
+            .allow_threads(|| {
+                crate::storage::snapshot::verify_snapshot_with_runtime(directory, &runtime)
+            })
+            .map_err(to_py_error)?;
+        let value = serde_json::to_value(manifest)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(json_to_pyobject(py, &value))
+    }
+
+    #[pyfunction]
+    #[pyo3(signature = (source, destination, runtime=None))]
+    fn restore_snapshot(
+        py: Python<'_>,
+        source: &str,
+        destination: &str,
+        runtime: Option<PyRef<'_, PyResourceRuntime>>,
+    ) -> PyResult<PyObject> {
+        let runtime = runtime
+            .map(|r| r.inner.clone())
+            .unwrap_or_else(crate::resources::ResourceRuntime::shared_default);
+        let manifest = py
+            .allow_threads(|| {
+                crate::storage::snapshot::restore_snapshot_with_runtime(
+                    source,
+                    destination,
+                    &runtime,
+                )
+            })
+            .map_err(to_py_error)?;
+        let value = serde_json::to_value(manifest)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(json_to_pyobject(py, &value))
+    }
+
     #[pymodule]
     pub fn triviumdb(m: &Bound<'_, PyModule>) -> PyResult<()> {
         m.add("ReadOnlyError", m.py().get_type::<ReadOnlyError>())?;
@@ -2800,6 +2884,15 @@ pub mod python {
             "UnsupportedDatabaseVersionError",
             m.py().get_type::<UnsupportedDatabaseVersionError>(),
         )?;
+        m.add(
+            "ResourceBudgetError",
+            m.py().get_type::<ResourceBudgetError>(),
+        )?;
+        m.add(
+            "SnapshotPublicationError",
+            m.py().get_type::<SnapshotPublicationError>(),
+        )?;
+        m.add_class::<PyResourceRuntime>()?;
         m.add_class::<PyPreparedTql>()?;
         m.add_class::<PyTriviumDB>()?;
         m.add_class::<PySearchHit>()?;
@@ -2813,6 +2906,8 @@ pub mod python {
         m.add_class::<PyHookContext>()?;
         m.add_class::<PyTransaction>()?;
         m.add_function(wrap_pyfunction!(init_logger, m)?)?;
+        m.add_function(wrap_pyfunction!(verify_snapshot, m)?)?;
+        m.add_function(wrap_pyfunction!(restore_snapshot, m)?)?;
         Ok(())
     }
 

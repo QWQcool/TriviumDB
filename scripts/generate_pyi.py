@@ -26,17 +26,17 @@ import sys
 from pathlib import Path
 
 EXCEPTIONS = [
-    "ReadOnlyError", "RecoveryRequiredError",
+    "ReadOnlyError", "RecoveryRequiredError", "ResourceBudgetError", "SnapshotPublicationError",
     "ImmutableArtifactError", "GenerationBusyError",
     "UnsupportedDatabaseVersionError",
 ]
 CLASS_ORDER = [
     "SearchHit", "GroupedSearchResult", "Edge", "IncomingEdge", "NodeView",
     "ReachabilityStep", "ReachabilityResult", "QueryRow", "HookContext",
-    "PreparedTql", "Transaction", "TriviumDB",
+    "PreparedTql", "Transaction", "ResourceRuntime", "TriviumDB",
 ]
-FUNCTIONS = ["init_logger"]
-CONSTRUCTIBLE = {"TriviumDB"}  # only these expose a real #[new]
+FUNCTIONS = ["init_logger", "verify_snapshot", "restore_snapshot"]
+CONSTRUCTIBLE = {"TriviumDB", "ResourceRuntime"}  # 仅这两个类提供原生构造器
 
 # Dunders emitted from the method loop (__new__ is handled by the ctor branch).
 KEEP_DUNDERS = ["__len__", "__contains__", "__repr__", "__enter__", "__exit__"]
@@ -65,6 +65,9 @@ PARAM_TYPES = {
     "vector": "Vector", "query_vector": "Vector",
     "vectors": "Sequence[Vector]", "query_vectors": "Sequence[Vector]",
     "ids": "Sequence[int]", "anchor_ids": "Sequence[int]",
+    "runtime": "ResourceRuntime",
+    "directory": "str", "source": "str", "destination": "str",
+    "maintenance_memory_limit_mb": "int", "timeout_ms": "int",
     "payload": "Any", "payloads": "Sequence[Any]", "patch": "Mapping[str, Any]",
     "metadata": "Any",
     "payload_filter": "Mapping[str, Any]",
@@ -74,7 +77,7 @@ PARAM_TYPES = {
 }
 # bulk name→type groups (space-separated names sharing one type)
 for _t, _names in {
-    "int": "id src dst key depth expand_depth min_depth max_depth max_visited_nodes "
+    "int": "max_threads max_active_tasks id src dst key depth expand_depth min_depth max_depth max_visited_nodes "
            "max_anchor_nodes parallelism additional mb interval_secs min_community_size "
            "max_iterations dim new_dim memory_limit_mb expected_nodes max_query_rows top_k recall_k rerank_k "
            "max_edges_per_node max_edges max_results seed",
@@ -137,7 +140,7 @@ for _ret, _quals in {
     "list[QueryRow]": "TriviumDB.tql TriviumDB.execute_prepared_tql",
     "list[str]": "PreparedTql.parameter_names",
     "PreparedTql": "TriviumDB.prepare_tql",
-    "dict[str, Any]": "TriviumDB.tql_mut TriviumDB.leiden_cluster TriviumDB.graph_stats "
+    "dict[str, Any]": "verify_snapshot restore_snapshot TriviumDB.create_snapshot TriviumDB.request_shutdown TriviumDB.shutdown_status ResourceRuntime.stats TriviumDB.resource_stats TriviumDB.instance_stats TriviumDB.tql_mut TriviumDB.leiden_cluster TriviumDB.graph_stats "
                       "TriviumDB.index_info TriviumDB.storage_info "
                       "TriviumDB.validate_graph TriviumDB.repair_graph_indexes "
                       "TriviumDB.reachable_detailed TriviumDB.query_subgraph",
@@ -148,7 +151,8 @@ for _ret, _quals in {
     "Transaction": "TriviumDB.transaction",
     "Any": "TriviumDB.publish_generation_manifest",
     "str": "TriviumDB.__repr__ Transaction.__repr__ QueryRow.__repr__ HookContext.__repr__",
-    "bool": "TriviumDB.__contains__ TriviumDB.__exit__ Transaction.__exit__",
+    "bool": "TriviumDB.close_timeout TriviumDB.__contains__ TriviumDB.__exit__ Transaction.__exit__",
+    '"ResourceRuntime"': "ResourceRuntime.__new__",
     '"TriviumDB"': "TriviumDB.__new__ TriviumDB.__enter__",
     '"Transaction"': "Transaction.__enter__",
 }.items():
@@ -244,7 +248,9 @@ def build_stub(mod) -> str:
         "__all__ = [\n" + "".join(f'    "{n}",\n'
                                   for n in EXCEPTIONS + CLASS_ORDER + FUNCTIONS) + "]",
         "# Exceptions",
-        *(f"class {e}({getattr(mod, e).__bases__[0].__name__}): ..." for e in EXCEPTIONS),
+        *(f"class {e}({getattr(mod, e).__bases__[0].__name__}):"
+          + ("\n    resource: str\n    requested: int\n    used: int\n    limit: int"
+             if e == "ResourceBudgetError" else " ...") for e in EXCEPTIONS),
         "# Classes",
         *(render_class(mod, c) for c in CLASS_ORDER),
         "# Functions",

@@ -631,3 +631,6 @@ fn PWR_04_事务commit后断电_WAL原子回放() {
 
     cleanup(&path);
 }
+
+#[cfg(feature = "test-hooks")]
+mod snapshot;
