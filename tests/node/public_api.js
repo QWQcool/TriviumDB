@@ -353,6 +353,7 @@ async function main() {
     runSharedContract(root)
     runTransactionContract(root)
     await require('./write_boundaries.js')(root, TriviumDB)
+    await require('./numeric_boundaries.js')(root, TriviumDB)
     runTextRecoveryContract(root)
     await runAsyncResourceContract(root)
     assert.throws(

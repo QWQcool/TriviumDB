@@ -1214,6 +1214,11 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         read_or_recover(&self.memtable).estimated_memory_bytes()
     }
 
+    #[cfg(feature = "nodejs")]
+    pub(crate) fn next_id_for_binding(&self) -> Result<NodeId> {
+        self.read_operation(|| read_or_recover(&self.memtable).next_id_value())
+    }
+
     fn ensure_incremental_memory_budget(&self, additional_bytes: usize) -> Result<()> {
         if self.memory_limit == 0 {
             return Ok(());
@@ -1367,6 +1372,17 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
             let mut mt = write_or_recover(&self.memtable);
             mt.validate_insert(vector)?;
             let id = mt.next_id_value();
+            mt.validate_insert_with_id(id, vector)?;
+            mt.ensure_additional_memory(
+                self.memory_limit,
+                mt.estimate_reserve_bytes(1)?
+                    .saturating_add(payload_str.len().saturating_mul(2))
+                    .saturating_add(crate::storage::payload_store::estimate_json_memory(
+                        &payload,
+                    ))
+                    .saturating_add(vector.len().saturating_mul(std::mem::size_of::<T>()))
+                    .saturating_add(256),
+            )?;
             mt.validate_unique_changes([(id, Some(&payload))])?;
             let mut w = lock_or_recover(&self.wal);
             w.append(&WalEntry::Insert {
@@ -1409,6 +1425,16 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         {
             let mut mt = write_or_recover(&self.memtable);
             mt.validate_insert_with_id(id, vector)?;
+            mt.ensure_additional_memory(
+                self.memory_limit,
+                mt.estimate_reserve_bytes(1)?
+                    .saturating_add(payload_str.len().saturating_mul(2))
+                    .saturating_add(crate::storage::payload_store::estimate_json_memory(
+                        &payload,
+                    ))
+                    .saturating_add(vector.len().saturating_mul(std::mem::size_of::<T>()))
+                    .saturating_add(256),
+            )?;
             mt.validate_unique_changes([(id, Some(&payload))])?;
             let mut w = lock_or_recover(&self.wal);
             w.append(&WalEntry::Insert {
@@ -1445,10 +1471,11 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         self.require_write_access("link")?;
         let _operation = self.enter_operation()?;
         reject_hook_reentrant_write()?;
-        self.ensure_incremental_memory_budget(label.len().saturating_add(256))?;
         {
             let mut mt = write_or_recover(&self.memtable);
             mt.validate_link(src, dst)?;
+            let growth = mt.estimate_edge_write_bytes(src, dst, label, &serde_json::Value::Null)?;
+            mt.ensure_additional_memory(self.memory_limit, growth)?;
             if !weight.is_finite() {
                 return Err(TriviumError::InvalidInput(
                     "边权重必须是有限浮点数 (Edge weight must be finite)".into(),
@@ -2793,6 +2820,14 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
     /// assert_eq!(result.created_ids.len(), 1);
     /// ```
     pub fn tql_mut(&mut self, input: &str) -> Result<crate::query::tql_executor::TqlMutResult> {
+        self.tql_mut_with_id_limit(input, NodeId::MAX - 1)
+    }
+
+    pub(crate) fn tql_mut_with_id_limit(
+        &mut self,
+        input: &str,
+        max_id: NodeId,
+    ) -> Result<crate::query::tql_executor::TqlMutResult> {
         self.require_write_access("tql_mut")?;
         let _operation = self.enter_operation()?;
         use crate::query::tql_ast::TqlStatement;
@@ -2820,8 +2855,13 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                     std::collections::HashMap::new();
                 for op in &ops {
                     if let MutationOp::InsertNode { var, .. } = op {
+                        if next_id > max_id {
+                            return Err(TriviumError::InvalidInput("节点 ID 超出当前接口范围 (Node ID exceeds this API's supported range)".into()));
+                        }
                         var_id_map.insert(var.clone(), next_id);
-                        next_id += 1;
+                        next_id = next_id.checked_add(1).ok_or_else(|| {
+                            TriviumError::InvalidInput("节点 ID 已耗尽 (Node IDs exhausted)".into())
+                        })?;
                     }
                 }
 

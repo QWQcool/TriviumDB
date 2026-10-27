@@ -688,3 +688,7 @@ cargo test --test contracts 共享json契约由rust适配器完整执行
 - `tests/fault_io/wal_failure_state.rs` 在 `test-hooks` 下分别注入 WAL flush/fsync 故障，子进程直接退出，再验证此前确认记录、隔离后的所有拒绝结果及恢复后的再次持久化。未确认操作允许按已持久化日志恢复；已确认数据要求完整核对。
 - `tests/storage/sidecar_facts.rs` 验证同长度 Payload 更新与边内容更新后混入旧 sidecar 的处理，检查严格拒绝、属性索引扫描回退、历史索引重建、平行边入度、分数顺序与只读零写。
 - `tests/node/write_boundaries.js` 与 `tests/python/write_boundaries.py` 由各端公共 API 入口执行，覆盖直接/批量/事务、查询、完整整数边界、合法容器往返，以及无效输入拒绝后的内容和 WAL。
+
+
+- `tests/core/index_graph_boundaries.rs` 验证唯一约束删除、部分覆盖索引的完整结果、复合唯一大整数、UTF-8 标签边界、图堆准入、零入度清理、三种 dtype 的 ID 分配耗尽、WAL 回放和只读零写。内核单元测试独立核对图容器容量、字符串分配和复合唯一映射账本。
+- `tests/fixtures/numeric_ids/wal_v3.bin` 提供固定完整 u64 ID 跨端样本；Rust 核对完整记录、向量与边，Python 安装制品核对精确整数，Node 安装制品核对字符串 ID 与数字输出拒绝。`tests/node/numeric_boundaries.js` 覆盖数量转换、同步/异步检索、遍历、索引查询及自动分配的 WAL 原子拒绝；`tests/python/index_graph_boundaries.py` 覆盖绑定的索引与图持久化行为。两者均接入现有公共 API CI 入口。

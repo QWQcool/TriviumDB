@@ -95,6 +95,134 @@ pub fn auto_quiver_node_threshold(dim: usize) -> usize {
         .clamp(AUTO_QUIVER_MIN_NODES, AUTO_QUIVER_MAX_NODES)
 }
 
+fn edge_dynamic_bytes(edge: &Edge) -> usize {
+    edge.label.capacity()
+        + crate::storage::payload_store::estimate_json_memory(&edge.metadata)
+            .saturating_sub(std::mem::size_of::<serde_json::Value>())
+}
+
+fn hash_growth_bytes<K, V>(len: usize, capacity: usize, additional: usize) -> usize {
+    if additional <= capacity.saturating_sub(len) {
+        0
+    } else {
+        len.saturating_add(additional)
+            .saturating_mul(4)
+            .saturating_mul(std::mem::size_of::<(K, V)>().saturating_add(1))
+            .saturating_add(64)
+    }
+}
+
+#[cfg(test)]
+mod graph_heap_tests {
+    use super::*;
+    use serde_json::Value;
+
+    fn assert_allocations(mt: &MemTable<f32>) {
+        // 此样本的 Metadata 仅含字符串或 null，直接读取容器容量作为独立分配 oracle。
+        let outgoing = mt
+            .edges
+            .values()
+            .map(|edges| {
+                edges.capacity() * std::mem::size_of::<Edge>()
+                    + edges
+                        .iter()
+                        .map(|edge| {
+                            edge.label.capacity()
+                                + match &edge.metadata {
+                                    Value::String(text) => text.capacity(),
+                                    Value::Null => 0,
+                                    _ => panic!("样本包含未声明的 Metadata 类型"),
+                                }
+                        })
+                        .sum::<usize>()
+            })
+            .sum::<usize>();
+        assert_eq!(mt.edge_heap_bytes, outgoing);
+        assert_eq!(
+            mt.label_heap_bytes,
+            mt.label_index
+                .iter()
+                .map(|(key, pairs)| key.capacity() + pairs.capacity() * 16)
+                .sum::<usize>()
+        );
+        assert_eq!(
+            mt.incoming_heap_bytes,
+            mt.incoming_edges
+                .values()
+                .map(|sources| sources.capacity() * 8)
+                .sum::<usize>()
+        );
+        let stats = mt.graph_stats_state.read().unwrap();
+        assert_eq!(
+            stats.label_heap_bytes,
+            stats
+                .labels
+                .iter()
+                .map(|(label, stats)| label.capacity()
+                    + (stats.sources.capacity() + stats.targets.capacity())
+                        * std::mem::size_of::<(NodeId, usize)>())
+                .sum::<usize>()
+        );
+        assert!(mt.validate_graph().valid);
+    }
+
+    #[test]
+    fn 图堆账本覆盖容量增长替换收缩与删除修复() {
+        let mut mt = MemTable::<f32>::new(2);
+        for id in 1..=8 {
+            mt.insert_with_id(id, &[1., 0.], Value::Null).unwrap();
+        }
+        let mut expected = BTreeMap::new();
+        for i in 0..160 {
+            let src = i % 8 + 1;
+            let dst = (i / 8) % 8 + 1;
+            let label = format!("label_{}", "中".repeat((i % 3 + 1) as usize));
+            let text = "m".repeat((i * 17) as usize);
+            mt.upsert_edge(
+                src,
+                dst,
+                label.clone(),
+                i as f32,
+                Value::String(text.clone()),
+            )
+            .unwrap();
+            expected.insert((src, dst, label), (i as f32, text));
+            assert_allocations(&mt);
+        }
+        for (&(src, dst, ref label), &(weight, ref text)) in &expected {
+            let edge = mt.get_edge(src, dst, label).unwrap();
+            assert_eq!(edge.weight, weight);
+            assert_eq!(edge.metadata, Value::String(text.clone()));
+        }
+        mt.upsert_edge(1, 1, "label_中".into(), 0., Value::Null)
+            .unwrap();
+        assert_allocations(&mt);
+        mt.unlink_label(1, 1, "label_中").unwrap();
+        assert_allocations(&mt);
+        mt.unlink(2, 3).unwrap();
+        assert_allocations(&mt);
+        mt.delete(4).unwrap();
+        assert_allocations(&mt);
+        mt.repair_graph_indexes();
+        assert_allocations(&mt);
+        for src in [1, 2, 3, 5, 6, 7, 8] {
+            for dst in [1, 2, 3, 5, 6, 7, 8] {
+                mt.unlink(src, dst).unwrap();
+                assert_allocations(&mt);
+            }
+        }
+        assert_eq!(mt.graph_stats().edge_count, 0);
+        assert_eq!(
+            mt.edge_heap_bytes,
+            mt.edges
+                .values()
+                .map(|edges| edges.capacity() * std::mem::size_of::<Edge>())
+                .sum::<usize>()
+        );
+        assert_eq!(mt.label_heap_bytes, 0);
+    }
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct LabelStats {
     pub edge_count: usize,
@@ -167,9 +295,26 @@ struct GraphStatsState {
     in_degree_frequency: BTreeMap<usize, usize>,
     labels: BTreeMap<String, MutableLabelStats>,
     sum_out_degree_squared: u128,
+    label_heap_bytes: usize,
 }
 
 impl GraphStatsState {
+    fn label_bytes(&self, label: &str) -> usize {
+        self.labels.get_key_value(label).map_or(0, |(key, stats)| {
+            key.capacity()
+                + (stats.sources.capacity() + stats.targets.capacity())
+                    * std::mem::size_of::<(NodeId, usize)>()
+        })
+    }
+
+    fn heap_memory_bytes(&self) -> usize {
+        self.label_heap_bytes
+            + (self.out_degrees.capacity() + self.in_degrees.capacity())
+                * std::mem::size_of::<(NodeId, usize)>()
+            + self.labels.len() * (std::mem::size_of::<(String, MutableLabelStats)>() + 32)
+            + (self.out_degree_frequency.len() + self.in_degree_frequency.len())
+                * (std::mem::size_of::<(usize, usize)>() + 32)
+    }
     fn adjust_frequency(frequency: &mut BTreeMap<usize, usize>, old: usize, new: usize) {
         if let Some(count) = frequency.get_mut(&old) {
             *count = count.saturating_sub(1);
@@ -193,6 +338,7 @@ impl GraphStatsState {
     }
 
     fn edge_added(&mut self, src: NodeId, dst: NodeId, label: &str) {
+        let before = self.label_bytes(label);
         let old_out = self.out_degrees.get(&src).copied().unwrap_or(0);
         let old_in = self.in_degrees.get(&dst).copied().unwrap_or(0);
         let src_was_isolated = old_out == 0 && self.in_degrees.get(&src).copied().unwrap_or(0) == 0;
@@ -213,9 +359,14 @@ impl GraphStatsState {
         stats.edge_count += 1;
         *stats.sources.entry(src).or_default() += 1;
         *stats.targets.entry(dst).or_default() += 1;
+        self.label_heap_bytes = self
+            .label_heap_bytes
+            .saturating_sub(before)
+            .saturating_add(self.label_bytes(label));
     }
 
     fn edge_removed(&mut self, src: NodeId, dst: NodeId, label: &str) {
+        let before = self.label_bytes(label);
         let old_out = self.out_degrees.get(&src).copied().unwrap_or(0);
         let old_in = self.in_degrees.get(&dst).copied().unwrap_or(0);
         if old_out == 0 || old_in == 0 {
@@ -247,6 +398,10 @@ impl GraphStatsState {
                 self.labels.remove(label);
             }
         }
+        self.label_heap_bytes = self
+            .label_heap_bytes
+            .saturating_sub(before)
+            .saturating_add(self.label_bytes(label));
     }
 
     fn node_removed(&mut self, id: NodeId) {
@@ -429,6 +584,9 @@ pub struct MemTable<T: VectorType> {
 
     // 3. 图谱邻接表 —— RW 使用内存 delta，ReadOnly/Immutable 可使用 mmap 基础块
     edges: HashMap<NodeId, Vec<Edge>>,
+    edge_heap_bytes: usize,
+    label_heap_bytes: usize,
+    incoming_heap_bytes: usize,
     mapped_graph: Option<crate::storage::graph_blocks::MappedGraphStore>,
 
     // 入度统计表：用于快速查询目标节点的被连接数（支持图谱反向抑制算法）
@@ -525,6 +683,9 @@ impl<T: VectorType> MemTable<T> {
             text_memory_limit: 0,
             payloads: PayloadStore::default(),
             edges: HashMap::new(),
+            edge_heap_bytes: 0,
+            label_heap_bytes: 0,
+            incoming_heap_bytes: 0,
             mapped_graph: None,
             in_degrees: HashMap::new(),
             incoming_edges: HashMap::new(),
@@ -577,6 +738,9 @@ impl<T: VectorType> MemTable<T> {
             text_memory_limit: 0,
             payloads: PayloadStore::default(),
             edges: HashMap::new(),
+            edge_heap_bytes: 0,
+            label_heap_bytes: 0,
+            incoming_heap_bytes: 0,
             mapped_graph: None,
             in_degrees: HashMap::new(),
             incoming_edges: HashMap::new(),
@@ -690,6 +854,9 @@ impl<T: VectorType> MemTable<T> {
 
     /// 估算为额外节点预留核心容器容量所需的新增堆内存。
     pub(crate) fn estimate_reserve_bytes(&self, additional: usize) -> Result<usize> {
+        if additional == 0 {
+            return Ok(0);
+        }
         let checked = |value: Option<usize>, label: &str| {
             value.ok_or_else(|| TriviumError::CapacityAllocationFailed {
                 reason: format!("{label}容量计算溢出"),
@@ -730,9 +897,25 @@ impl<T: VectorType> MemTable<T> {
             missing_slots.checked_mul(std::mem::size_of::<NodeId>() + std::mem::size_of::<u64>()),
             "槽位数组",
         )?;
+        let stats = self
+            .graph_stats_state
+            .read()
+            .unwrap_or_else(|p| p.into_inner());
+        let graph_bytes = hash_growth_bytes::<NodeId, usize>(
+            stats.out_degrees.len(),
+            stats.out_degrees.capacity(),
+            additional,
+        )
+        .saturating_add(hash_growth_bytes::<NodeId, usize>(
+            stats.in_degrees.len(),
+            stats.in_degrees.capacity(),
+            additional,
+        ))
+        .saturating_add(128);
         checked(
             vector_bytes
-                .checked_add(payload_bytes)
+                .checked_add(graph_bytes)
+                .and_then(|n| n.checked_add(payload_bytes))
                 .and_then(|n| n.checked_add(id_map_bytes))
                 .and_then(|n| n.checked_add(slot_bytes)),
             "核心容器",
@@ -783,7 +966,7 @@ impl<T: VectorType> MemTable<T> {
         vector: &[T],
         payload: serde_json::Value,
     ) -> Result<()> {
-        if id == 0 {
+        if id == 0 || id == NodeId::MAX {
             return Err(TriviumError::InvalidInput("节点 ID 0 为内部保留值".into()));
         }
         if vector.len() != self.dim {
@@ -829,6 +1012,12 @@ impl<T: VectorType> MemTable<T> {
 
     /// 从 mmap 加载时使用：仅注册紧凑 JSON 与映射关系，不解析 Payload DOM。
     pub fn register_node_raw(&mut self, id: NodeId, payload_raw: &[u8]) -> Result<()> {
+        if id == 0 || id == NodeId::MAX || self.ids_to_indices.contains_key(&id) {
+            return Err(TriviumError::CorruptedFile(
+                "节点映射包含非法或重复 ID (Node mapping contains an invalid or duplicate ID)"
+                    .into(),
+            ));
+        }
         let idx = self.indices_to_ids.len();
         self.payloads.insert_raw(id, payload_raw)?;
         self.active_ids.insert(id);
@@ -845,7 +1034,7 @@ impl<T: VectorType> MemTable<T> {
 
     /// 从分离 Payload 格式加载时，仅恢复活动 slot；raw JSON 随后由已校验的 sidecar 安装。
     pub(crate) fn register_payload_slot(&mut self, id: NodeId) -> Result<()> {
-        if id == 0 || self.ids_to_indices.contains_key(&id) {
+        if id == 0 || id == NodeId::MAX || self.ids_to_indices.contains_key(&id) {
             return Err(TriviumError::CorruptedFile(
                 "Payload slot 包含非法或重复 NodeId".into(),
             ));
@@ -1021,6 +1210,11 @@ impl<T: VectorType> MemTable<T> {
         if id == 0 {
             return Err(TriviumError::InvalidInput("节点 ID 0 为内部保留值".into()));
         }
+        if id == NodeId::MAX {
+            return Err(TriviumError::InvalidInput(
+                "节点 ID 空间已耗尽 (Node ID space exhausted)".into(),
+            ));
+        }
         if self.payloads.contains_key(&id) {
             return Err(TriviumError::NodeAlreadyExists(id));
         }
@@ -1035,6 +1229,144 @@ impl<T: VectorType> MemTable<T> {
             return Err(TriviumError::NodeNotFound(dst));
         }
         Ok(())
+    }
+
+    pub(crate) fn validate_edge_value(label: &str, metadata: &serde_json::Value) -> Result<()> {
+        if label.len() > u16::MAX as usize {
+            return Err(TriviumError::InvalidInput(
+                "边标签 UTF-8 长度不能超过 65535 字节 (Edge label must fit in 65535 UTF-8 bytes)"
+                    .into(),
+            ));
+        }
+        if crate::storage::payload_store::json_encoded_len(metadata)? > u32::MAX as usize {
+            return Err(TriviumError::InvalidInput(
+                "单条边元数据不能超过 4 GiB (Edge metadata must fit in 4 GiB)".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// 覆盖持久标签副本、WAL 暂存、容器增长和派生图统计的保守峰值。
+    pub(crate) fn estimate_edge_write_bytes(
+        &self,
+        src: NodeId,
+        dst: NodeId,
+        label: &str,
+        metadata: &serde_json::Value,
+    ) -> Result<usize> {
+        Self::validate_edge_value(label, metadata)?;
+        let outgoing = self.edges.get(&src);
+        let existing = outgoing
+            .is_some_and(|edges| edges.iter().any(|e| e.target_id == dst && e.label == label));
+        let mut bytes = label
+            .len()
+            .saturating_mul(if existing { 2 } else { 5 })
+            .saturating_add(256);
+        if existing {
+            return Ok(bytes);
+        }
+        let vec_growth = |len: usize, cap: usize, size: usize| {
+            if len < cap {
+                0
+            } else {
+                cap.saturating_mul(2).max(4).saturating_mul(size)
+            }
+        };
+        bytes = bytes.saturating_add(vec_growth(
+            outgoing.map_or(0, Vec::len),
+            outgoing.map_or(0, Vec::capacity),
+            std::mem::size_of::<Edge>(),
+        ));
+        let pairs = self.label_index.get(label);
+        bytes = bytes.saturating_add(vec_growth(
+            pairs.map_or(0, Vec::len),
+            pairs.map_or(0, Vec::capacity),
+            std::mem::size_of::<(NodeId, NodeId)>(),
+        ));
+        let incoming = self.incoming_edges.get(&dst);
+        if incoming.is_none_or(|sources| !sources.contains(&src)) {
+            bytes = bytes.saturating_add(vec_growth(
+                incoming.map_or(0, Vec::len),
+                incoming.map_or(0, Vec::capacity),
+                std::mem::size_of::<NodeId>(),
+            ));
+        }
+        bytes = bytes
+            .saturating_add(hash_growth_bytes::<NodeId, Vec<Edge>>(
+                self.edges.len(),
+                self.edges.capacity(),
+                usize::from(outgoing.is_none()),
+            ))
+            .saturating_add(hash_growth_bytes::<String, Vec<(NodeId, NodeId)>>(
+                self.label_index.len(),
+                self.label_index.capacity(),
+                usize::from(pairs.is_none()),
+            ))
+            .saturating_add(hash_growth_bytes::<NodeId, Vec<NodeId>>(
+                self.incoming_edges.len(),
+                self.incoming_edges.capacity(),
+                usize::from(incoming.is_none()),
+            ))
+            .saturating_add(hash_growth_bytes::<NodeId, usize>(
+                self.in_degrees.len(),
+                self.in_degrees.capacity(),
+                usize::from(!self.in_degrees.contains_key(&dst)),
+            ));
+        let stats = self
+            .graph_stats_state
+            .read()
+            .unwrap_or_else(|p| p.into_inner());
+        if let Some(label_stats) = stats.labels.get(label) {
+            bytes = bytes
+                .saturating_add(hash_growth_bytes::<NodeId, usize>(
+                    label_stats.sources.len(),
+                    label_stats.sources.capacity(),
+                    usize::from(!label_stats.sources.contains_key(&src)),
+                ))
+                .saturating_add(hash_growth_bytes::<NodeId, usize>(
+                    label_stats.targets.len(),
+                    label_stats.targets.capacity(),
+                    usize::from(!label_stats.targets.contains_key(&dst)),
+                ));
+        } else {
+            bytes = bytes.saturating_add(1024);
+        }
+        Ok(bytes)
+    }
+
+    fn label_entry_bytes(&self, label: &str) -> usize {
+        self.label_index
+            .get_key_value(label)
+            .map_or(0, |(key, pairs)| {
+                key.capacity() + pairs.capacity() * std::mem::size_of::<(NodeId, NodeId)>()
+            })
+    }
+    fn incoming_entry_bytes(&self, id: NodeId) -> usize {
+        self.incoming_edges.get(&id).map_or(0, |sources| {
+            sources.capacity() * std::mem::size_of::<NodeId>()
+        })
+    }
+    fn rebuild_graph_heap(&mut self) {
+        self.edge_heap_bytes = self
+            .edges
+            .values()
+            .map(|edges| {
+                edges.capacity() * std::mem::size_of::<Edge>()
+                    + edges.iter().map(edge_dynamic_bytes).sum::<usize>()
+            })
+            .sum();
+        self.label_heap_bytes = self
+            .label_index
+            .iter()
+            .map(|(key, pairs)| {
+                key.capacity() + pairs.capacity() * std::mem::size_of::<(NodeId, NodeId)>()
+            })
+            .sum();
+        self.incoming_heap_bytes = self
+            .incoming_edges
+            .values()
+            .map(|sources| sources.capacity() * std::mem::size_of::<NodeId>())
+            .sum();
     }
 
     pub(crate) fn validate_delete(&self, id: NodeId) -> Result<()> {
@@ -1084,13 +1416,15 @@ impl<T: VectorType> MemTable<T> {
         metadata: serde_json::Value,
     ) -> Result<()> {
         self.validate_link(src, dst)?;
-        crate::storage::payload_store::json_encoded_len(&metadata)?;
+        Self::validate_edge_value(&label, &metadata)?;
         if !weight.is_finite() {
             return Err(TriviumError::InvalidInput(
                 "边权重必须是有限浮点数 (Edge weight must be finite)".into(),
             ));
         }
 
+        let incoming_before = self.incoming_entry_bytes(dst);
+        let label_before = self.label_entry_bytes(&label);
         let outgoing = self.edges.entry(src).or_default();
         if let Some(edge) = outgoing
             .iter_mut()
@@ -1102,7 +1436,13 @@ impl<T: VectorType> MemTable<T> {
                 changed = true;
             }
             if edge.metadata != metadata {
+                self.edge_heap_bytes = self
+                    .edge_heap_bytes
+                    .saturating_sub(edge_dynamic_bytes(edge));
                 edge.metadata = metadata;
+                self.edge_heap_bytes = self
+                    .edge_heap_bytes
+                    .saturating_add(edge_dynamic_bytes(edge));
                 changed = true;
             }
             if changed {
@@ -1112,12 +1452,19 @@ impl<T: VectorType> MemTable<T> {
             return Ok(());
         }
 
-        outgoing.push(Edge {
+        let slots_before = outgoing.capacity() * std::mem::size_of::<Edge>();
+        let edge = Edge {
             target_id: dst,
             label: label.clone(),
             weight,
             metadata,
-        });
+        };
+        self.edge_heap_bytes += edge_dynamic_bytes(&edge);
+        outgoing.push(edge);
+        self.edge_heap_bytes = self
+            .edge_heap_bytes
+            .saturating_sub(slots_before)
+            .saturating_add(outgoing.capacity() * std::mem::size_of::<Edge>());
         *self.in_degrees.entry(dst).or_insert(0) += 1;
         if !self.incoming_edges.entry(dst).or_default().contains(&src) {
             self.incoming_edges.entry(dst).or_default().push(src);
@@ -1126,6 +1473,14 @@ impl<T: VectorType> MemTable<T> {
             .entry(label.clone())
             .or_default()
             .push((src, dst));
+        self.incoming_heap_bytes = self
+            .incoming_heap_bytes
+            .saturating_sub(incoming_before)
+            .saturating_add(self.incoming_entry_bytes(dst));
+        self.label_heap_bytes = self
+            .label_heap_bytes
+            .saturating_sub(label_before)
+            .saturating_add(self.label_entry_bytes(&label));
         self.graph_stats_state
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -1271,6 +1626,7 @@ impl<T: VectorType> MemTable<T> {
             pairs.dedup();
         }
         self.rebuild_graph_stats_state();
+        self.rebuild_graph_heap();
         self.mark_changed(false);
         GraphRepairReport {
             removed_dangling_edges,
@@ -1868,6 +2224,9 @@ impl<T: VectorType> MemTable<T> {
         self.edges.clear();
         self.incoming_edges.clear();
         self.label_index.clear();
+        self.edge_heap_bytes = 0;
+        self.label_heap_bytes = 0;
+        self.incoming_heap_bytes = 0;
         self.in_degrees.clear();
         for pairs in graph.label_index().values() {
             for &(_, target) in pairs {
@@ -2465,11 +2824,18 @@ impl<T: VectorType> MemTable<T> {
         let mut dirty_labels: HashMap<String, Vec<(NodeId, NodeId)>> = HashMap::new();
 
         if let Some(outgoing_edges) = self.edges.remove(&id) {
+            self.edge_heap_bytes = self.edge_heap_bytes.saturating_sub(
+                outgoing_edges.capacity() * std::mem::size_of::<Edge>()
+                    + outgoing_edges.iter().map(edge_dynamic_bytes).sum::<usize>(),
+            );
             // 清理这些出边目标节点的入度计数与反向哈希网记录
             for edge in &outgoing_edges {
                 let target = edge.target_id;
                 if let Some(in_deg) = self.in_degrees.get_mut(&target) {
                     *in_deg = in_deg.saturating_sub(1);
+                    if *in_deg == 0 {
+                        self.in_degrees.remove(&target);
+                    }
                 }
                 if let Some(incoming) = self.incoming_edges.get_mut(&target) {
                     incoming.retain(|&src| src != id);
@@ -2483,10 +2849,16 @@ impl<T: VectorType> MemTable<T> {
 
         // 神级优化：利用反向哈希网，只遍历指向本节点的死循环入口，彻底消除 O(E) 雪崩扫表！
         if let Some(incoming) = self.incoming_edges.remove(&id) {
+            self.incoming_heap_bytes = self
+                .incoming_heap_bytes
+                .saturating_sub(incoming.capacity() * std::mem::size_of::<NodeId>());
             for src_id in incoming {
                 if let Some(edge_list) = self.edges.get_mut(&src_id) {
                     for edge in edge_list.iter() {
                         if edge.target_id == id {
+                            self.edge_heap_bytes = self
+                                .edge_heap_bytes
+                                .saturating_sub(edge_dynamic_bytes(edge));
                             dirty_labels
                                 .entry(edge.label.clone())
                                 .or_default()
@@ -2506,9 +2878,17 @@ impl<T: VectorType> MemTable<T> {
             .map(|(label, pairs)| (label, pairs.into_iter().collect::<HashSet<_>>()))
             .collect::<HashMap<_, _>>();
         for (label, to_remove) in &dirty_labels {
+            let before = self.label_entry_bytes(label);
             if let Some(pairs) = self.label_index.get_mut(label) {
                 pairs.retain(|pair| !to_remove.contains(pair));
+                if pairs.is_empty() {
+                    self.label_index.remove(label);
+                }
             }
+            self.label_heap_bytes = self
+                .label_heap_bytes
+                .saturating_sub(before)
+                .saturating_add(self.label_entry_bytes(label));
         }
         {
             let mut state = self
@@ -2535,21 +2915,46 @@ impl<T: VectorType> MemTable<T> {
 
     /// 断开两个节点之间的指定标签边（幂等）。
     pub fn unlink_label(&mut self, src: NodeId, dst: NodeId, label: &str) -> Result<()> {
+        let label_before = self.label_entry_bytes(label);
         let Some(edge_list) = self.edges.get_mut(&src) else {
             return self.validate_unlink(src);
         };
         let before = edge_list.len();
-        edge_list.retain(|edge| !(edge.target_id == dst && edge.label == label));
+        edge_list.retain(|edge| {
+            let remove = edge.target_id == dst && edge.label == label;
+            if remove {
+                self.edge_heap_bytes = self
+                    .edge_heap_bytes
+                    .saturating_sub(edge_dynamic_bytes(edge));
+            }
+            !remove
+        });
         let removed = before - edge_list.len();
         if removed == 0 {
             return Ok(());
         }
         if let Some(in_deg) = self.in_degrees.get_mut(&dst) {
             *in_deg = in_deg.saturating_sub(removed);
+            if *in_deg == 0 {
+                self.in_degrees.remove(&dst);
+            }
         }
         if let Some(pairs) = self.label_index.get_mut(label) {
             pairs.retain(|&(source, target)| !(source == src && target == dst));
+            if pairs.is_empty() {
+                self.label_index.remove(label);
+            }
         }
+        self.label_heap_bytes = self
+            .label_heap_bytes
+            .saturating_sub(label_before)
+            .saturating_add(
+                self.label_index
+                    .get_key_value(label)
+                    .map_or(0, |(key, pairs)| {
+                        key.capacity() + pairs.capacity() * std::mem::size_of::<(NodeId, NodeId)>()
+                    }),
+            );
         let still_connected = edge_list.iter().any(|edge| edge.target_id == dst);
         if !still_connected && let Some(incoming) = self.incoming_edges.get_mut(&dst) {
             incoming.retain(|&source| source != src);
@@ -2582,29 +2987,55 @@ impl<T: VectorType> MemTable<T> {
                 .filter(|edge| edge.target_id == dst)
                 .map(|edge| edge.label.clone())
                 .collect::<Vec<_>>();
+            let mut labels_before = 0;
+            let mut labels_after = 0;
             // 先清理 label_index 中对应的条目
             for edge in edge_list.iter() {
                 if edge.target_id == dst
                     && let Some(pairs) = self.label_index.get_mut(&edge.label)
                 {
+                    labels_before += pairs.capacity() * std::mem::size_of::<(NodeId, NodeId)>()
+                        + edge.label.len();
                     pairs.retain(|&(s, d)| !(s == src && d == dst));
+                    if !pairs.is_empty() {
+                        labels_after += pairs.capacity() * std::mem::size_of::<(NodeId, NodeId)>()
+                            + edge.label.len();
+                    }
                 }
             }
-            edge_list.retain(|e| e.target_id != dst);
+            edge_list.retain(|e| {
+                if e.target_id == dst {
+                    self.edge_heap_bytes =
+                        self.edge_heap_bytes.saturating_sub(edge_dynamic_bytes(e));
+                    false
+                } else {
+                    true
+                }
+            });
             if edge_list.len() < initial_len {
                 let removed_count = initial_len - edge_list.len();
                 if let Some(in_deg) = self.in_degrees.get_mut(&dst) {
                     *in_deg = in_deg.saturating_sub(removed_count);
+                    if *in_deg == 0 {
+                        self.in_degrees.remove(&dst);
+                    }
                 }
                 if let Some(incoming) = self.incoming_edges.get_mut(&dst) {
                     incoming.retain(|&id| id != src);
                 }
                 for label in removed_labels {
+                    if self.label_index.get(&label).is_some_and(Vec::is_empty) {
+                        self.label_index.remove(&label);
+                    }
                     self.graph_stats_state
                         .write()
                         .unwrap_or_else(|poisoned| poisoned.into_inner())
                         .edge_removed(src, dst, &label);
                 }
+                self.label_heap_bytes = self
+                    .label_heap_bytes
+                    .saturating_sub(labels_before)
+                    .saturating_add(labels_after);
                 self.mark_graph_changed();
                 self.mark_changed(false);
             }
@@ -2845,19 +3276,25 @@ impl<T: VectorType> MemTable<T> {
     pub fn estimated_memory_bytes(&self) -> usize {
         let vec_bytes = self.vec_pool.heap_memory_bytes();
         let payload_bytes = self.payloads.heap_memory_bytes();
-        let edge_count = if self.mapped_graph.is_none() {
-            self.graph_stats_state
+        let edge_bytes = self.edge_heap_bytes
+            + self.label_heap_bytes
+            + self.incoming_heap_bytes
+            + self.edges.capacity() * std::mem::size_of::<(NodeId, Vec<Edge>)>()
+            + self.label_index.capacity() * std::mem::size_of::<(String, Vec<(NodeId, NodeId)>)>()
+            + self.incoming_edges.capacity() * std::mem::size_of::<(NodeId, Vec<NodeId>)>()
+            + self.in_degrees.capacity() * std::mem::size_of::<(NodeId, usize)>()
+            + self
+                .graph_stats_state
                 .read()
                 .unwrap_or_else(|p| p.into_inner())
-                .edge_count
-        } else {
-            0
-        };
-        let edge_bytes = edge_count * std::mem::size_of::<Edge>();
+                .heap_memory_bytes()
+            + self
+                .mapped_graph
+                .as_ref()
+                .map_or(0, |graph| graph.heap_memory_bytes());
         let index_bytes = self.indices_to_ids.len() * std::mem::size_of::<NodeId>()
             + self.ids_to_indices.len()
                 * (std::mem::size_of::<NodeId>() + std::mem::size_of::<usize>());
-        let label_index_bytes = edge_count * std::mem::size_of::<(NodeId, NodeId)>();
         let quiver_bytes = self
             .quiver_index
             .as_ref()
@@ -2872,7 +3309,6 @@ impl<T: VectorType> MemTable<T> {
             + payload_bytes
             + edge_bytes
             + index_bytes
-            + label_index_bytes
             + quiver_bytes
             + text_bytes
             + property_index_bytes
@@ -2888,6 +3324,19 @@ impl<T: VectorType> MemTable<T> {
         } else {
             Ok(())
         }
+    }
+
+    pub(crate) fn ensure_additional_memory(&self, limit: usize, additional: usize) -> Result<()> {
+        let current = self.estimated_memory_bytes();
+        if limit > 0 && current.saturating_add(additional) > limit {
+            return Err(TriviumError::CapacityReservationRejected {
+                requested_nodes: 0,
+                estimated_bytes: additional,
+                current_bytes: current,
+                memory_limit: limit,
+            });
+        }
+        Ok(())
     }
 
     pub(crate) fn resource_runtime(&self) -> &crate::resources::ResourceRuntime {

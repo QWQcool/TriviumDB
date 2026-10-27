@@ -5,6 +5,7 @@ mod boundary;
 mod database_advanced;
 mod endian_limit;
 mod engine_deep;
+mod index_graph_boundaries;
 mod lifecycle_resources;
 mod proptest_core;
 mod public_api_alignment;

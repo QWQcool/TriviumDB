@@ -630,6 +630,17 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
             .count();
         let mut estimated_bytes = mt.estimate_reserve_bytes(insert_count)?;
         for op in &ops {
+            if let TxOp::Link {
+                src,
+                dst,
+                label,
+                metadata,
+                ..
+            } = op
+            {
+                estimated_bytes = estimated_bytes
+                    .saturating_add(mt.estimate_edge_write_bytes(*src, *dst, label, metadata)?);
+            }
             let (value, vector_bytes) = match op {
                 TxOp::InsertWithId {
                     payload, vector, ..

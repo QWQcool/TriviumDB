@@ -46,3 +46,18 @@
 - The experimental append builder performs reverse pruning sequentially, preserving append and neighbor-selection behavior while removing concurrent mutable self references.
 - An RAII guard restores QuIVer synchronization state. Unexpected transaction application failures isolate the instance and shared queries; reopening replays the complete committed WAL. Transaction IDs use a checked process-local monotonic counter.
 - Boundary tests cover slot reuse, segmented and parallel Top-K, invalid cold vectors, numeric extremes, accounting after reload, and admitted queries interleaved with application failures.
+
+
+## 索引覆盖、图资源与数字接口
+
+- 删除 Hash 唯一索引同步移除唯一约束。Ordered 排序和复合前缀/范围访问按字段覆盖情况选择完整候选；缺失字段、容器与混合排序类型通过扫描保留结果。复合唯一约束使用完整类型键，精确保留 i64/u64/f64 标量，打开时从 Payload 事实恢复映射；查询 posting 和磁盘格式继续使用现行版本。
+- 图写入在 WAL 前检查标签 65,535 UTF-8 字节上限和预算。堆账本计入标签、Metadata、邻接容量、反向索引、标签索引、统计及只读图缓存；普通修改增量维护，移除最后一条入边同步清理零入度项。
+- Rust/Python 节点 ID 保留 `1..=u64::MAX-1`；保留值和自动分配耗尽在 WAL 前拒绝。Node 数量参数在整数转换前校验，数字 ID 的全部输出遵守安全整数范围，超范围返回参数错误；TQL 返回完整字符串 ID。自动插入、批量、事务、TQL CREATE 和迁移在持久化变更前检查返回 ID。
+- 新增固定跨端 WAL 样本，以及覆盖部分索引、唯一键交换、标签字节边界、图堆账本、预算拒绝、同步/异步搜索、遍历、只读零写和恢复的边界测试。
+
+## Index coverage, graph resources and numeric interfaces
+
+- Dropping a unique Hash index removes its constraint definition. Ordered sorting and composite prefix/range access select complete candidates based on field coverage. Scans preserve records with missing fields, containers or mixed sorting types. Composite uniqueness uses full typed scalar keys, preserving i64/u64/f64 values exactly, and restores its map from Payload facts on open. Query postings retain the current disk formats.
+- Graph writes check the 65,535 UTF-8-byte label limit and memory admission before WAL writes. Heap accounting includes labels, metadata, adjacency capacities, reverse and label indexes, statistics and read-only graph caches. Ordinary mutations maintain counters incrementally, and removing the final incoming edge removes its zero-degree entry.
+- Rust/Python node IDs retain `1..=u64::MAX-1`; reserved values and exhausted allocation fail before WAL writes. Node validates quantities before integer conversion and enforces safe integers for every numeric ID result. Oversized results return an input error; TQL returns complete string IDs. Automatic, batch, transaction and TQL CREATE allocation, plus migration, validate result IDs before persistent changes.
+- Boundary tests add a fixed cross-language WAL sample and verify partial indexes, unique-key swaps, UTF-8 labels, graph heap accounting, admission rejection, synchronous/asynchronous search, traversal, read-only file preservation and recovery.

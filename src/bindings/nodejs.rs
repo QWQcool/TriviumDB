@@ -386,19 +386,15 @@ pub mod nodejs {
         }
 
         fn resolve(&mut self, env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
-            Ok(output
+            output
                 .map_err(|error| to_resource_error(env, error))?
                 .into_iter()
                 .map(|hits| {
                     hits.into_iter()
-                        .map(|hit| JsSearchHit {
-                            id: hit.id as f64,
-                            score: hit.score as f64,
-                            payload: hit.payload,
-                        })
-                        .collect()
+                        .map(search_hit_to_js)
+                        .collect::<napi::Result<_>>()
                 })
-                .collect())
+                .collect::<napi::Result<_>>()
         }
     }
 
@@ -454,12 +450,12 @@ pub mod nodejs {
         }
     }
 
-    fn search_hit_to_js(hit: crate::node::SearchHit) -> JsSearchHit {
-        JsSearchHit {
-            id: hit.id as f64,
+    fn search_hit_to_js(hit: crate::node::SearchHit) -> napi::Result<JsSearchHit> {
+        Ok(JsSearchHit {
+            id: node_id_to_js(hit.id)?,
             score: hit.score as f64,
             payload: hit.payload,
-        }
+        })
     }
 
     #[napi(object)]
@@ -514,8 +510,8 @@ pub mod nodejs {
 
     #[napi(object)]
     pub struct JsReachabilityOptions {
-        pub min_depth: Option<u32>,
-        pub max_depth: Option<u32>,
+        pub min_depth: Option<f64>,
+        pub max_depth: Option<f64>,
         pub labels: Option<Vec<String>>,
         pub direction: Option<String>,
         pub max_visited_nodes: Option<f64>,
@@ -601,7 +597,7 @@ pub mod nodejs {
     #[napi(object)]
     pub struct JsDatabaseOptions {
         pub runtime: Option<JsObject>,
-        pub dim: Option<u32>,
+        pub dim: Option<f64>,
         pub dtype: Option<String>,
         pub sync_mode: Option<String>,
         pub storage_mode: Option<String>,
@@ -620,11 +616,11 @@ pub mod nodejs {
     /// 高级管线专用配置结构
     #[napi(object)]
     pub struct JsSearchConfig {
-        /// top_k 用 i64 承载：u32 会把 JS 负数无符号化成超大值（静默返回全库）
-        pub top_k: Option<i64>,
-        pub recall_k: Option<i64>,
-        pub rerank_k: Option<i64>,
-        pub expand_depth: Option<u32>,
+        /// 保留原始 JS Number，在转换为整数前检查有限性、整数性和范围。
+        pub top_k: Option<f64>,
+        pub recall_k: Option<f64>,
+        pub rerank_k: Option<f64>,
+        pub expand_depth: Option<f64>,
         pub min_score: Option<f64>,
         pub teleport_alpha: Option<f64>,
         pub enable_advanced_pipeline: Option<bool>,
@@ -693,9 +689,9 @@ pub mod nodejs {
     #[napi(object)]
     pub struct JsLeidenConfig {
         /// 最小社区大小 (节点数 < 此值的碎片簇被丢弃, 默认 3)
-        pub min_community_size: Option<u32>,
+        pub min_community_size: Option<f64>,
         /// 最大迭代轮次 (默认 15)
-        pub max_iterations: Option<u32>,
+        pub max_iterations: Option<f64>,
         /// 是否计算质心 (默认 true)
         pub with_centroids: Option<bool>,
     }
@@ -751,11 +747,32 @@ pub mod nodejs {
             || value > 9_007_199_254_740_991.0
             || value > usize::MAX as f64
         {
-            return Err(napi::Error::from_reason(format!(
+            return Err(to_napi_error(crate::TriviumError::InvalidInput(format!(
                 "{name} 必须是 JavaScript 安全范围内的非负整数 ({name} must be a non-negative JavaScript safe integer)"
-            )));
+            ))));
         }
         Ok(value as usize)
+    }
+
+    fn parse_positive_usize(value: f64, name: &str) -> napi::Result<usize> {
+        let value = parse_safe_usize(value, name)?;
+        if value == 0 {
+            return Err(to_napi_error(crate::TriviumError::InvalidInput(format!(
+                "{name} 必须大于零 ({name} must be positive)"
+            ))));
+        }
+        Ok(value)
+    }
+
+    fn node_id_to_js(id: u64) -> napi::Result<f64> {
+        if id > 9_007_199_254_740_991 {
+            return Err(to_napi_error(crate::TriviumError::InvalidInput("节点 ID 超出 JavaScript 安全整数范围，请使用字符串 ID 的 TQL 接口 (Node ID exceeds the JavaScript safe-integer range; use TQL string IDs)".into())));
+        }
+        Ok(id as f64)
+    }
+
+    fn node_ids_to_js(ids: impl IntoIterator<Item = u64>) -> napi::Result<Vec<f64>> {
+        ids.into_iter().map(node_id_to_js).collect()
     }
 
     fn parse_reachability_options(
@@ -781,8 +798,8 @@ pub mod nodejs {
             }
         };
         Ok(crate::graph::reachability::ReachabilityConfig {
-            min_depth: options.min_depth.unwrap_or(1) as usize,
-            max_depth: options.max_depth.unwrap_or(1) as usize,
+            min_depth: parse_safe_usize(options.min_depth.unwrap_or(1.0), "minDepth")?,
+            max_depth: parse_safe_usize(options.max_depth.unwrap_or(1.0), "maxDepth")?,
             labels: options.labels,
             direction,
             max_visited_nodes: options
@@ -886,24 +903,30 @@ pub mod nodejs {
 
     fn to_js_reachability(
         result: crate::graph::reachability::ReachabilityResult,
-    ) -> JsReachabilityResult {
-        JsReachabilityResult {
-            source_id: result.source_id as f64,
-            target_id: result.target_id as f64,
+    ) -> napi::Result<JsReachabilityResult> {
+        Ok(JsReachabilityResult {
+            source_id: node_id_to_js(result.source_id)?,
+            target_id: node_id_to_js(result.target_id)?,
             depth: result.depth as u32,
-            path: result.path.into_iter().map(|id| id as f64).collect(),
+            path: result
+                .path
+                .into_iter()
+                .map(node_id_to_js)
+                .collect::<napi::Result<_>>()?,
             steps: result
                 .steps
                 .into_iter()
-                .map(|step| JsReachabilityStep {
-                    from: step.from as f64,
-                    to: step.to as f64,
-                    label: step.label,
-                    weight: round_api_f32(step.weight),
-                    metadata: step.metadata,
+                .map(|step| {
+                    Ok(JsReachabilityStep {
+                        from: node_id_to_js(step.from)?,
+                        to: node_id_to_js(step.to)?,
+                        label: step.label,
+                        weight: round_api_f32(step.weight),
+                        metadata: step.metadata,
+                    })
                 })
-                .collect(),
-        }
+                .collect::<napi::Result<_>>()?,
+        })
     }
 
     fn parse_row_overflow(value: Option<&str>) -> napi::Result<crate::database::RowOverflowPolicy> {
@@ -983,6 +1006,43 @@ pub mod nodejs {
         dtype: String,
     }
 
+    impl TriviumDB {
+        fn check_generated_ids(&self, count: usize) -> napi::Result<()> {
+            if count == 0 {
+                return Ok(());
+            }
+            let next = dispatch!(self,db=>db.next_id_for_binding()).map_err(to_napi_error)?;
+            let last = next.checked_add(count as u64 - 1).ok_or_else(|| {
+                napi::Error::from_reason("节点 ID 分配溢出 (Node ID allocation overflow)")
+            })?;
+            node_id_to_js(last)?;
+            Ok(())
+        }
+
+        fn check_transaction_ids(&self, operations: &[serde_json::Value]) -> napi::Result<()> {
+            let mut next = dispatch!(self,db=>db.next_id_for_binding()).map_err(to_napi_error)?;
+            for operation in operations {
+                match operation.get("type").and_then(serde_json::Value::as_str) {
+                    Some("insert") => {
+                        node_id_to_js(next)?;
+                        next += 1;
+                    }
+                    Some("insertWithId") => {
+                        let id = operation
+                            .get("id")
+                            .and_then(serde_json::Value::as_f64)
+                            .ok_or_else(|| {
+                                napi::Error::from_reason("缺少事务 ID (Missing transaction ID)")
+                            })?;
+                        next = next.max(parse_node_id(id, "id")? + 1);
+                    }
+                    _ => {}
+                }
+            }
+            Ok(())
+        }
+    }
+
     #[napi]
     impl TriviumDB {
         /// 打开或创建数据库
@@ -994,7 +1054,7 @@ pub mod nodejs {
         pub fn new(
             env: Env,
             path: String,
-            options: Option<napi::bindgen_prelude::Either<u32, JsDatabaseOptions>>,
+            options: Option<napi::bindgen_prelude::Either<f64, JsDatabaseOptions>>,
         ) -> napi::Result<Self> {
             let options = match options {
                 Some(napi::bindgen_prelude::Either::A(_)) => {
@@ -1021,7 +1081,7 @@ pub mod nodejs {
                     row_overflow: None,
                 },
             };
-            let dim = options.dim.unwrap_or(1536) as usize;
+            let dim = parse_positive_usize(options.dim.unwrap_or(1536.0), "dim")?;
             let dtype = options.dtype.unwrap_or_else(|| "f32".into());
             let expected_nodes = options
                 .expected_nodes
@@ -1174,18 +1234,13 @@ pub mod nodejs {
                 edge_direction: None,
             });
 
-            let top_k = cfg.top_k.unwrap_or(5);
-            if top_k <= 0 {
-                return Err(napi::Error::from_reason(format!(
-                    "top_k 必须为正整数，收到 {top_k}"
-                )));
-            }
+            let top_k = parse_positive_usize(cfg.top_k.unwrap_or(5.0), "topK")?;
             let payload_filter = parse_payload_filter(cfg.payload_filter.take())?;
             let core_config = crate::database::SearchConfig {
-                top_k: top_k as usize,
-                recall_k: cfg.recall_k.unwrap_or(0).max(0) as usize,
-                rerank_k: cfg.rerank_k.unwrap_or(0).max(0) as usize,
-                expand_depth: cfg.expand_depth.unwrap_or(2) as usize,
+                top_k,
+                recall_k: parse_safe_usize(cfg.recall_k.unwrap_or(0.0), "recallK")?,
+                rerank_k: parse_safe_usize(cfg.rerank_k.unwrap_or(0.0), "rerankK")?,
+                expand_depth: parse_safe_usize(cfg.expand_depth.unwrap_or(2.0), "expandDepth")?,
                 min_score: cfg.min_score.unwrap_or(0.1) as f32,
                 teleport_alpha: cfg.teleport_alpha.unwrap_or(0.0) as f32,
                 enable_advanced_pipeline: cfg.enable_advanced_pipeline.unwrap_or(false),
@@ -1237,12 +1292,8 @@ pub mod nodejs {
             // 转换 hits
             let hits: Vec<JsSearchHit> = results
                 .into_iter()
-                .map(|h| JsSearchHit {
-                    id: h.id as f64,
-                    score: h.score as f64,
-                    payload: h.payload,
-                })
-                .collect();
+                .map(search_hit_to_js)
+                .collect::<napi::Result<_>>()?;
 
             // 转换 HookContext → JsHookContext
             let mut timings_map = serde_json::Map::new();
@@ -1285,25 +1336,26 @@ pub mod nodejs {
             vector: Vec<f64>,
             payload: serde_json::Value,
         ) -> napi::Result<f64> {
+            self.check_generated_ids(1)?;
             match &mut self.inner {
                 DbBackend::F32(db) => {
                     let v: Vec<f32> = vector.iter().map(|&x| x as f32).collect();
                     db.insert(&v, payload)
-                        .map(|id| id as f64)
                         .map_err(|error| to_resource_error(env, error))
+                        .and_then(node_id_to_js)
                 }
                 DbBackend::F16(db) => {
                     let v: Vec<half::f16> =
                         vector.iter().map(|&x| half::f16::from_f64(x)).collect();
                     db.insert(&v, payload)
-                        .map(|id| id as f64)
                         .map_err(|error| to_resource_error(env, error))
+                        .and_then(node_id_to_js)
                 }
                 DbBackend::U64(db) => {
                     let v: Vec<u64> = parse_u64_vector(&vector)?;
                     db.insert(&v, payload)
-                        .map(|id| id as f64)
                         .map_err(|error| to_resource_error(env, error))
+                        .and_then(node_id_to_js)
                 }
             }
         }
@@ -1319,6 +1371,7 @@ pub mod nodejs {
             if vectors.len() != payloads.len() {
                 return Err(napi::Error::from_reason("向量列表与负载列表长度不一致"));
             }
+            self.check_generated_ids(vectors.len())?;
             match &mut self.inner {
                 DbBackend::F32(db) => {
                     let converted: Vec<Vec<f32>> = vectors
@@ -1330,8 +1383,8 @@ pub mod nodejs {
                         tx.insert(vector, payload);
                     }
                     db.commit_tx(tx)
-                        .map(|ids| ids.into_iter().map(|id| id as f64).collect())
                         .map_err(|error| to_resource_error(env, error))
+                        .and_then(node_ids_to_js)
                 }
                 DbBackend::F16(db) => {
                     let converted: Vec<Vec<half::f16>> = vectors
@@ -1343,8 +1396,8 @@ pub mod nodejs {
                         tx.insert(vector, payload);
                     }
                     db.commit_tx(tx)
-                        .map(|ids| ids.into_iter().map(|id| id as f64).collect())
                         .map_err(|error| to_resource_error(env, error))
+                        .and_then(node_ids_to_js)
                 }
                 DbBackend::U64(db) => {
                     let converted: Vec<Vec<u64>> = vectors
@@ -1356,8 +1409,8 @@ pub mod nodejs {
                         tx.insert(vector, payload);
                     }
                     db.commit_tx(tx)
-                        .map(|ids| ids.into_iter().map(|id| id as f64).collect())
                         .map_err(|error| to_resource_error(env, error))
+                        .and_then(node_ids_to_js)
                 }
             }
         }
@@ -1490,13 +1543,14 @@ pub mod nodejs {
             .map_err(|error| to_resource_error(env, error))
         }
 
-        /// 按 ID 获取节点，不存在时返回 null
+        /// 提交缓冲操作，返回新插入的节点 ID。
         #[napi]
         pub fn commit_transaction(
             &mut self,
             env: Env,
             operations: Vec<serde_json::Value>,
         ) -> napi::Result<Vec<f64>> {
+            self.check_transaction_ids(&operations)?;
             let ids = match &mut self.inner {
                 DbBackend::F32(db) => {
                     db.commit_tx(build_transaction(&operations, |value| Ok(value as f32))?)
@@ -1509,7 +1563,9 @@ pub mod nodejs {
                 }
             }
             .map_err(|error| to_resource_error(env, error))?;
-            Ok(ids.into_iter().map(|id| id as f64).collect())
+            ids.into_iter()
+                .map(node_id_to_js)
+                .collect::<napi::Result<_>>()
         }
 
         #[napi]
@@ -1534,7 +1590,7 @@ pub mod nodejs {
 
         #[napi]
         pub fn get(&self, env: Env, id: f64) -> napi::Result<Option<JsNodeView>> {
-            Ok({
+            {
                 let id = parse_node_id(id, "id")?;
                 match &self.inner {
                     DbBackend::F32(db) => db
@@ -1545,21 +1601,24 @@ pub mod nodejs {
                             let edges_arr = n
                                 .edges
                                 .into_iter()
-                                .map(|e| JsEdge {
-                                    target_id: e.target_id as f64,
-                                    label: e.label.clone(),
-                                    weight: round_api_f32(e.weight),
-                                    metadata: e.metadata.clone(),
+                                .map(|e| {
+                                    Ok(JsEdge {
+                                        target_id: node_id_to_js(e.target_id)?,
+                                        label: e.label.clone(),
+                                        weight: round_api_f32(e.weight),
+                                        metadata: e.metadata.clone(),
+                                    })
                                 })
-                                .collect();
-                            JsNodeView {
-                                id: n.id as f64,
+                                .collect::<napi::Result<_>>()?;
+                            Ok(JsNodeView {
+                                id: node_id_to_js(n.id)?,
                                 vector: n.vector.iter().map(|&x| x as f64).collect(),
                                 payload: n.payload,
                                 edges: edges_arr,
                                 num_edges,
-                            }
-                        }),
+                            })
+                        })
+                        .transpose(),
                     DbBackend::F16(db) => db
                         .get(id)
                         .map_err(|error| to_resource_error(env, error))?
@@ -1568,21 +1627,24 @@ pub mod nodejs {
                             let edges_arr = n
                                 .edges
                                 .into_iter()
-                                .map(|e| JsEdge {
-                                    target_id: e.target_id as f64,
-                                    label: e.label.clone(),
-                                    weight: round_api_f32(e.weight),
-                                    metadata: e.metadata.clone(),
+                                .map(|e| {
+                                    Ok(JsEdge {
+                                        target_id: node_id_to_js(e.target_id)?,
+                                        label: e.label.clone(),
+                                        weight: round_api_f32(e.weight),
+                                        metadata: e.metadata.clone(),
+                                    })
                                 })
-                                .collect();
-                            JsNodeView {
-                                id: n.id as f64,
+                                .collect::<napi::Result<_>>()?;
+                            Ok(JsNodeView {
+                                id: node_id_to_js(n.id)?,
                                 vector: n.vector.iter().map(|x| x.to_f64()).collect(),
                                 payload: n.payload,
                                 edges: edges_arr,
                                 num_edges,
-                            }
-                        }),
+                            })
+                        })
+                        .transpose(),
                     DbBackend::U64(db) => db
                         .get(id)
                         .map_err(|error| to_resource_error(env, error))?
@@ -1591,23 +1653,26 @@ pub mod nodejs {
                             let edges_arr = n
                                 .edges
                                 .into_iter()
-                                .map(|e| JsEdge {
-                                    target_id: e.target_id as f64,
-                                    label: e.label.clone(),
-                                    weight: round_api_f32(e.weight),
-                                    metadata: e.metadata.clone(),
+                                .map(|e| {
+                                    Ok(JsEdge {
+                                        target_id: node_id_to_js(e.target_id)?,
+                                        label: e.label.clone(),
+                                        weight: round_api_f32(e.weight),
+                                        metadata: e.metadata.clone(),
+                                    })
                                 })
-                                .collect();
-                            JsNodeView {
-                                id: n.id as f64,
+                                .collect::<napi::Result<_>>()?;
+                            Ok(JsNodeView {
+                                id: node_id_to_js(n.id)?,
                                 vector: n.vector.iter().map(|&x| x as f64).collect(),
                                 payload: n.payload,
                                 edges: edges_arr,
                                 num_edges,
-                            }
-                        }),
+                            })
+                        })
+                        .transpose(),
                 }
-            })
+            }
         }
 
         /// 更新节点元数据
@@ -1725,12 +1790,12 @@ pub mod nodejs {
             label: String,
         ) -> napi::Result<Option<JsEdge>> {
             Ok({
-                dispatch!(self, db => db.get_edge(parse_node_id(src, "src")?, parse_node_id(dst, "dst")?, &label).map_err(|error| to_resource_error(env, error))?).map(|edge| JsEdge {
-                target_id: edge.target_id as f64,
+                dispatch!(self, db => db.get_edge(parse_node_id(src, "src")?, parse_node_id(dst, "dst")?, &label).map_err(|error| to_resource_error(env, error))?).map(|edge| Ok::<_,napi::Error>(JsEdge {
+                target_id: node_id_to_js(edge.target_id)?,
                 label: edge.label,
                 weight: round_api_f32(edge.weight),
                 metadata: edge.metadata,
-            })
+            })).transpose()?
             })
         }
 
@@ -1798,15 +1863,14 @@ pub mod nodejs {
             &self,
             env: Env,
             id: f64,
-            depth: Option<u32>,
+            depth: Option<f64>,
             labels: Option<Vec<String>>,
         ) -> napi::Result<Vec<f64>> {
             Ok({
-                let depth = depth.unwrap_or(1) as usize;
+                let depth = parse_safe_usize(depth.unwrap_or(1.0), "depth")?;
                 dispatch!(self, db => db.neighbors_with_labels(parse_node_id(id, "id")?, depth, labels.as_deref()).map_err(|error| to_resource_error(env, error))?)
                 .into_iter()
-                .map(|id| id as f64)
-                .collect()
+                .map(node_id_to_js).collect::<napi::Result<_>>()?
             })
         }
 
@@ -1819,8 +1883,10 @@ pub mod nodejs {
         ) -> napi::Result<Vec<JsReachabilityResult>> {
             let config = parse_reachability_options(options)?;
             dispatch!(self, db => db.reachable(parse_node_id(id, "id")?, &config))
-                .map(|results| results.into_iter().map(to_js_reachability).collect())
-                .map_err(|error| to_resource_error(env, error))
+                .map_err(|error| to_resource_error(env, error))?
+                .into_iter()
+                .map(to_js_reachability)
+                .collect()
         }
 
         #[napi]
@@ -1835,7 +1901,11 @@ pub mod nodejs {
                 dispatch!(self, db => db.reachable_detailed(parse_node_id(id, "id")?, &config))
                     .map_err(|error| to_resource_error(env, error))?;
             Ok(JsReachabilityOutput {
-                results: output.results.into_iter().map(to_js_reachability).collect(),
+                results: output
+                    .results
+                    .into_iter()
+                    .map(to_js_reachability)
+                    .collect::<napi::Result<_>>()?,
                 visited_nodes: output.visited_nodes as f64,
                 traversed_edges: output.traversed_edges as f64,
                 truncated: output.truncated,
@@ -1857,22 +1927,26 @@ pub mod nodejs {
                 nodes: output
                     .nodes
                     .into_iter()
-                    .map(|node| JsSubgraphNode {
-                        id: node.id as f64,
-                        payload: node.payload,
+                    .map(|node| {
+                        Ok(JsSubgraphNode {
+                            id: node_id_to_js(node.id)?,
+                            payload: node.payload,
+                        })
                     })
-                    .collect(),
+                    .collect::<napi::Result<_>>()?,
                 edges: output
                     .edges
                     .into_iter()
-                    .map(|edge| JsSubgraphEdge {
-                        source_id: edge.source_id as f64,
-                        target_id: edge.target_id as f64,
-                        label: edge.label,
-                        weight: round_api_f32(edge.weight),
-                        metadata: edge.metadata,
+                    .map(|edge| {
+                        Ok(JsSubgraphEdge {
+                            source_id: node_id_to_js(edge.source_id)?,
+                            target_id: node_id_to_js(edge.target_id)?,
+                            label: edge.label,
+                            weight: round_api_f32(edge.weight),
+                            metadata: edge.metadata,
+                        })
                     })
-                    .collect(),
+                    .collect::<napi::Result<_>>()?,
                 visited_nodes: output.visited_nodes as f64,
                 traversed_edges: output.traversed_edges as f64,
                 truncated: output.truncated,
@@ -1885,9 +1959,10 @@ pub mod nodejs {
             env: Env,
             query_vector: Vec<f64>,
             anchor_ids: Vec<f64>,
-            top_k: u32,
+            top_k: f64,
             max_anchor_nodes: Option<f64>,
         ) -> napi::Result<Vec<JsSearchHit>> {
+            let top_k = parse_positive_usize(top_k, "topK")?;
             let anchors: Vec<u64> = anchor_ids
                 .into_iter()
                 .map(|id| parse_node_id(id, "anchorId"))
@@ -1899,29 +1974,24 @@ pub mod nodejs {
             let hits = match &self.inner {
                 DbBackend::F32(db) => {
                     let query: Vec<f32> = query_vector.iter().map(|value| *value as f32).collect();
-                    db.search_graph_first(&query, &anchors, top_k as usize, max_anchor_nodes)
+                    db.search_graph_first(&query, &anchors, top_k, max_anchor_nodes)
                 }
                 DbBackend::F16(db) => {
                     let query: Vec<half::f16> = query_vector
                         .iter()
                         .map(|value| half::f16::from_f64(*value))
                         .collect();
-                    db.search_graph_first(&query, &anchors, top_k as usize, max_anchor_nodes)
+                    db.search_graph_first(&query, &anchors, top_k, max_anchor_nodes)
                 }
                 DbBackend::U64(db) => {
                     let query: Vec<u64> = parse_u64_vector(&query_vector)?;
-                    db.search_graph_first(&query, &anchors, top_k as usize, max_anchor_nodes)
+                    db.search_graph_first(&query, &anchors, top_k, max_anchor_nodes)
                 }
             }
             .map_err(|error| to_resource_error(env, error))?;
-            Ok(hits
-                .into_iter()
-                .map(|hit| JsSearchHit {
-                    id: hit.id as f64,
-                    score: hit.score as f64,
-                    payload: hit.payload,
-                })
-                .collect())
+            hits.into_iter()
+                .map(search_hit_to_js)
+                .collect::<napi::Result<_>>()
         }
 
         #[napi]
@@ -1929,34 +1999,30 @@ pub mod nodejs {
             &self,
             env: Env,
             query_vector: Vec<f64>,
-            top_k: u32,
+            top_k: f64,
         ) -> napi::Result<Vec<JsSearchHit>> {
+            let top_k = parse_positive_usize(top_k, "topK")?;
             let hits = match &self.inner {
                 DbBackend::F32(db) => {
                     let query: Vec<f32> = query_vector.iter().map(|value| *value as f32).collect();
-                    db.search_exact(&query, top_k as usize)
+                    db.search_exact(&query, top_k)
                 }
                 DbBackend::F16(db) => {
                     let query: Vec<half::f16> = query_vector
                         .iter()
                         .map(|value| half::f16::from_f64(*value))
                         .collect();
-                    db.search_exact(&query, top_k as usize)
+                    db.search_exact(&query, top_k)
                 }
                 DbBackend::U64(db) => {
                     let query: Vec<u64> = parse_u64_vector(&query_vector)?;
-                    db.search_exact(&query, top_k as usize)
+                    db.search_exact(&query, top_k)
                 }
             }
             .map_err(|error| to_resource_error(env, error))?;
-            Ok(hits
-                .into_iter()
-                .map(|hit| JsSearchHit {
-                    id: hit.id as f64,
-                    score: hit.score as f64,
-                    payload: hit.payload,
-                })
-                .collect())
+            hits.into_iter()
+                .map(search_hit_to_js)
+                .collect::<napi::Result<_>>()
         }
 
         // ── 社区聚类 ──
@@ -1976,8 +2042,12 @@ pub mod nodejs {
                 max_iterations: None,
                 with_centroids: None,
             });
-            let min_c = cfg.min_community_size.unwrap_or(3) as usize;
-            let max_iter = cfg.max_iterations.map(|v| v as usize);
+            let min_c =
+                parse_safe_usize(cfg.min_community_size.unwrap_or(3.0), "minCommunitySize")?;
+            let max_iter = cfg
+                .max_iterations
+                .map(|v| parse_safe_usize(v, "maxIterations"))
+                .transpose()?;
             let with_cent = cfg.with_centroids;
 
             let result = dispatch!(self, db => db.leiden_cluster(min_c, max_iter, with_cent))
@@ -1989,8 +2059,8 @@ pub mod nodejs {
 
             let mut node_to_cluster = Vec::with_capacity(sorted_nodes.len() * 2);
             for (n, c) in sorted_nodes {
-                node_to_cluster.push(n as f64);
-                node_to_cluster.push(c as f64);
+                node_to_cluster.push(node_id_to_js(n)?);
+                node_to_cluster.push(f64::from(c));
             }
 
             // 簇标签: 排序后输出
@@ -2009,7 +2079,7 @@ pub mod nodejs {
 
             let mut centroids = Vec::new();
             for (c, v) in sorted_centroids {
-                centroids.push(c as f64);
+                centroids.push(f64::from(c));
                 for val in v {
                     centroids.push(val as f64);
                 }
@@ -2030,19 +2100,14 @@ pub mod nodejs {
             &self,
             env: Env,
             query_vector: Vec<f64>,
-            top_k: Option<i64>,
-            expand_depth: Option<u32>,
+            top_k: Option<f64>,
+            expand_depth: Option<f64>,
             min_score: Option<f64>,
             payload_filter: Option<serde_json::Value>,
         ) -> napi::Result<Vec<JsSearchHit>> {
-            let top_k = top_k.unwrap_or(5);
-            if top_k <= 0 {
-                return Err(napi::Error::from_reason(format!(
-                    "top_k 必须为正整数，收到 {top_k}"
-                )));
-            }
-            let top_k = top_k as usize;
-            let expand_depth = expand_depth.unwrap_or(0) as usize;
+            let top_k = parse_positive_usize(top_k.unwrap_or(5.0), "topK")?;
+
+            let expand_depth = parse_safe_usize(expand_depth.unwrap_or(0.0), "expandDepth")?;
             let min_score = min_score.unwrap_or(0.5) as f32;
             let payload_filter = parse_payload_filter(payload_filter)?;
 
@@ -2074,14 +2139,9 @@ pub mod nodejs {
             }
             .map_err(|error| to_resource_error(env, error))?;
 
-            Ok(hits
-                .into_iter()
-                .map(|h| JsSearchHit {
-                    id: h.id as f64,
-                    score: h.score as f64,
-                    payload: h.payload,
-                })
-                .collect())
+            hits.into_iter()
+                .map(search_hit_to_js)
+                .collect::<napi::Result<_>>()
         }
 
         #[napi]
@@ -2089,21 +2149,16 @@ pub mod nodejs {
             &self,
             env: Env,
             query_vector: Vec<f64>,
-            top_k: Option<i64>,
-            expand_depth: Option<u32>,
+            top_k: Option<f64>,
+            expand_depth: Option<f64>,
             min_score: Option<f64>,
             payload_filter: Option<serde_json::Value>,
         ) -> napi::Result<JsGroupedSearchResult> {
-            let top_k = top_k.unwrap_or(5);
-            if top_k <= 0 {
-                return Err(napi::Error::from_reason(format!(
-                    "top_k 必须为正整数，收到 {top_k}"
-                )));
-            }
+            let top_k = parse_positive_usize(top_k.unwrap_or(5.0), "topK")?;
             let payload_filter = parse_payload_filter(payload_filter)?;
             let config = crate::database::SearchConfig {
-                top_k: top_k as usize,
-                expand_depth: expand_depth.unwrap_or(2) as usize,
+                top_k,
+                expand_depth: parse_safe_usize(expand_depth.unwrap_or(2.0), "expandDepth")?,
                 min_score: min_score.unwrap_or(0.1) as f32,
                 payload_filter,
                 ..Default::default()
@@ -2131,12 +2186,12 @@ pub mod nodejs {
                     .semantic_hits
                     .into_iter()
                     .map(search_hit_to_js)
-                    .collect(),
+                    .collect::<napi::Result<_>>()?,
                 graph_hits: result
                     .graph_hits
                     .into_iter()
                     .map(search_hit_to_js)
-                    .collect(),
+                    .collect::<napi::Result<_>>()?,
             })
         }
 
@@ -2144,16 +2199,11 @@ pub mod nodejs {
         pub fn search_batch(
             &self,
             query_vectors: Vec<Vec<f64>>,
-            top_k: Option<i64>,
-            parallelism: Option<u32>,
+            top_k: Option<f64>,
+            parallelism: Option<f64>,
             min_score: Option<f64>,
         ) -> napi::Result<napi::bindgen_prelude::AsyncTask<BatchSearchTask>> {
-            let top_k = top_k.unwrap_or(5);
-            if top_k <= 0 {
-                return Err(napi::Error::from_reason(format!(
-                    "top_k 必须为正整数，收到 {top_k}"
-                )));
-            }
+            let top_k = parse_positive_usize(top_k.unwrap_or(5.0), "topK")?;
             let backend = match &self.inner {
                 DbBackend::F32(db) => SearchBackendHandle::F32(db.search_handle()),
                 DbBackend::F16(db) => SearchBackendHandle::F16(db.search_handle()),
@@ -2163,14 +2213,14 @@ pub mod nodejs {
                 backend,
                 queries: query_vectors,
                 search_config: crate::database::SearchConfig {
-                    top_k: top_k as usize,
+                    top_k,
                     expand_depth: 0,
                     min_score: min_score.unwrap_or(0.5) as f32,
                     enable_advanced_pipeline: false,
                     ..Default::default()
                 },
                 batch_config: crate::database::BatchSearchConfig {
-                    parallelism: parallelism.unwrap_or(0) as usize,
+                    parallelism: parse_safe_usize(parallelism.unwrap_or(0.0), "parallelism")?,
                 },
             }))
         }
@@ -2209,18 +2259,13 @@ pub mod nodejs {
                 edge_direction: None,
             });
 
-            let top_k = cfg.top_k.unwrap_or(5);
-            if top_k <= 0 {
-                return Err(napi::Error::from_reason(format!(
-                    "top_k 必须为正整数，收到 {top_k}"
-                )));
-            }
+            let top_k = parse_positive_usize(cfg.top_k.unwrap_or(5.0), "topK")?;
             let payload_filter = parse_payload_filter(cfg.payload_filter.take())?;
             let core_config = crate::database::SearchConfig {
-                top_k: top_k as usize,
-                recall_k: cfg.recall_k.unwrap_or(0).max(0) as usize,
-                rerank_k: cfg.rerank_k.unwrap_or(0).max(0) as usize,
-                expand_depth: cfg.expand_depth.unwrap_or(2) as usize,
+                top_k,
+                recall_k: parse_safe_usize(cfg.recall_k.unwrap_or(0.0), "recallK")?,
+                rerank_k: parse_safe_usize(cfg.rerank_k.unwrap_or(0.0), "rerankK")?,
+                expand_depth: parse_safe_usize(cfg.expand_depth.unwrap_or(2.0), "expandDepth")?,
                 min_score: cfg.min_score.unwrap_or(0.1) as f32,
                 teleport_alpha: cfg.teleport_alpha.unwrap_or(0.0) as f32,
                 enable_advanced_pipeline: cfg.enable_advanced_pipeline.unwrap_or(true),
@@ -2269,14 +2314,9 @@ pub mod nodejs {
             }
             .map_err(|error| to_resource_error(env, error))?;
 
-            Ok(hits
-                .into_iter()
-                .map(|h| JsSearchHit {
-                    id: h.id as f64,
-                    score: h.score as f64,
-                    payload: h.payload,
-                })
-                .collect())
+            hits.into_iter()
+                .map(search_hit_to_js)
+                .collect::<napi::Result<_>>()
         }
 
         /// 混合检索增强入口：带图扩散的双路检索
@@ -2286,20 +2326,15 @@ pub mod nodejs {
             env: Env,
             query_vector: Vec<f64>,
             query_text: String,
-            top_k: Option<i64>,
-            expand_depth: Option<u32>,
+            top_k: Option<f64>,
+            expand_depth: Option<f64>,
             min_score: Option<f64>,
             hybrid_alpha: Option<f64>,
             payload_filter: Option<serde_json::Value>,
         ) -> napi::Result<Vec<JsSearchHit>> {
-            let top_k = top_k.unwrap_or(5);
-            if top_k <= 0 {
-                return Err(napi::Error::from_reason(format!(
-                    "top_k 必须为正整数，收到 {top_k}"
-                )));
-            }
-            let top_k = top_k as usize;
-            let expand_depth = expand_depth.unwrap_or(2) as usize;
+            let top_k = parse_positive_usize(top_k.unwrap_or(5.0), "topK")?;
+
+            let expand_depth = parse_safe_usize(expand_depth.unwrap_or(2.0), "expandDepth")?;
             let min_score = min_score.unwrap_or(0.1) as f32;
             let alpha = hybrid_alpha.unwrap_or(0.7) as f32;
             let payload_filter = parse_payload_filter(payload_filter)?;
@@ -2335,14 +2370,9 @@ pub mod nodejs {
             }
             .map_err(|error| to_resource_error(env, error))?;
 
-            Ok(hits
-                .into_iter()
-                .map(|h| JsSearchHit {
-                    id: h.id as f64,
-                    score: h.score as f64,
-                    payload: h.payload,
-                })
-                .collect())
+            hits.into_iter()
+                .map(search_hit_to_js)
+                .collect::<napi::Result<_>>()
         }
 
         // ── 文本索引 ──
@@ -2401,7 +2431,7 @@ pub mod nodejs {
             &self,
             env: Env,
             equalities: serde_json::Value,
-            max_results: Option<u32>,
+            max_results: Option<f64>,
         ) -> napi::Result<Vec<f64>> {
             let object = equalities.as_object().ok_or_else(|| {
                 napi::Error::from_reason("equalities 必须是对象 (equalities must be an object)")
@@ -2410,9 +2440,8 @@ pub mod nodejs {
                 .iter()
                 .map(|(field, value)| (field.clone(), value.clone()))
                 .collect::<Vec<_>>();
-            dispatch!(self, db => db.indexed_lookup(&equalities, max_results.unwrap_or(10_000) as usize))
-                .map(|ids| ids.into_iter().map(|id| id as f64).collect())
-                .map_err(|error| to_resource_error(env, error))
+            dispatch!(self, db => db.indexed_lookup(&equalities, parse_safe_usize(max_results.unwrap_or(10_000.0), "maxResults")?))
+                .map_err(|error| to_resource_error(env, error)).and_then(node_ids_to_js)
         }
 
         #[napi]
@@ -2433,11 +2462,10 @@ pub mod nodejs {
             env: Env,
             field: String,
             needle: String,
-            max_results: Option<u32>,
+            max_results: Option<f64>,
         ) -> napi::Result<Vec<f64>> {
-            dispatch!(self, db => db.substring_lookup(&field, &needle, max_results.unwrap_or(10_000) as usize))
-                .map(|ids| ids.into_iter().map(|id| id as f64).collect())
-                .map_err(|error| to_resource_error(env, error))
+            dispatch!(self, db => db.substring_lookup(&field, &needle, parse_safe_usize(max_results.unwrap_or(10_000.0), "maxResults")?))
+                .map_err(|error| to_resource_error(env, error)).and_then(node_ids_to_js)
         }
 
         #[napi]
@@ -2544,13 +2572,12 @@ pub mod nodejs {
             Ok({
                 dispatch!(self, db => db.get_edges(parse_node_id(id, "id")?).map_err(|error| to_resource_error(env, error))?)
                     .into_iter()
-                    .map(|e| JsEdge {
-                        target_id: e.target_id as f64,
+                    .map(|e| Ok(JsEdge {
+                        target_id: node_id_to_js(e.target_id)?,
                         label: e.label,
                         weight: round_api_f32(e.weight),
                         metadata: e.metadata,
-                    })
-                    .collect()
+                    })).collect::<napi::Result<_>>()?
             })
         }
 
@@ -2565,14 +2592,13 @@ pub mod nodejs {
             Ok({
                 dispatch!(self, db => db.get_incoming_edges(parse_node_id(id, "id")?, label.as_deref()).map_err(|error| to_resource_error(env, error))?)
                 .into_iter()
-                .map(|edge| JsIncomingEdge {
-                    source_id: edge.source_id as f64,
-                    target_id: edge.target_id as f64,
+                .map(|edge| Ok(JsIncomingEdge {
+                    source_id: node_id_to_js(edge.source_id)?,
+                    target_id: node_id_to_js(edge.target_id)?,
                     label: edge.label,
                     weight: round_api_f32(edge.weight),
                     metadata: edge.metadata,
-                })
-                .collect()
+                })).collect::<napi::Result<_>>()?
             })
         }
 
@@ -2661,8 +2687,9 @@ pub mod nodejs {
         /// ```
         #[napi]
         pub fn tql_mut(&mut self, env: Env, query: String) -> napi::Result<serde_json::Value> {
-            let result = dispatch!(self, mut db => db.tql_mut(&query))
-                .map_err(|error| to_resource_error(env, error))?;
+            let result =
+                dispatch!(self, mut db => db.tql_mut_with_id_limit(&query,9_007_199_254_740_991))
+                    .map_err(|error| to_resource_error(env, error))?;
             Ok(serde_json::json!({
                 "affected": result.affected,
                 "createdIds": result.created_ids,
@@ -2703,10 +2730,10 @@ pub mod nodejs {
         pub fn enable_auto_compaction(
             &mut self,
             env: Env,
-            interval_secs: Option<u32>,
+            interval_secs: Option<f64>,
         ) -> napi::Result<()> {
-            let secs = interval_secs.unwrap_or(7200);
-            dispatch!(self, mut db => db.enable_auto_compaction(std::time::Duration::from_secs(u64::from(secs))))
+            let secs = parse_safe_usize(interval_secs.unwrap_or(7200.0), "intervalSecs")? as u64;
+            dispatch!(self, mut db => db.enable_auto_compaction(std::time::Duration::from_secs(secs)))
                 .map_err(|error| to_resource_error(env, error))
         }
 
@@ -2793,32 +2820,39 @@ pub mod nodejs {
             Ok({
                 dispatch!(self, db => db.all_node_ids().map_err(|error| to_resource_error(env, error))?)
                     .into_iter()
-                    .map(|id| id as f64)
-                    .collect()
+                    .map(node_id_to_js).collect::<napi::Result<_>>()?
             })
         }
 
         /// 维度迁移：结构复制到新维度数据库，返回需要更新向量的节点 ID 列表
         #[napi]
-        pub fn migrate(&self, env: Env, new_path: String, new_dim: u32) -> napi::Result<Vec<f64>> {
+        pub fn migrate(&self, env: Env, new_path: String, new_dim: f64) -> napi::Result<Vec<f64>> {
+            let new_dim = parse_positive_usize(new_dim, "newDim")?;
+            self.all_node_ids(env)?;
             match &self.inner {
                 DbBackend::F32(db) => {
                     let (_, ids) = db
-                        .migrate_to(&new_path, new_dim as usize)
+                        .migrate_to(&new_path, new_dim)
                         .map_err(|error| to_resource_error(env, error))?;
-                    Ok(ids.into_iter().map(|id| id as f64).collect())
+                    ids.into_iter()
+                        .map(node_id_to_js)
+                        .collect::<napi::Result<_>>()
                 }
                 DbBackend::F16(db) => {
                     let (_, ids) = db
-                        .migrate_to(&new_path, new_dim as usize)
+                        .migrate_to(&new_path, new_dim)
                         .map_err(|error| to_resource_error(env, error))?;
-                    Ok(ids.into_iter().map(|id| id as f64).collect())
+                    ids.into_iter()
+                        .map(node_id_to_js)
+                        .collect::<napi::Result<_>>()
                 }
                 DbBackend::U64(db) => {
                     let (_, ids) = db
-                        .migrate_to(&new_path, new_dim as usize)
+                        .migrate_to(&new_path, new_dim)
                         .map_err(|error| to_resource_error(env, error))?;
-                    Ok(ids.into_iter().map(|id| id as f64).collect())
+                    ids.into_iter()
+                        .map(node_id_to_js)
+                        .collect::<napi::Result<_>>()
                 }
             }
         }

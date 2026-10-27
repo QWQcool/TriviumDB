@@ -31,6 +31,7 @@ pub struct MappedGraphStore {
     incoming: HashMap<NodeId, Vec<NodeId>>,
     labels: HashMap<String, Vec<(NodeId, NodeId)>>,
     edge_count: usize,
+    heap_bytes: std::sync::atomic::AtomicUsize,
 }
 
 impl MappedGraphStore {
@@ -264,20 +265,51 @@ impl MappedGraphStore {
             pairs.sort_unstable();
             pairs.dedup();
         }
+        let heap_bytes = blocks.capacity() * std::mem::size_of::<(NodeId, GraphBlock)>()
+            + incoming.capacity() * std::mem::size_of::<(NodeId, Vec<NodeId>)>()
+            + labels.capacity() * std::mem::size_of::<(String, Vec<(NodeId, NodeId)>)>()
+            + incoming
+                .values()
+                .map(|sources| sources.capacity() * std::mem::size_of::<NodeId>())
+                .sum::<usize>()
+            + labels
+                .iter()
+                .map(|(label, pairs)| {
+                    label.capacity() + pairs.capacity() * std::mem::size_of::<(NodeId, NodeId)>()
+                })
+                .sum::<usize>();
         Ok(Some(Self {
             mmap,
             blocks,
             incoming,
             labels,
             edge_count,
+            heap_bytes: std::sync::atomic::AtomicUsize::new(heap_bytes),
         }))
     }
 
     pub fn edges(&self, source: NodeId) -> Option<&[Edge]> {
         let block = self.blocks.get(&source)?;
         Some(block.decoded.get_or_init(|| {
-            decode_edges(&self.mmap[block.range.clone()], usize::MAX).unwrap_or_default()
+            let edges =
+                decode_edges(&self.mmap[block.range.clone()], usize::MAX).unwrap_or_default();
+            let bytes = edges.capacity() * std::mem::size_of::<Edge>()
+                + edges
+                    .iter()
+                    .map(|edge| {
+                        edge.label.capacity()
+                            + crate::storage::payload_store::estimate_json_memory(&edge.metadata)
+                                .saturating_sub(std::mem::size_of::<serde_json::Value>())
+                    })
+                    .sum::<usize>();
+            self.heap_bytes
+                .fetch_add(bytes, std::sync::atomic::Ordering::Relaxed);
+            edges
         }))
+    }
+
+    pub(crate) fn heap_memory_bytes(&self) -> usize {
+        self.heap_bytes.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn incoming(&self, target: NodeId) -> &[NodeId] {
