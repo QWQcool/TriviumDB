@@ -380,7 +380,14 @@ impl OrderedPropertyIndex {
         };
         let take = limit.unwrap_or(usize::MAX);
         self.entries
-            .range_values(key.as_bytes(), op, inclusive, descending, take)
+            .range_values_in_kind(
+                key.as_bytes(),
+                op,
+                inclusive,
+                descending,
+                take,
+                key.as_bytes()[0],
+            )
             .into_iter()
             .flat_map(|ids| ids.iter().copied())
             .take(take)
@@ -538,6 +545,35 @@ struct BitmapPropertyIndex {
     entries: HashMap<PropertyKey, roaring::RoaringTreemap>,
 }
 
+type UniqueKeyChange = (NodeId, Option<Vec<u8>>, Option<Vec<u8>>);
+/// 提交前准备的复合唯一键最终投影；删除旧所有者后一次安装最终所有者。
+pub(crate) struct UniqueIndexDelta {
+    updates: Vec<(CompositeDefinition, Vec<UniqueKeyChange>)>,
+    map_growth_bytes: usize,
+}
+impl UniqueIndexDelta {
+    pub(crate) fn workspace_bytes(&self) -> usize {
+        self.map_growth_bytes
+            + self
+                .updates
+                .iter()
+                .map(|(fields, changes)| {
+                    fields.0.iter().map(String::capacity).sum::<usize>()
+                        + fields.0.capacity() * std::mem::size_of::<String>()
+                        + changes.capacity()
+                            * std::mem::size_of::<(NodeId, Option<Vec<u8>>, Option<Vec<u8>>)>()
+                        + changes
+                            .iter()
+                            .map(|(_, old, new)| {
+                                old.as_ref().map_or(0, Vec::capacity)
+                                    + new.as_ref().map_or(0, Vec::capacity)
+                            })
+                            .sum::<usize>()
+                })
+                .sum::<usize>()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PropertyIndexRegistry {
     indexes: HashMap<String, HashPropertyIndex>,
@@ -545,6 +581,7 @@ pub struct PropertyIndexRegistry {
     composite_indexes: HashMap<CompositeDefinition, CompositePropertyIndex>,
     bitmap_indexes: HashMap<String, BitmapPropertyIndex>,
     ngram_indexes: HashMap<String, NgramPropertyIndex>,
+    unique_updates_paused: bool,
     unique_indexes: HashSet<String>,
     unique_composite_indexes: HashSet<CompositeDefinition>,
     mapped: Option<Arc<MappedPostingStore>>,
@@ -560,6 +597,7 @@ impl Default for PropertyIndexRegistry {
             composite_indexes: HashMap::new(),
             bitmap_indexes: HashMap::new(),
             ngram_indexes: HashMap::new(),
+            unique_updates_paused: false,
             unique_indexes: HashSet::new(),
             unique_composite_indexes: HashSet::new(),
             mapped: None,
@@ -629,6 +667,107 @@ impl PropertyIndexRegistry {
                     .change((0, 0), bitmap_size(key.0.len(), Some(ids)));
             }
         }
+    }
+
+    pub(crate) fn has_definition(
+        &self,
+        kind: PropertyIndexKind,
+        fields: &[String],
+        unique: bool,
+    ) -> bool {
+        self.index_definitions()
+            .iter()
+            .any(|(existing, keys)| *existing == kind && keys == fields)
+            && (!unique || self.unique_definitions().iter().any(|keys| keys == fields))
+    }
+
+    pub(crate) fn empty_build(
+        kind: PropertyIndexKind,
+        fields: &[String],
+        unique: bool,
+    ) -> Result<Self> {
+        let mut index = Self::default();
+        let empty = std::iter::empty::<(NodeId, &Value)>();
+        match (kind, unique) {
+            (PropertyIndexKind::Hash, true) => index.register_unique(&fields[0], empty)?,
+            (PropertyIndexKind::Composite, true) => {
+                index.register_unique_composite(fields, empty)?
+            }
+            (PropertyIndexKind::Hash, false) => index.register(&fields[0], empty),
+            (PropertyIndexKind::Ordered, false) => index.register_ordered(&fields[0], empty),
+            (PropertyIndexKind::Composite, false) => index.register_composite(fields, empty),
+            (PropertyIndexKind::Bitmap, false) => index.register_bitmap(&fields[0], empty),
+            (PropertyIndexKind::Ngram, false) => index.register_ngram(&fields[0], empty)?,
+            _ => {
+                return Err(TriviumError::InvalidInput(
+                    "索引种类与唯一约束不匹配 (Index kind does not support this unique constraint)"
+                        .into(),
+                ));
+            }
+        }
+        Ok(index)
+    }
+
+    /// 每个 posting 为目录、容量增长和构建暂存保留空间，键按实际标量编码测量。
+    pub(crate) fn estimate_build_row(
+        kind: PropertyIndexKind,
+        fields: &[String],
+        unique: bool,
+        payload: &Value,
+    ) -> Result<usize> {
+        let mut lengths = Vec::new();
+        match kind {
+            PropertyIndexKind::Hash | PropertyIndexKind::Bitmap => {
+                if let Some(value) = payload.get(&fields[0]) {
+                    if let Some(key) = PropertyKey::from_json(value) {
+                        lengths.push(key.0.len());
+                    } else if unique {
+                        return Err(TriviumError::InvalidInput(
+                            "唯一索引只支持标量 (Unique indexes require scalar values)".into(),
+                        ));
+                    }
+                }
+            }
+            PropertyIndexKind::Ordered => {
+                if let Some(key) = payload.get(&fields[0]).and_then(ordered_key) {
+                    lengths.push(key.0.len());
+                }
+            }
+            PropertyIndexKind::Composite => {
+                if let Some(key) = composite_key(payload, fields) {
+                    lengths.push(key.len());
+                }
+                if unique && let Some(key) = unique_key(payload, fields)? {
+                    lengths.push(key.len());
+                }
+            }
+            PropertyIndexKind::Ngram => {
+                if let Some(value) = payload.get(&fields[0]) {
+                    let text = value.as_str().ok_or_else(|| {
+                        TriviumError::InvalidInput(
+                            "N-gram 索引只支持字符串 (N-gram indexes require strings)".into(),
+                        )
+                    })?;
+                    lengths.extend(text_ngrams(text)?.iter().map(String::len));
+                }
+            }
+        }
+        Ok(lengths.into_iter().fold(0usize, |total, len| {
+            total
+                .saturating_add(len.saturating_mul(4))
+                .saturating_add(384)
+        }))
+    }
+
+    pub(crate) fn install_build(&mut self, built: Self) {
+        self.indexes.extend(built.indexes);
+        self.ordered_indexes.extend(built.ordered_indexes);
+        self.composite_indexes.extend(built.composite_indexes);
+        self.bitmap_indexes.extend(built.bitmap_indexes);
+        self.ngram_indexes.extend(built.ngram_indexes);
+        self.unique_indexes.extend(built.unique_indexes);
+        self.unique_composite_indexes
+            .extend(built.unique_composite_indexes);
     }
 
     pub fn register_unique<I, P>(&mut self, field: &str, payloads: I) -> Result<()>
@@ -777,6 +916,123 @@ impl PropertyIndexRegistry {
                         existing_id,
                         conflicting_id: *id,
                     });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn unique_updates_paused(&self) -> bool {
+        self.unique_updates_paused
+    }
+    pub(crate) fn set_unique_updates_paused(&mut self, paused: bool) {
+        self.unique_updates_paused = paused;
+    }
+
+    pub(crate) fn prepare_unique_delta<F>(
+        &self,
+        changes: &[(NodeId, Option<&Value>)],
+        mut previous: F,
+    ) -> Result<UniqueIndexDelta>
+    where
+        F: FnMut(NodeId) -> Result<Option<Arc<Value>>>,
+    {
+        self.validate_unique_changes(changes.iter().copied())?;
+        let mut updates = self
+            .unique_composite_indexes
+            .iter()
+            .cloned()
+            .map(|fields| (fields, Vec::new()))
+            .collect::<Vec<_>>();
+        updates.sort_by(|a, b| a.0.cmp(&b.0));
+        if !updates.is_empty() {
+            for &(id, next) in changes {
+                let old = previous(id)?;
+                for (fields, keys) in &mut updates {
+                    keys.push((
+                        id,
+                        old.as_deref()
+                            .and_then(|value| exact_composite_key(value, &fields.0)),
+                        next.and_then(|value| exact_composite_key(value, &fields.0)),
+                    ));
+                }
+            }
+        }
+        let map_growth_bytes = updates
+            .iter()
+            .map(|(fields, changes)| {
+                self.composite_indexes
+                    .get(fields)
+                    .and_then(|index| index.unique_entries.as_ref())
+                    .map_or(0, |owners| {
+                        let additional = changes.iter().filter(|(_, _, key)| key.is_some()).count();
+                        if additional > owners.capacity().saturating_sub(owners.len()) {
+                            (owners.len() + additional)
+                                .saturating_mul(4)
+                                .saturating_mul(std::mem::size_of::<(Vec<u8>, NodeId)>() + 1)
+                                .saturating_add(64)
+                        } else {
+                            0
+                        }
+                    })
+            })
+            .sum();
+        Ok(UniqueIndexDelta {
+            updates,
+            map_growth_bytes,
+        })
+    }
+
+    pub(crate) fn reserve_unique_delta(&mut self, delta: &UniqueIndexDelta) -> Result<()> {
+        for (fields, changes) in &delta.updates {
+            let index = self.composite_indexes.get_mut(fields).ok_or_else(|| {
+                TriviumError::InvalidInput(
+                    "复合唯一索引缺失 (Composite unique index is missing)".into(),
+                )
+            })?;
+            let owners = index.unique_entries.as_mut().ok_or_else(|| {
+                TriviumError::InvalidInput(
+                    "复合唯一所有者缺失 (Composite unique owners are missing)".into(),
+                )
+            })?;
+            owners
+                .try_reserve(changes.iter().filter(|(_, _, key)| key.is_some()).count())
+                .map_err(|e| TriviumError::CapacityAllocationFailed {
+                    reason: format!("唯一键预留失败 (Unique key reservation failed): {e}"),
+                })?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn apply_unique_delta(&mut self, delta: UniqueIndexDelta) -> Result<()> {
+        for (fields, changes) in delta.updates {
+            let index = self.composite_indexes.get_mut(&fields).ok_or_else(|| {
+                TriviumError::InvalidInput(
+                    "复合唯一索引缺失 (Composite unique index is missing)".into(),
+                )
+            })?;
+            let owners = index.unique_entries.as_mut().ok_or_else(|| {
+                TriviumError::InvalidInput(
+                    "复合唯一所有者缺失 (Composite unique owners are missing)".into(),
+                )
+            })?;
+            for (id, old, _) in &changes {
+                if let Some(key) = old
+                    && owners.get(key) == Some(id)
+                    && let Some((key, _)) = owners.remove_entry(key)
+                {
+                    index.unique_key_bytes = index.unique_key_bytes.saturating_sub(key.capacity());
+                }
+            }
+            for (id, _, new) in changes {
+                if let Some(key) = new {
+                    if owners.contains_key(&key) {
+                        return Err(TriviumError::InvalidInput(
+                            "唯一键最终投影冲突 (Conflicting final unique key projection)".into(),
+                        ));
+                    }
+                    index.unique_key_bytes += key.capacity();
+                    owners.insert(key, id);
                 }
             }
         }
@@ -1382,7 +1638,8 @@ impl PropertyIndexRegistry {
             } else {
                 index.incomplete_count += 1;
             }
-            if let Some(entries) = &mut index.unique_entries
+            if !self.unique_updates_paused
+                && let Some(entries) = &mut index.unique_entries
                 && let Some(key) = exact_composite_key(payload, &definition.0)
             {
                 if !entries.contains_key(&key) {
@@ -1439,7 +1696,8 @@ impl PropertyIndexRegistry {
             } else {
                 index.incomplete_count = index.incomplete_count.saturating_sub(1);
             }
-            if let Some(entries) = &mut index.unique_entries
+            if !self.unique_updates_paused
+                && let Some(entries) = &mut index.unique_entries
                 && let Some(key) = exact_composite_key(payload, &definition.0)
                 && entries.get(&key) == Some(&id)
                 && let Some((removed, _)) = entries.remove_entry(&key)

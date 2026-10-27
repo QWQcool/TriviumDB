@@ -2344,6 +2344,79 @@ impl<T: VectorType> MemTable<T> {
     //  属性二级索引 API
     // ════════════════════════════════════════════════════════
 
+    /// 候选索引在隔离目录中构建；解析与构建峰值均通过准入后才安装到实例。
+    pub(crate) fn build_property_index(
+        &mut self,
+        kind: crate::index::property::PropertyIndexKind,
+        fields: &[String],
+        unique: bool,
+        limit: usize,
+    ) -> Result<()> {
+        use crate::index::property::{PropertyIndexKind, PropertyIndexRegistry};
+        if fields.is_empty()
+            || fields
+                .iter()
+                .any(|field| field.is_empty() || field.len() > 1024 * 1024)
+            || fields.iter().collect::<HashSet<_>>().len() != fields.len()
+            || (kind == PropertyIndexKind::Composite && fields.len() < 2)
+        {
+            return Err(TriviumError::InvalidInput("索引字段必须非空且互不重复，复合索引至少包含两个字段 (Index fields must be non-empty and distinct; composite indexes require at least two fields)".into()));
+        }
+        if self.property_indexes.has_definition(kind, fields, unique) {
+            return Ok(());
+        }
+        // 一次仅解析一条冷记录，读原始字节不会填充实例的 Payload 缓存。
+        let parse_peak = self
+            .payloads
+            .ids()
+            .filter_map(|id| self.payloads.raw(id))
+            .map(|raw| raw.len().saturating_mul(64))
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1024);
+        self.ensure_additional_memory(limit, parse_peak)?;
+        let mut build_peak = fields
+            .iter()
+            .map(|field| field.len().saturating_mul(4))
+            .sum::<usize>()
+            .saturating_add(1024);
+        for id in self.payloads.ids() {
+            let raw = self.payloads.raw(id).ok_or_else(|| {
+                TriviumError::CorruptedFile(
+                    "索引构建缺少 Payload (Index build is missing a Payload)".into(),
+                )
+            })?;
+            let payload: serde_json::Value = serde_json::from_slice(raw).map_err(|e| {
+                TriviumError::CorruptedFile(format!(
+                    "索引构建 Payload 无效 (Invalid Payload during index build): {e}"
+                ))
+            })?;
+            build_peak = build_peak.saturating_add(PropertyIndexRegistry::estimate_build_row(
+                kind, fields, unique, &payload,
+            )?);
+            self.ensure_additional_memory(limit, build_peak.saturating_add(parse_peak))?;
+        }
+        let mut candidate = PropertyIndexRegistry::empty_build(kind, fields, unique)?;
+        for id in self.payloads.ids() {
+            let raw = self.payloads.raw(id).ok_or_else(|| {
+                TriviumError::CorruptedFile(
+                    "索引构建缺少 Payload (Index build is missing a Payload)".into(),
+                )
+            })?;
+            let payload: serde_json::Value = serde_json::from_slice(raw).map_err(|e| {
+                TriviumError::CorruptedFile(format!(
+                    "索引构建 Payload 无效 (Invalid Payload during index build): {e}"
+                ))
+            })?;
+            candidate.validate_unique_changes([(id, Some(&payload))])?;
+            candidate.insert(id, &payload);
+        }
+        self.ensure_additional_memory(limit, candidate.estimated_memory_bytes())?;
+        self.property_indexes.install_build(candidate);
+        self.mark_property_changed();
+        Ok(())
+    }
+
     pub fn register_unique_property_index(&mut self, field: &str) -> Result<()> {
         let payloads = &self.payloads;
         self.property_indexes
@@ -2365,6 +2438,45 @@ impl<T: VectorType> MemTable<T> {
         I: IntoIterator<Item = (NodeId, Option<&'a serde_json::Value>)>,
     {
         self.property_indexes.validate_unique_changes(changes)
+    }
+
+    pub(crate) fn prepare_unique_delta(
+        &self,
+        changes: &[(NodeId, Option<&serde_json::Value>)],
+    ) -> Result<crate::index::property::UniqueIndexDelta> {
+        self.property_indexes
+            .prepare_unique_delta(changes, |id| {
+                self.payloads
+                    .raw(id)
+                    .map(|raw| {
+                        serde_json::from_slice(raw)
+                            .map(std::sync::Arc::new)
+                            .map_err(|error| {
+                                TriviumError::CorruptedFile(format!(
+                                    "唯一键原值无法解析 (Cannot decode previous unique key payload): {error}"
+                                ))
+                            })
+                    })
+                    .transpose()
+            })
+    }
+    pub(crate) fn reserve_unique_delta(
+        &mut self,
+        delta: &crate::index::property::UniqueIndexDelta,
+    ) -> Result<()> {
+        self.property_indexes.reserve_unique_delta(delta)
+    }
+    pub(crate) fn apply_unique_delta(
+        &mut self,
+        delta: crate::index::property::UniqueIndexDelta,
+    ) -> Result<()> {
+        self.property_indexes.apply_unique_delta(delta)
+    }
+    pub(crate) fn unique_updates_paused(&self) -> bool {
+        self.property_indexes.unique_updates_paused()
+    }
+    pub(crate) fn set_unique_updates_paused(&mut self, paused: bool) {
+        self.property_indexes.set_unique_updates_paused(paused);
     }
 
     pub fn validate_unique_payloads<'a, I>(&self, payloads: I) -> Result<()>

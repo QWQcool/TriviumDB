@@ -8,6 +8,7 @@ use std::collections::{BTreeSet, HashMap};
 #[derive(Debug, Clone, PartialEq)]
 pub enum TqlParamValue {
     Int(i64),
+    UInt(u64),
     Float(f64),
     String(String),
     Bool(bool),
@@ -23,6 +24,7 @@ impl TqlParamValue {
             serde_json::Value::Number(value) => {
                 if let Some(value) = value.as_i64() {
                     Ok(Self::Int(value))
+                } else if let Some(value)=value.as_u64() {Ok(Self::UInt(value))
                 } else if let Some(value) = value.as_f64().filter(|value| value.is_finite()) {
                     Ok(Self::Float(value))
                 } else {
@@ -172,6 +174,7 @@ fn bind_query(
             })?;
             vector[*index] = match value {
                 TqlParamValue::Int(value) => *value as f64,
+                TqlParamValue::UInt(value) => *value as f64,
                 TqlParamValue::Float(value) if value.is_finite() => *value,
                 _ => {
                     return Err(TriviumError::QueryExecution(format!(
@@ -247,6 +250,7 @@ fn bind_expr(
             })?;
             *expr = TqlExpr::Literal(match value {
                 TqlParamValue::Int(value) => TqlLiteral::Int(*value),
+                TqlParamValue::UInt(value) => TqlLiteral::UInt(*value),
                 TqlParamValue::Float(value) if value.is_finite() => TqlLiteral::Float(*value),
                 TqlParamValue::Float(_) => {
                     return Err(TriviumError::QueryExecution(format!(

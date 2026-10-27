@@ -2,6 +2,24 @@
 
 后续变更以 `0.9.0-beta.2` 为基线；该版本内容见[变更说明](0.9.0-beta.2.md)。
 
+## 事务最终键、范围候选与 TQL 数值域
+
+- 复合唯一索引按事务最终状态投影所有权，支持临时占用其他节点的键后再次改键、删除或恢复原键。提交前准备并预留最终键变更，提交后统一安装；异常展开恢复同步标志并隔离实例。WAL 回放后从最终事实恢复并验证唯一映射，验证成功后截断日志。
+- Ordered ART 范围遍历在 LIMIT/OFFSET 前约束数值或字符串类型，混合类型字段保持完整范围结果。
+- TQL 的字面量、Prepared 参数、运行时及一等值新增完整无符号整数表示，投影、WHERE、排序和聚合保持整数精度。整数加减乘及 SUM 返回整数，整数溢出返回 Null；MIN/MAX 保留选中值。浮点相等采用实际值比较，除法检查实际零分母，有限小分母正常计算。
+- Python 保留完整 `int`；Node 的超安全整数标量及列表/对象中的相应整数返回十进制字符串。Rust 调用方可匹配新增的 `UInt(u64)` 变体；Server 查询协议同步提供 `uint` 编码。
+- Hash、Ordered、Bitmap、Composite、N-gram 与唯一索引创建共用解析/构建峰值准入和隔离候选构建。预算拒绝、非法字段值或唯一约束失败保持已有定义、缓存与 WAL，可调整配额后重试。
+- 新增事务多次改键与 WAL 恢复、混合类型分页、完整整数/浮点边界、七类索引预算和跨语言安装制品回归。差分参考模型按有界原生整数与固定样例分别验收整数运算及完整 u64 域。
+
+## Final transaction keys, typed ranges and TQL numbers
+
+- Composite unique indexes project ownership from the final transaction state. A node may temporarily use another node's key before changing it again, deleting it or restoring its original key. Final key changes are prepared and reserved before the WAL, then installed together after application. Unwinding restores synchronization flags and isolates the instance. Recovery rebuilds and validates ownership from final facts before truncating the WAL.
+- Ordered ART traversal restricts candidates to the boundary's numeric or string type before LIMIT/OFFSET, preserving range results for mixed-type fields.
+- TQL literals, prepared parameters, runtime values and public results represent the full unsigned integer domain. Projection, WHERE, sorting and aggregates preserve integer precision. Integer addition, subtraction, multiplication and SUM retain integer results; integer overflow returns Null. MIN/MAX preserve the selected value. Floating equality compares actual values, and division treats only actual signed zero as a zero denominator.
+- Python preserves exact integers. Node returns decimal strings for unsafe integer scalars and corresponding integers inside projected lists and objects. Rust exposes the new `UInt(u64)` variants; the Server query protocol adds `uint` encoding.
+- Hash, Ordered, Bitmap, Composite, N-gram and unique index creation share parsing/build peak admission and isolated candidate construction. Budget rejection, invalid indexed values and uniqueness failures preserve existing definitions, caches and the WAL; callers can adjust the quota and retry.
+- Regression cases cover repeated key changes and recovery, typed range pagination, integer/floating boundaries, seven index admission paths and installed language packages. The independent differential model covers bounded native integer arithmetic, while fixed boundary cases cover the full u64 domain.
+
 ## 事务与 WAL 恢复
 
 - 事务预检按缓冲顺序投影节点存在状态。同一 ID 可在删除后重建、更新或再次删除；重建后的重复插入在写 WAL 前整批拒绝，保留原节点、索引、ID 分配状态和 WAL。

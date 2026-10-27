@@ -78,9 +78,15 @@ pub fn evaluate_expr(payload: &Value, expression: &Expr) -> RefValue {
     match expression {
         Expr::Literal(value) => value.clone(),
         Expr::Field(field) => RefValue::from_json(payload.get(field)),
-        Expr::Add(left, right) => arithmetic(payload, left, right, |a, b| a + b),
-        Expr::Subtract(left, right) => arithmetic(payload, left, right, |a, b| a - b),
-        Expr::Multiply(left, right) => arithmetic(payload, left, right, |a, b| a * b),
+        Expr::Add(left, right) => {
+            integer_arithmetic(payload, left, right, i64::checked_add, |a, b| a + b)
+        }
+        Expr::Subtract(left, right) => {
+            integer_arithmetic(payload, left, right, i64::checked_sub, |a, b| a - b)
+        }
+        Expr::Multiply(left, right) => {
+            integer_arithmetic(payload, left, right, i64::checked_mul, |a, b| a * b)
+        }
         Expr::Divide(left, right) => {
             let right_value = number(evaluate_expr(payload, right));
             if right_value == Some(0.0) {
@@ -98,6 +104,22 @@ pub fn evaluate_expr(payload: &Value, expression: &Expr) -> RefValue {
             evaluate_expr(payload, value),
             RefValue::Null | RefValue::Missing
         )),
+    }
+}
+
+// 生成器的整数域限制在小 i64；原生整数运算提供独立的有界参考，完整 u64 另由固定边界样例验收。
+fn integer_arithmetic(
+    payload: &Value,
+    left: &Expr,
+    right: &Expr,
+    integer: impl Fn(i64, i64) -> Option<i64>,
+    float: impl Fn(f64, f64) -> f64,
+) -> RefValue {
+    match (evaluate_expr(payload, left), evaluate_expr(payload, right)) {
+        (RefValue::Integer(left), RefValue::Integer(right)) => {
+            integer(left, right).map_or(RefValue::Null, RefValue::Integer)
+        }
+        _ => arithmetic(payload, left, right, float),
     }
 }
 
@@ -152,21 +174,21 @@ mod tests {
                     Box::new(Expr::Field("a".into())),
                     Box::new(Expr::Field("b".into())),
                 ),
-                RefValue::Float(8.0),
+                RefValue::Integer(8),
             ),
             (
                 Expr::Subtract(
                     Box::new(Expr::Field("a".into())),
                     Box::new(Expr::Field("b".into())),
                 ),
-                RefValue::Float(4.0),
+                RefValue::Integer(4),
             ),
             (
                 Expr::Multiply(
                     Box::new(Expr::Field("a".into())),
                     Box::new(Expr::Field("b".into())),
                 ),
-                RefValue::Float(12.0),
+                RefValue::Integer(12),
             ),
             (
                 Expr::IsNull(Box::new(Expr::Field("missing".into()))),

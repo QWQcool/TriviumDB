@@ -716,6 +716,10 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                 Ok(())
             })?;
 
+            // 回放按完整提交后的事实重建唯一所有者，验证通过后再修改 WAL。
+            let unique_definitions = memtable.unique_index_definitions();
+            memtable.restore_unique_index_definitions(&unique_definitions)?;
+
             // 内存恢复成功后才截断损坏或未提交尾部；回放失败保留原 WAL 供重试。
             let wal_path = format!("{}.wal", path);
             let wal_file = std::fs::OpenOptions::new().write(true).open(&wal_path)?;
@@ -2452,7 +2456,12 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                 "N-gram 索引字段不能为空 (N-gram index field cannot be empty)".into(),
             ));
         }
-        write_or_recover(&self.memtable).register_ngram_property_index(field)
+        write_or_recover(&self.memtable).build_property_index(
+            crate::index::property::PropertyIndexKind::Ngram,
+            &[field.to_owned()],
+            false,
+            self.memory_limit,
+        )
     }
 
     pub fn drop_ngram_index(&mut self, field: &str) -> Result<()> {
@@ -2511,7 +2520,12 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                 "唯一索引字段不能为空 (Unique index field cannot be empty)".into(),
             ));
         }
-        write_or_recover(&self.memtable).register_unique_property_index(field)?;
+        write_or_recover(&self.memtable).build_property_index(
+            crate::index::property::PropertyIndexKind::Hash,
+            &[field.to_owned()],
+            true,
+            self.memory_limit,
+        )?;
         self.flush_inner()
     }
 
@@ -2530,7 +2544,12 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                 "复合唯一索引至少需要两个非空且不重复的字段 (Composite unique index requires at least two distinct non-empty fields)".into(),
             ));
         }
-        write_or_recover(&self.memtable).register_unique_composite_property_index(fields)?;
+        write_or_recover(&self.memtable).build_property_index(
+            crate::index::property::PropertyIndexKind::Composite,
+            fields,
+            true,
+            self.memory_limit,
+        )?;
         self.flush_inner()
     }
 
@@ -2548,7 +2567,12 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         let _operation = self.enter_operation()?;
         self.require_write_access("create_index")?;
         let mut mt = write_or_recover(&self.memtable);
-        mt.register_property_index(field);
+        mt.build_property_index(
+            crate::index::property::PropertyIndexKind::Hash,
+            &[field.to_owned()],
+            false,
+            self.memory_limit,
+        )?;
         Ok(())
     }
 
@@ -2560,14 +2584,24 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                 "复合索引至少需要两个字段 (Composite index requires at least two fields)".into(),
             ));
         }
-        write_or_recover(&self.memtable).register_composite_property_index(fields);
+        write_or_recover(&self.memtable).build_property_index(
+            crate::index::property::PropertyIndexKind::Composite,
+            fields,
+            false,
+            self.memory_limit,
+        )?;
         Ok(())
     }
 
     pub fn create_bitmap_index(&mut self, field: &str) -> Result<()> {
         let _operation = self.enter_operation()?;
         self.require_write_access("create_bitmap_index")?;
-        write_or_recover(&self.memtable).register_bitmap_property_index(field);
+        write_or_recover(&self.memtable).build_property_index(
+            crate::index::property::PropertyIndexKind::Bitmap,
+            &[field.to_owned()],
+            false,
+            self.memory_limit,
+        )?;
         Ok(())
     }
 
@@ -2596,7 +2630,12 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         let _operation = self.enter_operation()?;
         self.require_write_access("create_ordered_index")?;
         let mut mt = write_or_recover(&self.memtable);
-        mt.register_ordered_property_index(field);
+        mt.build_property_index(
+            crate::index::property::PropertyIndexKind::Ordered,
+            &[field.to_owned()],
+            false,
+            self.memory_limit,
+        )?;
         Ok(())
     }
 

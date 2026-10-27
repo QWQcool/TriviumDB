@@ -213,6 +213,7 @@ impl TqlParser {
         let value = match self.advance() {
             TqlToken::FloatLit(value) => value,
             TqlToken::IntLit(value) => value as f64,
+            TqlToken::UIntLit(value) => value as f64,
             other => return Err(format!("Expected finite number, got {other:?}")),
         };
         if !value.is_finite() || value < f32::MIN as f64 || value > f32::MAX as f64 {
@@ -232,6 +233,7 @@ impl TqlParser {
             let value = match self.advance() {
                 TqlToken::FloatLit(value) => value,
                 TqlToken::IntLit(value) => value as f64,
+                TqlToken::UIntLit(value) => value as f64,
                 other => return Err(format!("Expected number in RANK vector, got {other:?}")),
             };
             vector.push(value);
@@ -428,6 +430,7 @@ impl TqlParser {
             let value = match self.advance() {
                 TqlToken::FloatLit(value) => value,
                 TqlToken::IntLit(value) => value as f64,
+                TqlToken::UIntLit(value) => value as f64,
                 TqlToken::DollarOp(name) => {
                     vector_parameters.push((index, name.trim_start_matches('$').to_owned()));
                     0.0
@@ -939,6 +942,7 @@ impl TqlParser {
         while !self.at(&TqlToken::RBracket) {
             match self.advance() {
                 TqlToken::IntLit(value) if value > 0 => values.push(value as u64),
+                TqlToken::UIntLit(value) => values.push(value),
                 other => {
                     return Err(format!(
                         "节点 ID 必须为正整数 (Node ID must be positive), got {other:?}"
@@ -1600,6 +1604,7 @@ impl TqlParser {
                 Ok(expr)
             }
             TqlToken::IntLit(_)
+            | TqlToken::UIntLit(_)
             | TqlToken::FloatLit(_)
             | TqlToken::StringLit(_)
             | TqlToken::BoolLit(_)
@@ -1626,6 +1631,7 @@ impl TqlParser {
     fn parse_tql_literal(&mut self) -> Result<TqlLiteral, String> {
         match self.advance() {
             TqlToken::IntLit(n) => Ok(TqlLiteral::Int(n)),
+            TqlToken::UIntLit(n) => Ok(TqlLiteral::UInt(n)),
             TqlToken::FloatLit(f) => Ok(TqlLiteral::Float(f)),
             TqlToken::StringLit(s) => Ok(TqlLiteral::Str(s)),
             TqlToken::BoolLit(b) => Ok(TqlLiteral::Bool(b)),
@@ -1644,7 +1650,10 @@ impl TqlParser {
 
     fn parse_positive_int(&mut self) -> Result<usize, String> {
         match self.advance() {
-            TqlToken::IntLit(n) if n >= 0 => Ok(n as usize),
+            TqlToken::IntLit(n) if n >= 0 => usize::try_from(n)
+                .map_err(|_| "数量超出平台范围 (Quantity exceeds platform range)".into()),
+            TqlToken::UIntLit(n) => usize::try_from(n)
+                .map_err(|_| "数量超出平台范围 (Quantity exceeds platform range)".into()),
             other => Err(format!("Expected positive integer, got {:?}", other)),
         }
     }
@@ -1661,6 +1670,10 @@ impl TqlParser {
     /// 解析 JSON 值（用于文档过滤的值部分）
     fn parse_json_value(&mut self) -> Result<serde_json::Value, String> {
         match self.peek().clone() {
+            TqlToken::UIntLit(value) => {
+                self.advance();
+                Ok(serde_json::json!(value))
+            }
             TqlToken::IntLit(_) => {
                 if let TqlToken::IntLit(n) = self.advance() {
                     Ok(serde_json::json!(n))
@@ -1710,6 +1723,7 @@ impl TqlParser {
     fn parse_json_number(&mut self) -> Result<f64, String> {
         match self.advance() {
             TqlToken::IntLit(n) => Ok(n as f64),
+            TqlToken::UIntLit(n) => Ok(n as f64),
             TqlToken::FloatLit(f) => Ok(f),
             other => Err(format!("Expected number, got {:?}", other)),
         }
@@ -1966,6 +1980,7 @@ impl TqlParser {
             let value = match self.advance() {
                 TqlToken::FloatLit(value) => value,
                 TqlToken::IntLit(value) => value as f64,
+                TqlToken::UIntLit(value) => value as f64,
                 other => return Err(format!("Expected number in vector, got {other:?}")),
             };
             if !value.is_finite() {

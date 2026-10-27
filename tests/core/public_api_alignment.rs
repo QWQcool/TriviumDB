@@ -104,7 +104,7 @@ fn prepared_tql和一等路径列表值可通过公共_api执行() {
         .unwrap();
     assert!(matches!(&rows[0]["path"], TqlValue::Path(value) if value == &vec![1, 2]));
     assert!(matches!(&rows[0]["ids"], TqlValue::List(value) if value == &vec![json!(2)]));
-    assert!(matches!(rows[0]["score"], TqlValue::Float(value) if value == 11.0));
+    assert!(matches!(rows[0]["score"], TqlValue::Int(11)));
     cleanup(&path);
 }
 

@@ -692,3 +692,6 @@ cargo test --test contracts 共享json契约由rust适配器完整执行
 
 - `tests/core/index_graph_boundaries.rs` 验证唯一约束删除、部分覆盖索引的完整结果、复合唯一大整数、UTF-8 标签边界、图堆准入、零入度清理、三种 dtype 的 ID 分配耗尽、WAL 回放和只读零写。内核单元测试独立核对图容器容量、字符串分配和复合唯一映射账本。
 - `tests/fixtures/numeric_ids/wal_v3.bin` 提供固定完整 u64 ID 跨端样本；Rust 核对完整记录、向量与边，Python 安装制品核对精确整数，Node 安装制品核对字符串 ID 与数字输出拒绝。`tests/node/numeric_boundaries.js` 覆盖数量转换、同步/异步检索、遍历、索引查询及自动分配的 WAL 原子拒绝；`tests/python/index_graph_boundaries.py` 覆盖绑定的索引与图持久化行为。两者均接入现有公共 API CI 入口。
+
+- `tests/core/query_numeric_indexes.rs` 使用独立固定结果验证临时唯一键冲突、原键恢复、删除与 WAL 回放，混合类型范围的 LIMIT/OFFSET，完整 u64 投影/参数/比较/聚合，以及正规数、次正规数和正负零。索引 DDL 覆盖七类入口的预算拒绝、定义保留、配额调整重试与只读重开；唯一构建失败继续保留已有非唯一索引。
+- `tests/node/query_numeric_indexes.js` 与 `tests/python/query_numeric_indexes.py` 在实际绑定中执行最终唯一键、数值精度与构建预算断言；Node 用例同时接入独立安装的 npm 制品验收。差分参考模型使用自身的有界整数运算，完整 u64 域由独立常量样例验收。

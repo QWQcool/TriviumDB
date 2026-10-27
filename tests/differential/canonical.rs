@@ -8,6 +8,7 @@ pub enum CanonicalValue {
     Null,
     Bool(bool),
     Integer(i64),
+    Unsigned(u64),
     Float(u64),
     String(String),
     Node(u64),
@@ -35,7 +36,12 @@ fn json_value(value: &serde_json::Value) -> CanonicalValue {
         serde_json::Value::Null => CanonicalValue::Null,
         serde_json::Value::Bool(value) => CanonicalValue::Bool(*value),
         serde_json::Value::Number(value) => value.as_i64().map_or_else(
-            || CanonicalValue::Float(value.as_f64().unwrap_or(f64::NAN).to_bits()),
+            || {
+                value.as_u64().map_or_else(
+                    || CanonicalValue::Float(value.as_f64().unwrap_or(f64::NAN).to_bits()),
+                    CanonicalValue::Unsigned,
+                )
+            },
             CanonicalValue::Integer,
         ),
         serde_json::Value::String(value) => CanonicalValue::String(value.clone()),
@@ -55,6 +61,7 @@ pub fn from_tql_value(value: &TqlValue<f32>) -> CanonicalValue {
             CanonicalValue::Edge(edge.source_id, edge.target_id, edge.label.clone())
         }
         TqlValue::Int(value) => CanonicalValue::Integer(*value),
+        TqlValue::UInt(value) => CanonicalValue::Unsigned(*value),
         TqlValue::Float(value) => CanonicalValue::Float(value.to_bits()),
         TqlValue::String(value) => CanonicalValue::String(value.clone()),
         TqlValue::Bool(value) => CanonicalValue::Bool(*value),

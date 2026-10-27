@@ -11,6 +11,7 @@ import tempfile
 import triviumdb
 from write_boundaries import run_write_boundaries
 from index_graph_boundaries import run_index_graph_boundaries
+from query_numeric_indexes import run_query_numeric_indexes
 
 
 def run_transaction_contract(root: str) -> None:
@@ -400,6 +401,7 @@ def main() -> None:
         run_transaction_contract(root)
         run_write_boundaries(root)
         run_index_graph_boundaries(root)
+        run_query_numeric_indexes(root)
         run_text_recovery_contract(root)
         run_query_budget_contract(root)
         path = os.path.join(root, "api.tdb")

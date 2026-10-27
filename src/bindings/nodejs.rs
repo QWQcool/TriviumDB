@@ -270,6 +270,29 @@ pub mod nodejs {
         napi::Error::new(napi::Status::GenericFailure, format!("{code}: {error}"))
     }
 
+    fn node_tql_scalar_json(value: serde_json::Value) -> serde_json::Value {
+        match value {
+            serde_json::Value::Number(ref number)
+                if number
+                    .as_i64()
+                    .is_some_and(|n| n.unsigned_abs() > 9_007_199_254_740_991)
+                    || number.as_u64().is_some_and(|n| n > 9_007_199_254_740_991) =>
+            {
+                serde_json::Value::String(number.to_string())
+            }
+            serde_json::Value::Array(values) => {
+                serde_json::Value::Array(values.into_iter().map(node_tql_scalar_json).collect())
+            }
+            serde_json::Value::Object(values) => serde_json::Value::Object(
+                values
+                    .into_iter()
+                    .map(|(name, value)| (name, node_tql_scalar_json(value)))
+                    .collect(),
+            ),
+            value => value,
+        }
+    }
+
     fn node_tql_row_to_json<T: crate::VectorType>(
         row: std::collections::HashMap<String, crate::query::tql_executor::TqlValue<T>>,
     ) -> serde_json::Value {
@@ -290,7 +313,8 @@ pub mod nodejs {
                     "weight": edge.weight,
                     "metadata": edge.metadata,
                 }),
-                TqlValue::Int(value) => serde_json::json!(value),
+                TqlValue::Int(value) => node_tql_scalar_json(serde_json::json!(value)),
+                TqlValue::UInt(value) => node_tql_scalar_json(serde_json::json!(value)),
                 TqlValue::Float(value) => serde_json::json!(value),
                 TqlValue::String(value) => serde_json::json!(value),
                 TqlValue::Bool(value) => serde_json::json!(value),
@@ -300,7 +324,7 @@ pub mod nodejs {
                         .map(|id| id.to_string())
                         .collect::<Vec<_>>()
                 ),
-                TqlValue::List(value) => serde_json::Value::Array(value),
+                TqlValue::List(value) => node_tql_scalar_json(serde_json::Value::Array(value)),
                 TqlValue::Null => serde_json::Value::Null,
             };
             obj.insert(name, value);

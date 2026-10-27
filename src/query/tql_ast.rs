@@ -435,6 +435,7 @@ pub enum TqlBinaryOp {
 #[derive(Debug, Clone)]
 pub enum TqlLiteral {
     Int(i64),
+    UInt(u64),
     Float(f64),
     Str(String),
     Bool(bool),

@@ -170,6 +170,7 @@ pub mod python {
                     "metadata": edge.metadata,
                 }),
                 TqlValue::Int(value) => serde_json::json!(value),
+                TqlValue::UInt(value) => serde_json::json!(value),
                 TqlValue::Float(value) => serde_json::json!(value),
                 TqlValue::String(value) => serde_json::json!(value),
                 TqlValue::Bool(value) => serde_json::json!(value),
@@ -2210,6 +2211,9 @@ pub mod python {
                             }
                             TqlValue::Int(value) => {
                                 let _ = py_row.set_item(name, value);
+                            }
+                            TqlValue::UInt(value) => {
+                                py_row.set_item(name, value)?;
                             }
                             TqlValue::Float(value) => {
                                 let _ = py_row.set_item(name, value);

@@ -621,6 +621,12 @@ RETURN clustered, topic(clustered) AS topic_id, topic_score(clustered) AS confid
 
 表达式支持 `+ - * /`、括号优先级、参数、属性、一等分数、`COALESCE`、`IS NULL/IS NOT NULL`、`path()` 与 `path_length()`。认知管线新增 `text_score()`、`diversity_score()`、`residual_score()`、`topic()` 与 `topic_score()`；未携带对应分数的行返回 Null。除零、非数值算术和非有限结果返回 Null，不 panic。
 
+整数的字面量、属性、节点 ID 与 Prepared 参数覆盖 `i64::MIN..=u64::MAX`；Rust 一等值使用 `Int(i64)`、`UInt(u64)`、`Float(f64)`。`WHERE`、排序与 `MIN/MAX` 共用精确数值比较，整数和浮点混合比较保持整数精度。浮点相等比较使用实际数值相等；`+0.0` 与 `-0.0` 相等。
+
+整数之间的 `+ - *` 和整数 `SUM` 保留整数结果，超出整数域时返回 Null。含浮点操作数的算术、除法与 `AVG` 使用 binary64；除法仅将实际的正负零视为零分母，有限的小分母正常计算。`MIN/MAX` 保留选中数值的类型和值。
+
+Python 返回精确 `int`。Node 的整数标量在安全整数范围内返回 `number`，超范围时返回十进制字符串，`COLLECT` 等列表中的整数采用相同转换；整节点结果中的 ID 继续使用字符串。例如，`RETURN 18446744073709551613 AS value` 在 Python 中返回整数，在 Node 中返回字符串 `"18446744073709551613"`。
+
 聚合支持 `COUNT/SUM/AVG/MIN/MAX/COLLECT` 与 aggregate `DISTINCT`。RETURN 中非聚合表达式构成隐式分组键；`DISTINCT b.id`、`DISTINCT id(b)` 和 `DISTINCT b.field` 均按实际投影值去重。空输入 `COUNT(*)=0`，其他无值聚合返回 Null。Rust 的 `tql()` 与 Python/Node 动态语言入口均返回统一一等值；`tql_nodes()` 保留给只需要节点绑定的 Rust 调用方，`tql_values()` 是兼容别名。
 
 ## 向量更新

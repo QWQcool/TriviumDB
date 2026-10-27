@@ -65,6 +65,7 @@ pub enum TqlValue<T> {
     Node(Node<T>),
     Edge(EdgeView),
     Int(i64),
+    UInt(u64),
     Float(f64),
     String(String),
     Bool(bool),
@@ -1056,10 +1057,15 @@ fn json_to_tql_value<T>(value: serde_json::Value) -> TqlValue<T> {
     match value {
         serde_json::Value::Null => TqlValue::Null,
         serde_json::Value::Bool(value) => TqlValue::Bool(value),
-        serde_json::Value::Number(value) => value.as_i64().map_or_else(
-            || TqlValue::Float(value.as_f64().unwrap_or(f64::NAN)),
-            TqlValue::Int,
-        ),
+        serde_json::Value::Number(value) => {
+            if let Some(value) = value.as_i64() {
+                TqlValue::Int(value)
+            } else if let Some(value) = value.as_u64() {
+                TqlValue::UInt(value)
+            } else {
+                TqlValue::Float(value.as_f64().unwrap_or(f64::NAN))
+            }
+        }
         serde_json::Value::String(value) => TqlValue::String(value),
         serde_json::Value::Array(value) => TqlValue::List(value),
         serde_json::Value::Object(value) => {
@@ -1103,7 +1109,7 @@ fn project_legacy_value_row<T: VectorType>(
             }
             ReturnExprKind::Property(var, field) => row.get(var).map_or(TqlValue::Null, |node| {
                 if field == "id" {
-                    TqlValue::Int(node.id as i64)
+                    json_to_tql_value(serde_json::json!(node.id))
                 } else {
                     node.payload
                         .get(field)
@@ -1502,27 +1508,10 @@ fn aggregate_pipeline_value<T: VectorType>(
         AggFunc::Count => TqlValue::Int(values.len() as i64),
         AggFunc::Collect => TqlValue::List(values),
         AggFunc::Sum | AggFunc::Avg | AggFunc::Min | AggFunc::Max => {
-            let numbers = values
-                .iter()
-                .filter_map(serde_json::Value::as_f64)
-                .filter(|value| value.is_finite())
-                .collect::<Vec<_>>();
-            if numbers.is_empty() {
-                TqlValue::Null
-            } else {
-                let value = match func {
-                    AggFunc::Sum => numbers.iter().sum(),
-                    AggFunc::Avg => numbers.iter().sum::<f64>() / numbers.len() as f64,
-                    AggFunc::Min => numbers.into_iter().fold(f64::INFINITY, f64::min),
-                    AggFunc::Max => numbers.into_iter().fold(f64::NEG_INFINITY, f64::max),
-                    _ => {
-                        return Err(TriviumError::QueryExecution(
-                            "聚合函数状态不一致 (Inconsistent aggregate function state)".into(),
-                        ));
-                    }
-                };
-                TqlValue::Float(value)
-            }
+            json_to_tql_value(aggregate_numbers(
+                func,
+                values.iter().filter_map(|value| value.as_number().cloned()),
+            ))
         }
     })
 }
@@ -1577,6 +1566,7 @@ fn pipeline_kind_json<T: VectorType>(
                 "metadata": edge.metadata,
             }),
             TqlValue::Int(value) => serde_json::json!(value),
+            TqlValue::UInt(value) => serde_json::json!(value),
             TqlValue::Float(value) => serde_json::json!(value),
             TqlValue::String(value) => serde_json::json!(value),
             TqlValue::Bool(value) => serde_json::json!(value),
@@ -1766,10 +1756,10 @@ fn eval_pipeline_row_expr<T: VectorType>(
     mt: &MemTable<T>,
 ) -> RuntimeValue {
     match expr {
-        TqlExpr::Variable(_) => RuntimeValue::Int(row.id as i64),
+        TqlExpr::Variable(_) => runtime_u64(row.id),
         TqlExpr::Property { field, .. } => {
             if field == "id" {
-                RuntimeValue::Int(row.id as i64)
+                runtime_u64(row.id)
             } else {
                 mt.get_payload(row.id)
                     .map(|payload| json_to_runtime(&payload[field]))
@@ -1843,11 +1833,11 @@ fn eval_pipeline_row_expr<T: VectorType>(
             .unwrap_or(RuntimeValue::Null),
         TqlExpr::PairLeft { .. } => row
             .pair
-            .map(|(left, _)| RuntimeValue::Int(left as i64))
+            .map(|(left, _)| runtime_u64(left))
             .unwrap_or(RuntimeValue::Null),
         TqlExpr::PairRight { .. } => row
             .pair
-            .map(|(_, right)| RuntimeValue::Int(right as i64))
+            .map(|(_, right)| runtime_u64(right))
             .unwrap_or(RuntimeValue::Null),
         TqlExpr::Binary { left, op, right } => eval_binary(
             eval_pipeline_row_expr(left, row, mt),
@@ -1896,6 +1886,7 @@ fn eval_pipeline_row_predicate<T: VectorType>(
 fn runtime_to_tql_value<T>(value: RuntimeValue) -> TqlValue<T> {
     match value {
         RuntimeValue::Int(value) => TqlValue::Int(value),
+        RuntimeValue::UInt(value) => TqlValue::UInt(value),
         RuntimeValue::Float(value) => TqlValue::Float(value),
         RuntimeValue::Str(value) => TqlValue::String(value),
         RuntimeValue::Bool(value) => TqlValue::Bool(value),
@@ -2609,6 +2600,7 @@ fn eval_predicate_single<T: VectorType>(pred: &Predicate, id: NodeId, mt: &MemTa
 #[derive(Debug, Clone)]
 enum RuntimeValue {
     Int(i64),
+    UInt(u64),
     Float(f64),
     Str(String),
     Bool(bool),
@@ -2659,7 +2651,7 @@ fn eval_tql_expr<T: VectorType>(
                 && let Some(id) = env[idx]
             {
                 if field == "id" {
-                    return RuntimeValue::Int(id as i64);
+                    return runtime_u64(id);
                 }
                 if let Some(payload) = mt.get_payload(id) {
                     return json_to_runtime(&payload[field]);
@@ -2710,7 +2702,7 @@ fn eval_tql_expr_single<T: VectorType>(
         | TqlExpr::PairRight { .. } => RuntimeValue::Null,
         TqlExpr::Property { field, .. } => {
             if field == "id" {
-                return RuntimeValue::Int(id as i64);
+                return runtime_u64(id);
             }
             if let Some(payload) = mt.get_payload(id) {
                 return json_to_runtime(&payload[field]);
@@ -2726,6 +2718,8 @@ fn json_to_runtime(v: &serde_json::Value) -> RuntimeValue {
         serde_json::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
                 RuntimeValue::Int(i)
+            } else if let Some(value) = n.as_u64() {
+                RuntimeValue::UInt(value)
             } else {
                 RuntimeValue::Float(n.as_f64().unwrap_or(0.0))
             }
@@ -2739,6 +2733,7 @@ fn json_to_runtime(v: &serde_json::Value) -> RuntimeValue {
 fn lit_to_runtime(lit: &TqlLiteral) -> RuntimeValue {
     match lit {
         TqlLiteral::Int(n) => RuntimeValue::Int(*n),
+        TqlLiteral::UInt(n) => RuntimeValue::UInt(*n),
         TqlLiteral::Float(f) => RuntimeValue::Float(*f),
         TqlLiteral::Str(s) => RuntimeValue::Str(s.clone()),
         TqlLiteral::Bool(b) => RuntimeValue::Bool(*b),
@@ -2746,22 +2741,55 @@ fn lit_to_runtime(lit: &TqlLiteral) -> RuntimeValue {
     }
 }
 
+fn runtime_u64(value: u64) -> RuntimeValue {
+    i64::try_from(value).map_or(RuntimeValue::UInt(value), RuntimeValue::Int)
+}
+
+fn runtime_number(value: &RuntimeValue) -> Option<serde_json::Number> {
+    match value {
+        RuntimeValue::Int(v) => Some((*v).into()),
+        RuntimeValue::UInt(v) => Some((*v).into()),
+        RuntimeValue::Float(v) => serde_json::Number::from_f64(*v),
+        _ => None,
+    }
+}
+
+fn integer_runtime(value: i128) -> RuntimeValue {
+    if value < 0 {
+        i64::try_from(value).map_or(RuntimeValue::Null, RuntimeValue::Int)
+    } else {
+        u64::try_from(value).map_or(RuntimeValue::Null, runtime_u64)
+    }
+}
+
 fn eval_binary(left: RuntimeValue, op: TqlBinaryOp, right: RuntimeValue) -> RuntimeValue {
-    let left = match left {
-        RuntimeValue::Int(value) => value as f64,
-        RuntimeValue::Float(value) => value,
-        _ => return RuntimeValue::Null,
+    let integer = |value: &RuntimeValue| match value {
+        RuntimeValue::Int(v) => Some(i128::from(*v)),
+        RuntimeValue::UInt(v) => Some(i128::from(*v)),
+        _ => None,
     };
-    let right = match right {
-        RuntimeValue::Int(value) => value as f64,
-        RuntimeValue::Float(value) => value,
-        _ => return RuntimeValue::Null,
+    if op != TqlBinaryOp::Divide
+        && let (Some(left), Some(right)) = (integer(&left), integer(&right))
+    {
+        let value = match op {
+            TqlBinaryOp::Add => left.checked_add(right),
+            TqlBinaryOp::Subtract => left.checked_sub(right),
+            TqlBinaryOp::Multiply => left.checked_mul(right),
+            TqlBinaryOp::Divide => None,
+        };
+        return value.map_or(RuntimeValue::Null, integer_runtime);
+    }
+    let Some(left) = runtime_number(&left).and_then(|n| n.as_f64()) else {
+        return RuntimeValue::Null;
+    };
+    let Some(right) = runtime_number(&right).and_then(|n| n.as_f64()) else {
+        return RuntimeValue::Null;
     };
     let value = match op {
         TqlBinaryOp::Add => left + right,
         TqlBinaryOp::Subtract => left - right,
         TqlBinaryOp::Multiply => left * right,
-        TqlBinaryOp::Divide if right.abs() > f64::EPSILON => left / right,
+        TqlBinaryOp::Divide if right != 0.0 => left / right,
         TqlBinaryOp::Divide => return RuntimeValue::Null,
     };
     if value.is_finite() {
@@ -2772,11 +2800,14 @@ fn eval_binary(left: RuntimeValue, op: TqlBinaryOp, right: RuntimeValue) -> Runt
 }
 
 fn compare_runtime(lhs: &RuntimeValue, op: &TqlCompOp, rhs: &RuntimeValue) -> bool {
+    if let (Some(left), Some(right)) = (runtime_number(lhs), runtime_number(rhs)) {
+        return cmp_ord(
+            &crate::filter::numeric_ordering(&left, &right),
+            op,
+            &std::cmp::Ordering::Equal,
+        );
+    }
     match (lhs, rhs) {
-        (RuntimeValue::Int(a), RuntimeValue::Int(b)) => cmp_ord(a, op, b),
-        (RuntimeValue::Float(a), RuntimeValue::Float(b)) => cmp_f64(*a, op, *b),
-        (RuntimeValue::Int(a), RuntimeValue::Float(b)) => cmp_f64(*a as f64, op, *b),
-        (RuntimeValue::Float(a), RuntimeValue::Int(b)) => cmp_f64(*a, op, *b as f64),
         (RuntimeValue::Str(a), RuntimeValue::Str(b)) => cmp_ord(a, op, b),
         (RuntimeValue::Bool(a), RuntimeValue::Bool(b)) => match op {
             TqlCompOp::Eq => a == b,
@@ -2791,17 +2822,6 @@ fn cmp_ord<T: Ord>(a: &T, op: &TqlCompOp, b: &T) -> bool {
     match op {
         TqlCompOp::Eq => a == b,
         TqlCompOp::Ne => a != b,
-        TqlCompOp::Gt => a > b,
-        TqlCompOp::Gte => a >= b,
-        TqlCompOp::Lt => a < b,
-        TqlCompOp::Lte => a <= b,
-    }
-}
-
-fn cmp_f64(a: f64, op: &TqlCompOp, b: f64) -> bool {
-    match op {
-        TqlCompOp::Eq => (a - b).abs() < f64::EPSILON,
-        TqlCompOp::Ne => (a - b).abs() >= f64::EPSILON,
         TqlCompOp::Gt => a > b,
         TqlCompOp::Gte => a >= b,
         TqlCompOp::Lt => a < b,
@@ -2921,14 +2941,14 @@ fn extract_order_key<T>(expr: &TqlExpr, row: &HashMap<String, Node<T>>) -> Runti
         TqlExpr::Property { var, field } => {
             if let Some(node) = row.get(var) {
                 if field == "id" {
-                    return RuntimeValue::Int(node.id as i64);
+                    return runtime_u64(node.id);
                 }
                 return json_to_runtime(&node.payload[field]);
             }
             // FIND/SEARCH 场景下节点绑定到 "_"
             if let Some(node) = row.get("_") {
                 if field == "id" {
-                    return RuntimeValue::Int(node.id as i64);
+                    return runtime_u64(node.id);
                 }
                 return json_to_runtime(&node.payload[field]);
             }
@@ -2939,17 +2959,10 @@ fn extract_order_key<T>(expr: &TqlExpr, row: &HashMap<String, Node<T>>) -> Runti
 }
 
 fn compare_for_sort(a: &RuntimeValue, b: &RuntimeValue) -> std::cmp::Ordering {
+    if let (Some(left), Some(right)) = (runtime_number(a), runtime_number(b)) {
+        return crate::filter::numeric_ordering(&left, &right);
+    }
     match (a, b) {
-        (RuntimeValue::Int(a), RuntimeValue::Int(b)) => a.cmp(b),
-        (RuntimeValue::Float(a), RuntimeValue::Float(b)) => {
-            a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
-        }
-        (RuntimeValue::Int(a), RuntimeValue::Float(b)) => (*a as f64)
-            .partial_cmp(b)
-            .unwrap_or(std::cmp::Ordering::Equal),
-        (RuntimeValue::Float(a), RuntimeValue::Int(b)) => a
-            .partial_cmp(&(*b as f64))
-            .unwrap_or(std::cmp::Ordering::Equal),
         (RuntimeValue::Str(a), RuntimeValue::Str(b)) => a.cmp(b),
         (RuntimeValue::Null, RuntimeValue::Null) => std::cmp::Ordering::Equal,
         (RuntimeValue::Null, _) => std::cmp::Ordering::Greater, // NULL 排最后
@@ -3373,46 +3386,12 @@ fn compute_aggregate<T: VectorType>(
             };
             serde_json::json!(count)
         }
-        AggFunc::Sum => {
-            let sum: f64 = rows
-                .iter()
-                .filter_map(|r| resolve_inner_numeric(inner, r))
-                .sum();
-            serde_json::json!(sum)
-        }
-        AggFunc::Avg => {
-            let vals: Vec<f64> = rows
-                .iter()
-                .filter_map(|r| resolve_inner_numeric(inner, r))
-                .collect();
-            if vals.is_empty() {
-                serde_json::Value::Null
-            } else {
-                serde_json::json!(vals.iter().sum::<f64>() / vals.len() as f64)
-            }
-        }
-        AggFunc::Min => {
-            let min = rows
-                .iter()
-                .filter_map(|r| resolve_inner_numeric(inner, r))
-                .fold(f64::INFINITY, f64::min);
-            if min.is_infinite() {
-                serde_json::Value::Null
-            } else {
-                serde_json::json!(min)
-            }
-        }
-        AggFunc::Max => {
-            let max = rows
-                .iter()
-                .filter_map(|r| resolve_inner_numeric(inner, r))
-                .fold(f64::NEG_INFINITY, f64::max);
-            if max.is_infinite() {
-                serde_json::Value::Null
-            } else {
-                serde_json::json!(max)
-            }
-        }
+        AggFunc::Sum | AggFunc::Avg | AggFunc::Min | AggFunc::Max => aggregate_numbers(
+            func,
+            rows.iter().filter_map(|row| {
+                resolve_inner_json(inner, row).and_then(|value| value.as_number().cloned())
+            }),
+        ),
         AggFunc::Collect => {
             let vals: Vec<serde_json::Value> = rows
                 .iter()
@@ -3435,21 +3414,54 @@ fn resolve_inner<'a, T: VectorType>(
     }
 }
 
-/// 解析为数值
-fn resolve_inner_numeric<T: VectorType>(
-    inner: &ReturnExprKind,
-    row: &HashMap<String, Node<T>>,
-) -> Option<f64> {
-    match inner {
-        ReturnExprKind::Var(v) => {
-            // count 风格: 变量存在就是 1
-            row.get(v).map(|_| 1.0)
-        }
-        ReturnExprKind::Property(v, field) => row
-            .get(v)
-            .and_then(|node| node.payload.get(field).and_then(|v| v.as_f64())),
-        _ => None,
+fn aggregate_numbers(
+    func: AggFunc,
+    values: impl Iterator<Item = serde_json::Number>,
+) -> serde_json::Value {
+    let values = values.collect::<Vec<_>>();
+    if values.is_empty() {
+        return serde_json::Value::Null;
     }
+    if func == AggFunc::Min || func == AggFunc::Max {
+        let selected = values.into_iter().reduce(|left, right| {
+            let order = crate::filter::numeric_ordering(&left, &right);
+            if (func == AggFunc::Min && order.is_gt()) || (func == AggFunc::Max && order.is_lt()) {
+                right
+            } else {
+                left
+            }
+        });
+        return selected.map_or(serde_json::Value::Null, serde_json::Value::Number);
+    }
+    if func == AggFunc::Sum
+        && values
+            .iter()
+            .all(|value| value.as_i64().is_some() || value.as_u64().is_some())
+    {
+        let sum = values.iter().try_fold(0i128, |sum, value| {
+            sum.checked_add(
+                value
+                    .as_i64()
+                    .map(i128::from)
+                    .or_else(|| value.as_u64().map(i128::from))?,
+            )
+        });
+        return match sum.map(integer_runtime) {
+            Some(RuntimeValue::Int(value)) => serde_json::json!(value),
+            Some(RuntimeValue::UInt(value)) => serde_json::json!(value),
+            _ => serde_json::Value::Null,
+        };
+    }
+    let sum = values
+        .iter()
+        .filter_map(serde_json::Number::as_f64)
+        .sum::<f64>();
+    let result = if func == AggFunc::Avg {
+        sum / values.len() as f64
+    } else {
+        sum
+    };
+    serde_json::Number::from_f64(result).map_or(serde_json::Value::Null, serde_json::Value::Number)
 }
 
 /// 解析为 JSON 值
@@ -3469,6 +3481,15 @@ fn resolve_inner_json<T: VectorType>(
                     .unwrap_or(serde_json::Value::Null)
             }
         }),
+        ReturnExprKind::Scalar(expr) => Some(match extract_order_key(expr, row) {
+            RuntimeValue::Int(value) => serde_json::json!(value),
+            RuntimeValue::UInt(value) => serde_json::json!(value),
+            RuntimeValue::Float(value) => serde_json::json!(value),
+            RuntimeValue::Str(value) => serde_json::json!(value),
+            RuntimeValue::Bool(value) => serde_json::json!(value),
+            RuntimeValue::Path(value) => serde_json::json!(value),
+            RuntimeValue::Null => serde_json::Value::Null,
+        }),
         _ => None,
     }
 }
@@ -3481,6 +3502,7 @@ fn resolve_inner_json<T: VectorType>(
 fn tql_literal_to_json(literal: &TqlLiteral) -> serde_json::Value {
     match literal {
         TqlLiteral::Int(value) => (*value).into(),
+        TqlLiteral::UInt(value) => (*value).into(),
         TqlLiteral::Float(value) => serde_json::Number::from_f64(*value)
             .map_or(serde_json::Value::Null, serde_json::Value::Number),
         TqlLiteral::Str(value) => value.clone().into(),

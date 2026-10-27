@@ -1273,6 +1273,7 @@ fn predicate_property_field(predicate: &Predicate) -> Option<&str> {
 fn literal_value(literal: &TqlLiteral) -> serde_json::Value {
     match literal {
         TqlLiteral::Int(value) => (*value).into(),
+        TqlLiteral::UInt(value) => (*value).into(),
         TqlLiteral::Float(value) => serde_json::Number::from_f64(*value)
             .map_or(serde_json::Value::Null, serde_json::Value::Number),
         TqlLiteral::Str(value) => value.clone().into(),

@@ -20,6 +20,7 @@ struct ApplicationGuard<'a, T: VectorType> {
     wal: &'a std::sync::Mutex<crate::storage::wal::Wal>,
     lifecycle: &'a std::sync::Mutex<super::LifecycleState>,
     previous_pause: bool,
+    previous_unique_pause: bool,
     complete: bool,
 }
 impl<'a, T: VectorType> ApplicationGuard<'a, T> {
@@ -28,6 +29,8 @@ impl<'a, T: VectorType> ApplicationGuard<'a, T> {
         wal: &'a std::sync::Mutex<crate::storage::wal::Wal>,
         lifecycle: &'a std::sync::Mutex<super::LifecycleState>,
     ) -> Self {
+        let previous_unique_pause = mt.unique_updates_paused();
+        mt.set_unique_updates_paused(true);
         let previous_pause = mt.quiver_sync_paused();
         mt.set_quiver_sync_paused(true);
         Self {
@@ -35,6 +38,7 @@ impl<'a, T: VectorType> ApplicationGuard<'a, T> {
             wal,
             lifecycle,
             previous_pause,
+            previous_unique_pause,
             complete: false,
         }
     }
@@ -42,6 +46,8 @@ impl<'a, T: VectorType> ApplicationGuard<'a, T> {
 impl<T: VectorType> Drop for ApplicationGuard<'_, T> {
     fn drop(&mut self) {
         self.mt.set_quiver_sync_paused(self.previous_pause);
+        self.mt
+            .set_unique_updates_paused(self.previous_unique_pause);
         if !self.complete {
             self.mt.require_recovery();
             lock_or_recover(self.wal).release_writer();
@@ -681,7 +687,17 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                 memory_limit: self.memory_limit,
             });
         }
-        mt.validate_unique_changes(unique_changes.iter().map(|(id, payload)| (*id, *payload)))?;
+        let changes = unique_changes
+            .iter()
+            .map(|(id, payload)| (*id, *payload))
+            .collect::<Vec<_>>();
+        let unique_delta = mt.prepare_unique_delta(&changes)?;
+        mt.ensure_additional_memory(
+            self.memory_limit,
+            estimated_bytes.saturating_add(unique_delta.workspace_bytes()),
+        )?;
+        mt.reserve_unique_delta(&unique_delta)?;
+        drop(unique_changes);
         mt.reserve_text_deletes(delete_count)?;
         mt.try_reserve_for_insert(insert_count)?;
 
@@ -842,6 +858,10 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
             .mt
             .set_quiver_sync_paused(application.previous_pause);
         apply_result?;
+        application.mt.apply_unique_delta(unique_delta)?;
+        application
+            .mt
+            .set_unique_updates_paused(application.previous_unique_pause);
 
         // ════════ 第五阶段：QuIVer 增量同步（分离时间线） ════════
         // 数据应用已完成后再同步索引，避免应用期间触发中间代际的增量维护。
@@ -965,9 +985,11 @@ mod guard_tests {
                 let wal: &Mutex<_> = &db.wal;
                 let mut mt = write_or_recover(&db.memtable);
                 mt.set_quiver_sync_paused(previous);
+                mt.set_unique_updates_paused(previous);
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let mut guard = ApplicationGuard::new(&mut mt, wal, &db.lifecycle.0);
                     assert!(guard.mt.quiver_sync_paused());
+                    assert!(guard.mt.unique_updates_paused());
                     if panicking {
                         panic!("受控事务应用展开");
                     }
@@ -975,6 +997,7 @@ mod guard_tests {
                 }));
                 assert_eq!(result.is_err(), panicking);
                 assert_eq!(mt.quiver_sync_paused(), previous);
+                assert_eq!(mt.unique_updates_paused(), previous);
                 assert_eq!(
                     lock_or_recover(&db.lifecycle.0).recovery_required,
                     panicking
