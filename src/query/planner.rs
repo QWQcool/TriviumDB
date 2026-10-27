@@ -291,8 +291,8 @@ pub fn plan_match<T: VectorType>(
     optional: bool,
 ) -> MatchPlan {
     if optional {
-        let mut forward = if let Some(filter) = &pattern.nodes[0].filter {
-            plan_filter(filter, mt)
+        let mut forward = if pattern.nodes[0].filter.is_some() {
+            plan_pattern_start(pattern, mt)
         } else {
             NodeAccessPlan {
                 access_path: AccessPath::FullNodeScan,
@@ -375,7 +375,14 @@ fn plan_pattern_start<T: VectorType>(pattern: &TqlPattern, mt: &MemTable<T>) -> 
                 },
             };
         }
-        return plan_filter(filter, mt);
+        return match payload_candidate_filter(filter) {
+            Some(filter) => plan_filter(&filter, mt),
+            None => NodeAccessPlan {
+                access_path: AccessPath::FullNodeScan,
+                estimated_rows: mt.node_count(),
+                candidates: Vec::new(),
+            },
+        };
     }
     if let Some(edge) = pattern.edges.first()
         && !edge.labels.is_empty()
@@ -399,6 +406,26 @@ fn plan_pattern_start<T: VectorType>(pattern: &TqlPattern, mt: &MemTable<T>) -> 
 fn materialize_full_scan<T: VectorType>(plan: &mut NodeAccessPlan, mt: &MemTable<T>) {
     if matches!(plan.access_path, AccessPath::FullNodeScan) && plan.candidates.is_empty() {
         plan.candidates = mt.all_node_ids();
+    }
+}
+
+/// 结构 ID 的事实来自节点目录；Payload 索引仅裁剪可独立成立的普通字段条件。
+fn payload_candidate_filter(filter: &Filter) -> Option<Filter> {
+    match filter {
+        Filter::And(filters) => {
+            let parts = filters
+                .iter()
+                .filter_map(payload_candidate_filter)
+                .collect::<Vec<_>>();
+            (!parts.is_empty()).then_some(Filter::And(parts))
+        }
+        Filter::Or(filters) => filters
+            .iter()
+            .map(payload_candidate_filter)
+            .collect::<Option<Vec<_>>>()
+            .map(Filter::Or),
+        _ if filter.field_name() == Some("id") => None,
+        _ => Some(filter.clone()),
     }
 }
 

@@ -45,6 +45,8 @@ TriviumDB 采用 **五层防御式测试体系**，从函数级正确性到系�
 
 `cargo test --test core tql_semantics` 验证普通 MATCH、FIND、WITH 与具名边的完整返回内容、分组、聚合、去重、别名排序和分页。`tests/contracts/tql_return_cases.json` 由 Rust、Python、Node 共同消费；Node 同时通过 `npm run test:package` 在独立安装的 tarball 上执行。DML 用例验证多字段合并、每行 CREATE 作用域、完整 u64 位模式、浮点转换边界、拒绝后的 WAL 内容及关闭重开。纯向量管线在分页后核对具体节点与 Payload 读取量。
 
+`cargo test --test core tql_boundaries` 验证内联 ID、结构 ID 与 Payload 索引域、OPTIONAL 起点过滤、具名边谓词、实体空值、JSON 容器、重复变量、默认列名、Prepared 非法槽位与精确向量输入。固定数值样例覆盖整数/浮点等价表示、2^53 相邻整数、有符号边界及 u64 上限，并在 Hash、Ordered、Bitmap、Composite 配置中核对具体结果。`tests/contracts/tql_boundary_cases.json` 为三端提供固定输入和完整预期；Node 与 Python 的公共 API 入口还验证拒绝后的 WAL 保持、完整大 ID 更新、容器输出及安装制品上的 u64 SEARCH/RANK/Prepared 行为。
+
 检索边界使用预先给定的 NodeId 次序验证槽位复用、分段扫描、并行度与 Top-K 截断；数值排序覆盖 `i64/u64` 端点、2^53 相邻整数、正负小数及索引重载。内存计量测试独立遍历实际容器，核对增量账本在替换、重复登记、删除、编译和重载后的值。事务应用故障测试在 WAL 提交后注入失败，要求当前句柄与已准入的共享搜索拒绝部分状态，并在重开后核对完整事务和再次持久化结果。
 
 定向入口：`cargo test --test core search_boundaries`、`cargo test --lib --features test-hooks guard_tests`、`cargo test --test fault_io --features test-hooks wal_failure_state -- --test-threads=1`。QuIVer 调整的质量与耗时对照同时记录数据分布、种子、维度、候选宽度、精排预算、平台和构建参数。

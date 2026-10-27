@@ -15,6 +15,7 @@ pub enum CanonicalValue {
     Edge(u64, u64, String),
     Path(Vec<u64>),
     List(Vec<CanonicalValue>),
+    Object(BTreeMap<String, CanonicalValue>),
 }
 
 impl Ord for CanonicalValue {
@@ -48,9 +49,12 @@ fn json_value(value: &serde_json::Value) -> CanonicalValue {
         serde_json::Value::Array(values) => {
             CanonicalValue::List(values.iter().map(json_value).collect())
         }
-        serde_json::Value::Object(value) => {
-            CanonicalValue::String(serde_json::to_string(value).expect("JSON object 必须可序列化"))
-        }
+        serde_json::Value::Object(value) => CanonicalValue::Object(
+            value
+                .iter()
+                .map(|(k, v)| (k.clone(), json_value(v)))
+                .collect(),
+        ),
     }
 }
 
@@ -67,6 +71,12 @@ pub fn from_tql_value(value: &TqlValue<f32>) -> CanonicalValue {
         TqlValue::Bool(value) => CanonicalValue::Bool(*value),
         TqlValue::Path(value) => CanonicalValue::Path(value.clone()),
         TqlValue::List(value) => CanonicalValue::List(value.iter().map(json_value).collect()),
+        TqlValue::Object(value) => CanonicalValue::Object(
+            value
+                .iter()
+                .map(|(k, v)| (k.clone(), json_value(v)))
+                .collect(),
+        ),
         TqlValue::Null => CanonicalValue::Null,
     }
 }

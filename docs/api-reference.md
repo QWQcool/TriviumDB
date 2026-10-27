@@ -1159,9 +1159,11 @@ TQL 公共 API 提供 **自由 DIY 混合查询能力**。调用者可以用一�
 
 ### tql / tql_values
 
-支持 MATCH、OPTIONAL MATCH、FIND、SEARCH、WITH 管线、聚合、图算法、路径与集合代数。Rust `tql()` 返回同时承载节点、边、标量和 Path/List 的一等值；`tql_values()` 为兼容别名，`tql_nodes()` 提供节点绑定容器。Python/Node 的 `tql` 同步承载一等值。
+支持 MATCH、OPTIONAL MATCH、FIND、SEARCH、WITH 管线、聚合、图算法、路径与集合代数。Rust `tql()` 返回同时承载节点、边、标量、Object 和 Path/List 的一等值；`tql_values()` 为兼容别名，`tql_nodes()` 提供节点绑定容器。Python/Node 的 `tql` 同步承载一等值。
 
 普通查询、WITH 与单跳具名边共享分组、COUNT(expr)、DISTINCT、别名排序与分页。返回列独立保存；省略 AS 时使用表达式名，例如 `Count(*)`。WITH 使用实例行数、内存工作区与取消配置。完整语义见 [TQL 返回处理](tql-reference.md#return--order-by--limit--offset)。
+
+MATCH 内联 `id` 和节点的 `.id` 属性使用完整无符号节点 ID；`FIND` 与 `MATCHES` 文档条件读取 Payload 字段。单跳边变量在 WHERE、RETURN、COALESCE、聚合和空值判断中保持边绑定；OPTIONAL MATCH 为符合起点条件且无合格边的记录补齐 Null 列。
 
 **Python：**
 ```python
@@ -1212,6 +1214,8 @@ const rows = db.executePreparedTql(prepared, { bonus: 4 })
 
 Prepared 参数只接受 null/bool/string/number；缺参、额外参数、数组/对象和非有限数值明确失败。
 
+SEARCH 向量的字面量与数值参数按数据库 dtype 转换，u64 分量保持整数位模式。RANK 和 RESIDUAL 的向量字面量采用相同转换。Rust 的 `QueryEntry::Search.vector`、`RankClause.vector` 和 `ResidualStage.vector` 使用 `Vec<serde_json::Number>`；`pipeline::lower_search_entry()` 返回 `Result`，调用方传播数值转换错误。
+
 ### 一等值映射
 
 | TQL 值 | Python | Node |
@@ -1222,7 +1226,10 @@ Prepared 参数只接受 null/bool/string/number；缺参、额外参数、数�
 | Float/String/Bool | 原生标量 | 原生标量 |
 | Path | `list[int]` | `string[]`，避免 u64 精度损失 |
 | List | list | array |
+| Object | dict，嵌套整数保持精度 | object，嵌套超安全整数转十进制字符串 |
 | Null | None | null |
+
+Rust 使用 `TqlValue::Object(serde_json::Map<String, serde_json::Value>)` 承载对象。数组和对象作为完整 JSON 值参与空值判断、COALESCE、去重与分组；节点和边按实体身份参与表达式求值。
 
 ### tql_mut — 执行 TQL 写操作
 

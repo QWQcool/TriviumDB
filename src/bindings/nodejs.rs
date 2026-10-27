@@ -325,6 +325,7 @@ pub mod nodejs {
                         .collect::<Vec<_>>()
                 ),
                 TqlValue::List(value) => node_tql_scalar_json(serde_json::Value::Array(value)),
+                TqlValue::Object(value) => node_tql_scalar_json(serde_json::Value::Object(value)),
                 TqlValue::Null => serde_json::Value::Null,
             };
             obj.insert(name, value);

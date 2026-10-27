@@ -163,6 +163,8 @@ impl TqlParser {
             offset,
         };
         validate_pipeline_scope(&query)?;
+        super::tql_executor::validate_return_columns(&query.returns)
+            .map_err(|error| error.to_string())?;
         Ok(query)
     }
 
@@ -227,21 +229,7 @@ impl TqlParser {
         let var = self.parse_ident()?;
         self.expect(&TqlToken::By)?;
         self.expect(&TqlToken::Vector)?;
-        self.expect(&TqlToken::LBracket)?;
-        let mut vector = Vec::new();
-        while !self.at(&TqlToken::RBracket) {
-            let value = match self.advance() {
-                TqlToken::FloatLit(value) => value,
-                TqlToken::IntLit(value) => value as f64,
-                TqlToken::UIntLit(value) => value as f64,
-                other => return Err(format!("Expected number in RANK vector, got {other:?}")),
-            };
-            vector.push(value);
-            if self.at(&TqlToken::Comma) {
-                self.advance();
-            }
-        }
-        self.expect(&TqlToken::RBracket)?;
+        let vector = self.parse_numeric_vector()?;
         self.expect(&TqlToken::Top)?;
         let top_k = self.parse_positive_int()?;
         Ok(RankClause { var, vector, top_k })
@@ -273,17 +261,19 @@ impl TqlParser {
         while self.at(&TqlToken::Dash) || self.at(&TqlToken::LeftArrow) {
             edges.push(self.parse_edge_pattern()?);
             let next_node = self.parse_node_pattern()?;
-            if next_node.var.is_none() {
-                return Err("路径中间或末尾的节点必须指定变量名".into());
-            }
             nodes.push(next_node);
         }
 
-        if !edges.is_empty() && nodes[0].var.is_none() {
-            return Err("包含边的路径中，起始节点也必须指定变量名".into());
+        let named_single =
+            edges.len() == 1 && edges[0].var.is_some() && edges[0].hop_range.is_none();
+        if !named_single && !edges.is_empty() && nodes.iter().any(|node| node.var.is_none()) {
+            return Err(
+                "此路径的节点需要具名绑定 (Nodes in this path require named bindings)".into(),
+            );
         }
-
-        Ok(TqlPattern { nodes, edges })
+        let pattern = TqlPattern { nodes, edges };
+        super::tql_executor::validate_pattern(&pattern).map_err(|error| error.to_string())?;
+        Ok(pattern)
     }
 
     /// 节点模式: (var {doc_filter})
@@ -428,18 +418,11 @@ impl TqlParser {
             }
             let index = vector.len();
             let value = match self.advance() {
-                TqlToken::FloatLit(value) => value,
-                TqlToken::IntLit(value) => value as f64,
-                TqlToken::UIntLit(value) => value as f64,
                 TqlToken::DollarOp(name) => {
                     vector_parameters.push((index, name.trim_start_matches('$').to_owned()));
-                    0.0
+                    0.into()
                 }
-                other => {
-                    return Err(format!(
-                        "Expected number or parameter in vector, got {other:?}"
-                    ));
-                }
+                token => Self::numeric_token(token)?,
             };
             vector.push(value);
             if self.at(&TqlToken::Comma) {
@@ -842,15 +825,7 @@ impl TqlParser {
                 let input = self.parse_ident()?;
                 self.expect(&TqlToken::By)?;
                 self.expect(&TqlToken::Vector)?;
-                self.expect(&TqlToken::LBracket)?;
-                let mut vector = Vec::new();
-                while !self.at(&TqlToken::RBracket) {
-                    vector.push(self.parse_finite_f32()? as f64);
-                    if self.at(&TqlToken::Comma) {
-                        self.advance();
-                    }
-                }
-                self.expect(&TqlToken::RBracket)?;
+                let vector = self.parse_numeric_vector()?;
                 self.expect(&TqlToken::Top)?;
                 let top_k = self.parse_positive_int()?;
                 self.expect_ident_keyword("lambda")?;
@@ -1531,7 +1506,7 @@ impl TqlParser {
                         | "path"
                         | "path_length"
                         | "id"
-                ) =>
+                ) && self.tokens.get(self.pos.saturating_add(1)) == Some(&TqlToken::LParen) =>
             {
                 self.advance();
                 self.expect(&TqlToken::LParen)?;
@@ -1576,7 +1551,10 @@ impl TqlParser {
                 self.advance();
                 Ok(TqlExpr::Parameter(name.trim_start_matches('$').to_owned()))
             }
-            TqlToken::Ident(name) if name.eq_ignore_ascii_case("coalesce") => {
+            TqlToken::Ident(name)
+                if name.eq_ignore_ascii_case("coalesce")
+                    && self.tokens.get(self.pos.saturating_add(1)) == Some(&TqlToken::LParen) =>
+            {
                 self.advance();
                 self.expect(&TqlToken::LParen)?;
                 let mut values = vec![self.parse_expr()?];
@@ -1973,20 +1951,25 @@ impl TqlParser {
         Ok(TqlMutation { source, action })
     }
 
+    /// 向量字面量保持 JSON 数值域，由目标 dtype 统一检查转换。
+    fn numeric_token(token: TqlToken) -> Result<serde_json::Number, String> {
+        match token {
+            TqlToken::IntLit(value) => Ok(value.into()),
+            TqlToken::UIntLit(value) => Ok(value.into()),
+            TqlToken::FloatLit(value) => serde_json::Number::from_f64(value).ok_or_else(|| {
+                "向量分量必须为有限数值 (Vector components must be finite)".to_owned()
+            }),
+            other => Err(format!(
+                "向量分量要求数值 (Expected a numeric vector component): {other:?}"
+            )),
+        }
+    }
+
     fn parse_numeric_vector(&mut self) -> Result<Vec<serde_json::Number>, String> {
         self.expect(&TqlToken::LBracket)?;
         let mut vector = Vec::new();
         while !self.at(&TqlToken::RBracket) {
-            let value = match self.advance() {
-                TqlToken::FloatLit(value) => {
-                    serde_json::Number::from_f64(value).ok_or_else(|| {
-                        "向量分量必须为有限数值 (Vector components must be finite)".to_owned()
-                    })?
-                }
-                TqlToken::IntLit(value) => value.into(),
-                TqlToken::UIntLit(value) => value.into(),
-                other => return Err(format!("Expected number in vector, got {other:?}")),
-            };
+            let value = Self::numeric_token(self.advance())?;
             vector.push(value);
             if self.at(&TqlToken::Comma) {
                 self.advance();
@@ -2161,7 +2144,17 @@ fn predicate_vars(predicate: &Predicate, output: &mut Vec<String>) {
 
 fn validate_pipeline_scope(query: &TqlQuery) -> Result<(), String> {
     if query.pipeline.is_empty() {
-        return Ok(());
+        let pattern = match &query.entry {
+            QueryEntry::Match { pattern } | QueryEntry::OptionalMatch { pattern } => pattern,
+            _ => return Ok(()),
+        };
+        let scope = pattern
+            .nodes
+            .iter()
+            .filter_map(|node| node.var.clone())
+            .chain(pattern.edges.iter().filter_map(|edge| edge.var.clone()))
+            .collect();
+        return validate_final_scope(query, scope, std::collections::BTreeSet::new());
     }
     let mut scope = std::collections::BTreeSet::from(["_".to_owned()]);
     let mut scalar_aliases = std::collections::BTreeSet::new();
@@ -2319,7 +2312,14 @@ fn validate_pipeline_scope(query: &TqlQuery) -> Result<(), String> {
             }
         }
     }
-    let final_scope = scope;
+    validate_final_scope(query, scope, scalar_aliases)
+}
+
+fn validate_final_scope(
+    query: &TqlQuery,
+    final_scope: std::collections::BTreeSet<String>,
+    scalar_aliases: std::collections::BTreeSet<String>,
+) -> Result<(), String> {
     let mut referenced = Vec::new();
     if let Some(predicate) = &query.predicate {
         predicate_vars(predicate, &mut referenced);

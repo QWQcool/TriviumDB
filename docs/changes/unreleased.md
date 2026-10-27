@@ -2,6 +2,22 @@
 
 后续变更以 `0.9.0-beta.2` 为基线；该版本内容见[变更说明](0.9.0-beta.2.md)。
 
+## TQL 绑定、值域与索引候选
+
+- MATCH 内联 ID 使用完整无符号数值比较；结构 ID 的筛选和排序使用对应的节点域。OPTIONAL MATCH 按起点条件产生匹配行或 Null 后缀，重复节点变量约束实体身份。
+- 单跳具名边在 WHERE、RETURN、空值、COALESCE 和聚合中保留完整绑定，支持匿名端点、平行标签和双向自环去重。节点与边作为实体值求值，数组和对象按实际 JSON 内容参与表达式、分组与去重。
+- Rust 结果新增 `TqlValue::Object`，Python 与 Node 同步返回原生对象，Node 递归保留对象中的大整数。字面量默认列名采用规范文本，重复列名明确报错，Prepared 参数列名在绑定前确定，函数同名别名可排序。
+- SEARCH、RANK、RESIDUAL 和 Prepared SEARCH 按目标 dtype 转换数值，u64 检索保留完整位模式。Rust 对应向量 AST 字段采用 `Vec<serde_json::Number>`，`lower_search_entry()` 返回 `Result`；非法参数槽位与未绑定参数返回明确错误。
+- TQL 数值等值索引候选合并精确等价的整数与浮点键，保留相邻大整数的区别，并执行完整谓词复核。增加三端固定样例及跨索引、存储模式、作用域、实体与数值边界回归。
+
+## TQL bindings, value domains and index candidates
+
+- Inline MATCH IDs use full unsigned numeric comparisons. Structural ID filtering and ordering operate on node identities. OPTIONAL MATCH applies start conditions before producing matched rows or null suffixes; repeated node variables constrain entity identity.
+- Named single-hop edges retain complete bindings in WHERE, RETURN, null checks, COALESCE and aggregation. They support anonymous endpoints, parallel labels and bidirectional self-loop deduplication. Nodes and edges evaluate as entity values; arrays and objects participate in expressions, grouping and deduplication by their JSON contents.
+- Rust adds `TqlValue::Object`. Python and Node return native objects, with Node recursively preserving large integers. Literal output columns use normalized literal text; duplicate column names fail explicitly. Prepared parameter column names are fixed before binding, and aliases that share function names support ordering.
+- SEARCH, RANK, RESIDUAL and prepared SEARCH convert numbers for the target dtype, preserving the full u64 bit pattern. Corresponding Rust vector AST fields use `Vec<serde_json::Number>`, and `lower_search_entry()` returns `Result`. Invalid parameter slots and unbound parameters fail explicitly.
+- TQL numeric equality candidates merge exactly equivalent integer and floating keys, keep adjacent large integers distinct, and apply the complete predicate. Shared language cases and regressions cover index configurations, storage modes, scopes, entities and numeric boundaries.
+
 ## TQL 返回处理与匹配写入
 
 - 普通 MATCH/FIND、WITH 与单跳具名边共用返回处理。计算表达式与节点 ID 形成完整分组键，COUNT(expr) 统计非 Null 求值；聚合、DISTINCT、别名排序与分页按相同顺序执行。

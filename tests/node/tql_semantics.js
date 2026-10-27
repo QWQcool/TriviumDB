@@ -5,6 +5,7 @@ const path = require('node:path')
 const contract = require('../contracts/tql_return_cases.json')
 
 module.exports = function tqlSemantics(root, TriviumDB) {
+  require('./tql_boundaries.js')(root, TriviumDB)
   const options = { dim: contract.dimension, autoBuildQuiver: false }
   const open = (name, extra = {}) => new TriviumDB(path.join(root, `semantics-${name}.tdb`), { ...options, ...extra })
   const db = open('returns')

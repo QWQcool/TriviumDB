@@ -61,6 +61,28 @@ pub enum Filter {
 }
 
 impl Filter {
+    /// 逻辑组合返回空，其余条件返回所引用的顶层字段。
+    pub(crate) fn field_name(&self) -> Option<&str> {
+        match self {
+            Self::And(_) | Self::Or(_) => None,
+            Self::Eq(k, _)
+            | Self::Ne(k, _)
+            | Self::Gt(k, _)
+            | Self::Gte(k, _)
+            | Self::Lt(k, _)
+            | Self::Lte(k, _)
+            | Self::Range(k, _, _)
+            | Self::TimeRange(k, _, _)
+            | Self::In(k, _)
+            | Self::Nin(k, _)
+            | Self::Exists(k, _)
+            | Self::Size(k, _)
+            | Self::All(k, _)
+            | Self::TypeMatch(k, _)
+            | Self::StartsWith(k, _)
+            | Self::Contains(k, _) => Some(k),
+        }
+    }
     /// 检查一个 JSON payload 是否满足该过滤条件
     pub fn matches(&self, payload: &Value) -> bool {
         match self {

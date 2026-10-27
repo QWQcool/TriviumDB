@@ -23,11 +23,7 @@ pub(super) struct Row<T> {
     pub values: HashMap<String, TqlValue<T>>,
 }
 
-fn column_name(item: &ReturnExpr) -> String {
-    item.alias
-        .clone()
-        .unwrap_or_else(|| format_return_expr_kind(&item.kind))
-}
+use super::return_column_name as column_name;
 
 fn runtime_json(value: RuntimeValue) -> serde_json::Value {
     match value {
@@ -37,6 +33,9 @@ fn runtime_json(value: RuntimeValue) -> serde_json::Value {
         RuntimeValue::Str(v) => v.into(),
         RuntimeValue::Bool(v) => v.into(),
         RuntimeValue::Path(v) => serde_json::json!(v),
+        RuntimeValue::Json(v) => v,
+        RuntimeValue::Node(id) => serde_json::json!(id),
+        RuntimeValue::Edge(edge) => edge_json(&edge),
         RuntimeValue::Null => serde_json::Value::Null,
     }
 }
@@ -54,6 +53,7 @@ fn value_json<T>(value: &TqlValue<T>) -> serde_json::Value {
         TqlValue::Bool(v) => (*v).into(),
         TqlValue::Path(v) => serde_json::json!(v),
         TqlValue::List(v) => serde_json::Value::Array(v.clone()),
+        TqlValue::Object(v) => serde_json::Value::Object(v.clone()),
         TqlValue::Null => serde_json::Value::Null,
     }
 }
@@ -75,12 +75,15 @@ fn canonical_json(value: serde_json::Value) -> serde_json::Value {
             }
         }
         Value::Array(values) => Value::Array(values.into_iter().map(canonical_json).collect()),
-        Value::Object(values) => Value::Object(
-            values
-                .into_iter()
-                .map(|(k, v)| (k, canonical_json(v)))
-                .collect(),
-        ),
+        Value::Object(values) => {
+            let sorted = values.into_iter().collect::<BTreeMap<_, _>>();
+            Value::Object(
+                sorted
+                    .into_iter()
+                    .map(|(k, v)| (k, canonical_json(v)))
+                    .collect(),
+            )
+        }
         _ => value,
     }
 }
@@ -129,14 +132,72 @@ fn expression<T: VectorType>(
                 "label" => RuntimeValue::Str(edge.label.clone()),
                 "source" | "source_id" => runtime_u64(edge.source_id),
                 "target" | "target_id" => runtime_u64(edge.target_id),
+                "metadata" => json_to_runtime(&edge.metadata),
                 _ => json_to_runtime(&edge.metadata[field]),
             }
         }
-        TqlExpr::Variable(var) => nodes
-            .get(var)
-            .map_or(RuntimeValue::Null, |n| runtime_u64(n.id)),
+        TqlExpr::Variable(var) => {
+            if let Some((name, edge)) = edge
+                && *name == var
+            {
+                RuntimeValue::Edge((*edge).clone())
+            } else {
+                nodes
+                    .get(var)
+                    .map_or(RuntimeValue::Null, |node| RuntimeValue::Node(node.id))
+            }
+        }
+        TqlExpr::Property { var, field } => {
+            let node = nodes.get(var).or_else(|| {
+                if matches!(scope.query.entry, QueryEntry::Find { .. }) {
+                    nodes.values().next()
+                } else {
+                    None
+                }
+            });
+            node.map_or(RuntimeValue::Null, |node| {
+                if field == "id" {
+                    runtime_u64(node.id)
+                } else {
+                    json_to_runtime(&node.payload[field])
+                }
+            })
+        }
         _ => extract_order_key(expr, nodes),
     }
+}
+
+fn kind_runtime<T: VectorType>(
+    kind: &ReturnExprKind,
+    input: &Input<'_, T>,
+    scope: &Scope<'_, T>,
+) -> Result<RuntimeValue, TriviumError> {
+    Ok(match kind {
+        ReturnExprKind::Var(var) => {
+            if matches!(scope.query.entry, QueryEntry::Find { .. })
+                && let Input::Nodes(nodes, _) = input
+                && let Some(value) = nodes.get(var).and_then(|node| node.payload.get(var))
+            {
+                json_to_runtime(value)
+            } else {
+                expression(&TqlExpr::Variable(var.clone()), input, scope)
+            }
+        }
+        ReturnExprKind::Property(var, field) => expression(
+            &TqlExpr::Property {
+                var: var.clone(),
+                field: field.clone(),
+            },
+            input,
+            scope,
+        ),
+        ReturnExprKind::Scalar(expr) => expression(expr, input, scope),
+        ReturnExprKind::Aggregate(..) => {
+            return Err(TriviumError::QueryExecution(
+                "聚合需要分组上下文 (Aggregates require a grouping context)".into(),
+            ));
+        }
+    })
 }
 
 fn kind_json<T: VectorType>(
@@ -144,49 +205,61 @@ fn kind_json<T: VectorType>(
     input: &Input<'_, T>,
     scope: &Scope<'_, T>,
 ) -> Result<serde_json::Value, TriviumError> {
-    // 聚合和去重只需要节点身份，保持候选阶段的 Payload 物化边界。
-    if let ReturnExprKind::Var(var) = kind {
-        match input {
-            Input::Pipeline(row) if scope.pipeline.is_some_and(|(name, _)| name == var) => {
-                return Ok(serde_json::json!(row.id));
-            }
-            Input::Nodes(nodes, edge) => {
-                if let Some((name, edge)) = edge
-                    && *name == var
-                {
-                    return Ok(
-                        serde_json::json!({"source":edge.source_id,"target":edge.target_id,"label":edge.label}),
-                    );
-                }
-                if let Some(node) = nodes.get(var) {
-                    if matches!(scope.query.entry, QueryEntry::Find { .. })
-                        && let Some(value) = node.payload.get(var)
-                    {
-                        return Ok(value.clone());
-                    }
-                    return Ok(serde_json::json!(node.id));
-                }
-            }
-            _ => {}
+    kind_runtime(kind, input, scope).map(runtime_json)
+}
+
+fn runtime_signature(value: RuntimeValue) -> Result<String, TriviumError> {
+    let (kind, value) = match value {
+        RuntimeValue::Node(id) => ("node", serde_json::json!(id)),
+        RuntimeValue::Edge(edge) => (
+            "edge",
+            serde_json::json!([edge.source_id, edge.target_id, edge.label]),
+        ),
+        RuntimeValue::Path(path) => ("path", serde_json::json!(path)),
+        other => ("value", runtime_json(other)),
+    };
+    signature(serde_json::json!([kind, canonical_json(value)]))
+}
+
+pub(super) fn matches_predicate<T: VectorType>(
+    predicate: &Predicate,
+    input: &Input<'_, T>,
+    scope: &Scope<'_, T>,
+) -> bool {
+    match predicate {
+        Predicate::Compare { left, op, right } => compare_runtime(
+            &expression(left, input, scope),
+            op,
+            &expression(right, input, scope),
+        ),
+        Predicate::And(a, b) => {
+            matches_predicate(a, input, scope) && matches_predicate(b, input, scope)
         }
-    }
-    match (input, kind) {
-        (Input::Nodes(nodes, edge), ReturnExprKind::Property(var, field))
-            if field != "id" && !edge.is_some_and(|(name, _)| name == var) =>
-        {
-            Ok(nodes
-                .get(var)
-                .and_then(|n| n.payload.get(field))
-                .cloned()
-                .unwrap_or(serde_json::Value::Null))
+        Predicate::Or(a, b) => {
+            matches_predicate(a, input, scope) || matches_predicate(b, input, scope)
         }
-        (Input::Pipeline(row), ReturnExprKind::Property(_, field)) if field != "id" => Ok(scope
-            .mt
-            .get_payload(row.id)
-            .and_then(|p| p.get(field).cloned())
-            .unwrap_or(serde_json::Value::Null)),
-        (_, ReturnExprKind::Scalar(expr)) => Ok(runtime_json(expression(expr, input, scope))),
-        _ => kind_value(kind, input, scope).map(|v| value_json(&v)),
+        Predicate::Not(value) => !matches_predicate(value, input, scope),
+        Predicate::DocFilter { var, filter } => {
+            let Input::Nodes(nodes, edge) = input else {
+                return false;
+            };
+            if let Some((name, edge)) = edge
+                && var.as_deref() == Some(*name)
+            {
+                return filter.matches(&edge_json(edge));
+            }
+            let node = var.as_ref().and_then(|var| nodes.get(var)).or_else(|| {
+                if var.is_none() {
+                    nodes
+                        .iter()
+                        .min_by_key(|(name, _)| *name)
+                        .map(|(_, node)| node)
+                } else {
+                    None
+                }
+            });
+            node.is_some_and(|node| filter.matches(&node.payload))
+        }
     }
 }
 
@@ -223,14 +296,17 @@ fn kind_value<T: VectorType>(
         }
         ReturnExprKind::Property(var, field) => {
             if edge.is_some_and(|(name, _)| name == var) {
-                runtime_to_tql_value(expression(
-                    &TqlExpr::Property {
-                        var: var.clone(),
-                        field: field.clone(),
-                    },
-                    input,
-                    scope,
-                ))
+                runtime_to_tql_value(
+                    expression(
+                        &TqlExpr::Property {
+                            var: var.clone(),
+                            field: field.clone(),
+                        },
+                        input,
+                        scope,
+                    ),
+                    scope.mt,
+                )?
             } else {
                 nodes.get(var).map_or(TqlValue::Null, |node| {
                     json_to_tql_value(if field == "id" {
@@ -244,7 +320,9 @@ fn kind_value<T: VectorType>(
                 })
             }
         }
-        ReturnExprKind::Scalar(expr) => runtime_to_tql_value(expression(expr, input, scope)),
+        ReturnExprKind::Scalar(expr) => {
+            runtime_to_tql_value(expression(expr, input, scope), scope.mt)?
+        }
         ReturnExprKind::Aggregate(..) => {
             return Err(TriviumError::QueryExecution(
                 "聚合只能在分组阶段求值 (Aggregates must be evaluated in the grouping stage)"
@@ -283,6 +361,16 @@ fn project<T: VectorType>(
                 if let Some((name, edge)) = edge {
                     values.insert((*name).to_owned(), TqlValue::Edge((*edge).clone()));
                 }
+                if let QueryEntry::OptionalMatch { pattern } = &scope.query.entry {
+                    for name in pattern
+                        .nodes
+                        .iter()
+                        .filter_map(|node| node.var.as_ref())
+                        .chain(pattern.edges.iter().filter_map(|edge| edge.var.as_ref()))
+                    {
+                        values.entry(name.clone()).or_insert(TqlValue::Null);
+                    }
+                }
             }
             Input::Pipeline(_) => {
                 let name = scope.pipeline.map_or("_", |(name, _)| name);
@@ -310,12 +398,25 @@ fn aggregate<T: VectorType>(
     for &index in group {
         scope.limits.check_cancelled()?;
         let value = if star {
-            serde_json::Value::Bool(true)
+            RuntimeValue::Bool(true)
         } else {
-            kind_json(inner, &inputs[index], scope)?
+            kind_runtime(inner, &inputs[index], scope)?
         };
-        if !value.is_null() && (!distinct || seen.insert(signature(value.clone())?)) {
-            values.push(value);
+        if matches!(value, RuntimeValue::Null) {
+            continue;
+        }
+        if distinct && !seen.insert(runtime_signature(value.clone())?) {
+            continue;
+        }
+        if matches!(
+            func,
+            AggFunc::Sum | AggFunc::Avg | AggFunc::Min | AggFunc::Max
+        ) {
+            if let Some(number) = runtime_number(&value) {
+                values.push(serde_json::Value::Number(number));
+            }
+        } else {
+            values.push(runtime_json(value));
         }
     }
     Ok(match func {
@@ -406,6 +507,7 @@ pub(super) fn finish<T: VectorType>(
     inputs: &[Input<'_, T>],
     scope: &Scope<'_, T>,
 ) -> Result<Vec<Row<T>>, TriviumError> {
+    validate_return_columns(&scope.query.returns)?;
     let expressions = match &scope.query.returns {
         ReturnClause::Expressions(items) => Some(items.as_slice()),
         _ => None,
@@ -439,7 +541,7 @@ pub(super) fn finish<T: VectorType>(
             scope.limits.check_cancelled()?;
             let key = group_items
                 .iter()
-                .map(|item| kind_json(&item.kind, input, scope).and_then(signature))
+                .map(|item| kind_runtime(&item.kind, input, scope).and_then(runtime_signature))
                 .collect::<Result<Vec<_>, _>>()?;
             groups.entry(key).or_default().push(index);
         }
@@ -475,7 +577,7 @@ pub(super) fn finish<T: VectorType>(
             if !distinct.is_empty() {
                 let key = distinct
                     .iter()
-                    .map(|item| kind_json(&item.kind, input, scope).and_then(signature))
+                    .map(|item| kind_runtime(&item.kind, input, scope).and_then(runtime_signature))
                     .collect::<Result<Vec<_>, _>>()?;
                 if !seen.insert(key) {
                     continue;

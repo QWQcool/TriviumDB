@@ -2525,15 +2525,15 @@ pub fn combine_sets(left: NodeSet, right: NodeSet, operation: SetOperation) -> N
 }
 
 pub fn lower_search_entry<T: VectorType>(
-    vector: &[f64],
+    vector: &[serde_json::Number],
     top_k: usize,
     expand: Option<&crate::query::tql_ast::ExpandClause>,
-) -> Vec<Box<dyn PipelineOperator<T>>> {
+) -> Result<Vec<Box<dyn PipelineOperator<T>>>> {
     let mut operators: Vec<Box<dyn PipelineOperator<T>>> = vec![Box::new(ExactVectorSearch {
         query: vector
             .iter()
-            .map(|value| T::from_f32(*value as f32))
-            .collect(),
+            .map(T::from_json_number)
+            .collect::<Result<Vec<_>>>()?,
         top_k,
     })];
     if let Some(expand) = expand {
@@ -2550,7 +2550,7 @@ pub fn lower_search_entry<T: VectorType>(
             include_input: true,
         }));
     }
-    operators
+    Ok(operators)
 }
 
 pub fn ids(set: &NodeSet) -> BTreeSet<NodeId> {

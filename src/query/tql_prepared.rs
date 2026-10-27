@@ -52,7 +52,14 @@ pub struct PreparedTql {
 
 impl PreparedTql {
     /// 从已解析的只读查询创建 Prepared TQL。
-    pub fn from_query(query: TqlQuery) -> Self {
+    pub fn from_query(mut query: TqlQuery) -> Self {
+        if let ReturnClause::Expressions(items) = &mut query.returns {
+            for item in items {
+                if item.alias.is_none() {
+                    item.alias = Some(super::tql_executor::return_column_name(item));
+                }
+            }
+        }
         let mut parameters = BTreeSet::new();
         collect_query_parameters(&query, &mut parameters);
         Self { query, parameters }
@@ -85,7 +92,7 @@ impl PreparedTql {
     }
 }
 
-fn collect_query_parameters(query: &TqlQuery, output: &mut BTreeSet<String>) {
+pub(crate) fn collect_query_parameters(query: &TqlQuery, output: &mut BTreeSet<String>) {
     if let QueryEntry::Search {
         vector_parameters, ..
     } = &query.entry
@@ -168,14 +175,32 @@ fn bind_query(
         ..
     } = &mut query.entry
     {
+        let mut slots = std::collections::HashSet::new();
         for (index, name) in vector_parameters.iter() {
+            if !slots.insert(*index) {
+                return Err(TriviumError::QueryExecution(
+                    "Prepared 向量槽位重复 (Duplicate prepared vector slot)".into(),
+                ));
+            }
             let value = values.get(name).ok_or_else(|| {
                 TriviumError::QueryExecution(format!("Prepared TQL 缺少参数 ${name}"))
             })?;
-            vector[*index] = match value {
-                TqlParamValue::Int(value) => *value as f64,
-                TqlParamValue::UInt(value) => *value as f64,
-                TqlParamValue::Float(value) if value.is_finite() => *value,
+            let slot = vector.get_mut(*index).ok_or_else(|| {
+                TriviumError::QueryExecution(
+                    "Prepared 向量槽位越界 (Prepared vector slot is out of bounds)".into(),
+                )
+            })?;
+            *slot = match value {
+                TqlParamValue::Int(value) => (*value).into(),
+                TqlParamValue::UInt(value) => (*value).into(),
+                TqlParamValue::Float(value) if value.is_finite() => {
+                    serde_json::Number::from_f64(*value).ok_or_else(|| {
+                        TriviumError::InvalidInput(
+                            "Prepared 向量分量必须有限 (Prepared vector components must be finite)"
+                                .into(),
+                        )
+                    })?
+                }
                 _ => {
                     return Err(TriviumError::QueryExecution(format!(
                         "SEARCH VECTOR 参数 ${name} 必须是有限数值 (SEARCH VECTOR parameter ${name} must be a finite number)"

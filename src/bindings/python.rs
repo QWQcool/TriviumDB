@@ -176,6 +176,7 @@ pub mod python {
                 TqlValue::Bool(value) => serde_json::json!(value),
                 TqlValue::Path(value) => serde_json::json!(value),
                 TqlValue::List(value) => serde_json::Value::Array(value),
+                TqlValue::Object(value) => serde_json::Value::Object(value),
                 TqlValue::Null => serde_json::Value::Null,
             };
             output.insert(name, value);
@@ -2232,6 +2233,12 @@ pub mod python {
                                     name,
                                     json_to_pyobject(py, &serde_json::Value::Array(value))?,
                                 );
+                            }
+                            TqlValue::Object(value) => {
+                                py_row.set_item(
+                                    name,
+                                    json_to_pyobject(py, &serde_json::Value::Object(value))?,
+                                )?;
                             }
                             TqlValue::Null => {
                                 let _ = py_row.set_item(name, py.None());

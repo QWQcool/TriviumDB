@@ -510,6 +510,7 @@ pub fn projection_columns(rows: &TqlValueResult<f32>) -> Vec<ProjectionColumn> {
                 TqlValue::Bool(_) => "bool",
                 TqlValue::Path(_) => "path",
                 TqlValue::List(_) => "list",
+                TqlValue::Object(_) => "object",
                 TqlValue::Null => "null",
             };
             columns
@@ -564,6 +565,7 @@ fn encode_value(value: TqlValue<f32>) -> Result<serde_json::Value, ApiError> {
             "value": ids.into_iter().map(|id| id.to_string()).collect::<Vec<_>>()
         }),
         TqlValue::List(value) => serde_json::json!({"type": "list", "value": value}),
+        TqlValue::Object(value) => serde_json::json!({"type":"object","value":value}),
         TqlValue::Null => serde_json::json!({"type": "null"}),
     })
 }

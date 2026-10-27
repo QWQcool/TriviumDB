@@ -13,6 +13,7 @@ from write_boundaries import run_write_boundaries
 from index_graph_boundaries import run_index_graph_boundaries
 from query_numeric_indexes import run_query_numeric_indexes
 from tql_semantics import run_tql_semantics
+from tql_boundaries import run_tql_boundaries
 
 
 def run_transaction_contract(root: str) -> None:
@@ -404,6 +405,7 @@ def main() -> None:
         run_index_graph_boundaries(root)
         run_query_numeric_indexes(root)
         run_tql_semantics(root)
+        run_tql_boundaries(root)
         run_text_recovery_contract(root)
         run_query_budget_contract(root)
         path = os.path.join(root, "api.tdb")

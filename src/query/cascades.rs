@@ -1400,7 +1400,9 @@ fn collect_predicate_fields(predicate: &Predicate, output: &mut Vec<String>) {
     match predicate {
         Predicate::Compare { left, right, .. } => {
             for expression in [left, right] {
-                if let TqlExpr::Property { field, .. } = expression {
+                if let TqlExpr::Property { field, .. } = expression
+                    && field != "id"
+                {
                     output.push(field.clone());
                 }
             }
