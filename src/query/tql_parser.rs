@@ -1973,19 +1973,20 @@ impl TqlParser {
         Ok(TqlMutation { source, action })
     }
 
-    fn parse_numeric_vector(&mut self) -> Result<Vec<f64>, String> {
+    fn parse_numeric_vector(&mut self) -> Result<Vec<serde_json::Number>, String> {
         self.expect(&TqlToken::LBracket)?;
         let mut vector = Vec::new();
         while !self.at(&TqlToken::RBracket) {
             let value = match self.advance() {
-                TqlToken::FloatLit(value) => value,
-                TqlToken::IntLit(value) => value as f64,
-                TqlToken::UIntLit(value) => value as f64,
+                TqlToken::FloatLit(value) => {
+                    serde_json::Number::from_f64(value).ok_or_else(|| {
+                        "向量分量必须为有限数值 (Vector components must be finite)".to_owned()
+                    })?
+                }
+                TqlToken::IntLit(value) => value.into(),
+                TqlToken::UIntLit(value) => value.into(),
                 other => return Err(format!("Expected number in vector, got {other:?}")),
             };
-            if !value.is_finite() {
-                return Err("Vector values must be finite".into());
-            }
             vector.push(value);
             if self.at(&TqlToken::Comma) {
                 self.advance();
@@ -2323,9 +2324,6 @@ fn validate_pipeline_scope(query: &TqlQuery) -> Result<(), String> {
     if let Some(predicate) = &query.predicate {
         predicate_vars(predicate, &mut referenced);
     }
-    for order in &query.order_by {
-        collect_expr_vars(&order.expr, &mut referenced);
-    }
     match &query.returns {
         ReturnClause::Variables(vars) => referenced.extend(vars.iter().cloned()),
         ReturnClause::Expressions(expressions) => {
@@ -2349,6 +2347,25 @@ fn validate_pipeline_scope(query: &TqlQuery) -> Result<(), String> {
     {
         return Err(format!(
             "RETURN/WHERE/ORDER BY 引用了作用域外变量 {var} (Final clause references out-of-scope variable {var})"
+        ));
+    }
+    // RETURN 的别名在排序阶段可见，WHERE 与 RETURN 求值仍使用输入作用域。
+    let return_aliases = match &query.returns {
+        ReturnClause::Expressions(items) => items
+            .iter()
+            .filter_map(|item| item.alias.as_ref())
+            .collect::<std::collections::BTreeSet<_>>(),
+        _ => std::collections::BTreeSet::new(),
+    };
+    let mut ordered = Vec::new();
+    for order in &query.order_by {
+        collect_expr_vars(&order.expr, &mut ordered);
+    }
+    if let Some(var) = ordered.into_iter().find(|var| {
+        !final_scope.contains(var) && !scalar_aliases.contains(var) && !return_aliases.contains(var)
+    }) {
+        return Err(format!(
+            "ORDER BY 引用了作用域外变量 {var} (ORDER BY references out-of-scope variable {var})"
         ));
     }
     Ok(())

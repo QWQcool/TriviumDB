@@ -14,6 +14,7 @@ mod quiver_threshold;
 mod runtime_types;
 mod search;
 mod search_boundaries;
+mod tql_semantics;
 mod transaction;
 mod transaction_state;
 mod typed_facade;

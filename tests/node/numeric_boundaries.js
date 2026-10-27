@@ -6,6 +6,7 @@ const path = require('node:path')
 
 module.exports = async function numericBoundaries(root, TriviumDB) {
   require('./query_numeric_indexes.js')(root, TriviumDB)
+  require('./tql_semantics.js')(root, TriviumDB)
   const options = { dim: 2, autoBuildQuiver: false }
   const file = path.join(root, 'numeric-inputs.tdb')
   const db = new TriviumDB(file, options)

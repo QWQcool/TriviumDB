@@ -2,6 +2,24 @@
 
 后续变更以 `0.9.0-beta.2` 为基线；该版本内容见[变更说明](0.9.0-beta.2.md)。
 
+## TQL 返回处理与匹配写入
+
+- 普通 MATCH/FIND、WITH 与单跳具名边共用返回处理。计算表达式与节点 ID 形成完整分组键，COUNT(expr) 统计非 Null 求值；聚合、DISTINCT、别名排序与分页按相同顺序执行。
+- 返回列独立于输入绑定；省略 AS 的聚合输出实际值，同名聚合别名保留其他列的源绑定。单跳具名边支持投影、去重与聚合，多标签平行边分别计数，自环在单次双向匹配中计数一次。
+- WITH 承接实例行预算、偏移准入、内存工作区与取消控制。RETURN 别名进入排序作用域，支持标量算术与节点属性排序；最终分页后物化整节点。
+- 多字段 SET 按节点累计赋值并原子替换；MATCH … CREATE 按完整匹配集创建，每行使用独立的新节点作用域，零匹配保持空操作。
+- SET VECTOR 保留完整 u64 字面量，按目标 dtype 校验转换；非法整数和浮点转换溢出在 WAL 前拒绝。Rust 的 `MutationAction::SetVector.vector` 改为 `Vec<serde_json::Number>`，`VectorType::from_json_number` 提供带默认实现的类型转换入口。
+- 新增三端共享返回样例，覆盖多入口计算/分组/COUNT、别名、具名边、预算、匹配写入、持久化和 dtype 边界。差分矩阵与物理策略用例使用独立临时目录。
+
+## TQL return processing and matched mutations
+
+- Plain MATCH/FIND, WITH pipelines and named single-hop edges share return processing. Computed expressions and node IDs form complete grouping keys; COUNT(expr) counts non-null evaluated values. Aggregation, DISTINCT, alias ordering and pagination follow the same sequence.
+- Return columns are stored separately from input bindings. Unaliased aggregates expose their values, and aggregate aliases can share an input variable's name without overwriting other columns' source bindings. Named edges participate in projection, deduplication and aggregation; parallel labels count separately, while a self-loop counts once within a bidirectional binding.
+- WITH applies instance row limits, OFFSET admission, workspace limits and cancellation. RETURN aliases are visible to ordering, including arithmetic and node-property expressions. Whole nodes are materialized after final pagination.
+- Multi-field SET accumulates assignments per node before an atomic payload replacement. MATCH … CREATE processes every matching row with a separate scope for newly created nodes; zero matches perform no creation.
+- SET VECTOR preserves full u64 literals and validates conversion for the target dtype before writing the WAL, including integer bounds and floating overflow. Rust's `MutationAction::SetVector.vector` now uses `Vec<serde_json::Number>`. `VectorType::from_json_number` supplies a default conversion method that custom types can override.
+- Shared Rust/Python/Node cases cover expression/group/count semantics, aliases, named edges, budgets, matched writes, persistence and dtype boundaries. Differential matrix and physical-strategy tests use isolated temporary directories.
+
 ## 事务最终键、范围候选与 TQL 数值域
 
 - 复合唯一索引按事务最终状态投影所有权，支持临时占用其他节点的键后再次改键、删除或恢复原键。提交前准备并预留最终键变更，提交后统一安装；异常展开恢复同步标志并隔离实例。WAL 回放后从最终事实恢复并验证唯一映射，验证成功后截断日志。

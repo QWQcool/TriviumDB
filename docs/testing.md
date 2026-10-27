@@ -43,6 +43,8 @@ TriviumDB 采用 **五层防御式测试体系**，从函数级正确性到系�
 
 ## 用例设计与验收证据
 
+`cargo test --test core tql_semantics` 验证普通 MATCH、FIND、WITH 与具名边的完整返回内容、分组、聚合、去重、别名排序和分页。`tests/contracts/tql_return_cases.json` 由 Rust、Python、Node 共同消费；Node 同时通过 `npm run test:package` 在独立安装的 tarball 上执行。DML 用例验证多字段合并、每行 CREATE 作用域、完整 u64 位模式、浮点转换边界、拒绝后的 WAL 内容及关闭重开。纯向量管线在分页后核对具体节点与 Payload 读取量。
+
 检索边界使用预先给定的 NodeId 次序验证槽位复用、分段扫描、并行度与 Top-K 截断；数值排序覆盖 `i64/u64` 端点、2^53 相邻整数、正负小数及索引重载。内存计量测试独立遍历实际容器，核对增量账本在替换、重复登记、删除、编译和重载后的值。事务应用故障测试在 WAL 提交后注入失败，要求当前句柄与已准入的共享搜索拒绝部分状态，并在重开后核对完整事务和再次持久化结果。
 
 定向入口：`cargo test --test core search_boundaries`、`cargo test --lib --features test-hooks guard_tests`、`cargo test --test fault_io --features test-hooks wal_failure_state -- --test-threads=1`。QuIVer 调整的质量与耗时对照同时记录数据分布、种子、维度、候选宽度、精排预算、平台和构建参数。

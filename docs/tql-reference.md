@@ -501,7 +501,9 @@ RETURN COUNT(*) AS total, AVG(a.score) AS avg_score
 ```
 
 - `FIND` / `SEARCH` 场景下，`RETURN *` 将节点绑定到隐式变量 `_`
-- `MATCH` 场景下，`RETURN *` 返回模式中所有具名节点变量
+- `MATCH` 场景下，`RETURN *` 返回模式中具名节点与单跳具名边变量
+
+普通查询、WITH 管线与单跳具名边共用返回处理。计算表达式按实际值参与去重与分组；返回列与输入绑定分别保存，聚合别名可与输入节点变量同名。省略 `AS` 时，列名采用表达式文本，例如 `Count(*)`、`n.x`。
 
 ### ORDER BY
 
@@ -510,6 +512,7 @@ ORDER BY b.age ASC          -- 升序（默认）
 ORDER BY b.age DESC         -- 降序
 ORDER BY a.name, b.age DESC -- 多字段排序
 ORDER BY _.heat DESC        -- FIND/SEARCH 场景
+ORDER BY adjusted DESC      -- RETURN 中定义的别名
 ```
 
 ### LIMIT / OFFSET
@@ -520,6 +523,8 @@ LIMIT 10 OFFSET 20    -- 跳过前 20 条，返回 10 条
 ```
 
 **执行顺序**：`WHERE 过滤 → RANK（如有）→ 聚合/DISTINCT → ORDER BY → OFFSET → LIMIT`
+
+RETURN 别名在 ORDER BY 中可用，也可参与排序算术；WHERE 与 RETURN 表达式使用各自的输入作用域。WITH 承接实例的 `max_query_rows`、`row_overflow`、内存预算与取消控制。显式 LIMIT 可覆盖默认行数上限，OFFSET + LIMIT 继续接受内存准入；聚合、去重与完整排序要求完整输入。管线工作区在执行前按候选规模保守预留。
 
 ---
 
@@ -629,6 +634,10 @@ Python 返回精确 `int`。Node 的整数标量在安全整数范围内返回 `
 
 聚合支持 `COUNT/SUM/AVG/MIN/MAX/COLLECT` 与 aggregate `DISTINCT`。RETURN 中非聚合表达式构成隐式分组键；`DISTINCT b.id`、`DISTINCT id(b)` 和 `DISTINCT b.field` 均按实际投影值去重。空输入 `COUNT(*)=0`，其他无值聚合返回 Null。Rust 的 `tql()` 与 Python/Node 动态语言入口均返回统一一等值；`tql_nodes()` 保留给只需要节点绑定的 Rust 调用方，`tql_values()` 是兼容别名。
 
+`COUNT(*)` 统计匹配行，`COUNT(expr)` 统计求值后非 Null 的值；`0`、`false`、空字符串与空容器均为有效值。当前聚合去重语法为 `RETURN DISTINCT COUNT(n.g) AS total`，表示先对 `n.g` 的非 Null 值去重，再计数。单跳具名边按实际边产生行，多标签平行边分别参与计数。
+
+写入操作沿匹配行生成事务。`MATCH … CREATE` 的零匹配产生零次创建，每条匹配拥有独立的新节点变量作用域；同一行内的边引用对应的新节点。多字段 SET 按文本顺序累计到同一节点，重复字段采用最后一次赋值，合并后提交一次 Payload 替换。整条 mutation 通过内核事务完成预检、预算准入与原子提交。
+
 ## 向量更新
 
 TQL mutation 可在 `MATCH` 目标集合上原子更新向量：
@@ -639,6 +648,8 @@ SET VECTOR(n) == [1e-5, 0.2, -0.3]
 ```
 
 目标匹配集不受查询返回行上限静默截断。向量维度必须与数据库一致，且所有分量必须为有限值；任一目标或向量校验失败时，事务整体不提交。该语法当前使用数字字面量；需要参数化或批量向量写入时使用事务 API。
+
+SET VECTOR 从字面量保留数值类型，并按目标 dtype 转换。`u64` 保留 `0..=18446744073709551615` 的整数位模式，负数、小数与超范围值在写 WAL 前拒绝；f32/f16 在转换后检查有限范围。Rust mutation AST 的 `SetVector.vector` 使用 `Vec<serde_json::Number>`，自定义 `VectorType` 可覆盖 `from_json_number()` 定义数值转换。
 
 ## Prepared TQL
 
@@ -766,6 +777,7 @@ TQL 由七个协作模块组成，延续项目既有的模块化拆分：
 | **Cascades** | `query/cascades.rs` | Memo、物理候选、成本与预算 |
 | **Pipeline** | `query/pipeline.rs` | NodeSet 与图/集合/路径算子 |
 | **Executor** | `query/tql_executor.rs` | 一等值、聚合和结果投影 |
+| **Return processing** | `query/tql_return.rs` | 共享表达式求值、分组、去重、排序与分页 |
 | **Prepared** | `query/tql_prepared.rs` | 严格参数绑定 |
 
 ### 执行流程

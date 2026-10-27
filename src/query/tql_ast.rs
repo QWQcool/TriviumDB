@@ -543,7 +543,10 @@ pub enum MutationAction {
     /// SET a.name = "Bob", a.age = 30
     Set(Vec<SetAssignment>),
     /// SET VECTOR(a) = [0.1, 0.2]
-    SetVector { var: String, vector: Vec<f64> },
+    SetVector {
+        var: String,
+        vector: Vec<serde_json::Number>,
+    },
     /// DELETE a
     Delete { vars: Vec<String>, detach: bool },
 }

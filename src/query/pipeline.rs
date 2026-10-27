@@ -360,6 +360,8 @@ pub struct PipelineContext<'a, T: VectorType> {
     pub memtable: &'a MemTable<T>,
     pub budget: PipelineBudget,
     pub metrics: Vec<PipelineStageMetrics>,
+    pub query_control: Option<super::tql_executor::QueryControl>,
+    pub(crate) workspace_limit: usize,
     profile: bool,
     stages: usize,
     vector_read_bytes: usize,
@@ -376,6 +378,8 @@ impl<'a, T: VectorType> PipelineContext<'a, T> {
             memtable,
             budget,
             metrics: Vec::new(),
+            query_control: None,
+            workspace_limit: 0,
             profile,
             stages: 0,
             vector_read_bytes: 0,
@@ -384,6 +388,9 @@ impl<'a, T: VectorType> PipelineContext<'a, T> {
     }
 
     fn begin_stage(&mut self) -> Result<()> {
+        if let Some(control) = &self.query_control {
+            control.check()?;
+        }
         self.stages = self.stages.saturating_add(1);
         if self.stages > self.budget.max_stages {
             return Err(TriviumError::QueryExecution(format!(
@@ -470,6 +477,12 @@ pub fn execute_pipeline<T: VectorType>(
         .ok_or_else(|| TriviumError::CapacityAllocationFailed {
             reason: "管线工作区估算溢出".into(),
         })?;
+    if context.workspace_limit > 0 && estimate > context.workspace_limit {
+        return Err(TriviumError::QueryRowBudgetExceeded {
+            budget: context.workspace_limit
+                / (std::mem::size_of::<NodeRow>() + 64).saturating_mul(4),
+        });
+    }
     let _workspace = context
         .memtable
         .resource_runtime()
@@ -480,6 +493,9 @@ pub fn execute_pipeline<T: VectorType>(
         let input_rows = context.profile.then(|| current.len());
         let started = context.profile.then(Instant::now);
         current = operator.apply(current, context)?;
+        if let Some(control) = &context.query_control {
+            control.check()?;
+        }
         current.normalize();
         context.validate_output(&current)?;
         let (payload_lookups, payload_parsed_bytes) = context.validate_payload_budget()?;

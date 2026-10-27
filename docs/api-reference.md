@@ -1159,7 +1159,9 @@ TQL 公共 API 提供 **自由 DIY 混合查询能力**。调用者可以用一�
 
 ### tql / tql_values
 
-支持 MATCH、OPTIONAL MATCH、FIND、SEARCH、WITH 管线、聚合、图算法、路径与集合代数。Rust `tql()` 只适合纯节点绑定；标量、聚合、Path/List 必须使用 `tql_values()`。Python/Node 的 `tql` 已自动承载一等值。
+支持 MATCH、OPTIONAL MATCH、FIND、SEARCH、WITH 管线、聚合、图算法、路径与集合代数。Rust `tql()` 返回同时承载节点、边、标量和 Path/List 的一等值；`tql_values()` 为兼容别名，`tql_nodes()` 提供节点绑定容器。Python/Node 的 `tql` 同步承载一等值。
+
+普通查询、WITH 与单跳具名边共享分组、COUNT(expr)、DISTINCT、别名排序与分页。返回列独立保存；省略 AS 时使用表达式名，例如 `Count(*)`。WITH 使用实例行数、内存工作区与取消配置。完整语义见 [TQL 返回处理](tql-reference.md#return--order-by--limit--offset)。
 
 **Python：**
 ```python
@@ -1187,7 +1189,9 @@ rows.forEach(row => console.log(row.b.payload))
 let rows = db.tql("MATCH (a)-[:knows]->(b) WHERE b.age > 20 RETURN b")?;
 for row in &rows {
     if let Some(node) = row.get("b") {
-        println!("{}: {:?}", node.id, node.payload);
+        if let Some(node) = node.as_node() {
+            println!("节点 (Node) {}: {:?}", node.id, node.payload);
+        }
     }
 }
 ```
@@ -1214,7 +1218,8 @@ Prepared 参数只接受 null/bool/string/number；缺参、额外参数、数�
 |---|---|---|
 | Node | dict | object，NodeId 为字符串 |
 | Edge | `{type, source, target, label, weight, metadata}` | `{type, source, target, label, weight, metadata}`，NodeId 为字符串 |
-| Int/Float/String/Bool | 原生标量 | 原生标量 |
+| Int/UInt | 精确 int | 安全整数为 number；超范围整数为十进制字符串 |
+| Float/String/Bool | 原生标量 | 原生标量 |
 | Path | `list[int]` | `string[]`，避免 u64 精度损失 |
 | List | list | array |
 | Null | None | null |
@@ -1222,6 +1227,8 @@ Prepared 参数只接受 null/bool/string/number；缺参、额外参数、数�
 ### tql_mut — 执行 TQL 写操作
 
 支持 CREATE / SET / DELETE / DETACH DELETE 语法，返回受影响行数和新创建的节点 ID。
+
+多字段 SET 按节点累计，重复字段采用最后一次赋值。MATCH … CREATE 每条匹配建立独立的新节点作用域，零匹配返回零次创建。SET VECTOR 按目标 dtype 检查，u64 整数字面量覆盖完整范围；任一目标失败时整个 mutation 保持原子性。
 
 **Python：**
 ```python

@@ -20,3 +20,5 @@ mod pipeline_reference;
 mod prepared;
 mod replay;
 mod shrinker;
+#[path = "../support/mod.rs"]
+mod support;

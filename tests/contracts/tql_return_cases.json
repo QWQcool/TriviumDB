@@ -1,0 +1,27 @@
+{
+  "dimension": 1,
+  "records": [
+    {"id": 1, "payload": {"kind": "sample", "x": 3, "g": "a", "k": 8}},
+    {"id": 2, "payload": {"kind": "sample", "x": 1, "g": "b", "k": null}},
+    {"id": 3, "payload": {"kind": "sample", "x": 2, "g": "b"}}
+  ],
+  "sources": [
+    {"query": "MATCH (n {kind: \"sample\"})", "variable": "n"},
+    {"query": "FIND {kind: \"sample\"}", "variable": "_"},
+    {"query": "MATCH (n {kind: \"sample\"}) AS n WITH n", "variable": "n"},
+    {"query": "FIND {kind: \"sample\"} AS n WITH n", "variable": "n"},
+    {"query": "MATCH (root)-[edge:item]->(n)", "variable": "n"}
+  ],
+  "cases": [
+    {"name":"computed_distinct", "suffix":"RETURN DISTINCT {var}.x + 1 AS v ORDER BY v ASC", "rows":[{"v":2},{"v":3},{"v":4}]},
+    {"name":"field_distinct", "suffix":"RETURN DISTINCT {var}.g AS v ORDER BY v ASC", "rows":[{"v":"a"},{"v":"b"}]},
+    {"name":"group_id", "suffix":"RETURN {var}.id AS ident, COUNT(*) AS total ORDER BY ident ASC", "rows":[{"ident":1,"total":1},{"ident":2,"total":1},{"ident":3,"total":1}]},
+    {"name":"group_expression", "suffix":"RETURN {var}.x + 1 AS v, COUNT(*) AS total ORDER BY v ASC", "rows":[{"v":2,"total":1},{"v":3,"total":1},{"v":4,"total":1}]},
+    {"name":"count_expression", "suffix":"RETURN COUNT(1) AS literal, COUNT({var}.k) AS field, COUNT(NULL) AS absent", "rows":[{"literal":3,"field":1,"absent":0}]},
+    {"name":"default_aggregate_name", "suffix":"RETURN COUNT(*)", "rows":[{"Count(*)":3}]},
+    {"name":"aggregate_distinct", "suffix":"RETURN DISTINCT COUNT({var}.g) AS total", "rows":[{"total":2}]},
+    {"name":"aggregate_order", "suffix":"RETURN {var}.g AS g, COUNT(*) AS total ORDER BY {var}.g DESC LIMIT 1", "rows":[{"g":"b","total":2}]},
+    {"name":"aggregate_alias_order", "suffix":"RETURN {var}.g AS g, COUNT(*) AS total ORDER BY total DESC LIMIT 1 OFFSET 1", "rows":[{"g":"a","total":1}]},
+    {"name":"return_alias_order", "suffix":"RETURN {var}.x AS v ORDER BY v DESC", "rows":[{"v":3},{"v":2},{"v":1}]}
+  ]
+}
