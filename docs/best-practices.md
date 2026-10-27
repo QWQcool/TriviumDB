@@ -2,7 +2,7 @@
 
 > 高效使用 TriviumDB 的实战指南：从项目集成到性能调优，从数据建模到避坑指南。
 >
-> 本文按 `0.9.0-beta.2` 编写，见[变更说明](changes/0.9.0-beta.2.md)。
+> 本文按 `0.9.0-beta.3` 编写，见[变更说明](changes/0.9.0-beta.3.md)。
 
 ---
 
@@ -70,7 +70,7 @@ cargo add triviumdb
 
 ```toml
 [dependencies]
-triviumdb = "0.9.0-beta.2"
+triviumdb = "0.9.0-beta.3"
 ```
 
 ### 30 秒入门模板
@@ -523,13 +523,13 @@ tx.link(person_id, 9999, "attended", 1.0);
 
 // 第 2 步：commit 两阶段执行
 // 阶段 1: 干跑验证 → 维度 OK？节点存在？ID 未冲突？
-// 阶段 2: 验证通过后一次性物理写入，不会中途失败
+// 阶段 2: 提交 WAL 后应用数据，写入错误通过 Result 返回
 let ids = tx.commit()?;
 ```
 
 ### 事务内 insert_with_id 后立即 link：完全安全
 
-由于干跑阶段有虚拟状态叠加（`pending_ids`），在同一个事务里先 `insert_with_id(999)`，再 `link(999, ...)` 是完全合法的——验证器能感知到 999 将要存在。
+预检按操作顺序投影节点状态。在同一个事务里先 `insert_with_id(999)`，再 `link(999, ...)` 时，连边可直接使用新节点；同一 ID 删除后重建，也可立即参与 Payload、向量和图关系更新。
 
 ```rust
 let mut tx = db.begin_tx();
@@ -546,7 +546,7 @@ let _ = tx.commit()?;
 | `NodeNotFound` | `link`/`delete`/`update` 引用了不存在的 ID |
 | ID 已存在 | `insert_with_id` 的 ID 在已有库或同事务中重复 |
 
-> ✅ 任何 `commit()` 返回的 `Err` 都意味着底层数据完全未被修改，可以安全重试或放弃。
+预检失败保持原节点、索引、ID 分配状态和 WAL，可修改缓冲操作后重新提交。WAL I/O 错误保留原始原因供宿主处理；进程重启时按日志封条与同步模式完成恢复。
 
 ---
 

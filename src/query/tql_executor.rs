@@ -8,6 +8,10 @@
 //! DML 写操作通过 execute_tql_mutation() 生成 MutationOp 指令，
 //! 由 Database 层统一执行并写入 WAL。
 
+#[path = "tql_return.rs"]
+mod returning;
+
+use super::pipeline::BindingValue as RuntimeValue;
 use super::planner::{
     AccessPath, NodeAccessPlan, plan_filter, plan_filter_ordered, plan_filter_with_limit,
     plan_match,
@@ -65,11 +69,13 @@ pub enum TqlValue<T> {
     Node(Node<T>),
     Edge(EdgeView),
     Int(i64),
+    UInt(u64),
     Float(f64),
     String(String),
     Bool(bool),
     Path(Vec<NodeId>),
     List(Vec<serde_json::Value>),
+    Object(serde_json::Map<String, serde_json::Value>),
     Null,
 }
 
@@ -192,6 +198,13 @@ fn requested_row_limit<T: VectorType>(
         None => usize::MAX,
     };
     let memory_cap = memory_row_cap(limits.memory_limit, mt);
+    if let Some(limit) = query.limit
+        && limit
+            .checked_add(query.offset.unwrap_or(0))
+            .is_none_or(|rows| rows > memory_cap)
+    {
+        return Err(TriviumError::QueryRowBudgetExceeded { budget: memory_cap });
+    }
     let user_limited = !requires_full_input && query.limit.is_some();
     let requested = if user_limited {
         query
@@ -214,6 +227,32 @@ fn requires_full_input(query: &TqlQuery, ordered_find: bool) -> bool {
         || matches!(&query.returns, ReturnClause::Expressions(exprs) if exprs.iter().any(|expr| is_aggregate(&expr.kind) || expr.distinct))
 }
 
+fn is_aggregate(kind: &ReturnExprKind) -> bool {
+    matches!(kind, ReturnExprKind::Aggregate(..))
+}
+
+fn admit_input_rows<T: VectorType>(
+    query: &TqlQuery,
+    mt: &MemTable<T>,
+    limits: &TqlLimits,
+    count: usize,
+) -> Result<usize, TriviumError> {
+    let full = requires_full_input(query, false);
+    let (cap, user_limited) = requested_row_limit(query, full, limits, mt)?;
+    if count > cap && !user_limited {
+        if full || limits.row_overflow == crate::database::RowOverflowPolicy::Throw {
+            return Err(TriviumError::QueryExecution(format!(
+                "TQL 结果超过 {cap} 行上限 (TQL result exceeds row limit {cap})"
+            )));
+        }
+        tracing::warn!(
+            budget = cap,
+            "TQL 返回预算内的部分结果 (TQL returns partial results within the row budget)"
+        );
+    }
+    Ok(count.min(cap))
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 //  公开入口
 // ═══════════════════════════════════════════════════════════════════════
@@ -227,11 +266,42 @@ pub fn execute_tql<T: VectorType>(
 }
 
 fn ensure_search_vector_bound(query: &TqlQuery) -> Result<(), TriviumError> {
+    if let QueryEntry::Match { pattern } | QueryEntry::OptionalMatch { pattern } = &query.entry {
+        validate_pattern(pattern)?;
+    }
+    super::tql_parser::validate_pipeline_scope(query).map_err(TriviumError::QueryExecution)?;
+    validate_return_columns(&query.returns)?;
     if matches!(&query.entry, QueryEntry::Search { vector_parameters, .. } if !vector_parameters.is_empty())
     {
         return Err(TriviumError::QueryExecution(
             "SEARCH VECTOR 参数必须通过 Prepared TQL 绑定后执行 (SEARCH VECTOR parameters must be bound through Prepared TQL before execution)".into(),
         ));
+    }
+    let mut unbound = std::collections::BTreeSet::new();
+    super::tql_prepared::collect_query_parameters(query, &mut unbound);
+    if !unbound.is_empty() {
+        return Err(TriviumError::QueryExecution("查询参数必须通过 Prepared TQL 绑定 (Query parameters must be bound through Prepared TQL)".into()));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_pattern(pattern: &TqlPattern) -> Result<(), TriviumError> {
+    if pattern.nodes.is_empty() || pattern.edges.len().checked_add(1) != Some(pattern.nodes.len()) {
+        return Err(TriviumError::QueryExecution(
+            "图模式的节点与边数量不匹配 (Graph pattern node and edge counts do not match)".into(),
+        ));
+    }
+    let nodes = pattern
+        .nodes
+        .iter()
+        .filter_map(|node| node.var.as_deref())
+        .collect::<HashSet<_>>();
+    for name in pattern.edges.iter().filter_map(|edge| edge.var.as_deref()) {
+        if nodes.contains(name) {
+            return Err(TriviumError::QueryExecution(format!(
+                "变量 {name} 同时绑定为节点和边 (Variable {name} is bound as both a node and an edge)"
+            )));
+        }
     }
     Ok(())
 }
@@ -267,21 +337,38 @@ pub fn execute_tql_with_limits<T: VectorType>(
             executable.explain = false;
             executable.analyze = false;
             if !executable.pipeline.is_empty() {
-                let (set, _, _, profile) = execute_pipeline_set(&executable, memtable, true)?;
+                let (set, name, aliases, profile) =
+                    execute_pipeline_set(&executable, memtable, true, &limits)?;
                 let mut rows = set.into_rows();
-                apply_offset_limit(&mut rows, executable.offset, executable.limit);
+                rows.truncate(admit_input_rows(
+                    &executable,
+                    memtable,
+                    &limits,
+                    rows.len(),
+                )?);
+                let inputs = rows
+                    .iter()
+                    .map(returning::Input::Pipeline)
+                    .collect::<Vec<_>>();
+                let scope = returning::Scope {
+                    query: &executable,
+                    mt: memtable,
+                    limits: &limits,
+                    pipeline: Some((&name, &aliases)),
+                };
+                let returned = returning::finish(&inputs, &scope)?;
                 return Ok(generate_explain_plan(
                     query,
                     memtable,
                     Some((
-                        rows.len(),
+                        returned.len(),
                         started.elapsed().as_secs_f64() * 1000.0,
                         profile,
                     )),
                     find_plan,
                 ));
             }
-            let rows = execute_tql_with_limits(&executable, memtable, limits)?;
+            let rows = execute_tql_values_with_limits(&executable, memtable, limits)?;
             return Ok(generate_explain_plan(
                 query,
                 memtable,
@@ -292,18 +379,65 @@ pub fn execute_tql_with_limits<T: VectorType>(
         return Ok(generate_explain_plan(query, memtable, None, find_plan));
     }
     if !query.pipeline.is_empty() {
-        return execute_pipeline_node_query(query, memtable);
+        return execute_pipeline_node_query(query, memtable, limits);
     }
 
+    if let QueryEntry::Match { pattern } | QueryEntry::OptionalMatch { pattern } = &query.entry
+        && pattern.edges.iter().any(|edge| edge.var.is_some())
+    {
+        let expanded = collect_single_edge_rows(query, pattern, memtable, &limits)?;
+        let edge_var = pattern.edges[0].var.as_deref().ok_or_else(|| {
+            TriviumError::QueryExecution("缺少边变量 (Missing edge variable)".into())
+        })?;
+        let inputs = expanded
+            .iter()
+            .map(|(nodes, edge)| {
+                returning::Input::Nodes(nodes, edge.as_ref().map(|edge| (edge_var, edge)))
+            })
+            .collect::<Vec<_>>();
+        let scope = returning::Scope {
+            query,
+            mt: memtable,
+            limits: &limits,
+            pipeline: None,
+        };
+        return returning::into_nodes(returning::finish(&inputs, &scope)?, &inputs, &scope);
+    }
+    let (results, _) = execute_binding_rows(query, memtable, &limits)?;
+    let inputs = results
+        .iter()
+        .map(|row| returning::Input::Nodes(row, None))
+        .collect::<Vec<_>>();
+    let scope = returning::Scope {
+        query,
+        mt: memtable,
+        limits: &limits,
+        pipeline: None,
+    };
+    returning::into_nodes(returning::finish(&inputs, &scope)?, &inputs, &scope)
+}
+
+fn execute_binding_rows<T: VectorType>(
+    query: &TqlQuery,
+    memtable: &MemTable<T>,
+    limits: &TqlLimits,
+) -> Result<(TqlResult<T>, bool), TriviumError> {
     let ordered_find = matches!(
         &query.entry,
         QueryEntry::Find { filter } if find_ordered_find_plan(query, filter, memtable).is_some()
     );
     let requires_full_input = requires_full_input(query, ordered_find);
     let (row_limit, user_limited) =
-        requested_row_limit(query, requires_full_input, &limits, memtable)?;
+        requested_row_limit(query, requires_full_input, limits, memtable)?;
     let scan_limit = row_limit.saturating_add(1);
 
+    let mut snapshot_query = query.clone();
+    if matches!(
+        query.entry,
+        QueryEntry::Match { .. } | QueryEntry::OptionalMatch { .. }
+    ) {
+        snapshot_query.returns = ReturnClause::All;
+    }
     let (mut results, ordered_output) = match &query.entry {
         QueryEntry::Find { filter } => execute_find(
             filter,
@@ -315,7 +449,7 @@ pub fn execute_tql_with_limits<T: VectorType>(
         QueryEntry::Match { pattern } => (
             execute_match(
                 pattern,
-                query,
+                &snapshot_query,
                 memtable,
                 scan_limit,
                 false,
@@ -326,7 +460,7 @@ pub fn execute_tql_with_limits<T: VectorType>(
         QueryEntry::OptionalMatch { pattern } => (
             execute_match(
                 pattern,
-                query,
+                &snapshot_query,
                 memtable,
                 scan_limit,
                 true,
@@ -368,34 +502,7 @@ pub fn execute_tql_with_limits<T: VectorType>(
         results = apply_graph_first_rank(results, rank, memtable)?;
     }
 
-    results = apply_aggregation_and_distinct(
-        &query.returns,
-        results,
-        matches!(&query.entry, QueryEntry::Find { .. }),
-    )?;
-
-    if !query.order_by.is_empty() && !ordered_output {
-        sort_results(&mut results, &query.order_by, memtable);
-    }
-
-    // OFFSET 偏移
-    if let Some(off) = query.offset {
-        if off < results.len() {
-            results = results.into_iter().skip(off).collect();
-        } else {
-            results.clear();
-        }
-    }
-
-    // LIMIT 截断（排序后再截断）
-    if let Some(lim) = query.limit {
-        results.truncate(lim);
-    }
-
-    // 投影裁剪：对仅属性引用的变量，剥离 vector + edges 节省内存
-    apply_projection_pruning(&query.returns, &mut results);
-
-    Ok(results)
+    Ok((results, ordered_output))
 }
 
 fn test_disable_fusion() -> bool {
@@ -442,7 +549,7 @@ struct PipelineExecutionProfile {
 type PipelineSetResult = (
     crate::query::pipeline::NodeSet,
     String,
-    HashMap<String, TqlExpr>,
+    std::collections::BTreeSet<String>,
     Option<PipelineExecutionProfile>,
 );
 
@@ -450,7 +557,10 @@ fn execute_pipeline_set<T: VectorType>(
     query: &TqlQuery,
     mt: &MemTable<T>,
     profile: bool,
+    limits: &TqlLimits,
 ) -> Result<PipelineSetResult, TriviumError> {
+    limits.check_cancelled()?;
+    requested_row_limit(query, requires_full_input(query, false), limits, mt)?;
     let source_vector = match &query.entry {
         QueryEntry::Search { vector, .. } => Some(vector.as_slice()),
         _ => None,
@@ -478,14 +588,14 @@ fn execute_pipeline_set<T: VectorType>(
                 vec![Box::new(crate::query::pipeline::QuiverVectorSearch {
                     query: vector
                         .iter()
-                        .map(|value| T::from_f32(*value as f32))
-                        .collect(),
+                        .map(T::from_json_number)
+                        .collect::<Result<Vec<_>, _>>()?,
                     top_k: *top_k,
                     ef_search: top_k.saturating_mul(8).max(64),
                 })];
             if let Some(expand) = expand {
                 operators.extend(
-                    crate::query::pipeline::lower_search_entry::<T>(vector, 0, Some(expand))
+                    crate::query::pipeline::lower_search_entry::<T>(vector, 0, Some(expand))?
                         .into_iter()
                         .skip(1),
                 );
@@ -500,7 +610,7 @@ fn execute_pipeline_set<T: VectorType>(
                 ..
             },
             _,
-        ) => crate::query::pipeline::lower_search_entry(vector, *top_k, expand.as_ref()),
+        ) => crate::query::pipeline::lower_search_entry(vector, *top_k, expand.as_ref())?,
         (QueryEntry::Text { clause }, _) => {
             vec![Box::new(crate::query::pipeline::TextSearchSource {
                 query: clause.query.clone(),
@@ -543,16 +653,25 @@ fn execute_pipeline_set<T: VectorType>(
             source_query.limit = None;
             source_query.offset = None;
             source_query.returns = ReturnClause::All;
-            let ids = execute_tql(&source_query, mt)?
-                .into_iter()
-                .flat_map(|row| row.into_values().map(|node| node.id))
-                .collect();
+            let ids = execute_tql_with_limits(
+                &source_query,
+                mt,
+                TqlLimits {
+                    max_query_rows: Some(0),
+                    memory_limit: limits.memory_limit,
+                    query_control: limits.query_control.clone(),
+                    ..Default::default()
+                },
+            )?
+            .into_iter()
+            .flat_map(|row| row.into_values().map(|node| node.id))
+            .collect();
             vec![Box::new(crate::query::pipeline::NodeIdsSource { ids })]
         }
     };
     let disable_fusion = cfg!(feature = "test-hooks") && test_disable_fusion();
     let mut current_name = "_".to_owned();
-    let mut scalar_aliases = HashMap::<String, TqlExpr>::new();
+    let mut columns = std::collections::BTreeSet::<String>::from(["_".into()]);
     let physical_stage = |stage_index: usize| {
         plan.stages
             .iter()
@@ -564,26 +683,32 @@ fn execute_pipeline_set<T: VectorType>(
         if skip_filter_stage == Some(stage_index) {
             continue;
         }
-        if plan.elided_stages.contains(&stage_index) {
+        if plan.elided_stages.contains(&stage_index) && !matches!(stage, PipelineStage::With(_)) {
             continue;
         }
         match stage {
             PipelineStage::With(with) => {
-                let previous_aliases = scalar_aliases.clone();
-                scalar_aliases.clear();
-                for item in &with.items {
-                    match &item.expr {
-                        TqlExpr::Variable(var) if var == &current_name || var == "_" => {
-                            current_name = item.alias.clone();
-                        }
-                        expr => {
-                            scalar_aliases.insert(
-                                item.alias.clone(),
-                                substitute_scalar_aliases(expr, &previous_aliases),
-                            );
-                        }
-                    }
+                let preferred = query
+                    .pipeline
+                    .get(stage_index + 1)
+                    .and_then(|next| match next {
+                        PipelineStage::Expand(stage) => Some(stage.input.as_str()),
+                        PipelineStage::GraphAlgorithm(stage) => Some(stage.input.as_str()),
+                        _ => None,
+                    });
+                let primary = with.items.iter().find(|item| preferred == Some(item.alias.as_str()) && matches!(item.expr, TqlExpr::Variable(_)))
+                    .map(|item| item.alias.clone()).or_else(|| with.items.iter().find_map(|item| {
+                    matches!(&item.expr, TqlExpr::Variable(var) if var == &current_name || var == "_")
+                        .then(|| item.alias.clone())
+                }));
+                operators.push(Box::new(TqlScopeProjection {
+                    projection: with.clone(),
+                    primary: primary.clone(),
+                }));
+                if let Some(primary) = primary {
+                    current_name = primary;
                 }
+                columns = with.items.iter().map(|item| item.alias.clone()).collect();
             }
             PipelineStage::Expand(stage) => {
                 if stage.input != current_name {
@@ -621,8 +746,8 @@ fn execute_pipeline_set<T: VectorType>(
                         query: rank
                             .vector
                             .iter()
-                            .map(|value| T::from_f32(*value as f32))
-                            .collect(),
+                            .map(T::from_json_number)
+                            .collect::<Result<Vec<_>, _>>()?,
                         top_k: rank.top_k,
                     }));
                 } else {
@@ -636,8 +761,8 @@ fn execute_pipeline_set<T: VectorType>(
                         operators.push(Box::new(crate::query::pipeline::ExactRerank {
                             query: vector
                                 .iter()
-                                .map(|value| T::from_f32(*value as f32))
-                                .collect(),
+                                .map(T::from_json_number)
+                                .collect::<Result<Vec<_>, _>>()?,
                             top_k: None,
                         }));
                     }
@@ -917,8 +1042,8 @@ fn execute_pipeline_set<T: VectorType>(
                     query: stage
                         .vector
                         .iter()
-                        .map(|value| T::from_f32(*value as f32))
-                        .collect(),
+                        .map(T::from_json_number)
+                        .collect::<Result<Vec<_>, _>>()?,
                     top_k: stage.top_k,
                     lambda: stage.lambda,
                     threshold: stage.threshold,
@@ -962,17 +1087,19 @@ fn execute_pipeline_set<T: VectorType>(
                 let physical = physical_stage(stage_index);
                 if let Some(strategy) = physical.and_then(property_index_strategy) {
                     let mut equalities = Vec::new();
-                    collect_predicate_equalities(&predicate, &mut equalities);
+                    collect_predicate_equalities(&predicate, &current_name, &mut equalities);
                     if !equalities.is_empty() {
-                        operators.push(Box::new(crate::query::pipeline::PropertyIndexFilter {
-                            equalities,
-                            strategy,
-                        }));
+                        if equalities.iter().any(|(_, value)| value.is_number()) {
+                            operators.push(Box::new(TqlNumericIndexFilter { equalities }));
+                        } else {
+                            operators.push(Box::new(crate::query::pipeline::PropertyIndexFilter {
+                                equalities,
+                                strategy,
+                            }));
+                        }
                     }
                 }
-                operators.push(Box::new(PipelinePredicateFilter {
-                    predicate: substitute_predicate_aliases(&predicate, &scalar_aliases),
-                }));
+                operators.push(Box::new(PipelinePredicateFilter { predicate }));
             }
             PipelineStage::Rank(rank) => {
                 // 与前一个 EXPAND 相邻时，已由 ExpandExactRerank 安全融合并执行，避免重复重排。
@@ -989,20 +1116,40 @@ fn execute_pipeline_set<T: VectorType>(
                         query: rank
                             .vector
                             .iter()
-                            .map(|value| T::from_f32(*value as f32))
-                            .collect(),
+                            .map(T::from_json_number)
+                            .collect::<Result<Vec<_>, _>>()?,
                         top_k: Some(rank.top_k),
                     }))
                 }
             }
         }
+        if !matches!(
+            stage,
+            PipelineStage::With(_) | PipelineStage::Filter(_) | PipelineStage::Rank(_)
+        ) {
+            let inner = operators.pop().ok_or_else(|| {
+                TriviumError::QueryExecution(
+                    "管线输出算子缺失 (Missing pipeline output operator)".into(),
+                )
+            })?;
+            columns.insert(current_name.clone());
+            operators.push(Box::new(TqlOutputBinding {
+                inner,
+                name: current_name.clone(),
+            }));
+        }
     }
     let mut context = crate::query::pipeline::PipelineContext::with_profile(
         mt,
         crate::query::pipeline::PipelineBudget {
-            max_nodes: MAX_BUDGET,
+            max_nodes: MAX_BUDGET.min(memory_row_cap(limits.memory_limit, mt)),
             max_node_set_bytes: MAX_BUDGET
-                .saturating_mul(std::mem::size_of::<crate::query::pipeline::NodeRow>()),
+                .saturating_mul(std::mem::size_of::<crate::query::pipeline::NodeRow>())
+                .min(if limits.memory_limit == 0 {
+                    usize::MAX
+                } else {
+                    limits.memory_limit
+                }),
             max_vector_read_bytes: mt
                 .node_count()
                 .saturating_mul(mt.dim())
@@ -1020,17 +1167,21 @@ fn execute_pipeline_set<T: VectorType>(
         },
         profile,
     );
+    context.query_control = limits.query_control.clone();
+    context.workspace_limit = limits.memory_limit;
     let set = crate::query::pipeline::execute_pipeline(&mut context, &operators)?;
+    limits.check_cancelled()?;
     let execution_profile = profile.then_some(PipelineExecutionProfile {
         plan,
         metrics: context.metrics,
     });
-    Ok((set, current_name, scalar_aliases, execution_profile))
+    Ok((set, current_name, columns, execution_profile))
 }
 
 fn execute_pipeline_node_query<T: VectorType>(
     query: &TqlQuery,
     mt: &MemTable<T>,
+    limits: TqlLimits,
 ) -> Result<TqlResult<T>, TriviumError> {
     if matches!(&query.returns, ReturnClause::Expressions(items) if items.iter().any(|item| matches!(item.kind, ReturnExprKind::Scalar(_))))
     {
@@ -1038,102 +1189,39 @@ fn execute_pipeline_node_query<T: VectorType>(
             "节点结果 API 无法承载标量列，请使用 tql_values (Node-only result API cannot carry scalar columns; use tql_values)".into(),
         ));
     }
-    let (set, current_name, scalar_aliases, _) = execute_pipeline_set(query, mt, false)?;
-    let mut pipeline_rows = set.rows().to_vec();
-    sort_pipeline_rows(&mut pipeline_rows, &query.order_by, &scalar_aliases, mt);
-    apply_offset_limit(&mut pipeline_rows, query.offset, query.limit);
-    let results = pipeline_rows
+    let (set, current_name, columns, _) = execute_pipeline_set(query, mt, false, &limits)?;
+    let mut rows = set.into_rows();
+    rows.truncate(admit_input_rows(query, mt, &limits, rows.len())?);
+    let inputs = rows
         .iter()
-        .filter_map(|pipeline_row| {
-            let node = build_node(pipeline_row.id, mt)?;
-            Some(HashMap::from([(current_name.clone(), node)]))
-        })
-        .collect();
-    Ok(results)
+        .map(returning::Input::Pipeline)
+        .collect::<Vec<_>>();
+    let scope = returning::Scope {
+        query,
+        mt,
+        limits: &limits,
+        pipeline: Some((&current_name, &columns)),
+    };
+    returning::into_nodes(returning::finish(&inputs, &scope)?, &inputs, &scope)
 }
 
 fn json_to_tql_value<T>(value: serde_json::Value) -> TqlValue<T> {
     match value {
         serde_json::Value::Null => TqlValue::Null,
         serde_json::Value::Bool(value) => TqlValue::Bool(value),
-        serde_json::Value::Number(value) => value.as_i64().map_or_else(
-            || TqlValue::Float(value.as_f64().unwrap_or(f64::NAN)),
-            TqlValue::Int,
-        ),
+        serde_json::Value::Number(value) => {
+            if let Some(value) = value.as_i64() {
+                TqlValue::Int(value)
+            } else if let Some(value) = value.as_u64() {
+                TqlValue::UInt(value)
+            } else {
+                TqlValue::Float(value.as_f64().unwrap_or(f64::NAN))
+            }
+        }
         serde_json::Value::String(value) => TqlValue::String(value),
         serde_json::Value::Array(value) => TqlValue::List(value),
-        serde_json::Value::Object(value) => {
-            TqlValue::String(serde_json::to_string(&value).unwrap_or_else(|_| "{}".into()))
-        }
+        serde_json::Value::Object(value) => TqlValue::Object(value),
     }
-}
-
-fn project_legacy_value_row<T: VectorType>(
-    query: &TqlQuery,
-    row: HashMap<String, Node<T>>,
-    mt: &MemTable<T>,
-) -> Result<HashMap<String, TqlValue<T>>, TriviumError> {
-    let ReturnClause::Expressions(items) = &query.returns else {
-        return Ok(row
-            .into_iter()
-            .map(|(name, node)| (name, TqlValue::Node(node)))
-            .collect());
-    };
-    let is_find_entry = matches!(query.entry, QueryEntry::Find { .. });
-    let mut output = HashMap::new();
-    for item in items {
-        let name = item
-            .alias
-            .clone()
-            .unwrap_or_else(|| format_return_expr_kind(&item.kind));
-        let value = match &item.kind {
-            ReturnExprKind::Aggregate(_, _) => row
-                .get(&name)
-                .and_then(|node| node.payload.get(&name).cloned())
-                .map_or(TqlValue::Null, json_to_tql_value),
-            ReturnExprKind::Var(var) => {
-                if is_find_entry
-                    && let Some(node) = row.get(var)
-                    && let Some(value) = node.payload.get(var).cloned()
-                {
-                    json_to_tql_value(value)
-                } else {
-                    row.get(var).cloned().map_or(TqlValue::Null, TqlValue::Node)
-                }
-            }
-            ReturnExprKind::Property(var, field) => row.get(var).map_or(TqlValue::Null, |node| {
-                if field == "id" {
-                    TqlValue::Int(node.id as i64)
-                } else {
-                    node.payload
-                        .get(field)
-                        .cloned()
-                        .map_or(TqlValue::Null, json_to_tql_value)
-                }
-            }),
-            ReturnExprKind::Scalar(expr) => runtime_to_tql_value(match &query.entry {
-                QueryEntry::Find { .. } => row.get("_").map_or(RuntimeValue::Null, |node| {
-                    eval_tql_expr_single(expr, node.id, mt)
-                }),
-                _ => {
-                    let mut names = row.keys().cloned().collect::<Vec<_>>();
-                    names.sort();
-                    let env = names
-                        .iter()
-                        .map(|name| row.get(name).map(|node| node.id))
-                        .collect::<Vec<_>>();
-                    let var_map = names
-                        .into_iter()
-                        .enumerate()
-                        .map(|(index, name)| (name, index))
-                        .collect::<HashMap<_, _>>();
-                    eval_tql_expr(expr, &env, &var_map, mt)
-                }
-            }),
-        };
-        output.insert(name, value);
-    }
-    Ok(output)
 }
 
 /// 执行 TQL 并返回可同时承载节点与标量列的一等值结果。
@@ -1151,33 +1239,53 @@ pub fn execute_tql_values_with_limits<T: VectorType>(
 ) -> Result<TqlValueResult<T>, TriviumError> {
     limits.check_cancelled()?;
     ensure_search_vector_bound(query)?;
-    if query.pipeline.is_empty()
-        && let QueryEntry::Match { pattern } = &query.entry
+    if !query.explain
+        && query.pipeline.is_empty()
+        && let QueryEntry::Match { pattern } | QueryEntry::OptionalMatch { pattern } = &query.entry
         && pattern.edges.iter().any(|edge| edge.var.is_some())
     {
         return execute_single_edge_values(query, pattern, mt, limits);
     }
+    if query.explain {
+        return execute_tql_with_limits(query, mt, limits).map(|rows| {
+            rows.into_iter()
+                .map(|row| {
+                    row.into_iter()
+                        .map(|(name, node)| (name, TqlValue::Node(node)))
+                        .collect()
+                })
+                .collect()
+        });
+    }
     if query.pipeline.is_empty() {
-        return execute_tql_with_limits(query, mt, limits)?
-            .into_iter()
-            .map(|row| project_legacy_value_row(query, row, mt))
-            .collect();
+        let (rows, _) = execute_binding_rows(query, mt, &limits)?;
+        let inputs = rows
+            .iter()
+            .map(|row| returning::Input::Nodes(row, None))
+            .collect::<Vec<_>>();
+        let scope = returning::Scope {
+            query,
+            mt,
+            limits: &limits,
+            pipeline: None,
+        };
+        return returning::finish(&inputs, &scope)
+            .map(|rows| rows.into_iter().map(|row| row.values).collect());
     }
-    let (set, current_name, scalar_aliases, _) = execute_pipeline_set(query, mt, false)?;
-    let mut rows = set.rows().to_vec();
-    if pipeline_has_aggregation(&query.returns) {
-        let mut values =
-            aggregate_pipeline_rows(&query.returns, &current_name, &scalar_aliases, &rows, mt)?;
-        apply_offset_limit(&mut values, query.offset, query.limit);
-        return Ok(values);
-    }
-    sort_pipeline_rows(&mut rows, &query.order_by, &scalar_aliases, mt);
-    apply_offset_limit(&mut rows, query.offset, query.limit);
-    rows.into_iter()
-        .map(|pipeline_row| {
-            project_pipeline_row(query, &current_name, &scalar_aliases, &pipeline_row, mt)
-        })
-        .collect()
+    let (set, current_name, columns, _) = execute_pipeline_set(query, mt, false, &limits)?;
+    let mut rows = set.into_rows();
+    rows.truncate(admit_input_rows(query, mt, &limits, rows.len())?);
+    let inputs = rows
+        .iter()
+        .map(returning::Input::Pipeline)
+        .collect::<Vec<_>>();
+    let scope = returning::Scope {
+        query,
+        mt,
+        limits: &limits,
+        pipeline: Some((&current_name, &columns)),
+    };
+    returning::finish(&inputs, &scope).map(|rows| rows.into_iter().map(|row| row.values).collect())
 }
 
 fn execute_single_edge_values<T: VectorType>(
@@ -1186,114 +1294,178 @@ fn execute_single_edge_values<T: VectorType>(
     mt: &MemTable<T>,
     limits: TqlLimits,
 ) -> Result<TqlValueResult<T>, TriviumError> {
-    if pattern.edges.len() != 1 || pattern.edges[0].hop_range.is_some() {
-        return Err(TriviumError::QueryExecution(
-            "边变量目前仅支持单跳 MATCH (Edge variables currently support single-hop MATCH only)"
-                .into(),
-        ));
-    }
-    let edge_pattern = &pattern.edges[0];
-    let edge_var = edge_pattern
+    let expanded = collect_single_edge_rows(query, pattern, mt, &limits)?;
+    let edge_var = pattern.edges[0]
         .var
-        .as_ref()
+        .as_deref()
         .ok_or_else(|| TriviumError::QueryExecution("缺少边变量 (Missing edge variable)".into()))?;
-    let (Some(left_var), Some(right_var)) =
-        (pattern.nodes[0].var.as_ref(), pattern.nodes[1].var.as_ref())
-    else {
-        return Err(TriviumError::QueryExecution(
-            "边投影要求两端节点都有变量 (Edge projection requires variables on both nodes)".into(),
-        ));
+    let inputs = expanded
+        .iter()
+        .map(|(nodes, edge)| {
+            returning::Input::Nodes(nodes, edge.as_ref().map(|edge| (edge_var, edge)))
+        })
+        .collect::<Vec<_>>();
+    let scope = returning::Scope {
+        query,
+        mt,
+        limits: &limits,
+        pipeline: None,
     };
-    let mut node_query = query.clone();
-    node_query.limit = None;
-    node_query.offset = None;
-    node_query.returns = ReturnClause::Variables(vec![left_var.clone(), right_var.clone()]);
-    let rows = execute_tql_with_limits(&node_query, mt, limits)?;
-    let requested_vars = match &query.returns {
-        ReturnClause::Variables(vars) => Some(vars),
-        _ => None,
-    };
-    let mut output = Vec::new();
-    let mut seen_pairs = HashSet::new();
-    for row in rows {
-        let (Some(left), Some(right)) = (row.get(left_var), row.get(right_var)) else {
-            continue;
-        };
-        if !seen_pairs.insert((left.id, right.id)) {
-            continue;
-        }
-        let candidates = match edge_pattern.direction {
-            EdgeDirection::Forward => vec![(left.id, right.id)],
-            EdgeDirection::Backward => vec![(right.id, left.id)],
-            EdgeDirection::Both => vec![(left.id, right.id), (right.id, left.id)],
-        };
-        for (source, target) in candidates {
-            let Some(edges) = mt.get_edges(source) else {
-                continue;
-            };
-            for edge in edges {
-                if edge.target_id != target
-                    || (!edge_pattern.labels.is_empty()
-                        && !edge_pattern.labels.contains(&edge.label))
-                {
-                    continue;
-                }
-                let mut values = row
-                    .clone()
-                    .into_iter()
-                    .filter(|(name, _)| requested_vars.is_none_or(|vars| vars.contains(name)))
-                    .map(|(name, node)| (name, TqlValue::Node(node)))
-                    .collect::<HashMap<_, _>>();
-                values.insert(
-                    edge_var.clone(),
-                    TqlValue::Edge(EdgeView {
-                        source_id: source,
-                        target_id: target,
-                        label: edge.label.clone(),
-                        weight: edge.weight,
-                        metadata: edge.metadata.clone(),
-                    }),
-                );
-                output.push(values);
-            }
-        }
-    }
-    if let Some(offset) = query.offset {
-        output = output.into_iter().skip(offset).collect();
-    }
-    if let Some(limit) = query.limit {
-        output.truncate(limit);
-    }
-    Ok(output)
+    returning::finish(&inputs, &scope).map(|rows| rows.into_iter().map(|row| row.values).collect())
 }
 
-fn sort_pipeline_rows<T: VectorType>(
-    rows: &mut [crate::query::pipeline::NodeRow],
-    order_by: &[OrderExpr],
-    scalar_aliases: &HashMap<String, TqlExpr>,
+type EdgeBindingRow<T> = (HashMap<String, Node<T>>, Option<EdgeView>);
+
+fn collect_single_edge_rows<T: VectorType>(
+    query: &TqlQuery,
+    pattern: &TqlPattern,
     mt: &MemTable<T>,
-) {
-    if order_by.is_empty() {
-        return;
+    limits: &TqlLimits,
+) -> Result<Vec<EdgeBindingRow<T>>, TriviumError> {
+    if pattern.edges.len() != 1 || pattern.edges[0].hop_range.is_some() || pattern.nodes.len() != 2
+    {
+        return Err(TriviumError::QueryExecution(
+            "具名边要求单跳模式 (Named edges require a single-hop pattern)".into(),
+        ));
     }
-    rows.sort_by(|left, right| {
-        for order in order_by {
-            let expr = substitute_scalar_aliases(&order.expr, scalar_aliases);
-            let ordering = compare_for_sort(
-                &eval_pipeline_row_expr(&expr, left, mt),
-                &eval_pipeline_row_expr(&expr, right, mt),
-            );
-            let ordering = if order.descending {
-                ordering.reverse()
-            } else {
-                ordering
+    let optional = matches!(query.entry, QueryEntry::OptionalMatch { .. });
+    let plan = plan_match(pattern, mt, optional);
+    let left = &plan.pattern.nodes[0];
+    let right = &plan.pattern.nodes[1];
+    let edge_pattern = &plan.pattern.edges[0];
+    let edge_var = edge_pattern
+        .var
+        .as_deref()
+        .ok_or_else(|| TriviumError::QueryExecution("缺少边变量 (Missing edge variable)".into()))?;
+    let candidates: Box<dyn Iterator<Item = NodeId> + '_> = if matches!(
+        plan.access_path,
+        AccessPath::FullNodeScan | AccessPath::ColdPayloadScan
+    ) {
+        Box::new(mt.active_node_ids())
+    } else {
+        Box::new(plan.candidates.iter().copied())
+    };
+    let (row_limit, _) = requested_row_limit(query, requires_full_input(query, false), limits, mt)?;
+    let scope = returning::Scope {
+        query,
+        mt,
+        limits,
+        pipeline: None,
+    };
+    let mut expanded = Vec::new();
+    let mut examined = 0usize;
+    'anchors: for start in candidates {
+        limits.check_cancelled()?;
+        if left
+            .filter
+            .as_ref()
+            .is_some_and(|filter| !matches_filter_with_id(filter, start, mt))
+        {
+            continue;
+        }
+        // 物理边按端点与标签排序，并合并双向枚举中的同一自环。
+        let mut edges = BTreeMap::new();
+        let outgoing = mt
+            .get_edges(start)
+            .unwrap_or(&[])
+            .iter()
+            .filter(|_| edge_pattern.direction != EdgeDirection::Backward)
+            .map(|edge| (start, edge));
+        let incoming = mt
+            .get_incoming_sources(start)
+            .iter()
+            .filter(|_| edge_pattern.direction != EdgeDirection::Forward)
+            .flat_map(|source| {
+                mt.get_edges(*source)
+                    .unwrap_or(&[])
+                    .iter()
+                    .filter(move |edge| edge.target_id == start)
+                    .map(move |edge| (*source, edge))
+            });
+        for (source, edge) in outgoing.chain(incoming) {
+            if examined >= MAX_BUDGET {
+                return Err(TriviumError::QueryExecution(
+                    "具名边遍历超过步数预算 (Named-edge traversal exceeded its step budget)".into(),
+                ));
+            }
+            examined += 1;
+            if !edge_pattern.labels.is_empty() && !edge_pattern.labels.contains(&edge.label) {
+                continue;
+            }
+            let bytes = edges
+                .len()
+                .saturating_add(1)
+                .saturating_mul(std::mem::size_of::<(NodeId, NodeId, &str)>())
+                .saturating_mul(4);
+            if limits.memory_limit > 0 && bytes > limits.memory_limit {
+                return Err(TriviumError::QueryRowBudgetExceeded {
+                    budget: edges.len(),
+                });
+            }
+            edges.insert((source, edge.target_id, edge.label.as_str()), edge);
+        }
+        let mut matched = false;
+        for ((source, target, _), edge) in edges {
+            let end = if source == start { target } else { source };
+            if left.var.is_some() && left.var == right.var && start != end {
+                continue;
+            }
+            if right
+                .filter
+                .as_ref()
+                .is_some_and(|filter| !matches_filter_with_id(filter, end, mt))
+            {
+                continue;
+            }
+            let mut nodes = HashMap::new();
+            for (pattern, id) in [(left, start), (right, end)] {
+                if let Some(var) = &pattern.var {
+                    nodes.insert(
+                        var.clone(),
+                        build_node(id, mt).ok_or(TriviumError::NodeNotFound(id))?,
+                    );
+                }
+            }
+            let view = EdgeView {
+                source_id: source,
+                target_id: target,
+                label: edge.label.clone(),
+                weight: edge.weight,
+                metadata: edge.metadata.clone(),
             };
-            if ordering != std::cmp::Ordering::Equal {
-                return ordering;
+            let input = returning::Input::Nodes(&nodes, Some((edge_var, &view)));
+            if query
+                .predicate
+                .as_ref()
+                .is_some_and(|predicate| !returning::matches_predicate(predicate, &input, &scope))
+            {
+                continue;
+            }
+            matched = true;
+            expanded.push((nodes, Some(view)));
+            if expanded.len() > row_limit {
+                break 'anchors;
             }
         }
-        left.id.cmp(&right.id)
-    });
+        if optional && !matched {
+            let mut nodes = HashMap::new();
+            if let Some(var) = &left.var {
+                nodes.insert(
+                    var.clone(),
+                    build_node(start, mt).ok_or(TriviumError::NodeNotFound(start))?,
+                );
+            }
+            expanded.push((nodes, None));
+            if expanded.len() > row_limit {
+                break;
+            }
+        }
+    }
+    expanded.truncate(admit_input_rows(query, mt, limits, expanded.len())?);
+    if let Some(rank) = &query.rank {
+        expanded = rank_rows_by_node(expanded, rank, mt, |row| &row.0)?;
+    }
+    Ok(expanded)
 }
 
 fn apply_offset_limit<T>(rows: &mut Vec<T>, offset: Option<usize>, limit: Option<usize>) {
@@ -1309,229 +1481,29 @@ fn apply_offset_limit<T>(rows: &mut Vec<T>, offset: Option<usize>, limit: Option
     }
 }
 
-fn project_pipeline_row<T: VectorType>(
-    query: &TqlQuery,
-    current_name: &str,
-    scalar_aliases: &HashMap<String, TqlExpr>,
-    pipeline_row: &crate::query::pipeline::NodeRow,
-    mt: &MemTable<T>,
-) -> Result<HashMap<String, TqlValue<T>>, TriviumError> {
-    let node = build_node(pipeline_row.id, mt).ok_or_else(|| {
-        TriviumError::QueryExecution(format!(
-            "管线节点 {} 不存在 (Pipeline node {} does not exist)",
-            pipeline_row.id, pipeline_row.id
-        ))
-    })?;
-    let mut output = HashMap::new();
-    match &query.returns {
-        ReturnClause::All => {
-            output.insert(current_name.to_owned(), TqlValue::Node(node));
-        }
-        ReturnClause::Variables(vars) => {
-            for var in vars {
-                if var == current_name {
-                    output.insert(var.clone(), TqlValue::Node(node.clone()));
-                } else if let Some(expr) = scalar_aliases.get(var) {
-                    output.insert(
-                        var.clone(),
-                        runtime_to_tql_value(eval_pipeline_row_expr(expr, pipeline_row, mt)),
-                    );
-                }
-            }
-        }
-        ReturnClause::Expressions(items) => {
-            for item in items {
-                let (name, value) = match &item.kind {
-                    ReturnExprKind::Var(var) if var == current_name => (
-                        item.alias.clone().unwrap_or_else(|| var.clone()),
-                        TqlValue::Node(node.clone()),
-                    ),
-                    ReturnExprKind::Var(alias) => {
-                        let Some(expr) = scalar_aliases.get(alias) else {
-                            return Err(TriviumError::QueryExecution(format!(
-                                "RETURN 节点变量 {alias} 不是当前 NodeSet {current_name} (RETURN node variable {alias} is not current NodeSet {current_name})"
-                            )));
-                        };
-                        (
-                            item.alias.clone().unwrap_or_else(|| alias.clone()),
-                            runtime_to_tql_value(eval_pipeline_row_expr(expr, pipeline_row, mt)),
-                        )
-                    }
-                    ReturnExprKind::Property(var, field) => (
-                        item.alias.clone().unwrap_or_else(|| field.clone()),
-                        runtime_to_tql_value(eval_pipeline_row_expr(
-                            &TqlExpr::Property {
-                                var: var.clone(),
-                                field: field.clone(),
-                            },
-                            pipeline_row,
-                            mt,
-                        )),
-                    ),
-                    ReturnExprKind::Scalar(expr) => (
-                        item.alias.clone().unwrap_or_else(|| format_tql_expr(expr)),
-                        runtime_to_tql_value(eval_pipeline_row_expr(expr, pipeline_row, mt)),
-                    ),
-                    ReturnExprKind::Aggregate(_, _) => {
-                        return Err(TriviumError::QueryExecution(
-                            "WITH 管线暂不支持聚合投影 (WITH pipeline aggregation is not supported yet)".into(),
-                        ));
-                    }
-                };
-                output.insert(name, value);
-            }
-        }
-    }
-    Ok(output)
-}
-
-fn pipeline_has_aggregation(returns: &ReturnClause) -> bool {
-    matches!(returns, ReturnClause::Expressions(items) if items.iter().any(|item| is_aggregate(&item.kind)))
-}
-
-fn aggregate_pipeline_rows<T: VectorType>(
-    returns: &ReturnClause,
-    current_name: &str,
-    scalar_aliases: &HashMap<String, TqlExpr>,
-    rows: &[crate::query::pipeline::NodeRow],
-    mt: &MemTable<T>,
-) -> Result<TqlValueResult<T>, TriviumError> {
-    let ReturnClause::Expressions(items) = returns else {
-        return Ok(Vec::new());
-    };
-    let group_items = items
-        .iter()
-        .filter(|item| !is_aggregate(&item.kind))
-        .collect::<Vec<_>>();
-    let mut groups = BTreeMap::<String, Vec<&crate::query::pipeline::NodeRow>>::new();
-    for row in rows {
-        let key = group_items
-            .iter()
-            .map(|item| {
-                pipeline_kind_json(&item.kind, current_name, scalar_aliases, row, mt).map(|value| {
-                    serde_json::to_string(&value).unwrap_or_else(|_| "null".to_owned())
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?
-            .join("\u{1f}");
-        groups.entry(key).or_default().push(row);
-    }
-    if rows.is_empty() && group_items.is_empty() {
-        groups.insert(String::new(), Vec::new());
-    }
-    groups
-        .into_values()
-        .map(|group| {
-            let mut output = HashMap::new();
-            for item in items {
-                let name = item
-                    .alias
-                    .clone()
-                    .unwrap_or_else(|| format_return_expr(item));
-                let value = match &item.kind {
-                    ReturnExprKind::Aggregate(func, inner) => aggregate_pipeline_value(
-                        *func,
-                        inner,
-                        item.distinct,
-                        current_name,
-                        scalar_aliases,
-                        &group,
-                        mt,
-                    )?,
-                    kind => {
-                        let Some(row) = group.first() else {
-                            return Err(TriviumError::QueryExecution(
-                                "空输入不能产生分组列 (Empty input cannot produce grouping columns)"
-                                    .into(),
-                            ));
-                        };
-                        pipeline_kind_value(kind, current_name, scalar_aliases, row, mt)?
-                    }
-                };
-                output.insert(name, value);
-            }
-            Ok(output)
-        })
-        .collect()
-}
-
-fn aggregate_pipeline_value<T: VectorType>(
-    func: AggFunc,
-    inner: &ReturnExprKind,
-    distinct: bool,
-    current_name: &str,
-    scalar_aliases: &HashMap<String, TqlExpr>,
-    rows: &[&crate::query::pipeline::NodeRow],
-    mt: &MemTable<T>,
-) -> Result<TqlValue<T>, TriviumError> {
-    let mut values = if matches!(inner, ReturnExprKind::Var(name) if name == "*") {
-        rows.iter().map(|_| serde_json::Value::Bool(true)).collect()
-    } else {
-        rows.iter()
-            .map(|row| pipeline_kind_json(inner, current_name, scalar_aliases, row, mt))
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .filter(|value| !value.is_null())
-            .collect::<Vec<_>>()
-    };
-    if distinct {
-        let mut seen = HashSet::new();
-        values.retain(|value| seen.insert(serde_json::to_string(value).unwrap_or_default()));
-    }
-    Ok(match func {
-        AggFunc::Count => TqlValue::Int(values.len() as i64),
-        AggFunc::Collect => TqlValue::List(values),
-        AggFunc::Sum | AggFunc::Avg | AggFunc::Min | AggFunc::Max => {
-            let numbers = values
-                .iter()
-                .filter_map(serde_json::Value::as_f64)
-                .filter(|value| value.is_finite())
-                .collect::<Vec<_>>();
-            if numbers.is_empty() {
-                TqlValue::Null
-            } else {
-                let value = match func {
-                    AggFunc::Sum => numbers.iter().sum(),
-                    AggFunc::Avg => numbers.iter().sum::<f64>() / numbers.len() as f64,
-                    AggFunc::Min => numbers.into_iter().fold(f64::INFINITY, f64::min),
-                    AggFunc::Max => numbers.into_iter().fold(f64::NEG_INFINITY, f64::max),
-                    _ => {
-                        return Err(TriviumError::QueryExecution(
-                            "聚合函数状态不一致 (Inconsistent aggregate function state)".into(),
-                        ));
-                    }
-                };
-                TqlValue::Float(value)
-            }
-        }
-    })
-}
-
 fn pipeline_kind_value<T: VectorType>(
     kind: &ReturnExprKind,
-    current_name: &str,
-    scalar_aliases: &HashMap<String, TqlExpr>,
     row: &crate::query::pipeline::NodeRow,
     mt: &MemTable<T>,
 ) -> Result<TqlValue<T>, TriviumError> {
     match kind {
-        ReturnExprKind::Var(var) if var == current_name => build_node(row.id, mt)
-            .map(TqlValue::Node)
-            .ok_or_else(|| TriviumError::QueryExecution(format!("管线节点 {} 不存在", row.id))),
-        ReturnExprKind::Var(alias) => scalar_aliases
-            .get(alias)
-            .map(|expr| runtime_to_tql_value(eval_pipeline_row_expr(expr, row, mt)))
-            .ok_or_else(|| TriviumError::QueryExecution(format!("未知管线别名 {alias}"))),
-        ReturnExprKind::Property(var, field) => Ok(runtime_to_tql_value(eval_pipeline_row_expr(
-            &TqlExpr::Property {
-                var: var.clone(),
-                field: field.clone(),
-            },
-            row,
+        ReturnExprKind::Var(var) => runtime_to_tql_value(
+            eval_pipeline_row_expr(&TqlExpr::Variable(var.clone()), row, mt),
             mt,
-        ))),
+        ),
+        ReturnExprKind::Property(var, field) => runtime_to_tql_value(
+            eval_pipeline_row_expr(
+                &TqlExpr::Property {
+                    var: var.clone(),
+                    field: field.clone(),
+                },
+                row,
+                mt,
+            ),
+            mt,
+        ),
         ReturnExprKind::Scalar(expr) => {
-            Ok(runtime_to_tql_value(eval_pipeline_row_expr(expr, row, mt)))
+            runtime_to_tql_value(eval_pipeline_row_expr(expr, row, mt), mt)
         }
         ReturnExprKind::Aggregate(_, _) => Err(TriviumError::QueryExecution(
             "不允许嵌套聚合 (Nested aggregation is not supported)".into(),
@@ -1539,32 +1511,121 @@ fn pipeline_kind_value<T: VectorType>(
     }
 }
 
-fn pipeline_kind_json<T: VectorType>(
-    kind: &ReturnExprKind,
-    current_name: &str,
-    scalar_aliases: &HashMap<String, TqlExpr>,
-    row: &crate::query::pipeline::NodeRow,
-    mt: &MemTable<T>,
-) -> Result<serde_json::Value, TriviumError> {
-    Ok(
-        match pipeline_kind_value(kind, current_name, scalar_aliases, row, mt)? {
-            TqlValue::Node(node) => serde_json::json!(node.id),
-            TqlValue::Edge(edge) => serde_json::json!({
-                "source": edge.source_id,
-                "target": edge.target_id,
-                "label": edge.label,
-                "weight": edge.weight,
-                "metadata": edge.metadata,
-            }),
-            TqlValue::Int(value) => serde_json::json!(value),
-            TqlValue::Float(value) => serde_json::json!(value),
-            TqlValue::String(value) => serde_json::json!(value),
-            TqlValue::Bool(value) => serde_json::json!(value),
-            TqlValue::Path(value) => serde_json::json!(value),
-            TqlValue::List(value) => serde_json::Value::Array(value),
-            TqlValue::Null => serde_json::Value::Null,
-        },
-    )
+struct TqlScopeProjection {
+    projection: WithStage,
+    primary: Option<String>,
+}
+
+impl<T: VectorType> crate::query::pipeline::PipelineOperator<T> for TqlScopeProjection {
+    fn name(&self) -> &'static str {
+        "scope_projection"
+    }
+    fn apply(
+        &self,
+        input: crate::query::pipeline::NodeSet,
+        context: &mut crate::query::pipeline::PipelineContext<'_, T>,
+    ) -> Result<crate::query::pipeline::NodeSet, TriviumError> {
+        let mut rows = Vec::with_capacity(input.len());
+        for mut row in input.into_rows() {
+            // 同一 WITH 的所有右值读取进入阶段时的环境，再同时安装新作用域。
+            let values: BTreeMap<_, _> = self
+                .projection
+                .items
+                .iter()
+                .map(|item| {
+                    (
+                        item.alias.clone(),
+                        eval_pipeline_row_expr(&item.expr, &row, context.memtable),
+                    )
+                })
+                .collect();
+            if let Some(RuntimeValue::Node(id)) =
+                self.primary.as_ref().and_then(|name| values.get(name))
+            {
+                row.id = *id;
+            }
+            row.bindings = Some(Arc::new(values));
+            rows.push(row);
+        }
+        let output = crate::query::pipeline::NodeSet::from_rows(rows);
+        if output.estimated_bytes() > context.budget.max_node_set_bytes {
+            return Err(TriviumError::QueryExecution(
+                "WITH 投影超过内存预算 (WITH projection exceeds memory budget)".into(),
+            ));
+        }
+        Ok(output)
+    }
+}
+
+struct TqlOutputBinding<T: VectorType> {
+    inner: Box<dyn crate::query::pipeline::PipelineOperator<T>>,
+    name: String,
+}
+impl<T: VectorType> crate::query::pipeline::PipelineOperator<T> for TqlOutputBinding<T> {
+    fn name(&self) -> &'static str {
+        self.inner.name()
+    }
+    fn apply(
+        &self,
+        input: crate::query::pipeline::NodeSet,
+        context: &mut crate::query::pipeline::PipelineContext<'_, T>,
+    ) -> Result<crate::query::pipeline::NodeSet, TriviumError> {
+        let mut origins = BTreeMap::<NodeId, Vec<_>>::new();
+        for row in input.rows() {
+            if let Some(bindings) = &row.bindings {
+                origins.entry(row.id).or_default().push(bindings.clone());
+            }
+        }
+        let output = self.inner.apply(input, context)?;
+        let mut output_counts = BTreeMap::<NodeId, usize>::new();
+        for row in output.rows() {
+            *output_counts.entry(row.id).or_default() += 1;
+        }
+        let mut rows = Vec::new();
+        for row in output.into_rows() {
+            let lost_contexts = origins
+                .get(&row.id)
+                .is_some_and(|values| values.len() > output_counts[&row.id]);
+            let inherited = if row.bindings.is_some() && !lost_contexts {
+                Vec::new()
+            } else if let Some(values) = origins.get(&row.id) {
+                values.clone()
+            } else {
+                let source = row
+                    .path
+                    .as_ref()
+                    .and_then(|path| path.first())
+                    .copied()
+                    .or_else(|| {
+                        (row.provenance.source_ids.len() == 1).then(|| row.provenance.source_ids[0])
+                    });
+                source
+                    .and_then(|source| origins.get(&source))
+                    .cloned()
+                    .unwrap_or_default()
+            };
+            let candidates = if inherited.is_empty() {
+                vec![row]
+            } else {
+                inherited
+                    .into_iter()
+                    .map(|bindings| {
+                        let mut inherited = row.clone();
+                        inherited.bindings = Some(bindings);
+                        inherited
+                    })
+                    .collect()
+            };
+            for mut row in candidates {
+                let bindings = row
+                    .bindings
+                    .get_or_insert_with(|| Arc::new(BTreeMap::new()));
+                Arc::make_mut(bindings).insert(self.name.clone(), RuntimeValue::Node(row.id));
+                rows.push(row);
+            }
+        }
+        Ok(crate::query::pipeline::NodeSet::from_rows(rows))
+    }
 }
 
 struct TqlSetCombineOperator {
@@ -1621,22 +1682,25 @@ fn property_index_strategy(
 
 fn collect_predicate_equalities(
     predicate: &Predicate,
+    current_name: &str,
     output: &mut Vec<(String, serde_json::Value)>,
 ) {
     match predicate {
         Predicate::Compare {
-            left: TqlExpr::Property { field, .. },
+            left: TqlExpr::Property { var, field },
             op: TqlCompOp::Eq,
             right: TqlExpr::Literal(value),
         }
         | Predicate::Compare {
             left: TqlExpr::Literal(value),
             op: TqlCompOp::Eq,
-            right: TqlExpr::Property { field, .. },
-        } => output.push((field.clone(), tql_literal_to_json(value))),
+            right: TqlExpr::Property { var, field },
+        } if field != "id" && var == current_name => {
+            output.push((field.clone(), tql_literal_to_json(value)))
+        }
         Predicate::And(left, right) => {
-            collect_predicate_equalities(left, output);
-            collect_predicate_equalities(right, output);
+            collect_predicate_equalities(left, current_name, output);
+            collect_predicate_equalities(right, current_name, output);
         }
         _ => {}
     }
@@ -1670,6 +1734,72 @@ struct PipelinePredicateFilter {
     predicate: Predicate,
 }
 
+fn numeric_equality_keys(value: &serde_json::Value) -> Vec<serde_json::Value> {
+    let mut keys = vec![value.clone()];
+    let Some(number) = value.as_number() else {
+        return keys;
+    };
+    let Some(float) = number.as_f64() else {
+        return keys;
+    };
+    // TQL 数值相等跨整数和浮点表示；属性索引仍保留 JSON 的类型键。
+    let mut candidates = Vec::with_capacity(3);
+    if let Some(candidate) = serde_json::Number::from_f64(float) {
+        candidates.push(candidate);
+    }
+    if float.fract() == 0.0 {
+        if (i64::MIN as f64..-(i64::MIN as f64)).contains(&float) {
+            candidates.push(serde_json::Number::from(float as i64));
+        }
+        if (0.0..18_446_744_073_709_551_616.0).contains(&float) {
+            candidates.push(serde_json::Number::from(float as u64));
+        }
+    }
+    for candidate in candidates {
+        if crate::filter::numeric_ordering(number, &candidate) == std::cmp::Ordering::Equal {
+            let candidate = serde_json::Value::Number(candidate);
+            if !keys.contains(&candidate) {
+                keys.push(candidate);
+            }
+        }
+    }
+    keys
+}
+
+struct TqlNumericIndexFilter {
+    equalities: Vec<(String, serde_json::Value)>,
+}
+
+impl<T: VectorType> crate::query::pipeline::PipelineOperator<T> for TqlNumericIndexFilter {
+    fn name(&self) -> &'static str {
+        "tql_numeric_index_filter"
+    }
+
+    fn apply(
+        &self,
+        input: crate::query::pipeline::NodeSet,
+        context: &mut crate::query::pipeline::PipelineContext<'_, T>,
+    ) -> Result<crate::query::pipeline::NodeSet, TriviumError> {
+        let mut rows = input.into_rows();
+        for (field, value) in &self.equalities {
+            let mut allowed = HashSet::new();
+            let mut complete = true;
+            for key in numeric_equality_keys(value) {
+                let Some(ids) = context.memtable.find_by_property_index(field, &key) else {
+                    complete = false;
+                    break;
+                };
+                allowed.extend(ids);
+            }
+            // 只有完整的等价键并集才可缩小候选；最终谓词统一复核。
+            if complete {
+                rows.retain(|row| allowed.contains(&row.id));
+            }
+        }
+        Ok(crate::query::pipeline::NodeSet::from_rows(rows))
+    }
+}
+
 impl<T: VectorType> crate::query::pipeline::PipelineOperator<T> for PipelinePredicateFilter {
     fn name(&self) -> &'static str {
         "tql_pipeline_filter"
@@ -1690,66 +1820,33 @@ impl<T: VectorType> crate::query::pipeline::PipelineOperator<T> for PipelinePred
     }
 }
 
-fn substitute_scalar_aliases(expr: &TqlExpr, aliases: &HashMap<String, TqlExpr>) -> TqlExpr {
-    match expr {
-        TqlExpr::Variable(alias) if aliases.contains_key(alias) => aliases[alias].clone(),
-        TqlExpr::Binary { left, op, right } => TqlExpr::Binary {
-            left: Box::new(substitute_scalar_aliases(left, aliases)),
-            op: *op,
-            right: Box::new(substitute_scalar_aliases(right, aliases)),
-        },
-        TqlExpr::Coalesce(values) => TqlExpr::Coalesce(
-            values
-                .iter()
-                .map(|value| substitute_scalar_aliases(value, aliases))
-                .collect(),
-        ),
-        TqlExpr::IsNull { expr, negated } => TqlExpr::IsNull {
-            expr: Box::new(substitute_scalar_aliases(expr, aliases)),
-            negated: *negated,
-        },
-        _ => expr.clone(),
-    }
-}
-
-fn substitute_predicate_aliases(
-    predicate: &Predicate,
-    aliases: &HashMap<String, TqlExpr>,
-) -> Predicate {
-    match predicate {
-        Predicate::Compare { left, op, right } => Predicate::Compare {
-            left: substitute_scalar_aliases(left, aliases),
-            op: *op,
-            right: substitute_scalar_aliases(right, aliases),
-        },
-        Predicate::DocFilter { var, filter } => Predicate::DocFilter {
-            var: var.clone(),
-            filter: filter.clone(),
-        },
-        Predicate::And(left, right) => Predicate::And(
-            Box::new(substitute_predicate_aliases(left, aliases)),
-            Box::new(substitute_predicate_aliases(right, aliases)),
-        ),
-        Predicate::Or(left, right) => Predicate::Or(
-            Box::new(substitute_predicate_aliases(left, aliases)),
-            Box::new(substitute_predicate_aliases(right, aliases)),
-        ),
-        Predicate::Not(inner) => {
-            Predicate::Not(Box::new(substitute_predicate_aliases(inner, aliases)))
-        }
-    }
-}
-
 fn eval_pipeline_row_expr<T: VectorType>(
     expr: &TqlExpr,
     row: &crate::query::pipeline::NodeRow,
     mt: &MemTable<T>,
 ) -> RuntimeValue {
     match expr {
-        TqlExpr::Variable(_) => RuntimeValue::Int(row.id as i64),
-        TqlExpr::Property { field, .. } => {
+        TqlExpr::Variable(var) => row
+            .bindings
+            .as_ref()
+            .and_then(|bindings| bindings.get(var))
+            .cloned()
+            .unwrap_or_else(|| {
+                if row.bindings.is_none() && var == "_" {
+                    RuntimeValue::Node(row.id)
+                } else {
+                    RuntimeValue::Null
+                }
+            }),
+        TqlExpr::Property { var, field } => {
+            if let Some(value) = row.bindings.as_ref().and_then(|bindings| bindings.get(var)) {
+                return runtime_property(value, field, mt);
+            }
+            if row.bindings.is_some() || var != "_" {
+                return RuntimeValue::Null;
+            }
             if field == "id" {
-                RuntimeValue::Int(row.id as i64)
+                runtime_u64(row.id)
             } else {
                 mt.get_payload(row.id)
                     .map(|payload| json_to_runtime(&payload[field]))
@@ -1823,11 +1920,11 @@ fn eval_pipeline_row_expr<T: VectorType>(
             .unwrap_or(RuntimeValue::Null),
         TqlExpr::PairLeft { .. } => row
             .pair
-            .map(|(left, _)| RuntimeValue::Int(left as i64))
+            .map(|(left, _)| runtime_u64(left))
             .unwrap_or(RuntimeValue::Null),
         TqlExpr::PairRight { .. } => row
             .pair
-            .map(|(_, right)| RuntimeValue::Int(right as i64))
+            .map(|(_, right)| runtime_u64(right))
             .unwrap_or(RuntimeValue::Null),
         TqlExpr::Binary { left, op, right } => eval_binary(
             eval_pipeline_row_expr(left, row, mt),
@@ -1858,9 +1955,21 @@ fn eval_pipeline_row_predicate<T: VectorType>(
             op,
             &eval_pipeline_row_expr(right, row, mt),
         ),
-        Predicate::DocFilter { filter, .. } => mt
-            .get_payload(row.id)
-            .is_some_and(|payload| filter.matches(&payload)),
+        Predicate::DocFilter { var, filter } => {
+            let bound = var
+                .as_ref()
+                .and_then(|var| row.bindings.as_ref().and_then(|bindings| bindings.get(var)));
+            match bound {
+                Some(RuntimeValue::Node(id)) => mt
+                    .get_payload(*id)
+                    .is_some_and(|payload| filter.matches(&payload)),
+                Some(RuntimeValue::Json(value)) => filter.matches(value),
+                Some(_) => false,
+                None => mt
+                    .get_payload(row.id)
+                    .is_some_and(|payload| filter.matches(&payload)),
+            }
+        }
         Predicate::And(left, right) => {
             eval_pipeline_row_predicate(left, row, mt)
                 && eval_pipeline_row_predicate(right, row, mt)
@@ -1873,15 +1982,24 @@ fn eval_pipeline_row_predicate<T: VectorType>(
     }
 }
 
-fn runtime_to_tql_value<T>(value: RuntimeValue) -> TqlValue<T> {
-    match value {
+fn runtime_to_tql_value<T: VectorType>(
+    value: RuntimeValue,
+    mt: &MemTable<T>,
+) -> Result<TqlValue<T>, TriviumError> {
+    Ok(match value {
         RuntimeValue::Int(value) => TqlValue::Int(value),
+        RuntimeValue::UInt(value) => TqlValue::UInt(value),
         RuntimeValue::Float(value) => TqlValue::Float(value),
         RuntimeValue::Str(value) => TqlValue::String(value),
         RuntimeValue::Bool(value) => TqlValue::Bool(value),
         RuntimeValue::Path(value) => TqlValue::Path(value),
+        RuntimeValue::Json(value) => json_to_tql_value(value),
+        RuntimeValue::Node(id) => {
+            TqlValue::Node(build_node(id, mt).ok_or(TriviumError::NodeNotFound(id))?)
+        }
+        RuntimeValue::Edge(edge) => TqlValue::Edge(edge),
         RuntimeValue::Null => TqlValue::Null,
-    }
+    })
 }
 
 fn apply_graph_first_rank<T: VectorType>(
@@ -1889,23 +2007,33 @@ fn apply_graph_first_rank<T: VectorType>(
     rank: &RankClause,
     mt: &MemTable<T>,
 ) -> Result<TqlResult<T>, TriviumError> {
+    rank_rows_by_node(rows, rank, mt, |row| row)
+}
+
+fn rank_rows_by_node<T: VectorType, R, F: Fn(&R) -> &HashMap<String, Node<T>>>(
+    rows: Vec<R>,
+    rank: &RankClause,
+    mt: &MemTable<T>,
+    bindings: F,
+) -> Result<Vec<R>, TriviumError> {
     let query_vector: Vec<T> = rank
         .vector
         .iter()
-        .map(|value| T::from_f32(*value as f32))
-        .collect();
+        .map(T::from_json_number)
+        .collect::<Result<Vec<_>, _>>()?;
     if query_vector.len() != mt.dim() {
         return Err(TriviumError::DimensionMismatch {
             expected: mt.dim(),
             got: query_vector.len(),
         });
     }
-    let mut canonical = BTreeMap::<NodeId, (Vec<NodeId>, HashMap<String, Node<T>>)>::new();
+    let mut canonical = BTreeMap::<NodeId, (Vec<NodeId>, R)>::new();
     for row in rows {
-        let anchor = row.get(&rank.var).ok_or_else(|| {
+        let nodes = bindings(&row);
+        let anchor = nodes.get(&rank.var).ok_or_else(|| {
             TriviumError::QueryExecution(format!("RANK 变量 {} 未在 MATCH 中绑定", rank.var))
         })?;
-        let mut bindings: Vec<(&str, NodeId)> = row
+        let mut bindings: Vec<(&str, NodeId)> = nodes
             .iter()
             .map(|(var, node)| (var.as_str(), node.id))
             .collect();
@@ -2057,6 +2185,9 @@ fn find_ordered_find_plan<T: VectorType>(
     let TqlExpr::Property { field, .. } = &order.expr else {
         return None;
     };
+    if field == "id" {
+        return None;
+    }
     // ORDER BY 索引只能提供候选顺序；入口 Filter 和 WHERE 都可能继续淘汰候选。
     // 在过滤前按 OFFSET + LIMIT 截断会造成分页缺行，因此这里必须读取完整有序候选。
     plan_filter_ordered(filter, field, order.descending, None, mt)
@@ -2121,6 +2252,13 @@ fn execute_match<T: VectorType>(
         {
             control.check()?;
         }
+        if planned_pattern.nodes[0]
+            .filter
+            .as_ref()
+            .is_some_and(|filter| !matches_filter_with_id(filter, start_id, mt))
+        {
+            continue;
+        }
         let result_start = results.len();
         let mut env = vec![None; var_map.len()];
         let cont = tql_dfs(
@@ -2184,7 +2322,8 @@ fn tql_dfs<T: VectorType>(
     let node_pat = &pattern.nodes[layer_idx];
 
     // 内联 Filter 校验（Q1-B: 支持 Mongo 操作符）
-    if let Some(filter) = &node_pat.filter
+    if layer_idx > 0
+        && let Some(filter) = &node_pat.filter
         && !matches_filter_with_id(filter, current, mt)
     {
         return Ok(true); // 不匹配，剪枝
@@ -2194,6 +2333,9 @@ fn tql_dfs<T: VectorType>(
     let old_val = if let Some(var) = &node_pat.var {
         let idx = var_map[var];
         let old = env[idx];
+        if old.is_some_and(|bound| bound != current) {
+            return Ok(true);
+        }
         env[idx] = Some(current);
         Some((idx, old))
     } else {
@@ -2422,14 +2564,14 @@ fn collect_neighbors<T: VectorType>(
 // ═══════════════════════════════════════════════════════════════════════
 
 fn execute_search<T: VectorType>(
-    vector: &[f64],
+    vector: &[serde_json::Number],
     top_k: usize,
     expand: Option<&ExpandClause>,
     query: &TqlQuery,
     mt: &MemTable<T>,
     row_limit: usize,
 ) -> Result<TqlResult<T>, TriviumError> {
-    let mut operators = crate::query::pipeline::lower_search_entry(vector, top_k, expand);
+    let mut operators = crate::query::pipeline::lower_search_entry(vector, top_k, expand)?;
     let post_filter = if expand.is_none() {
         query
             .predicate
@@ -2458,8 +2600,8 @@ fn execute_search<T: VectorType>(
             Box::new(crate::query::pipeline::ExactRerank {
                 query: vector
                     .iter()
-                    .map(|value| T::from_f32(*value as f32))
-                    .collect(),
+                    .map(T::from_json_number)
+                    .collect::<Result<Vec<_>, _>>()?,
                 top_k: Some(top_k),
             }),
             Box::new(crate::query::pipeline::PayloadFilter { filter }),
@@ -2586,14 +2728,43 @@ fn eval_predicate_single<T: VectorType>(pred: &Predicate, id: NodeId, mt: &MemTa
 //  表达式求值 & 比较
 // ═══════════════════════════════════════════════════════════════════════
 
-#[derive(Debug, Clone)]
-enum RuntimeValue {
-    Int(i64),
-    Float(f64),
-    Str(String),
-    Bool(bool),
-    Path(Vec<NodeId>),
-    Null,
+fn tql_value_runtime<T>(value: &TqlValue<T>) -> RuntimeValue {
+    match value {
+        TqlValue::Node(value) => RuntimeValue::Node(value.id),
+        TqlValue::Edge(value) => RuntimeValue::Edge(value.clone()),
+        TqlValue::Path(value) => RuntimeValue::Path(value.clone()),
+        TqlValue::Int(value) => RuntimeValue::Int(*value),
+        TqlValue::UInt(value) => RuntimeValue::UInt(*value),
+        TqlValue::Float(value) => RuntimeValue::Float(*value),
+        TqlValue::String(value) => RuntimeValue::Str(value.clone()),
+        TqlValue::Bool(value) => RuntimeValue::Bool(*value),
+        TqlValue::List(value) => RuntimeValue::Json(serde_json::Value::Array(value.clone())),
+        TqlValue::Object(value) => RuntimeValue::Json(serde_json::Value::Object(value.clone())),
+        TqlValue::Null => RuntimeValue::Null,
+    }
+}
+
+fn runtime_property<T: VectorType>(
+    value: &RuntimeValue,
+    field: &str,
+    mt: &MemTable<T>,
+) -> RuntimeValue {
+    match value {
+        RuntimeValue::Node(id) if field == "id" => runtime_u64(*id),
+        RuntimeValue::Node(id) => mt
+            .get_payload(*id)
+            .map_or(RuntimeValue::Null, |value| json_to_runtime(&value[field])),
+        RuntimeValue::Json(value) => json_to_runtime(&value[field]),
+        RuntimeValue::Edge(edge) => match field {
+            "source" | "source_id" => runtime_u64(edge.source_id),
+            "target" | "target_id" => runtime_u64(edge.target_id),
+            "label" => RuntimeValue::Str(edge.label.clone()),
+            "weight" => RuntimeValue::Float(f64::from(edge.weight)),
+            "metadata" => json_to_runtime(&edge.metadata),
+            _ => json_to_runtime(&edge.metadata[field]),
+        },
+        _ => RuntimeValue::Null,
+    }
 }
 
 fn eval_tql_expr<T: VectorType>(
@@ -2603,7 +2774,13 @@ fn eval_tql_expr<T: VectorType>(
     mt: &MemTable<T>,
 ) -> RuntimeValue {
     match expr {
-        TqlExpr::Variable(_) | TqlExpr::Parameter(_) => RuntimeValue::Null,
+        TqlExpr::Variable(var) => var_map
+            .get(var)
+            .and_then(|index| env.get(*index))
+            .copied()
+            .flatten()
+            .map_or(RuntimeValue::Null, RuntimeValue::Node),
+        TqlExpr::Parameter(_) => RuntimeValue::Null,
         TqlExpr::Binary { left, op, right } => eval_binary(
             eval_tql_expr(left, env, var_map, mt),
             *op,
@@ -2639,7 +2816,7 @@ fn eval_tql_expr<T: VectorType>(
                 && let Some(id) = env[idx]
             {
                 if field == "id" {
-                    return RuntimeValue::Int(id as i64);
+                    return runtime_u64(id);
                 }
                 if let Some(payload) = mt.get_payload(id) {
                     return json_to_runtime(&payload[field]);
@@ -2657,7 +2834,8 @@ fn eval_tql_expr_single<T: VectorType>(
     mt: &MemTable<T>,
 ) -> RuntimeValue {
     match expr {
-        TqlExpr::Variable(_) | TqlExpr::Parameter(_) => RuntimeValue::Null,
+        TqlExpr::Variable(_) => RuntimeValue::Node(id),
+        TqlExpr::Parameter(_) => RuntimeValue::Null,
         TqlExpr::Binary { left, op, right } => eval_binary(
             eval_tql_expr_single(left, id, mt),
             *op,
@@ -2690,7 +2868,7 @@ fn eval_tql_expr_single<T: VectorType>(
         | TqlExpr::PairRight { .. } => RuntimeValue::Null,
         TqlExpr::Property { field, .. } => {
             if field == "id" {
-                return RuntimeValue::Int(id as i64);
+                return runtime_u64(id);
             }
             if let Some(payload) = mt.get_payload(id) {
                 return json_to_runtime(&payload[field]);
@@ -2706,19 +2884,23 @@ fn json_to_runtime(v: &serde_json::Value) -> RuntimeValue {
         serde_json::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
                 RuntimeValue::Int(i)
+            } else if let Some(value) = n.as_u64() {
+                RuntimeValue::UInt(value)
             } else {
                 RuntimeValue::Float(n.as_f64().unwrap_or(0.0))
             }
         }
         serde_json::Value::String(s) => RuntimeValue::Str(s.clone()),
         serde_json::Value::Bool(b) => RuntimeValue::Bool(*b),
-        _ => RuntimeValue::Null,
+        serde_json::Value::Array(_) | serde_json::Value::Object(_) => RuntimeValue::Json(v.clone()),
+        serde_json::Value::Null => RuntimeValue::Null,
     }
 }
 
 fn lit_to_runtime(lit: &TqlLiteral) -> RuntimeValue {
     match lit {
         TqlLiteral::Int(n) => RuntimeValue::Int(*n),
+        TqlLiteral::UInt(n) => RuntimeValue::UInt(*n),
         TqlLiteral::Float(f) => RuntimeValue::Float(*f),
         TqlLiteral::Str(s) => RuntimeValue::Str(s.clone()),
         TqlLiteral::Bool(b) => RuntimeValue::Bool(*b),
@@ -2726,22 +2908,93 @@ fn lit_to_runtime(lit: &TqlLiteral) -> RuntimeValue {
     }
 }
 
-fn eval_binary(left: RuntimeValue, op: TqlBinaryOp, right: RuntimeValue) -> RuntimeValue {
-    let left = match left {
-        RuntimeValue::Int(value) => value as f64,
-        RuntimeValue::Float(value) => value,
-        _ => return RuntimeValue::Null,
+fn runtime_u64(value: u64) -> RuntimeValue {
+    i64::try_from(value).map_or(RuntimeValue::UInt(value), RuntimeValue::Int)
+}
+
+fn runtime_number(value: &RuntimeValue) -> Option<serde_json::Number> {
+    match value {
+        RuntimeValue::Int(v) => Some((*v).into()),
+        RuntimeValue::UInt(v) => Some((*v).into()),
+        RuntimeValue::Float(v) => serde_json::Number::from_f64(*v),
+        _ => None,
+    }
+}
+
+fn edge_json(edge: &EdgeView) -> serde_json::Value {
+    serde_json::json!({"source":edge.source_id,"target":edge.target_id,"label":edge.label,"weight":edge.weight,"metadata":edge.metadata})
+}
+
+/// 容器按完整内容比较，其中所有数字共用精确数值比较。
+fn compare_json(left: &serde_json::Value, right: &serde_json::Value) -> std::cmp::Ordering {
+    use serde_json::Value;
+    let kind = |value: &Value| match value {
+        Value::Null => 0,
+        Value::Bool(_) => 1,
+        Value::Number(_) => 2,
+        Value::String(_) => 3,
+        Value::Array(_) => 4,
+        Value::Object(_) => 5,
     };
-    let right = match right {
-        RuntimeValue::Int(value) => value as f64,
-        RuntimeValue::Float(value) => value,
-        _ => return RuntimeValue::Null,
+    match (left, right) {
+        (Value::Null, Value::Null) => std::cmp::Ordering::Equal,
+        (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
+        (Value::Number(a), Value::Number(b)) => crate::filter::numeric_ordering(a, b),
+        (Value::String(a), Value::String(b)) => a.cmp(b),
+        (Value::Array(a), Value::Array(b)) => a
+            .iter()
+            .zip(b)
+            .map(|(a, b)| compare_json(a, b))
+            .find(|order| !order.is_eq())
+            .unwrap_or_else(|| a.len().cmp(&b.len())),
+        (Value::Object(a), Value::Object(b)) => a
+            .iter()
+            .collect::<BTreeMap<_, _>>()
+            .into_iter()
+            .zip(b.iter().collect::<BTreeMap<_, _>>())
+            .map(|((ka, va), (kb, vb))| ka.cmp(kb).then_with(|| compare_json(va, vb)))
+            .find(|order| !order.is_eq())
+            .unwrap_or_else(|| a.len().cmp(&b.len())),
+        _ => kind(left).cmp(&kind(right)),
+    }
+}
+
+fn integer_runtime(value: i128) -> RuntimeValue {
+    if value < 0 {
+        i64::try_from(value).map_or(RuntimeValue::Null, RuntimeValue::Int)
+    } else {
+        u64::try_from(value).map_or(RuntimeValue::Null, runtime_u64)
+    }
+}
+
+fn eval_binary(left: RuntimeValue, op: TqlBinaryOp, right: RuntimeValue) -> RuntimeValue {
+    let integer = |value: &RuntimeValue| match value {
+        RuntimeValue::Int(v) => Some(i128::from(*v)),
+        RuntimeValue::UInt(v) => Some(i128::from(*v)),
+        _ => None,
+    };
+    if op != TqlBinaryOp::Divide
+        && let (Some(left), Some(right)) = (integer(&left), integer(&right))
+    {
+        let value = match op {
+            TqlBinaryOp::Add => left.checked_add(right),
+            TqlBinaryOp::Subtract => left.checked_sub(right),
+            TqlBinaryOp::Multiply => left.checked_mul(right),
+            TqlBinaryOp::Divide => None,
+        };
+        return value.map_or(RuntimeValue::Null, integer_runtime);
+    }
+    let Some(left) = runtime_number(&left).and_then(|n| n.as_f64()) else {
+        return RuntimeValue::Null;
+    };
+    let Some(right) = runtime_number(&right).and_then(|n| n.as_f64()) else {
+        return RuntimeValue::Null;
     };
     let value = match op {
         TqlBinaryOp::Add => left + right,
         TqlBinaryOp::Subtract => left - right,
         TqlBinaryOp::Multiply => left * right,
-        TqlBinaryOp::Divide if right.abs() > f64::EPSILON => left / right,
+        TqlBinaryOp::Divide if right != 0.0 => left / right,
         TqlBinaryOp::Divide => return RuntimeValue::Null,
     };
     if value.is_finite() {
@@ -2752,18 +3005,46 @@ fn eval_binary(left: RuntimeValue, op: TqlBinaryOp, right: RuntimeValue) -> Runt
 }
 
 fn compare_runtime(lhs: &RuntimeValue, op: &TqlCompOp, rhs: &RuntimeValue) -> bool {
+    if let (Some(left), Some(right)) = (runtime_number(lhs), runtime_number(rhs)) {
+        return cmp_ord(
+            &crate::filter::numeric_ordering(&left, &right),
+            op,
+            &std::cmp::Ordering::Equal,
+        );
+    }
     match (lhs, rhs) {
-        (RuntimeValue::Int(a), RuntimeValue::Int(b)) => cmp_ord(a, op, b),
-        (RuntimeValue::Float(a), RuntimeValue::Float(b)) => cmp_f64(*a, op, *b),
-        (RuntimeValue::Int(a), RuntimeValue::Float(b)) => cmp_f64(*a as f64, op, *b),
-        (RuntimeValue::Float(a), RuntimeValue::Int(b)) => cmp_f64(*a, op, *b as f64),
+        (RuntimeValue::Path(a), RuntimeValue::Path(b)) => match op {
+            TqlCompOp::Eq => a == b,
+            TqlCompOp::Ne => a != b,
+            _ => false,
+        },
+        (RuntimeValue::Node(a), RuntimeValue::Node(b)) => match op {
+            TqlCompOp::Eq => a == b,
+            TqlCompOp::Ne => a != b,
+            _ => false,
+        },
+        (RuntimeValue::Edge(a), RuntimeValue::Edge(b)) => {
+            let equal =
+                (a.source_id, a.target_id, &a.label) == (b.source_id, b.target_id, &b.label);
+            match op {
+                TqlCompOp::Eq => equal,
+                TqlCompOp::Ne => !equal,
+                _ => false,
+            }
+        }
+        (RuntimeValue::Json(a), RuntimeValue::Json(b)) => match op {
+            TqlCompOp::Eq => compare_json(a, b).is_eq(),
+            TqlCompOp::Ne => !compare_json(a, b).is_eq(),
+            _ => false,
+        },
         (RuntimeValue::Str(a), RuntimeValue::Str(b)) => cmp_ord(a, op, b),
         (RuntimeValue::Bool(a), RuntimeValue::Bool(b)) => match op {
             TqlCompOp::Eq => a == b,
             TqlCompOp::Ne => a != b,
             _ => false,
         },
-        _ => false,
+        (RuntimeValue::Null, _) | (_, RuntimeValue::Null) => false,
+        _ => matches!(op, TqlCompOp::Ne),
     }
 }
 
@@ -2771,17 +3052,6 @@ fn cmp_ord<T: Ord>(a: &T, op: &TqlCompOp, b: &T) -> bool {
     match op {
         TqlCompOp::Eq => a == b,
         TqlCompOp::Ne => a != b,
-        TqlCompOp::Gt => a > b,
-        TqlCompOp::Gte => a >= b,
-        TqlCompOp::Lt => a < b,
-        TqlCompOp::Lte => a <= b,
-    }
-}
-
-fn cmp_f64(a: f64, op: &TqlCompOp, b: f64) -> bool {
-    match op {
-        TqlCompOp::Eq => (a - b).abs() < f64::EPSILON,
-        TqlCompOp::Ne => (a - b).abs() >= f64::EPSILON,
         TqlCompOp::Gt => a > b,
         TqlCompOp::Gte => a >= b,
         TqlCompOp::Lt => a < b,
@@ -2799,11 +3069,10 @@ fn matches_filter_with_id<T: VectorType>(
     node_id: NodeId,
     mt: &MemTable<T>,
 ) -> bool {
+    if filter.field_name() == Some("id") {
+        return filter.matches(&serde_json::json!({"id":node_id}));
+    }
     match filter {
-        // id 字段特殊处理：匹配节点的结构 ID，而不是 payload 中的字段
-        Filter::Eq(key, val) if key == "id" => {
-            val.as_i64().is_some_and(|target| node_id == target as u64)
-        }
         // 逻辑组合：递归处理
         Filter::And(filters) => filters
             .iter()
@@ -2819,33 +3088,13 @@ fn matches_filter_with_id<T: VectorType>(
     }
 }
 
-/// ORDER BY 排序
-fn sort_results<T: VectorType>(
-    results: &mut TqlResult<T>,
-    order_by: &[OrderExpr],
-    _mt: &MemTable<T>,
-) {
-    results.sort_by(|a, b| {
-        for order in order_by {
-            // 从结果行中提取排序键
-            let a_val = extract_order_key(&order.expr, a);
-            let b_val = extract_order_key(&order.expr, b);
-
-            let cmp = compare_for_sort(&a_val, &b_val);
-            let cmp = if order.descending { cmp.reverse() } else { cmp };
-
-            if cmp != std::cmp::Ordering::Equal {
-                return cmp;
-            }
-        }
-        std::cmp::Ordering::Equal
-    });
-}
-
 fn extract_order_key<T>(expr: &TqlExpr, row: &HashMap<String, Node<T>>) -> RuntimeValue {
     match expr {
-        TqlExpr::Variable(_)
-        | TqlExpr::Parameter(_)
+        TqlExpr::Variable(var) => row
+            .get(var)
+            .or_else(|| row.get("_"))
+            .map_or(RuntimeValue::Null, |node| RuntimeValue::Node(node.id)),
+        TqlExpr::Parameter(_)
         | TqlExpr::Similarity { .. }
         | TqlExpr::GraphScore { .. }
         | TqlExpr::GraphMetric { .. }
@@ -2879,14 +3128,14 @@ fn extract_order_key<T>(expr: &TqlExpr, row: &HashMap<String, Node<T>>) -> Runti
         TqlExpr::Property { var, field } => {
             if let Some(node) = row.get(var) {
                 if field == "id" {
-                    return RuntimeValue::Int(node.id as i64);
+                    return runtime_u64(node.id);
                 }
                 return json_to_runtime(&node.payload[field]);
             }
             // FIND/SEARCH 场景下节点绑定到 "_"
             if let Some(node) = row.get("_") {
                 if field == "id" {
-                    return RuntimeValue::Int(node.id as i64);
+                    return runtime_u64(node.id);
                 }
                 return json_to_runtime(&node.payload[field]);
             }
@@ -2896,23 +3145,37 @@ fn extract_order_key<T>(expr: &TqlExpr, row: &HashMap<String, Node<T>>) -> Runti
     }
 }
 
-fn compare_for_sort(a: &RuntimeValue, b: &RuntimeValue) -> std::cmp::Ordering {
+pub(crate) fn compare_for_sort(a: &RuntimeValue, b: &RuntimeValue) -> std::cmp::Ordering {
+    if let (Some(left), Some(right)) = (runtime_number(a), runtime_number(b)) {
+        return crate::filter::numeric_ordering(&left, &right);
+    }
     match (a, b) {
-        (RuntimeValue::Int(a), RuntimeValue::Int(b)) => a.cmp(b),
-        (RuntimeValue::Float(a), RuntimeValue::Float(b)) => {
-            a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+        (RuntimeValue::Bool(a), RuntimeValue::Bool(b)) => a.cmp(b),
+        (RuntimeValue::Path(a), RuntimeValue::Path(b)) => a.cmp(b),
+        (RuntimeValue::Json(a), RuntimeValue::Json(b)) => compare_json(a, b),
+        (RuntimeValue::Node(a), RuntimeValue::Node(b)) => a.cmp(b),
+        (RuntimeValue::Edge(a), RuntimeValue::Edge(b)) => {
+            (a.source_id, a.target_id, &a.label).cmp(&(b.source_id, b.target_id, &b.label))
         }
-        (RuntimeValue::Int(a), RuntimeValue::Float(b)) => (*a as f64)
-            .partial_cmp(b)
-            .unwrap_or(std::cmp::Ordering::Equal),
-        (RuntimeValue::Float(a), RuntimeValue::Int(b)) => a
-            .partial_cmp(&(*b as f64))
-            .unwrap_or(std::cmp::Ordering::Equal),
         (RuntimeValue::Str(a), RuntimeValue::Str(b)) => a.cmp(b),
         (RuntimeValue::Null, RuntimeValue::Null) => std::cmp::Ordering::Equal,
         (RuntimeValue::Null, _) => std::cmp::Ordering::Greater, // NULL 排最后
         (_, RuntimeValue::Null) => std::cmp::Ordering::Less,
-        _ => std::cmp::Ordering::Equal,
+        _ => runtime_sort_kind(a).cmp(&runtime_sort_kind(b)),
+    }
+}
+
+fn runtime_sort_kind(value: &RuntimeValue) -> u8 {
+    match value {
+        RuntimeValue::Int(_) | RuntimeValue::UInt(_) | RuntimeValue::Float(_) => 0,
+        RuntimeValue::Str(_) => 1,
+        RuntimeValue::Bool(_) => 2,
+        RuntimeValue::Json(serde_json::Value::Array(_)) => 3,
+        RuntimeValue::Json(_) => 4,
+        RuntimeValue::Node(_) => 5,
+        RuntimeValue::Edge(_) => 6,
+        RuntimeValue::Path(_) => 7,
+        RuntimeValue::Null => 8,
     }
 }
 
@@ -3052,383 +3315,54 @@ fn first_var_from_kind(kind: &ReturnExprKind) -> Option<String> {
     }
 }
 
-/// 聚合 + DISTINCT 后处理
-///
-/// 处理逻辑：
-/// - 如果 ReturnClause 不是 Expressions，直接返回原结果
-/// - 如果没有聚合函数，只做 DISTINCT 过滤
-/// - 如果有聚合函数，按非聚合列分组，对每组计算聚合值
-fn apply_aggregation_and_distinct<T: VectorType>(
-    returns: &ReturnClause,
-    results: TqlResult<T>,
-    is_find_entry: bool,
-) -> Result<TqlResult<T>, TriviumError> {
-    let exprs = match returns {
-        ReturnClause::Expressions(exprs) => exprs,
-        _ => return Ok(results),
-    };
-
-    let has_agg = exprs.iter().any(|e| is_aggregate(&e.kind));
-    let has_distinct = exprs.iter().any(|e| e.distinct);
-
-    // FIND 只有隐式节点变量 `_`。聚合上下文中的裸标识符仍表示节点变量，
-    // 不能静默猜测为 Payload 字段，否则 MATCH 与 FIND 的同一语法会有两种含义。
-    if is_find_entry
-        && has_agg
-        && let Some(name) = exprs.iter().find_map(|expr| match &expr.kind {
-            ReturnExprKind::Var(name) if name != "_" && name != "*" => Some(name.as_str()),
-            _ => None,
-        })
-    {
-        return Err(TriviumError::QueryExecution(format!(
-            "FIND 聚合中的裸标识符 `{name}` 不是属性；请写 `_.{name}` (Bare identifier `{name}` is not a FIND property; use `_.{name}`)"
-        )));
-    }
-
-    // 无聚合、无 DISTINCT → 直接返回
-    if !has_agg && !has_distinct {
-        return Ok(results);
-    }
-
-    // 纯 DISTINCT，无聚合
-    if !has_agg && has_distinct {
-        return Ok(apply_distinct(results, exprs, is_find_entry));
-    }
-
-    // 有聚合函数 → 分组计算
-    Ok(apply_aggregation(results, exprs))
-}
-
-/// 判断表达式是否包含聚合函数
-fn is_aggregate(kind: &ReturnExprKind) -> bool {
-    matches!(kind, ReturnExprKind::Aggregate(_, _))
-}
-
-/// 纯 DISTINCT 去重
-fn apply_distinct<T: VectorType>(
-    results: TqlResult<T>,
-    exprs: &[ReturnExpr],
-    is_find_entry: bool,
-) -> TqlResult<T> {
-    let distinct_exprs: Vec<&ReturnExpr> = exprs.iter().filter(|e| e.distinct).collect();
-    let key_exprs = if distinct_exprs.is_empty() {
-        exprs.iter().collect()
-    } else {
-        distinct_exprs
-    };
-
-    let mut seen: HashSet<String> = HashSet::new();
-    let mut out = Vec::new();
-    for row in results {
-        let sig = distinct_signature(&row, &key_exprs, is_find_entry);
-        if seen.insert(sig) {
-            out.push(row);
-        }
-    }
-    out
-}
-
-/// DISTINCT 签名：基于返回表达式的实际值拼接
-fn distinct_signature<T: VectorType>(
-    row: &HashMap<String, Node<T>>,
-    exprs: &[&ReturnExpr],
-    is_find_entry: bool,
-) -> String {
-    exprs
-        .iter()
-        .map(|expr| {
-            format!(
-                "{}={}",
-                format_return_expr(expr),
-                distinct_expr_value(row, expr, is_find_entry)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("|")
-}
-
-/// DISTINCT 表达式值：变量按节点身份去重，属性按 payload 值去重
-fn distinct_expr_value<T: VectorType>(
-    row: &HashMap<String, Node<T>>,
-    expr: &ReturnExpr,
-    is_find_entry: bool,
-) -> serde_json::Value {
-    match &expr.kind {
-        ReturnExprKind::Var(v) => {
-            if is_find_entry
-                && let Some(node) = row.get(v)
-                && let Some(value) = node.payload.get(v)
-            {
-                value.clone()
-            } else {
-                row.get(v)
-                    .map(|node| serde_json::json!(node.id))
-                    .unwrap_or(serde_json::Value::Null)
-            }
-        }
-        ReturnExprKind::Property(v, field) => row.get(v).map_or(serde_json::Value::Null, |node| {
-            if field == "id" {
-                serde_json::json!(node.id)
-            } else {
-                node.payload
-                    .get(field)
-                    .cloned()
-                    .unwrap_or(serde_json::Value::Null)
-            }
-        }),
-        ReturnExprKind::Scalar(expr) => distinct_scalar_expr_value(row, expr),
-        ReturnExprKind::Aggregate(_, _) => serde_json::Value::Null,
-    }
-}
-
-fn distinct_scalar_expr_value<T: VectorType>(
-    row: &HashMap<String, Node<T>>,
-    expr: &TqlExpr,
-) -> serde_json::Value {
-    match expr {
-        TqlExpr::Property { var, field } => row.get(var).map_or(serde_json::Value::Null, |node| {
-            if field == "id" {
-                serde_json::json!(node.id)
-            } else {
-                node.payload
-                    .get(field)
-                    .cloned()
-                    .unwrap_or(serde_json::Value::Null)
-            }
-        }),
-        TqlExpr::Literal(literal) => tql_literal_to_json(literal),
-        _ => serde_json::Value::Null,
-    }
-}
-
-/// 聚合计算
-///
-/// 非聚合列作为分组键，聚合列按组计算。
-/// 结果中聚合值写入节点的 payload 字段中（以 alias 或生成名为 key）。
-fn apply_aggregation<T: VectorType>(results: TqlResult<T>, exprs: &[ReturnExpr]) -> TqlResult<T> {
-    // 分离分组列和聚合列
-    let group_exprs: Vec<&ReturnExpr> = exprs.iter().filter(|e| !is_aggregate(&e.kind)).collect();
-    let agg_exprs: Vec<&ReturnExpr> = exprs.iter().filter(|e| is_aggregate(&e.kind)).collect();
-    if results.is_empty() {
-        if !group_exprs.is_empty() {
-            return Vec::new();
-        }
-        let empty_rows: Vec<&HashMap<String, Node<T>>> = Vec::new();
-        let mut result_row = HashMap::new();
-        for agg_expr in agg_exprs {
-            if let ReturnExprKind::Aggregate(func, inner) = &agg_expr.kind {
-                let alias = agg_expr
-                    .alias
-                    .clone()
-                    .unwrap_or_else(|| format!("{:?}", func).to_lowercase());
-                let value = compute_aggregate(*func, inner, &empty_rows);
-                result_row.insert(
-                    alias.clone(),
-                    Node {
-                        id: 0,
-                        vector: Vec::new(),
-                        payload: serde_json::json!({ alias: value }),
-                        edges: Vec::new(),
-                    },
-                );
-            }
-        }
-        return vec![result_row];
-    }
-
-    // 构建分组键
-    let mut groups: BTreeMap<String, Vec<&HashMap<String, Node<T>>>> = BTreeMap::new();
-    for row in &results {
-        let key = make_group_key(row, &group_exprs);
-        groups.entry(key).or_default().push(row);
-    }
-
-    // 对每组计算聚合
-    let mut output = Vec::new();
-    for rows in groups.values() {
-        let mut result_row: HashMap<String, Node<T>> = HashMap::new();
-
-        // 保留分组列的值（取组内第一行的绑定）
-        if let Some(first_row) = rows.first() {
-            for expr in &group_exprs {
-                if let Some(var) = first_var_from_kind(&expr.kind)
-                    && let Some(node) = first_row.get(&var)
-                {
-                    result_row.insert(var, node.clone());
-                }
-            }
-        }
-
-        // 计算聚合列
-        for agg_expr in &agg_exprs {
-            if let ReturnExprKind::Aggregate(func, inner) = &agg_expr.kind {
-                let alias = agg_expr
-                    .alias
-                    .clone()
-                    .unwrap_or_else(|| format!("{:?}", func).to_lowercase());
-                let agg_val = compute_aggregate(*func, inner, rows);
-
-                // 将聚合值注入到一个合成节点的 payload 中
-                let agg_node = Node {
-                    id: 0,
-                    vector: Vec::new(),
-                    payload: serde_json::json!({ &alias: agg_val }),
-                    edges: Vec::new(),
-                };
-                result_row.insert(alias, agg_node);
-            }
-        }
-
-        output.push(result_row);
-    }
-
-    output
-}
-
-/// 生成分组键
-fn make_group_key<T: VectorType>(
-    row: &HashMap<String, Node<T>>,
-    group_exprs: &[&ReturnExpr],
-) -> String {
-    let mut parts = Vec::new();
-    for expr in group_exprs {
-        match &expr.kind {
-            ReturnExprKind::Var(v) => {
-                if let Some(node) = row.get(v) {
-                    parts.push(format!("{}:{}", v, node.id));
-                }
-            }
-            ReturnExprKind::Property(v, field) => {
-                if let Some(node) = row.get(v) {
-                    let val = node
-                        .payload
-                        .get(field)
-                        .cloned()
-                        .unwrap_or(serde_json::Value::Null);
-                    parts.push(format!("{}.{}={}", v, field, val));
-                }
-            }
-            _ => {}
-        }
-    }
-    parts.join("|")
-}
-
-/// 计算单个聚合函数
-fn compute_aggregate<T: VectorType>(
+fn aggregate_numbers(
     func: AggFunc,
-    inner: &ReturnExprKind,
-    rows: &[&HashMap<String, Node<T>>],
+    values: impl Iterator<Item = serde_json::Number>,
 ) -> serde_json::Value {
-    match func {
-        AggFunc::Count => {
-            let count = if matches!(inner, ReturnExprKind::Var(name) if name == "*") {
-                rows.len()
-            } else {
-                rows.iter()
-                    .filter(|row| resolve_inner(inner, row).is_some())
-                    .count()
-            };
-            serde_json::json!(count)
-        }
-        AggFunc::Sum => {
-            let sum: f64 = rows
-                .iter()
-                .filter_map(|r| resolve_inner_numeric(inner, r))
-                .sum();
-            serde_json::json!(sum)
-        }
-        AggFunc::Avg => {
-            let vals: Vec<f64> = rows
-                .iter()
-                .filter_map(|r| resolve_inner_numeric(inner, r))
-                .collect();
-            if vals.is_empty() {
-                serde_json::Value::Null
-            } else {
-                serde_json::json!(vals.iter().sum::<f64>() / vals.len() as f64)
-            }
-        }
-        AggFunc::Min => {
-            let min = rows
-                .iter()
-                .filter_map(|r| resolve_inner_numeric(inner, r))
-                .fold(f64::INFINITY, f64::min);
-            if min.is_infinite() {
-                serde_json::Value::Null
-            } else {
-                serde_json::json!(min)
-            }
-        }
-        AggFunc::Max => {
-            let max = rows
-                .iter()
-                .filter_map(|r| resolve_inner_numeric(inner, r))
-                .fold(f64::NEG_INFINITY, f64::max);
-            if max.is_infinite() {
-                serde_json::Value::Null
-            } else {
-                serde_json::json!(max)
-            }
-        }
-        AggFunc::Collect => {
-            let vals: Vec<serde_json::Value> = rows
-                .iter()
-                .filter_map(|r| resolve_inner_json(inner, r))
-                .collect();
-            serde_json::json!(vals)
-        }
+    let values = values.collect::<Vec<_>>();
+    if values.is_empty() {
+        return serde_json::Value::Null;
     }
-}
-
-/// 从行中解析内部表达式引用的节点
-fn resolve_inner<'a, T: VectorType>(
-    inner: &ReturnExprKind,
-    row: &'a HashMap<String, Node<T>>,
-) -> Option<&'a Node<T>> {
-    match inner {
-        ReturnExprKind::Var(v) => row.get(v),
-        ReturnExprKind::Property(v, _) => row.get(v),
-        _ => None,
-    }
-}
-
-/// 解析为数值
-fn resolve_inner_numeric<T: VectorType>(
-    inner: &ReturnExprKind,
-    row: &HashMap<String, Node<T>>,
-) -> Option<f64> {
-    match inner {
-        ReturnExprKind::Var(v) => {
-            // count 风格: 变量存在就是 1
-            row.get(v).map(|_| 1.0)
-        }
-        ReturnExprKind::Property(v, field) => row
-            .get(v)
-            .and_then(|node| node.payload.get(field).and_then(|v| v.as_f64())),
-        _ => None,
-    }
-}
-
-/// 解析为 JSON 值
-fn resolve_inner_json<T: VectorType>(
-    inner: &ReturnExprKind,
-    row: &HashMap<String, Node<T>>,
-) -> Option<serde_json::Value> {
-    match inner {
-        ReturnExprKind::Var(v) => row.get(v).map(|n| serde_json::json!(n.id)),
-        ReturnExprKind::Property(v, field) => row.get(v).map(|node| {
-            if field == "id" {
-                serde_json::json!(node.id)
+    if func == AggFunc::Min || func == AggFunc::Max {
+        let selected = values.into_iter().reduce(|left, right| {
+            let order = crate::filter::numeric_ordering(&left, &right);
+            if (func == AggFunc::Min && order.is_gt()) || (func == AggFunc::Max && order.is_lt()) {
+                right
             } else {
-                node.payload
-                    .get(field)
-                    .cloned()
-                    .unwrap_or(serde_json::Value::Null)
+                left
             }
-        }),
-        _ => None,
+        });
+        return selected.map_or(serde_json::Value::Null, serde_json::Value::Number);
     }
+    if func == AggFunc::Sum
+        && values
+            .iter()
+            .all(|value| value.as_i64().is_some() || value.as_u64().is_some())
+    {
+        let sum = values.iter().try_fold(0i128, |sum, value| {
+            sum.checked_add(
+                value
+                    .as_i64()
+                    .map(i128::from)
+                    .or_else(|| value.as_u64().map(i128::from))?,
+            )
+        });
+        return match sum.map(integer_runtime) {
+            Some(RuntimeValue::Int(value)) => serde_json::json!(value),
+            Some(RuntimeValue::UInt(value)) => serde_json::json!(value),
+            _ => serde_json::Value::Null,
+        };
+    }
+    let sum = values
+        .iter()
+        .filter_map(serde_json::Number::as_f64)
+        .sum::<f64>();
+    let result = if func == AggFunc::Avg {
+        sum / values.len() as f64
+    } else {
+        sum
+    };
+    serde_json::Number::from_f64(result).map_or(serde_json::Value::Null, serde_json::Value::Number)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -3439,6 +3373,7 @@ fn resolve_inner_json<T: VectorType>(
 fn tql_literal_to_json(literal: &TqlLiteral) -> serde_json::Value {
     match literal {
         TqlLiteral::Int(value) => (*value).into(),
+        TqlLiteral::UInt(value) => (*value).into(),
         TqlLiteral::Float(value) => serde_json::Number::from_f64(*value)
             .map_or(serde_json::Value::Null, serde_json::Value::Number),
         TqlLiteral::Str(value) => value.clone().into(),
@@ -3461,7 +3396,7 @@ fn collect_cross_modal_origins(
             left: TqlExpr::Literal(value),
             op: TqlCompOp::Eq,
             right: TqlExpr::Property { field, .. },
-        } => output.push((field.clone(), tql_literal_to_json(value))),
+        } if field != "id" => output.push((field.clone(), tql_literal_to_json(value))),
         Predicate::And(left, right) => {
             collect_cross_modal_origins(left, output);
             collect_cross_modal_origins(right, output);
@@ -3897,8 +3832,31 @@ fn format_tql_expr(expr: &TqlExpr) -> String {
             format_tql_expr(expr),
             if *negated { "NOT " } else { "" }
         ),
-        TqlExpr::Literal(_) => "literal".into(),
+        TqlExpr::Literal(value) => tql_literal_to_json(value).to_string(),
     }
+}
+
+pub(crate) fn return_column_name(item: &ReturnExpr) -> String {
+    item.alias
+        .clone()
+        .unwrap_or_else(|| format_return_expr_kind(&item.kind))
+}
+
+pub(crate) fn validate_return_columns(returns: &ReturnClause) -> Result<(), TriviumError> {
+    let names = match returns {
+        ReturnClause::All => return Ok(()),
+        ReturnClause::Variables(vars) => vars.clone(),
+        ReturnClause::Expressions(items) => items.iter().map(return_column_name).collect(),
+    };
+    let mut seen = HashSet::new();
+    for name in names {
+        if !seen.insert(name.clone()) {
+            return Err(TriviumError::QueryExecution(format!(
+                "返回列名重复：{name}；请使用不同的 AS 别名 (Duplicate return column {name}; use distinct AS aliases)"
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn format_return_expr_kind(kind: &ReturnExprKind) -> String {
@@ -4015,56 +3973,53 @@ fn execute_create<T: VectorType>(
     source: &Option<MutationSource>,
     mt: &MemTable<T>,
 ) -> Result<Vec<MutationOp<T>>, TriviumError> {
-    let mut ops = Vec::new();
-    let dim = mt.dim();
-
-    // 如果有前置 MATCH（用于创建边引用已有节点）
-    let matched_vars: HashMap<String, NodeId> = if let Some(src) = source {
-        resolve_match_vars(&src.pattern, src.predicate.as_ref(), mt)?
+    let matches = if let Some(source) = source {
+        let query = build_match_query(&source.pattern, source.predicate.as_ref());
+        execute_tql_with_limits(&query, mt, TqlLimits::UNLIMITED)?
     } else {
-        HashMap::new()
+        vec![HashMap::new()]
     };
-
-    // 1. 为每个 CreateNode 生成 InsertNode 指令
-    //    已在 MATCH 中绑定的变量名 → 不创建新节点
-    for node in &create.nodes {
-        let var = node.var.as_deref().unwrap_or("_anon");
-        if matched_vars.contains_key(var) {
-            continue; // 已有节点，跳过创建
-        }
-        let zero_vec = vec![T::default(); dim];
-        ops.push(MutationOp::InsertNode {
-            var: var.to_string(),
-            vector: zero_vec,
-            payload: node.payload.clone(),
-        });
-    }
-
-    // 2. 为每个 CreateEdge 生成 LinkEdge 指令
-    //    src/dst 可能引用 MATCH 变量（已有 ID）或 CREATE 变量（待分配 ID）
-    for edge in &create.edges {
-        // 如果 src 和 dst 都已匹配到 ID，直接生成 LinkEdge
-        let src_id = matched_vars.get(&edge.src_var).copied();
-        let dst_id = matched_vars.get(&edge.dst_var).copied();
-
-        if let (Some(s), Some(d)) = (src_id, dst_id) {
-            ops.push(MutationOp::LinkEdge {
-                src_id: s,
-                dst_id: d,
-                src_var: edge.src_var.clone(),
-                dst_var: edge.dst_var.clone(),
-                label: edge.label.clone(),
-                weight: edge.weight,
+    let mut ops = Vec::new();
+    for (row_index, matched) in matches.iter().enumerate() {
+        // 每条匹配拥有独立的新建变量作用域，边端点始终引用该行的新节点。
+        let mut created = HashMap::new();
+        for (node_index, node) in create.nodes.iter().enumerate() {
+            if node
+                .var
+                .as_ref()
+                .is_some_and(|var| matched.contains_key(var))
+            {
+                continue;
+            }
+            let scoped = format!("__create_{row_index}_{node_index}");
+            if let Some(var) = &node.var {
+                created.insert(var.clone(), scoped.clone());
+            }
+            ops.push(MutationOp::InsertNode {
+                var: scoped,
+                vector: vec![T::default(); mt.dim()],
+                payload: node.payload.clone(),
             });
         }
-        // 如果引用了 CREATE 变量（尚无 ID），Database 层会在应用
-        // InsertNode 后分配 ID，再回填 LinkEdge。这里标记为 ID=0 占位。
-        else {
+        for edge in &create.edges {
+            let endpoint = |var: &str| -> Result<(NodeId, String), TriviumError> {
+                if let Some(node) = matched.get(var) {
+                    Ok((node.id, var.to_owned()))
+                } else if let Some(scoped) = created.get(var) {
+                    Ok((0, scoped.clone()))
+                } else {
+                    Err(TriviumError::QueryExecution(format!(
+                        "CREATE 引用了未定义变量 {var} (CREATE references undefined variable {var})"
+                    )))
+                }
+            };
+            let (src_id, src_var) = endpoint(&edge.src_var)?;
+            let (dst_id, dst_var) = endpoint(&edge.dst_var)?;
             ops.push(MutationOp::LinkEdge {
-                src_id: src_id.unwrap_or(0),
-                dst_id: dst_id.unwrap_or(0),
-                src_var: edge.src_var.clone(),
-                dst_var: edge.dst_var.clone(),
+                src_id,
+                dst_id,
+                src_var,
+                dst_var,
                 label: edge.label.clone(),
                 weight: edge.weight,
             });
@@ -4076,7 +4031,7 @@ fn execute_create<T: VectorType>(
 
 fn execute_set_vector<T: VectorType>(
     var: &str,
-    vector: &[f64],
+    vector: &[serde_json::Number],
     source: &Option<MutationSource>,
     mt: &MemTable<T>,
 ) -> Result<Vec<MutationOp<T>>, TriviumError> {
@@ -4086,11 +4041,6 @@ fn execute_set_vector<T: VectorType>(
             got: vector.len(),
         });
     }
-    if vector.iter().any(|value| !value.is_finite()) {
-        return Err(TriviumError::InvalidVector {
-            reason: "向量包含 NaN 或 Infinity (Vector contains NaN or Infinity)".into(),
-        });
-    }
     let source = source.as_ref().ok_or_else(|| {
         TriviumError::QueryParse("SET VECTOR requires a preceding MATCH clause".into())
     })?;
@@ -4098,8 +4048,8 @@ fn execute_set_vector<T: VectorType>(
     let results = execute_tql_with_limits(&query, mt, TqlLimits::UNLIMITED)?;
     let converted = vector
         .iter()
-        .map(|value| T::from_f32(*value as f32))
-        .collect::<Vec<_>>();
+        .map(T::from_json_number)
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(results
         .iter()
         .filter_map(|row| row.get(var))
@@ -4124,23 +4074,31 @@ fn execute_set<T: VectorType>(
     let query = build_match_query(&source.pattern, source.predicate.as_ref());
     let results = execute_tql_with_limits(&query, mt, TqlLimits::UNLIMITED)?;
 
-    let mut ops = Vec::new();
-
+    // 同一节点的多字段及重复字段赋值按文本顺序合并，只生成一次替换。
+    let mut payloads = BTreeMap::new();
     for row in &results {
         for assign in assignments {
-            if let Some(node) = row.get(&assign.var) {
-                // 构建更新后的 payload
-                let mut new_payload = node.payload.clone();
-                if let Some(obj) = new_payload.as_object_mut() {
-                    obj.insert(assign.field.clone(), assign.value.clone());
-                }
-                ops.push(MutationOp::UpdatePayload {
-                    id: node.id,
-                    payload: new_payload,
-                });
-            }
+            let node = row.get(&assign.var).ok_or_else(|| {
+                TriviumError::QueryExecution(format!(
+                    "SET 引用了未绑定变量 {} (SET references unbound variable {})",
+                    assign.var, assign.var
+                ))
+            })?;
+            let payload = payloads
+                .entry(node.id)
+                .or_insert_with(|| node.payload.clone());
+            let object = payload.as_object_mut().ok_or_else(|| {
+                TriviumError::InvalidInput(
+                    "SET 字段要求对象 Payload (SET fields requires an object Payload)".into(),
+                )
+            })?;
+            object.insert(assign.field.clone(), assign.value.clone());
         }
     }
+    let ops = payloads
+        .into_iter()
+        .map(|(id, payload)| MutationOp::UpdatePayload { id, payload })
+        .collect();
 
     Ok(ops)
 }
@@ -4176,24 +4134,6 @@ fn execute_delete<T: VectorType>(
     }
 
     Ok(ops)
-}
-
-/// 从 MATCH 模式中解析变量绑定（返回第一行匹配的 var → id 映射）
-fn resolve_match_vars<T: VectorType>(
-    pattern: &TqlPattern,
-    predicate: Option<&Predicate>,
-    mt: &MemTable<T>,
-) -> Result<HashMap<String, NodeId>, TriviumError> {
-    let query = build_match_query(pattern, predicate);
-    let results = execute_tql(&query, mt)?;
-
-    let mut var_ids = HashMap::new();
-    if let Some(first_row) = results.first() {
-        for (var, node) in first_row {
-            var_ids.insert(var.clone(), node.id);
-        }
-    }
-    Ok(var_ids)
 }
 
 /// 从 MutationSource 构建一个用于内部执行的 TqlQuery（RETURN *）

@@ -13,6 +13,49 @@ const { TriviumDB, ResourceRuntime, verifySnapshot, restoreSnapshot } = require(
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'triviumdb-node-public-api-'))
 const file = path.join(root, 'api.tdb')
 
+function runTransactionContract(root) {
+  const contract = require('../contracts/transaction_cases.json')
+  for (const dtype of contract.dtypes) {
+    for (const storageMode of contract.storage_modes) {
+      for (const test of contract.cases) {
+        const file = path.join(root, `transaction-${dtype}-${storageMode}-${test.name}.tdb`)
+        const options = { dim: contract.dimension, dtype, storageMode, autoBuildQuiver: false }
+        const db = new TriviumDB(file, options)
+        try {
+          for (const node of contract.setup) db.insertWithId(node.id, node.vector, node.payload)
+          const beforeWal = fs.readFileSync(file + '.wal')
+          if (test.expected.error) {
+            assert.throws(() => db.commitTransaction(test.operations), Error)
+            assert.deepEqual(fs.readFileSync(file + '.wal'), beforeWal)
+          } else {
+            assert.deepEqual(db.commitTransaction(test.operations), test.expected.ids)
+          }
+          const check = database => {
+            assert.deepEqual(database.allNodeIds().sort((a, b) => a - b), test.expected.nodes.map(node => node.id))
+            for (const expected of test.expected.nodes) {
+              const actual = database.get(expected.id)
+              assert.ok(actual)
+              assert.equal(actual.id, expected.id)
+              assert.deepEqual(actual.payload, expected.payload)
+              assert.deepEqual(actual.vector, expected.vector)
+            }
+          }
+          check(db)
+          const replayFile = file + '.replay'
+          fs.copyFileSync(file + '.wal', replayFile + '.wal')
+          const replay = new TriviumDB(replayFile, options)
+          try { check(replay) } finally { replay.close() }
+          db.close()
+          const reopened = new TriviumDB(file, options)
+          try { check(reopened) } finally { reopened.close() }
+        } finally {
+          db.close()
+        }
+      }
+    }
+  }
+}
+
 function runTextRecoveryContract(root) {
   const source = path.join(__dirname, '..', 'fixtures', 'v0810_text_mmap')
   for (const missing of [false, true]) {
@@ -275,11 +318,42 @@ async function runAsyncResourceContract(root) {
   }
 }
 
+function runSearchBoundaries(root) {
+  for (const storageMode of ['rom', 'mmap']) {
+    const file = path.join(root, `search-order-${storageMode}.tdb`)
+    const options = { dim: 2, storageMode, autoBuildQuiver: false }
+    const db = new TriviumDB(file, options)
+    for (const id of [1, 2, 3]) db.insertWithId(id, [1, 0], { value: id })
+    db.delete(1)
+    db.insertWithId(10, [1, 0], { value: 10 })
+    const check = database => assert.deepEqual(database.searchAdvanced([1, 0], {
+      topK: 1, recallK: 1, rerankK: 1, expandDepth: 0, minScore: 0, forceBruteForce: true,
+    }).map(hit => hit.id), [2])
+    check(db)
+    db.updatePayload(2, { value: 2 ** 53 + 4 })
+    db.updatePayload(3, { value: 2 ** 53 })
+    db.updatePayload(10, { value: 2 ** 53 + 2 })
+    db.createOrderedIndex('value')
+    const query = 'FIND {value: {$exists: true}} RETURN * ORDER BY _.value ASC'
+    assert.deepEqual(db.tql(query).map(row => row._.id), ['3', '10', '2'])
+    db.close()
+    const reopened = new TriviumDB(file, options)
+    try {
+      check(reopened)
+      assert.deepEqual(reopened.tql(query).map(row => row._.id), ['3', '10', '2'])
+    } finally { reopened.close() }
+  }
+}
+
 async function main() {
   try {
+    runSearchBoundaries(root)
     runLifecycleContract(root)
     runResourceContract(root)
     runSharedContract(root)
+    runTransactionContract(root)
+    await require('./write_boundaries.js')(root, TriviumDB)
+    await require('./numeric_boundaries.js')(root, TriviumDB)
     runTextRecoveryContract(root)
     await runAsyncResourceContract(root)
     assert.throws(
@@ -352,7 +426,7 @@ async function main() {
 
     const storage = db.storageInfo()
     assert.equal(storage.database_format_current, 9)
-    assert.equal(storage.property_index_format, 6)
+    assert.equal(storage.property_index_format, 7)
     assert.equal(storage.node_count, 2)
 
     const vectorPrepared = db.prepareTql('SEARCH VECTOR [$x, $y] TOP 1 RETURN *')

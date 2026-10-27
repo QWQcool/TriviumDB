@@ -71,8 +71,8 @@ fn 四类属性索引和存储格式可结构化观测() {
 
     let storage = db.storage_info();
     assert_eq!(storage.database_format_current, 9);
-    assert_eq!(storage.property_index_format, 6);
-    assert_eq!(storage.graph_index_format, 2);
+    assert_eq!(storage.property_index_format, 7);
+    assert_eq!(storage.graph_index_format, 3);
     assert_eq!(storage.wal_format, 3);
     assert_eq!(storage.dim, 2);
     assert_eq!(storage.node_count, 1);
@@ -104,7 +104,7 @@ fn prepared_tql和一等路径列表值可通过公共_api执行() {
         .unwrap();
     assert!(matches!(&rows[0]["path"], TqlValue::Path(value) if value == &vec![1, 2]));
     assert!(matches!(&rows[0]["ids"], TqlValue::List(value) if value == &vec![json!(2)]));
-    assert!(matches!(rows[0]["score"], TqlValue::Float(value) if value == 11.0));
+    assert!(matches!(rows[0]["score"], TqlValue::Int(11)));
     cleanup(&path);
 }
 

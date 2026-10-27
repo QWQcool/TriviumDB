@@ -527,7 +527,8 @@ fn 显式LIMIT可覆盖配置行上限但OFFSET仍受内存硬上限() {
             storage_mode: StorageMode::Rom,
             max_query_rows: Some(2),
             row_overflow: RowOverflowPolicy::Throw,
-            memory_limit: 3 * (DIM * std::mem::size_of::<f32>() + 256),
+            // 64 KiB 同时容纳样本和写入暂存；10,002 个查询行显著超出该预算。
+            memory_limit: 64 * 1024,
             payload_cache_bytes: 0,
             payload_cache_entry_bytes: 0,
             ..Default::default()
@@ -540,16 +541,22 @@ fn 显式LIMIT可覆盖配置行上限但OFFSET仍受内存硬上限() {
     }
 
     let overflow = db.tql_nodes("MATCH (n) RETURN n").unwrap_err();
-    assert!(overflow.to_string().contains("超过 2 行上限"));
-    assert_eq!(db.tql_nodes("MATCH (n) RETURN n LIMIT 3").unwrap().len(), 3);
-    let memory_error = db
-        .tql_nodes("MATCH (n) RETURN n LIMIT 2 OFFSET 2")
-        .unwrap_err();
-    assert!(
-        memory_error
-            .to_string()
-            .contains("Query row budget exceeded")
+    assert!(matches!(
+        overflow,
+        triviumdb::TriviumError::QueryExecution(_)
+    ));
+    let rows = db.tql_nodes("MATCH (n) RETURN n LIMIT 3").unwrap();
+    assert_eq!(
+        rows.iter().map(|row| row["n"].id).collect::<Vec<_>>(),
+        [1, 2, 3]
     );
+    let memory_error = db
+        .tql_nodes("MATCH (n) RETURN n LIMIT 2 OFFSET 10000")
+        .unwrap_err();
+    assert!(matches!(
+        memory_error,
+        triviumdb::TriviumError::QueryRowBudgetExceeded { .. }
+    ));
 
     drop(db);
     cleanup(&path);

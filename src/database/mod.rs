@@ -223,6 +223,9 @@ impl<T: VectorType> QuiverBuildHandle<T> {
         resource_task.detach();
         let operation_guard = {
             let mut state = lock_or_recover(&self.lifecycle.0);
+            if state.recovery_required {
+                return Err(TriviumError::WalClosed);
+            }
             if state.lifecycle != DatabaseLifecycle::Open {
                 return Err(TriviumError::DatabaseClosed);
             }
@@ -283,6 +286,7 @@ enum DatabaseLifecycle {
 }
 
 struct LifecycleState {
+    recovery_required: bool,
     lifecycle: DatabaseLifecycle,
     active_operations: usize,
     group_commit_owner: Option<std::thread::ThreadId>,
@@ -324,6 +328,16 @@ impl Drop for GroupCommitGuard {
             && let Err(error) = self.finish()
         {
             tracing::error!(%error, "分组提交异常展开期间同步失败，已关闭 WAL 写入能力");
+        }
+    }
+}
+
+impl OperationGuard {
+    fn check_recovery(&self) -> Result<()> {
+        if lock_or_recover(&self.lifecycle.0).recovery_required {
+            Err(TriviumError::WalClosed)
+        } else {
+            Ok(())
         }
     }
 }
@@ -414,6 +428,9 @@ impl<T: VectorType> SearchHandle<T> {
 
     fn enter_operation(&self) -> Result<OperationGuard> {
         let mut state = lock_or_recover(&self.lifecycle.0);
+        if state.recovery_required {
+            return Err(TriviumError::WalClosed);
+        }
         if state.lifecycle != DatabaseLifecycle::Open {
             return Err(TriviumError::DatabaseClosed);
         }
@@ -486,6 +503,7 @@ impl<T: VectorType> SearchHandle<T> {
         };
         let first = search_one(&query_vectors[0])?;
         if query_vectors.len() == 1 {
+            _operation.check_recovery()?;
             return Ok(vec![first]);
         }
 
@@ -515,6 +533,7 @@ impl<T: VectorType> SearchHandle<T> {
         let mut results = Vec::with_capacity(query_vectors.len());
         results.push(first);
         results.extend(chunks.into_iter().flatten());
+        _operation.check_recovery()?;
         Ok(results)
     }
 }
@@ -530,6 +549,9 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
 
     fn enter_operation_kind(&self, maintenance: bool) -> Result<OperationGuard> {
         let mut state = lock_or_recover(&self.lifecycle.0);
+        if state.recovery_required {
+            return Err(TriviumError::WalClosed);
+        }
         if state.lifecycle != DatabaseLifecycle::Open {
             return Err(TriviumError::DatabaseClosed);
         }
@@ -694,6 +716,10 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                 Ok(())
             })?;
 
+            // 回放按完整提交后的事实重建唯一所有者，验证通过后再修改 WAL。
+            let unique_definitions = memtable.unique_index_definitions();
+            memtable.restore_unique_index_definitions(&unique_definitions)?;
+
             // 内存恢复成功后才截断损坏或未提交尾部；回放失败保留原 WAL 供重试。
             let wal_path = format!("{}.wal", path);
             let wal_file = std::fs::OpenOptions::new().write(true).open(&wal_path)?;
@@ -770,6 +796,7 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
             lifecycle: Arc::new((
                 Mutex::new(LifecycleState {
                     lifecycle: DatabaseLifecycle::Open,
+                    recovery_required: false,
                     active_operations: 0,
                     group_commit_owner: None,
                     shutdown_phase: ShutdownPhase::Open,
@@ -840,7 +867,9 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
     /// 数据读取与查询共享准入和生命周期检查。
     fn read_operation<R>(&self, operation: impl FnOnce() -> R) -> Result<R> {
         let _operation = self.enter_operation()?;
-        Ok(operation())
+        let result = operation();
+        _operation.check_recovery()?;
+        Ok(result)
     }
 
     /// 返回当前进程内累计的 WAL 写入与物理同步计数。
@@ -1189,6 +1218,11 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         read_or_recover(&self.memtable).estimated_memory_bytes()
     }
 
+    #[cfg(feature = "nodejs")]
+    pub(crate) fn next_id_for_binding(&self) -> Result<NodeId> {
+        self.read_operation(|| read_or_recover(&self.memtable).next_id_value())
+    }
+
     fn ensure_incremental_memory_budget(&self, additional_bytes: usize) -> Result<()> {
         if self.memory_limit == 0 {
             return Ok(());
@@ -1203,6 +1237,22 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
             });
         }
         Ok(())
+    }
+
+    fn admit_payload(&self, payload: &serde_json::Value) -> Result<()> {
+        let encoded = crate::storage::payload_store::json_encoded_len(payload)?;
+        if encoded > 8 * 1024 * 1024 {
+            return Err(TriviumError::PayloadTooLarge {
+                size_bytes: encoded,
+                max_bytes: 8 * 1024 * 1024,
+            });
+        }
+        self.ensure_incremental_memory_budget(
+            encoded
+                .saturating_mul(2)
+                .saturating_add(crate::storage::payload_store::estimate_json_memory(payload))
+                .saturating_add(256),
+        )
     }
 
     /// 内部方法：达到预算后只释放冷 mmap 页，不触发无法降低索引堆占用的全量重写。
@@ -1306,6 +1356,7 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         self.require_write_access("insert")?;
         let _operation = self.enter_operation()?;
         reject_hook_reentrant_write()?;
+        self.admit_payload(&payload)?;
         let payload_str = payload.to_string();
         if payload_str.len() > 8 * 1024 * 1024 {
             return Err(crate::error::TriviumError::PayloadTooLarge {
@@ -1325,6 +1376,17 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
             let mut mt = write_or_recover(&self.memtable);
             mt.validate_insert(vector)?;
             let id = mt.next_id_value();
+            mt.validate_insert_with_id(id, vector)?;
+            mt.ensure_additional_memory(
+                self.memory_limit,
+                mt.estimate_reserve_bytes(1)?
+                    .saturating_add(payload_str.len().saturating_mul(2))
+                    .saturating_add(crate::storage::payload_store::estimate_json_memory(
+                        &payload,
+                    ))
+                    .saturating_add(vector.len().saturating_mul(std::mem::size_of::<T>()))
+                    .saturating_add(256),
+            )?;
             mt.validate_unique_changes([(id, Some(&payload))])?;
             let mut w = lock_or_recover(&self.wal);
             w.append(&WalEntry::Insert {
@@ -1347,6 +1409,7 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
     ) -> Result<()> {
         self.require_write_access("insert_with_id")?;
         let _operation = self.enter_operation()?;
+        self.admit_payload(&payload)?;
         let payload_str = payload.to_string();
         reject_hook_reentrant_write()?;
         if payload_str.len() > 8 * 1024 * 1024 {
@@ -1366,6 +1429,16 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         {
             let mut mt = write_or_recover(&self.memtable);
             mt.validate_insert_with_id(id, vector)?;
+            mt.ensure_additional_memory(
+                self.memory_limit,
+                mt.estimate_reserve_bytes(1)?
+                    .saturating_add(payload_str.len().saturating_mul(2))
+                    .saturating_add(crate::storage::payload_store::estimate_json_memory(
+                        &payload,
+                    ))
+                    .saturating_add(vector.len().saturating_mul(std::mem::size_of::<T>()))
+                    .saturating_add(256),
+            )?;
             mt.validate_unique_changes([(id, Some(&payload))])?;
             let mut w = lock_or_recover(&self.wal);
             w.append(&WalEntry::Insert {
@@ -1402,10 +1475,11 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         self.require_write_access("link")?;
         let _operation = self.enter_operation()?;
         reject_hook_reentrant_write()?;
-        self.ensure_incremental_memory_budget(label.len().saturating_add(256))?;
         {
             let mut mt = write_or_recover(&self.memtable);
             mt.validate_link(src, dst)?;
+            let growth = mt.estimate_edge_write_bytes(src, dst, label, &serde_json::Value::Null)?;
+            mt.ensure_additional_memory(self.memory_limit, growth)?;
             if !weight.is_finite() {
                 return Err(TriviumError::InvalidInput(
                     "边权重必须是有限浮点数 (Edge weight must be finite)".into(),
@@ -1538,7 +1612,7 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                 "条件更新字段不能为空 (Conditional update field cannot be empty)".into(),
             ));
         }
-        self.ensure_incremental_memory_budget(replacement.to_string().len().saturating_add(128))?;
+        self.admit_payload(&replacement)?;
         let _operation = self.enter_operation()?;
         reject_hook_reentrant_write()?;
         let mut mt = write_or_recover(&self.memtable);
@@ -1557,6 +1631,19 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
             )
         })?;
         object.insert(field.to_owned(), replacement);
+        let encoded = crate::storage::payload_store::json_encoded_len(&payload)?;
+        let additional = encoded.saturating_mul(2).saturating_add(
+            crate::storage::payload_store::estimate_json_memory(&payload),
+        );
+        let current_bytes = mt.estimated_memory_bytes();
+        if self.memory_limit > 0 && current_bytes.saturating_add(additional) > self.memory_limit {
+            return Err(TriviumError::CapacityReservationRejected {
+                requested_nodes: 1,
+                estimated_bytes: additional,
+                current_bytes,
+                memory_limit: self.memory_limit,
+            });
+        }
         let payload_str = payload.to_string();
         if payload_str.len() > 8 * 1024 * 1024 {
             return Err(TriviumError::PayloadTooLarge {
@@ -1672,6 +1759,7 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         let _operation = self.enter_operation()?;
         self.require_write_access("update_payload")?;
         reject_hook_reentrant_write()?;
+        self.admit_payload(&payload)?;
         let payload_str = payload.to_string();
         if payload_str.len() > 8 * 1024 * 1024 {
             return Err(crate::error::TriviumError::PayloadTooLarge {
@@ -1714,10 +1802,13 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         self.require_write_access("patch_payload")?;
         let _operation = self.enter_operation()?;
         reject_hook_reentrant_write()?;
+        self.admit_payload(&patch)?;
         let final_payload = {
             let mt = read_or_recover(&self.memtable);
             mt.preview_patch_payload(id, &patch)?
         };
+
+        self.admit_payload(&final_payload)?;
 
         let payload_str = final_payload.to_string();
         if payload_str.len() > 8 * 1024 * 1024 {
@@ -1882,8 +1973,9 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
     pub fn get_payload(&self, id: NodeId) -> Result<Option<serde_json::Value>> {
         self.read_operation(|| {
             let mt = read_or_recover(&self.memtable);
-            mt.get_payload(id).map(|payload| (*payload).clone())
-        })
+            mt.try_get_payload(id)
+                .map(|payload| payload.map(|payload| (*payload).clone()))
+        })?
     }
 
     pub fn get_edges(&self, id: NodeId) -> Result<Vec<crate::node::Edge>> {
@@ -2076,16 +2168,23 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
     pub fn get(&self, id: NodeId) -> Result<Option<crate::node::NodeView<T>>> {
         self.read_operation(|| {
             let mt = read_or_recover(&self.memtable);
-            let payload = (*mt.get_payload(id)?).clone();
-            let vector = mt.get_vector(id)?.to_vec();
+            let Some(payload) = mt.try_get_payload(id)? else {
+                return Ok(None);
+            };
+            let vector = mt
+                .get_vector(id)
+                .ok_or_else(|| {
+                    TriviumError::CorruptedFile("节点缺少向量 (Node vector is missing)".into())
+                })?
+                .to_vec();
             let edges = mt.get_edges(id).unwrap_or(&[]).to_vec();
-            Some(crate::node::NodeView {
+            Ok(Some(crate::node::NodeView {
                 id,
                 vector,
-                payload,
+                payload: (*payload).clone(),
                 edges,
-            })
-        })
+            }))
+        })?
     }
 
     pub fn neighbors_with_labels(
@@ -2357,7 +2456,12 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                 "N-gram 索引字段不能为空 (N-gram index field cannot be empty)".into(),
             ));
         }
-        write_or_recover(&self.memtable).register_ngram_property_index(field)
+        write_or_recover(&self.memtable).build_property_index(
+            crate::index::property::PropertyIndexKind::Ngram,
+            &[field.to_owned()],
+            false,
+            self.memory_limit,
+        )
     }
 
     pub fn drop_ngram_index(&mut self, field: &str) -> Result<()> {
@@ -2416,7 +2520,12 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                 "唯一索引字段不能为空 (Unique index field cannot be empty)".into(),
             ));
         }
-        write_or_recover(&self.memtable).register_unique_property_index(field)?;
+        write_or_recover(&self.memtable).build_property_index(
+            crate::index::property::PropertyIndexKind::Hash,
+            &[field.to_owned()],
+            true,
+            self.memory_limit,
+        )?;
         self.flush_inner()
     }
 
@@ -2435,7 +2544,12 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                 "复合唯一索引至少需要两个非空且不重复的字段 (Composite unique index requires at least two distinct non-empty fields)".into(),
             ));
         }
-        write_or_recover(&self.memtable).register_unique_composite_property_index(fields)?;
+        write_or_recover(&self.memtable).build_property_index(
+            crate::index::property::PropertyIndexKind::Composite,
+            fields,
+            true,
+            self.memory_limit,
+        )?;
         self.flush_inner()
     }
 
@@ -2453,7 +2567,12 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         let _operation = self.enter_operation()?;
         self.require_write_access("create_index")?;
         let mut mt = write_or_recover(&self.memtable);
-        mt.register_property_index(field);
+        mt.build_property_index(
+            crate::index::property::PropertyIndexKind::Hash,
+            &[field.to_owned()],
+            false,
+            self.memory_limit,
+        )?;
         Ok(())
     }
 
@@ -2465,14 +2584,24 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                 "复合索引至少需要两个字段 (Composite index requires at least two fields)".into(),
             ));
         }
-        write_or_recover(&self.memtable).register_composite_property_index(fields);
+        write_or_recover(&self.memtable).build_property_index(
+            crate::index::property::PropertyIndexKind::Composite,
+            fields,
+            false,
+            self.memory_limit,
+        )?;
         Ok(())
     }
 
     pub fn create_bitmap_index(&mut self, field: &str) -> Result<()> {
         let _operation = self.enter_operation()?;
         self.require_write_access("create_bitmap_index")?;
-        write_or_recover(&self.memtable).register_bitmap_property_index(field);
+        write_or_recover(&self.memtable).build_property_index(
+            crate::index::property::PropertyIndexKind::Bitmap,
+            &[field.to_owned()],
+            false,
+            self.memory_limit,
+        )?;
         Ok(())
     }
 
@@ -2501,7 +2630,12 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         let _operation = self.enter_operation()?;
         self.require_write_access("create_ordered_index")?;
         let mut mt = write_or_recover(&self.memtable);
-        mt.register_ordered_property_index(field);
+        mt.build_property_index(
+            crate::index::property::PropertyIndexKind::Ordered,
+            &[field.to_owned()],
+            false,
+            self.memory_limit,
+        )?;
         Ok(())
     }
 
@@ -2725,6 +2859,14 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
     /// assert_eq!(result.created_ids.len(), 1);
     /// ```
     pub fn tql_mut(&mut self, input: &str) -> Result<crate::query::tql_executor::TqlMutResult> {
+        self.tql_mut_with_id_limit(input, NodeId::MAX - 1)
+    }
+
+    pub(crate) fn tql_mut_with_id_limit(
+        &mut self,
+        input: &str,
+        max_id: NodeId,
+    ) -> Result<crate::query::tql_executor::TqlMutResult> {
         self.require_write_access("tql_mut")?;
         let _operation = self.enter_operation()?;
         use crate::query::tql_ast::TqlStatement;
@@ -2752,8 +2894,13 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                     std::collections::HashMap::new();
                 for op in &ops {
                     if let MutationOp::InsertNode { var, .. } = op {
+                        if next_id > max_id {
+                            return Err(TriviumError::InvalidInput("节点 ID 超出当前接口范围 (Node ID exceeds this API's supported range)".into()));
+                        }
                         var_id_map.insert(var.clone(), next_id);
-                        next_id += 1;
+                        next_id = next_id.checked_add(1).ok_or_else(|| {
+                            TriviumError::InvalidInput("节点 ID 已耗尽 (Node IDs exhausted)".into())
+                        })?;
                     }
                 }
 

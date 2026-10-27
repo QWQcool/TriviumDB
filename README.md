@@ -180,15 +180,15 @@ pnpm add triviumdb
 cargo add triviumdb
 ```
 
-`0.9.0-beta.2` 提供关闭后的完整资源释放、流式 WAL 恢复、文本索引重建与文件组原子发布，并提前 QuIVer 自动构建阈值：
+`0.9.0-beta.3` 完善事务与 WAL 恢复、属性及图索引一致性、完整整数域和三端输入校验，并统一 Cascades 管线中的投影快照、实体绑定、聚合与排序语义：
 
 ```bash
-pip install "triviumdb==0.9.0b2"
-npm install triviumdb@0.9.0-beta.2
-cargo add triviumdb@0.9.0-beta.2
+pip install "triviumdb==0.9.0b3"
+npm install triviumdb@0.9.0-beta.3
+cargo add triviumdb@0.9.0-beta.3
 ```
 
-版本内容见 [0.9.0-beta.2 变更说明](docs/changes/0.9.0-beta.2.md)。
+版本内容见 [0.9.0-beta.3 变更说明](docs/changes/0.9.0-beta.3.md)。
 
 > 🧪 **尝鲜：HTTP 服务端版（nightly）** —— TriviumDB 的正式产品形态始终是**嵌入式数据库**（进程内 Library，即装即用，无需部署）。仓库中的 `triviumdb-server` 提供了一个可选的 HTTP 壳（多客户端并发读写、OCC、流式 NDJSON 等），目前处于 **nightly 预览状态**，仅供尝鲜和跟踪演进方向，协议随时可能变更，请勿用于生产。详见 [Server 说明（nightly）](docs/server.md)；一切 API 与用法说明仍以嵌入式版本为准。
 
@@ -384,7 +384,7 @@ finally:
 
 **QuIVer**（Quantized Index for Vector Retrieval）是 TriviumDB 自研的近似最近邻（ANN）图索引。使用 **BQ 快速构图 + 无训练 SM-L2 导航 + 原始向量余弦精排**；导航结合两位编码与每向量幅值信息计算重建平方 L2，召回和吞吐取决于数据、参数与精排预算。
 
-> 📖 [QuIVer 架构与配置](docs/quiver.md) · [基准测试指南](benches/README.md) · [0.9.0-beta.2 变更说明](docs/changes/0.9.0-beta.2.md)
+> 📖 [QuIVer 架构与配置](docs/quiver.md) · [基准测试指南](benches/README.md) · [0.9.0-beta.3 变更说明](docs/changes/0.9.0-beta.3.md)
 
 > ⚠️ **维度建议：强烈建议数据库向量维度不超过 3072。** TriviumDB 的通用存储与精确 BruteForce 检索允许更高维度，但 QuIVer 的 BQ 签名安全上限是 3072 维。超过该维度时引擎不会自动构建 QuIVer，检索会稳定回退到 BruteForce；手动构建 QuIVer 会返回明确错误。高维数据库仍可使用，但无法获得 QuIVer ANN 加速，内存和计算开销也会显著增加。
 

@@ -1,6 +1,6 @@
 # TriviumDB 安全特性详解
 
-> 本文说明 `0.9.0-beta.2` 的并发、数据完整性、格式校验、资源预算、ReadOnly/Immutable、输入验证与跨平台 I/O 实现。版本记录见[变更说明](changes/0.9.0-beta.2.md)。
+> 本文说明当前内核的并发、数据完整性、格式校验、资源预算、ReadOnly/Immutable、输入验证与跨平台 I/O 实现。当前版本见[变更说明](changes/0.9.0-beta.3.md)，后续更新见[未发布变更](changes/unreleased.md)。
 
 ---
 
@@ -132,6 +132,8 @@ if stored_crc != computed_crc {
 ---
 
 ### 6. WAL 单条记录大小上界检查
+
+WAL 回放在帧与 CRC 校验之后继续验证业务内容：Payload 与边元数据必须是可解码的 JSON，向量满足数据库维度和有限数值要求，插入 ID 位于 `1..u64::MAX`。这些检查先于检查点幂等跳过；语义非法记录返回 `CorruptedFile`。合法 `null` 按 JSON 值保存。回放或应用失败传播错误，原 WAL 保留供诊断与重试；未提交事务由封条过滤，不参与业务回放。
 
 **实现位置**：`storage/wal.rs:214-217`
 
@@ -420,7 +422,7 @@ safe_cfg.dpp_quality_weight = safe_cfg.dpp_quality_weight.clamp(0.0, 10.0);
 
 **防OOM极巨载荷拦截 (Payload Limiting)**：为防止恶意构造或意外产生的数以百兆计的超大 Payload 文本占用物理内存和撑爆日志，`Database::insert`、`update_payload` 和 `Transaction::commit` 会强制性对 JSON 载荷施加 **8MB 大小限制** (`MAX_PAYLOAD_SIZE`)。超越此数值的数据写入将被直接判定失败，保护操作系统的内存水位和文件视窗。
 
-任何验证失败直接返回 `Err`，MemTable 和 WAL 零损伤。只有 Dry-Run 全部通过，才进入不可失败的 WAL 写入 → MemTable 应用路径。
+预检按缓冲操作顺序更新每个 ID 的存在状态，覆盖删除、重建、修改和再次删除。JSON 在 WAL 前检查可恢复性；预检失败时节点、索引、ID 分配状态和 WAL 保持原样。容量预留完成后先提交 WAL，再应用已校验的原始值并同步索引；WAL I/O 失败向调用方传播原始错误，该批内存操作尚未应用。
 
 ---
 

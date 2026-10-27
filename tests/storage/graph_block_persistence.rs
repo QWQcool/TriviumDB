@@ -71,7 +71,7 @@ fn 图块_crc_与逐字节截断全部_fail_closed() {
     let original = std::fs::read(&sidecar).unwrap();
 
     let mut corrupted = original.clone();
-    let block_start = 24 + 24;
+    let block_start = 36 + 24;
     corrupted[block_start] ^= 0x5a;
     let whole_crc = crc32fast::hash(&corrupted[..corrupted.len() - 4]);
     let end = corrupted.len();
@@ -109,7 +109,7 @@ fn 图块_v2_目录独立_crc_与超大计数_fail_closed() {
     let original = std::fs::read(&sidecar).unwrap();
 
     let block_count = u64::from_le_bytes(original[16..24].try_into().unwrap()) as usize;
-    let mut cursor = 24usize;
+    let mut cursor = 36usize;
     for _ in 0..block_count {
         let block_len =
             u32::from_le_bytes(original[cursor + 12..cursor + 16].try_into().unwrap()) as usize;

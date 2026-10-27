@@ -2,7 +2,7 @@
 
 > 从单元测试到属性测试、从覆盖率度量到变异测试：TriviumDB 的多层防御测试体系详解。
 >
-> 本文说明 `0.9.0-beta.2` 的测试与验收方法，见[变更说明](changes/0.9.0-beta.2.md)。
+> 本文说明 `0.9.0-beta.3` 的测试与验收方法，见[变更说明](changes/0.9.0-beta.3.md)。
 
 ---
 
@@ -42,6 +42,16 @@ TriviumDB 采用 **五层防御式测试体系**，从函数级正确性到系�
 | L5 | 变异测试 | 指定生产代码变异能否被现有断言检出 |
 
 ## 用例设计与验收证据
+
+`cargo test --test core tql_semantics` 验证普通 MATCH、FIND、WITH 与具名边的完整返回内容、分组、聚合、去重、别名排序和分页。`tests/contracts/tql_return_cases.json` 由 Rust、Python、Node 共同消费；Node 同时通过 `npm run test:package` 在独立安装的 tarball 上执行。DML 用例验证多字段合并、每行 CREATE 作用域、完整 u64 位模式、浮点转换边界、拒绝后的 WAL 内容及关闭重开。纯向量管线在分页后核对具体节点与 Payload 读取量。
+
+`cargo test --test core tql_boundaries` 验证内联 ID、结构 ID 与 Payload 索引域、OPTIONAL 起点过滤、具名边谓词、实体空值、JSON 容器、重复变量、默认列名、Prepared 非法槽位与精确向量输入。固定数值样例覆盖整数/浮点等价表示、2^53 相邻整数、有符号边界及 u64 上限，并在 Hash、Ordered、Bitmap、Composite 配置中核对具体结果。`tests/contracts/tql_boundary_cases.json` 为三端提供固定输入和完整预期；Node 与 Python 的公共 API 入口还验证拒绝后的 WAL 保持、完整大 ID 更新、容器输出及安装制品上的 u64 SEARCH/RANK/Prepared 行为。
+
+`cargo test --features test-hooks --test core tql_aliases -- --test-threads=1` 验证投影快照、多源汇合、连续扩展、同时赋值、标量/节点重命名、递归作用域、实体与对象别名排序，以及串行、并行和融合精排。`tests/contracts/tql_alias_cases.json` 在 Rust Rom/Mmap 与两端实际 SDK 中核对固定完整结果或明确的排序 ID。工作区测试分别检查实例上限与共享配额拒绝，并核对拒绝后配额归还和后续查询。
+
+检索边界使用预先给定的 NodeId 次序验证槽位复用、分段扫描、并行度与 Top-K 截断；数值排序覆盖 `i64/u64` 端点、2^53 相邻整数、正负小数及索引重载。内存计量测试独立遍历实际容器，核对增量账本在替换、重复登记、删除、编译和重载后的值。事务应用故障测试在 WAL 提交后注入失败，要求当前句柄与已准入的共享搜索拒绝部分状态，并在重开后核对完整事务和再次持久化结果。
+
+定向入口：`cargo test --test core search_boundaries`、`cargo test --lib --features test-hooks guard_tests`、`cargo test --test fault_io --features test-hooks wal_failure_state -- --test-threads=1`。QuIVer 调整的质量与耗时对照同时记录数据分布、种子、维度、候选宽度、精排预算、平台和构建参数。
 
 预期结果依据公开契约、独立样例或独立参考模型给出。多物理计划对比验证执行策略的一致性，独立 oracle 验证查询语义；文件组前后快照验证零写与内容保持。每份测试报告注明提交、平台、特性、命令、实际断言及尚待执行的路径。
 
@@ -265,10 +275,25 @@ fn tx_insert_后_在同一事务link() {
     let mut tx = db.begin_tx();
     tx.insert_with_id(10, &[1.0, 0.0, 0.0], json!({}));
     tx.insert_with_id(20, &[0.0, 1.0, 0.0], json!({}));
-    tx.link(10, 20, "related", 0.5);   // ✅ 合法：pending_ids 能追踪到 10 和 20
+    tx.link(10, 20, "related", 0.5);   // 顺序状态投影已记录两个节点存在
     let ids = tx.commit().unwrap();
     assert_eq!(ids.len(), 2);
 }
+```
+
+### 事务顺序状态与 WAL 语义
+
+`core/transaction_state.rs` 使用独立的单节点状态模型，穷举插入、删除、更新 Payload、更新向量的一至四步组合，分别从存在与不存在的初态执行。矩阵包含 f32/f16/u64 和 Rom/Mmap；成功时验证完整向量、Payload、返回 ID 与未触及节点，失败时验证原内容和 WAL 字节。额外检查自动 ID 分配、图边、自环、文本删除、唯一索引与持久化重开。
+
+`tests/contracts/transaction_cases.json` 为三端提供独立固定预期，覆盖删除重建后的重复插入、更新、反复重建、最终删除和自动 ID 混用。Rust、Python、Node 各自执行当前会话、复制已确认 WAL 后的独立恢复与检查点重开，核对全部节点 ID、向量及 Payload。Rust 和 Node 执行 Rom/Mmap 矩阵；Python 使用其当前构造 API 的默认 Mmap 模式。
+
+`storage/wal_semantics.rs` 使用正常 WAL API 生成 CRC 合法帧，分别构造非法 JSON、错误维度、非有限数值、保留 ID 和 ID 推进溢出。既有检查点与 WAL-only、独立记录与已提交事务均要求结构化拒绝；重复打开失败后比较完整原始文件组。合法 `null`、有效幂等重放、最大合法 ID 和未提交非法记录另有正向样例。
+
+```bash
+cargo test --test core transaction_state -- --test-threads=1
+cargo test --test storage wal_semantics -- --test-threads=1
+npm run test:public-api
+python tests/python/public_api.py
 ```
 
 ### Filter 错误路径覆盖
@@ -661,3 +686,18 @@ cargo test --features test-hooks --test concurrency 显式连续视图交错
 cargo test --test storage text_index_lifecycle -- --test-threads=1
 cargo test --test contracts 共享json契约由rust适配器完整执行
 ```
+
+
+## 写入边界与索引事实一致性
+
+- `tests/core/write_boundaries.rs` 覆盖三种 dtype、Rom/Mmap、解析缓存开启/关闭的 JSON 深度边界，验证当前读取、WAL 独立回放及关闭重开；更新入口同时验证预算拒绝后的原值、向量和 WAL。`$inc` 通过固定独立数值样例检查精确整数、跨符号边界、小数、溢出和整份补丁原子性。
+- `tests/fault_io/wal_failure_state.rs` 在 `test-hooks` 下分别注入 WAL flush/fsync 故障，子进程直接退出，再验证此前确认记录、隔离后的所有拒绝结果及恢复后的再次持久化。未确认操作允许按已持久化日志恢复；已确认数据要求完整核对。
+- `tests/storage/sidecar_facts.rs` 验证同长度 Payload 更新与边内容更新后混入旧 sidecar 的处理，检查严格拒绝、属性索引扫描回退、历史索引重建、平行边入度、分数顺序与只读零写。
+- `tests/node/write_boundaries.js` 与 `tests/python/write_boundaries.py` 由各端公共 API 入口执行，覆盖直接/批量/事务、查询、完整整数边界、合法容器往返，以及无效输入拒绝后的内容和 WAL。
+
+
+- `tests/core/index_graph_boundaries.rs` 验证唯一约束删除、部分覆盖索引的完整结果、复合唯一大整数、UTF-8 标签边界、图堆准入、零入度清理、三种 dtype 的 ID 分配耗尽、WAL 回放和只读零写。内核单元测试独立核对图容器容量、字符串分配和复合唯一映射账本。
+- `tests/fixtures/numeric_ids/wal_v3.bin` 提供固定完整 u64 ID 跨端样本；Rust 核对完整记录、向量与边，Python 安装制品核对精确整数，Node 安装制品核对字符串 ID 与数字输出拒绝。`tests/node/numeric_boundaries.js` 覆盖数量转换、同步/异步检索、遍历、索引查询及自动分配的 WAL 原子拒绝；`tests/python/index_graph_boundaries.py` 覆盖绑定的索引与图持久化行为。两者均接入现有公共 API CI 入口。
+
+- `tests/core/query_numeric_indexes.rs` 使用独立固定结果验证临时唯一键冲突、原键恢复、删除与 WAL 回放，混合类型范围的 LIMIT/OFFSET，完整 u64 投影/参数/比较/聚合，以及正规数、次正规数和正负零。索引 DDL 覆盖七类入口的预算拒绝、定义保留、配额调整重试与只读重开；唯一构建失败继续保留已有非唯一索引。
+- `tests/node/query_numeric_indexes.js` 与 `tests/python/query_numeric_indexes.py` 在实际绑定中执行最终唯一键、数值精度与构建预算断言；Node 用例同时接入独立安装的 npm 制品验收。差分参考模型使用自身的有界整数运算，完整 u64 域由独立常量样例验收。

@@ -81,7 +81,7 @@
 - 说明相关验收范围、已知问题及使用条件。面向用户描述产品形态、功能和作用，采用客观表述；不混入内部汇报、主观评价和投稿计划。QuIVer 审稿材料集中在 `README_QUIVER.md`。
 - `docs/changes/<版本>.md` 保存对应版本的完整双语说明，`docs/changes/unreleased.md` 跟踪尚未发布的变更。自动生成的 commit/PR 列表可以作为附录，不能替代上述说明。
 - GitHub Release 正文从已审查的同版双语说明发布；涉及 CD 自动生成说明时，同步检查生成入口与最终正文，确保双语内容完整保留。
-- Rust、CLI、Server、npm、Python 和现有受跟踪锁文件的版本元数据同步更新。遵循 Cargo/npm 的 SemVer 与 Python 的 PEP 440 映射，例如 `0.9.0-beta.2` 对应 `0.9.0b2`，正式版均为 `0.9.0`。
+- Rust、CLI、Server、npm、Python 和现有受跟踪锁文件的版本元数据同步更新。遵循 Cargo/npm 的 SemVer 与 Python 的 PEP 440 映射，例如 `0.9.0-beta.3` 对应 `0.9.0b3`，正式版均为 `0.9.0`。
 - 分支、Tag、验收和发布通道遵守 [贡献指南](CONTRIBUTING.md)：功能分支经 PR 进入 `dev`，Release PR 从 `dev` 进入 `master`；已发布 Tag 保持不可变，包上传使用对应已验收提交。
 
 ## 验收与完成报告

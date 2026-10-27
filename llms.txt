@@ -5,6 +5,7 @@
 TriviumDB runs inside the host application. Applications use it for AI agent memory, AI companion memory, retrieval-augmented generation (RAG), local knowledge bases, and knowledge graphs. Independent database instances support per-agent, per-session, and per-tenant data organization in desktop applications and containers.
 
 - Native tri-model unification: vector, graph, and document operations share the same storage kernel, node identities, and transaction system. Each NodeId connects a stored vector, a JSON payload, indexed text, and graph edges. Applications combine semantic similarity, document predicates, and graph relationships over the same data.
+- Typed query values: WITH projections capture per-row values and node identities across graph expansion. Aggregation, DISTINCT, alias ordering, and pagination share evaluation semantics. Unsigned vectors and integers retain their exact values through the corresponding typed APIs.
 - Unified Cascades planning: TQL brings vector recall, document filtering, text retrieval, graph traversal, paths, set operations, aggregation, iteration, and reranking into one query pipeline. The same deterministic, cost-driven Cascades optimizer plans these cross-model pipelines using shared statistics, index availability, and resource budgets. MATCH, FIND, SEARCH, and WITH express the combined query.
 - Vector retrieval: f32, f16, and u64 storage; exact vector search; and the QuIVer approximate nearest-neighbor (ANN) index. QuIVer uses compact 2-bit representations, sign-magnitude SM-L2 navigation, and candidate reranking with stored vectors. Dimension-aware automatic index construction supports growing datasets. The engine supports vector dimensions from 1 to 65,536, with QuIVer ANN covering 1 to 3,072 dimensions.
 - Text retrieval: BM25 ranking and Aho-Corasick keyword matching support text search and hybrid recall. Text and vector recall can feed graph expansion and reranking.
@@ -26,6 +27,8 @@ TriviumDB runs inside the host application. Applications use it for AI agent mem
 - [Resource runtime](https://raw.githubusercontent.com/YoKONCy/TriviumDB/master/docs/resource-runtime.md): Shared resource budgets, thread pools, task admission, and instance diagnostics.
 - [Shutdown, snapshots, and restore](https://raw.githubusercontent.com/YoKONCy/TriviumDB/master/docs/lifecycle-snapshots.md): Instance lifecycle, consistent directory snapshots, verification, and restore.
 - [Best practices](https://raw.githubusercontent.com/YoKONCy/TriviumDB/master/docs/best-practices.md): Data modeling, application integration, retrieval patterns, and resource configuration.
+
+- [0.9.0-beta.3 release notes](https://raw.githubusercontent.com/YoKONCy/TriviumDB/master/docs/changes/0.9.0-beta.3.md): Bilingual changes, Rust API migration, persisted index formats, and installation versions.
 
 ## Packages
 

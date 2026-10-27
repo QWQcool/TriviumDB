@@ -112,12 +112,8 @@ fn assert_query(database: &Database<f32>, reference: &RefDatabase, query: &Query
 }
 
 fn run_matrix(mode: StorageMode, indexed: bool) {
-    let path = std::env::temp_dir()
-        .join("triviumdb_test")
-        .join(format!("differential_{mode:?}_{indexed}.tdb"))
-        .to_string_lossy()
-        .to_string();
-    std::fs::create_dir_all(std::env::temp_dir().join("triviumdb_test")).unwrap();
+    let root = super::support::TestDir::new("differential_matrix");
+    let path = root.file(&format!("{mode:?}_{indexed}.tdb"));
     cleanup(&path);
     let reference = RefDatabase::fixture(48);
     let mut database = open(&path, mode);

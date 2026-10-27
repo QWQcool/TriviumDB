@@ -21,6 +21,11 @@ export async function exercise(file: string): Promise<void> {
     ];
     const inserted: number[] = db.commitTransaction(operations);
     check(JSON.stringify(inserted) === '[11,22]', '事务返回的节点 ID 与写入事实不符');
+    db.upsertEdge(11, 22, 'next', 0.5, { note: 'typed-metadata' });
+    const edgeMetadata: unknown = db.getEdge(11, 22, 'next')?.metadata;
+    const incomingMetadata: unknown = db.getIncomingEdges(22)[0].metadata;
+    check(JSON.stringify(edgeMetadata) === '{"note":"typed-metadata"}', '出边元数据与样例不符');
+    check(JSON.stringify(incomingMetadata) === '{"note":"typed-metadata"}', '入边元数据与样例不符');
     db.createIndex('kind');
     db.rebuildTextIndex([{ id: 11, text: 'primarytoken', keywords: ['primaryalias'] }]);
     const prepared: PreparedTql = db.prepareTql('FIND {kind: "primary"} AS n WITH n RETURN n, $label AS label');

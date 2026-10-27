@@ -481,6 +481,23 @@ impl QuIVer {
 }
 
 impl CorrectedSmIndex {
+    fn order_rerank_candidates(
+        &self,
+        candidates: &mut [(NonNanF32, u32)],
+        budget: usize,
+        uses_anchor: bool,
+    ) {
+        if !uses_anchor && budget >= candidates.len() {
+            // 候选全部进入精算时，最终分数与外部 ID 排序直接确定结果。
+            candidates.sort_unstable();
+        } else {
+            candidates.sort_unstable_by_key(|candidate| candidate.0);
+            for tied in candidates.chunk_by_mut(|a, b| a.0 == b.0) {
+                tied.sort_unstable_by_key(|candidate| self.ids[candidate.1 as usize]);
+            }
+        }
+    }
+
     pub(super) fn routing_owned_bytes(&self) -> usize {
         self.rows.capacity() * std::mem::size_of::<SmRow>()
             + self.dynamic.as_ref().map_or(0, DynamicSm::owned_bytes)
@@ -960,7 +977,7 @@ impl CorrectedSmIndex {
                 }
             }
             st.candidates.extend(st.results.drain());
-            st.candidates.sort_unstable();
+            self.order_rerank_candidates(&mut st.candidates, budget, uses_anchor);
             #[cfg(feature = "test-hooks")]
             crate::test_hooks::hit(crate::test_hooks::ConcurrencyPoint::QuiverCandidateProduced);
             if TRACE {
@@ -1007,8 +1024,10 @@ impl CorrectedSmIndex {
             if TRACE {
                 trace.exact.extend(st.exact.iter().map(|x| x.0));
             }
-            st.exact
-                .sort_unstable_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+            st.exact.sort_unstable_by(|a, b| {
+                b.1.total_cmp(&a.1)
+                    .then_with(|| self.ids[a.0 as usize].cmp(&self.ids[b.0 as usize]))
+            });
             let neighbors = st
                 .exact
                 .iter()

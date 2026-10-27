@@ -15,7 +15,7 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 const MAGIC: &[u8; 4] = b"TGIX";
-pub const VERSION: u16 = 2;
+pub const VERSION: u16 = 3;
 const HEADER_SIZE: usize = 24;
 
 #[derive(Debug)]
@@ -31,6 +31,7 @@ pub struct MappedGraphStore {
     incoming: HashMap<NodeId, Vec<NodeId>>,
     labels: HashMap<String, Vec<(NodeId, NodeId)>>,
     edge_count: usize,
+    heap_bytes: std::sync::atomic::AtomicUsize,
 }
 
 impl MappedGraphStore {
@@ -69,6 +70,21 @@ impl MappedGraphStore {
         }
 
         let mut cursor = HEADER_SIZE;
+        if version >= 3 {
+            let main_size = read_u64(&mmap, cursor, "main_size")?;
+            let main_crc = read_u32(&mmap, cursor + 8, "main_crc")?;
+            cursor += 12;
+            if main_size != std::fs::metadata(db_path)?.len()
+                || main_crc != crate::storage::file_format::file_crc32(db_path)?
+            {
+                return Err(corrupted(
+                    "图索引与主文件事实不匹配 (Graph index does not match main file facts)",
+                ));
+            }
+        } else {
+            // 旧格式缺少事实绑定，由调用方保留主文件中已读取的权威图。
+            return Ok(None);
+        }
         let mut blocks = HashMap::with_capacity(block_count);
         let mut incoming: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
         let mut labels: HashMap<String, Vec<(NodeId, NodeId)>> = HashMap::new();
@@ -249,20 +265,51 @@ impl MappedGraphStore {
             pairs.sort_unstable();
             pairs.dedup();
         }
+        let heap_bytes = blocks.capacity() * std::mem::size_of::<(NodeId, GraphBlock)>()
+            + incoming.capacity() * std::mem::size_of::<(NodeId, Vec<NodeId>)>()
+            + labels.capacity() * std::mem::size_of::<(String, Vec<(NodeId, NodeId)>)>()
+            + incoming
+                .values()
+                .map(|sources| sources.capacity() * std::mem::size_of::<NodeId>())
+                .sum::<usize>()
+            + labels
+                .iter()
+                .map(|(label, pairs)| {
+                    label.capacity() + pairs.capacity() * std::mem::size_of::<(NodeId, NodeId)>()
+                })
+                .sum::<usize>();
         Ok(Some(Self {
             mmap,
             blocks,
             incoming,
             labels,
             edge_count,
+            heap_bytes: std::sync::atomic::AtomicUsize::new(heap_bytes),
         }))
     }
 
     pub fn edges(&self, source: NodeId) -> Option<&[Edge]> {
         let block = self.blocks.get(&source)?;
         Some(block.decoded.get_or_init(|| {
-            decode_edges(&self.mmap[block.range.clone()], usize::MAX).unwrap_or_default()
+            let edges =
+                decode_edges(&self.mmap[block.range.clone()], usize::MAX).unwrap_or_default();
+            let bytes = edges.capacity() * std::mem::size_of::<Edge>()
+                + edges
+                    .iter()
+                    .map(|edge| {
+                        edge.label.capacity()
+                            + crate::storage::payload_store::estimate_json_memory(&edge.metadata)
+                                .saturating_sub(std::mem::size_of::<serde_json::Value>())
+                    })
+                    .sum::<usize>();
+            self.heap_bytes
+                .fetch_add(bytes, std::sync::atomic::Ordering::Relaxed);
+            edges
         }))
+    }
+
+    pub(crate) fn heap_memory_bytes(&self) -> usize {
+        self.heap_bytes.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn incoming(&self, target: NodeId) -> &[NodeId] {
@@ -271,6 +318,16 @@ impl MappedGraphStore {
 
     pub fn by_label(&self, label: &str) -> &[(NodeId, NodeId)] {
         self.labels.get(label).map(Vec::as_slice).unwrap_or(&[])
+    }
+
+    pub(crate) fn incoming_index(&self) -> &HashMap<NodeId, Vec<NodeId>> {
+        &self.incoming
+    }
+    pub(crate) fn label_index(&self) -> &HashMap<String, Vec<(NodeId, NodeId)>> {
+        &self.labels
+    }
+    pub(crate) fn sources(&self) -> impl Iterator<Item = NodeId> + '_ {
+        self.blocks.keys().copied()
     }
 
     pub fn mapped_bytes(&self) -> usize {
@@ -303,6 +360,8 @@ pub fn save<T: crate::VectorType>(
     bytes.extend_from_slice(&0u16.to_le_bytes());
     bytes.extend_from_slice(&(memtable.node_count() as u64).to_le_bytes());
     bytes.extend_from_slice(&(sources.len() as u64).to_le_bytes());
+    bytes.extend_from_slice(&std::fs::metadata(db_path)?.len().to_le_bytes());
+    bytes.extend_from_slice(&crate::storage::file_format::file_crc32(db_path)?.to_le_bytes());
     for &source in &sources {
         let edges = memtable.get_edges(source).unwrap_or(&[]);
         let data = encode_edges(edges)?;
