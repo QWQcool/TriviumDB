@@ -1,6 +1,5 @@
 //! 写入边界覆盖直接操作、事务、补丁与 WAL 恢复，预期来自明确的数值和 JSON 契约。
-#[path = "../support/mod.rs"]
-mod support;
+use crate::support;
 
 use serde_json::{Value, json};
 use triviumdb::database::{Config, StorageMode, TxBuilder};

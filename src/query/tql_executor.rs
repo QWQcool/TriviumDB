@@ -1279,10 +1279,30 @@ fn sort_pipeline_rows<T: VectorType>(
     rows.sort_by(|left, right| {
         for order in order_by {
             let expr = substitute_scalar_aliases(&order.expr, scalar_aliases);
-            let ordering = compare_for_sort(
-                &eval_pipeline_row_expr(&expr, left, mt),
-                &eval_pipeline_row_expr(&expr, right, mt),
-            );
+            let exact = if let TqlExpr::Property { field, .. } = &expr {
+                if field == "id" {
+                    Some(left.id.cmp(&right.id))
+                } else {
+                    match (mt.get_payload(left.id), mt.get_payload(right.id)) {
+                        (Some(a), Some(b)) => match (a.get(field), b.get(field)) {
+                            (
+                                Some(serde_json::Value::Number(a)),
+                                Some(serde_json::Value::Number(b)),
+                            ) => Some(crate::filter::numeric_ordering(a, b)),
+                            _ => None,
+                        },
+                        _ => None,
+                    }
+                }
+            } else {
+                None
+            };
+            let ordering = exact.unwrap_or_else(|| {
+                compare_for_sort(
+                    &eval_pipeline_row_expr(&expr, left, mt),
+                    &eval_pipeline_row_expr(&expr, right, mt),
+                )
+            });
             let ordering = if order.descending {
                 ordering.reverse()
             } else {
@@ -2819,6 +2839,27 @@ fn matches_filter_with_id<T: VectorType>(
     }
 }
 
+fn property_ordering<T>(
+    expr: &TqlExpr,
+    left: &HashMap<String, Node<T>>,
+    right: &HashMap<String, Node<T>>,
+) -> Option<std::cmp::Ordering> {
+    let TqlExpr::Property { var, field } = expr else {
+        return None;
+    };
+    let a = left.get(var).or_else(|| left.get("_"))?;
+    let b = right.get(var).or_else(|| right.get("_"))?;
+    if field == "id" {
+        return Some(a.id.cmp(&b.id));
+    }
+    match (a.payload.get(field)?, b.payload.get(field)?) {
+        (serde_json::Value::Number(a), serde_json::Value::Number(b)) => {
+            Some(crate::filter::numeric_ordering(a, b))
+        }
+        _ => None,
+    }
+}
+
 /// ORDER BY 排序
 fn sort_results<T: VectorType>(
     results: &mut TqlResult<T>,
@@ -2827,11 +2868,12 @@ fn sort_results<T: VectorType>(
 ) {
     results.sort_by(|a, b| {
         for order in order_by {
-            // 从结果行中提取排序键
-            let a_val = extract_order_key(&order.expr, a);
-            let b_val = extract_order_key(&order.expr, b);
-
-            let cmp = compare_for_sort(&a_val, &b_val);
+            let cmp = property_ordering(&order.expr, a, b).unwrap_or_else(|| {
+                compare_for_sort(
+                    &extract_order_key(&order.expr, a),
+                    &extract_order_key(&order.expr, b),
+                )
+            });
             let cmp = if order.descending { cmp.reverse() } else { cmp };
 
             if cmp != std::cmp::Ordering::Equal {

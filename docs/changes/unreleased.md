@@ -27,3 +27,22 @@
 - Property sidecars use v7 and bind the actual Payload bytes. Graph sidecars use v3 and bind the main fact file. Legacy property indexes rebuild in memory; legacy graph indexes use the main graph. Read-only access preserves physical files.
 - Python transactions extract `u64` vectors exactly. Payload conversion preserves the complete `i64/u64` integer domain, converts tuples into arrays, and rejects invalid types or dictionary keys. Node numeric IDs share safe-integer validation; `u64` components require finite, integral values within range.
 - General boundary tests cover storage modes, dtypes, cache settings, process-exit recovery, stale sidecars, valid numeric limits and rejection atomicity through Rust and installed Python/Node bindings.
+
+
+## 检索确定性与计量开销
+
+- BruteForce 分片采用有界 Top-K 堆，按分数降序、外部 NodeId 升序合并和截断。QuIVer 默认 SM 与公开 BQ 路径在精排名额和最终同分结果中使用外部 NodeId；无效查询按现有 Vec 返回契约拒绝，冷向量的维度和有限数值统一校验。
+- 有序索引在 2^53 数值边界回退精确范围比较，包含该范围数值键的 `ORDER BY` 从 Payload 精确排序后分页。普通与管线字段排序覆盖完整 `i64/u64` 整数域及混合浮点数。
+- Payload、图、属性 posting、文本和 QuIVer 热内存使用增量计数或容量计量；写入准入与查询观测按索引定义数量读取估算。TQL 阶段预算直接读取 Payload 访问计数。属性统计保持跨加载模式的字段及索引类型顺序。
+- 实验追加构图入口使用顺序反向剪枝，保持追加行为与邻居选择语义，并移除跨线程创建可变自身引用的实现。
+- 事务应用通过 RAII 恢复 QuIVer 同步标记；应用异常后隔离实例和共享查询，完整 WAL 经重开恢复。事务编号使用进程内单调计数并检查耗尽。
+- 增加槽位复用、分段与并行 Top-K、非法冷向量、极值排序、增量计量重载，以及已准入查询与事务故障交错测试。
+
+## Deterministic retrieval and accounting cost
+
+- BruteForce uses bounded per-partition Top-K heaps, merging and truncating by descending score and ascending external NodeId. Default SM and public BQ reranking apply external NodeId tie-breaking before rerank admission and final truncation. Invalid queries follow the existing Vec return contract; cold vectors share dimension and finite-value validation.
+- Ordered range boundaries at the 2^53 magnitude use exact fallback comparisons. Indexes containing such numeric keys defer ORDER BY pagination to exact Payload sorting. Plain and pipeline property ordering preserve the complete i64/u64 integer domain and mixed finite floating-point values.
+- Payload, graph, property posting, text and QuIVer hot-memory estimates use incremental counters or capacities. Admission and query observations read accounting by index definition count. TQL stage budgets read Payload access counters directly. Property diagnostics retain field and index-kind order across loading modes.
+- The experimental append builder performs reverse pruning sequentially, preserving append and neighbor-selection behavior while removing concurrent mutable self references.
+- An RAII guard restores QuIVer synchronization state. Unexpected transaction application failures isolate the instance and shared queries; reopening replays the complete committed WAL. Transaction IDs use a checked process-local monotonic counter.
+- Boundary tests cover slot reuse, segmented and parallel Top-K, invalid cold vectors, numeric extremes, accounting after reload, and admitted queries interleaved with application failures.

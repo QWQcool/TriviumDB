@@ -11,9 +11,13 @@ mod public_api_alignment;
 mod quiver_threshold;
 mod runtime_types;
 mod search;
+mod search_boundaries;
 mod transaction;
 mod transaction_state;
 mod typed_facade;
 mod vector_types;
 mod workflow;
 mod write_boundaries;
+
+#[path = "../support/mod.rs"]
+mod support;

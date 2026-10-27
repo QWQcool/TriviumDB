@@ -14,6 +14,57 @@ use crate::storage::wal::WalEntry;
 
 use super::{lock_or_recover, write_or_recover};
 
+/// 应用过程异常时保留 WAL，并让共享句柄统一等待重新打开恢复。
+struct ApplicationGuard<'a, T: VectorType> {
+    mt: &'a mut MemTable<T>,
+    wal: &'a std::sync::Mutex<crate::storage::wal::Wal>,
+    lifecycle: &'a std::sync::Mutex<super::LifecycleState>,
+    previous_pause: bool,
+    complete: bool,
+}
+impl<'a, T: VectorType> ApplicationGuard<'a, T> {
+    fn new(
+        mt: &'a mut MemTable<T>,
+        wal: &'a std::sync::Mutex<crate::storage::wal::Wal>,
+        lifecycle: &'a std::sync::Mutex<super::LifecycleState>,
+    ) -> Self {
+        let previous_pause = mt.quiver_sync_paused();
+        mt.set_quiver_sync_paused(true);
+        Self {
+            mt,
+            wal,
+            lifecycle,
+            previous_pause,
+            complete: false,
+        }
+    }
+}
+impl<T: VectorType> Drop for ApplicationGuard<'_, T> {
+    fn drop(&mut self) {
+        self.mt.set_quiver_sync_paused(self.previous_pause);
+        if !self.complete {
+            self.mt.require_recovery();
+            lock_or_recover(self.wal).release_writer();
+            lock_or_recover(self.lifecycle).recovery_required = true;
+        }
+    }
+}
+
+static NEXT_TX_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+fn next_transaction_id(counter: &std::sync::atomic::AtomicU64) -> Result<u64> {
+    use std::sync::atomic::Ordering;
+    let mut current = counter.load(Ordering::Relaxed);
+    loop {
+        let next = current.checked_add(1).ok_or_else(|| {
+            TriviumError::InvalidInput("事务 ID 空间已耗尽 (Transaction ID space exhausted)".into())
+        })?;
+        match counter.compare_exchange_weak(current, next, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => return Ok(current),
+            Err(actual) => current = actual,
+        }
+    }
+}
+
 /// WAL 崩溃恢复：回放单条 WAL 记录到 MemTable
 ///
 /// 设计要点：
@@ -714,10 +765,7 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         // ════════ 第三阶段：先写 WAL（若失败则 memtable 完全未变） ════════
         {
             let mut w = lock_or_recover(&self.wal);
-            let tx_id = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos() as u64;
+            let tx_id = next_transaction_id(&NEXT_TX_ID)?;
             w.append_batch(tx_id, &wal_entries)?;
         }
         #[cfg(feature = "test-hooks")]
@@ -727,7 +775,7 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         #[cfg(feature = "test-hooks")]
         crate::test_hooks::hit(crate::test_hooks::ConcurrencyPoint::BeforeMemtableApply);
         // 暂停 QuIVer 增量同步，避免事务中途的 QuIVer 状态需要回滚
-        mt.set_quiver_sync_paused(true);
+        let mut application = ApplicationGuard::new(&mut mt, &self.wal, &self.lifecycle.0);
 
         let apply_result = (|| -> Result<()> {
             for op in ops {
@@ -737,7 +785,7 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                         vector,
                         payload,
                     } => {
-                        mt.insert_with_id(id, &vector, payload)?;
+                        application.mt.insert_with_id(id, &vector, payload)?;
                     }
                     TxOp::Link {
                         src,
@@ -746,22 +794,24 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                         weight,
                         metadata,
                     } => {
-                        mt.upsert_edge(src, dst, label, weight, metadata)?;
+                        application
+                            .mt
+                            .upsert_edge(src, dst, label, weight, metadata)?;
                     }
                     TxOp::Delete { id } => {
-                        mt.delete(id)?;
+                        application.mt.delete(id)?;
                     }
                     TxOp::Unlink { src, dst } => {
-                        mt.unlink(src, dst)?;
+                        application.mt.unlink(src, dst)?;
                     }
                     TxOp::UnlinkLabel { src, dst, label } => {
-                        mt.unlink_label(src, dst, &label)?;
+                        application.mt.unlink_label(src, dst, &label)?;
                     }
                     TxOp::UpdatePayload { id, payload } => {
-                        mt.update_payload(id, payload)?;
+                        application.mt.update_payload(id, payload)?;
                     }
                     TxOp::UpdateVector { id, vector } => {
-                        mt.update_vector(id, &vector)?;
+                        application.mt.update_vector(id, &vector)?;
                     }
                     TxOp::Insert { .. } => {
                         return Err(TriviumError::InvalidInput(
@@ -770,18 +820,24 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                     ));
                     }
                 }
+                #[cfg(feature = "test-hooks")]
+                crate::test_hooks::io_result(crate::test_hooks::IoPoint::TransactionApply)?;
             }
             Ok(())
         })();
 
         // 恢复 QuIVer 同步
-        mt.set_quiver_sync_paused(false);
+        application
+            .mt
+            .set_quiver_sync_paused(application.previous_pause);
         apply_result?;
 
         // ════════ 第五阶段：QuIVer 增量同步（分离时间线） ════════
         // 数据应用已完成后再同步索引，避免应用期间触发中间代际的增量维护。
         // 委托给 MemTable 方法处理，避免直接访问私有字段。
-        mt.quiver_sync_tx_entries(&wal_entries);
+        application.mt.quiver_sync_tx_entries(&wal_entries);
+        application.complete = true;
+        drop(application);
 
         drop(mt);
 
@@ -797,5 +853,130 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
     /// ```
     pub fn commit_tx(&mut self, builder: TxBuilder<T>) -> Result<Vec<NodeId>> {
         self.commit_ops(builder.into_ops())
+    }
+}
+
+#[cfg(test)]
+mod guard_tests {
+    use super::*;
+    use std::sync::{Mutex, atomic::AtomicU64};
+
+    #[cfg(feature = "test-hooks")]
+    #[test]
+    fn 已准入的共享搜索在事务应用失败后同样拒绝部分状态() {
+        use crate::test_hooks::{ConcurrencyPoint, IoPoint, fail_io_at, pause_at};
+        for count in [1, 3] {
+            let root = std::env::temp_dir()
+                .join(format!("tdb-tx-admitted-{count}-{}", std::process::id()));
+            std::fs::create_dir_all(&root).unwrap();
+            let path = root.join("sample.tdb");
+            let mut db = Database::<f32>::open(path.to_str().unwrap(), 2).unwrap();
+            db.insert_with_id(1, &[1., 0.], serde_json::json!({"state":"old"}))
+                .unwrap();
+            let handle = db.search_handle();
+            let barrier = pause_at(ConcurrencyPoint::BeforeSearchReadLock);
+            let query = std::thread::spawn(move || {
+                handle.search_batch(
+                    &vec![vec![1., 0.]; count],
+                    &super::super::SearchConfig {
+                        top_k: 1,
+                        expand_depth: 0,
+                        ..Default::default()
+                    },
+                    &Default::default(),
+                )
+            });
+            barrier.wait_until_arrived();
+            let failure = fail_io_at(IoPoint::TransactionApply);
+            let mut tx = TxBuilder::new();
+            tx.update_payload(1, serde_json::json!({"state":"new"}));
+            tx.insert_with_id(2, &[0., 1.], serde_json::json!({}));
+            let result = db.commit_tx(tx);
+            drop(failure);
+            barrier.release();
+            let result_query = query.join().unwrap();
+            assert!(matches!(result, Err(TriviumError::Io(_))));
+            assert!(matches!(result_query, Err(TriviumError::WalClosed)));
+            drop(db);
+            let mut reopened = Database::<f32>::open(path.to_str().unwrap(), 2).unwrap();
+            assert_eq!(reopened.node_count().unwrap(), 2);
+            assert_eq!(
+                reopened.get_payload(1).unwrap(),
+                Some(serde_json::json!({"state":"new"}))
+            );
+            reopened.close().unwrap();
+            drop(reopened);
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn 事务编号并发唯一且耗尽后保持拒绝() {
+        let counter = AtomicU64::new(1);
+        let batches = std::thread::scope(|scope| {
+            (0..4)
+                .map(|_| {
+                    scope.spawn(|| {
+                        (0..256)
+                            .map(|_| next_transaction_id(&counter).unwrap())
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
+                .map(|h| h.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        let mut ids = batches.into_iter().flatten().collect::<Vec<_>>();
+        ids.sort_unstable();
+        assert_eq!(ids, (1..=1024).collect::<Vec<_>>());
+        let counter = AtomicU64::new(u64::MAX - 1);
+        assert_eq!(next_transaction_id(&counter).unwrap(), u64::MAX - 1);
+        for _ in 0..2 {
+            assert!(matches!(
+                next_transaction_id(&counter),
+                Err(TriviumError::InvalidInput(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn 应用guard正常结束和异常展开均恢复原暂停状态() {
+        for previous in [false, true] {
+            for panicking in [false, true] {
+                let root = std::env::temp_dir().join(format!(
+                    "tdb-tx-guard-{previous}-{panicking}-{}",
+                    std::process::id()
+                ));
+                std::fs::create_dir_all(&root).unwrap();
+                let mut db =
+                    Database::<f32>::open(root.join("sample.tdb").to_str().unwrap(), 2).unwrap();
+                let wal: &Mutex<_> = &db.wal;
+                let mut mt = write_or_recover(&db.memtable);
+                mt.set_quiver_sync_paused(previous);
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let mut guard = ApplicationGuard::new(&mut mt, wal, &db.lifecycle.0);
+                    assert!(guard.mt.quiver_sync_paused());
+                    if panicking {
+                        panic!("受控事务应用展开");
+                    }
+                    guard.complete = true;
+                }));
+                assert_eq!(result.is_err(), panicking);
+                assert_eq!(mt.quiver_sync_paused(), previous);
+                assert_eq!(
+                    lock_or_recover(&db.lifecycle.0).recovery_required,
+                    panicking
+                );
+                drop(mt);
+                if panicking {
+                    assert!(matches!(db.node_count(), Err(TriviumError::WalClosed)));
+                } else {
+                    db.close().unwrap();
+                }
+                drop(db);
+                std::fs::remove_dir_all(root).unwrap();
+            }
+        }
     }
 }

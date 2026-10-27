@@ -223,6 +223,9 @@ impl<T: VectorType> QuiverBuildHandle<T> {
         resource_task.detach();
         let operation_guard = {
             let mut state = lock_or_recover(&self.lifecycle.0);
+            if state.recovery_required {
+                return Err(TriviumError::WalClosed);
+            }
             if state.lifecycle != DatabaseLifecycle::Open {
                 return Err(TriviumError::DatabaseClosed);
             }
@@ -283,6 +286,7 @@ enum DatabaseLifecycle {
 }
 
 struct LifecycleState {
+    recovery_required: bool,
     lifecycle: DatabaseLifecycle,
     active_operations: usize,
     group_commit_owner: Option<std::thread::ThreadId>,
@@ -324,6 +328,16 @@ impl Drop for GroupCommitGuard {
             && let Err(error) = self.finish()
         {
             tracing::error!(%error, "分组提交异常展开期间同步失败，已关闭 WAL 写入能力");
+        }
+    }
+}
+
+impl OperationGuard {
+    fn check_recovery(&self) -> Result<()> {
+        if lock_or_recover(&self.lifecycle.0).recovery_required {
+            Err(TriviumError::WalClosed)
+        } else {
+            Ok(())
         }
     }
 }
@@ -414,6 +428,9 @@ impl<T: VectorType> SearchHandle<T> {
 
     fn enter_operation(&self) -> Result<OperationGuard> {
         let mut state = lock_or_recover(&self.lifecycle.0);
+        if state.recovery_required {
+            return Err(TriviumError::WalClosed);
+        }
         if state.lifecycle != DatabaseLifecycle::Open {
             return Err(TriviumError::DatabaseClosed);
         }
@@ -486,6 +503,7 @@ impl<T: VectorType> SearchHandle<T> {
         };
         let first = search_one(&query_vectors[0])?;
         if query_vectors.len() == 1 {
+            _operation.check_recovery()?;
             return Ok(vec![first]);
         }
 
@@ -515,6 +533,7 @@ impl<T: VectorType> SearchHandle<T> {
         let mut results = Vec::with_capacity(query_vectors.len());
         results.push(first);
         results.extend(chunks.into_iter().flatten());
+        _operation.check_recovery()?;
         Ok(results)
     }
 }
@@ -530,6 +549,9 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
 
     fn enter_operation_kind(&self, maintenance: bool) -> Result<OperationGuard> {
         let mut state = lock_or_recover(&self.lifecycle.0);
+        if state.recovery_required {
+            return Err(TriviumError::WalClosed);
+        }
         if state.lifecycle != DatabaseLifecycle::Open {
             return Err(TriviumError::DatabaseClosed);
         }
@@ -770,6 +792,7 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
             lifecycle: Arc::new((
                 Mutex::new(LifecycleState {
                     lifecycle: DatabaseLifecycle::Open,
+                    recovery_required: false,
                     active_operations: 0,
                     group_commit_owner: None,
                     shutdown_phase: ShutdownPhase::Open,
@@ -840,7 +863,9 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
     /// 数据读取与查询共享准入和生命周期检查。
     fn read_operation<R>(&self, operation: impl FnOnce() -> R) -> Result<R> {
         let _operation = self.enter_operation()?;
-        Ok(operation())
+        let result = operation();
+        _operation.check_recovery()?;
+        Ok(result)
     }
 
     /// 返回当前进程内累计的 WAL 写入与物理同步计数。

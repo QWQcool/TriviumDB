@@ -6,9 +6,55 @@
 use crate::VectorType;
 use crate::node::{NodeId, SearchHit};
 use rayon::prelude::*;
+use std::cmp::Ordering;
+use std::collections::BinaryHeap;
 
-/// rayon 并行扫描 SoA 向量池。
-/// 安全代码，无 unsafe。利用多核并行分块计算余弦相似度。
+#[derive(Clone, Copy)]
+struct Candidate {
+    id: NodeId,
+    score: f32,
+}
+impl PartialEq for Candidate {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other).is_eq()
+    }
+}
+impl Eq for Candidate {}
+impl PartialOrd for Candidate {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for Candidate {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other
+            .score
+            .total_cmp(&self.score)
+            .then_with(|| self.id.cmp(&other.id))
+    }
+}
+fn retain_best(heap: &mut BinaryHeap<Candidate>, candidate: Candidate, k: usize) {
+    if heap.len() < k {
+        heap.push(candidate);
+    } else if heap.peek().is_some_and(|worst| candidate < *worst) {
+        heap.pop();
+        heap.push(candidate);
+    }
+}
+fn finish(heap: BinaryHeap<Candidate>) -> Vec<SearchHit> {
+    let mut hits = heap
+        .into_iter()
+        .map(|c| SearchHit {
+            id: c.id,
+            score: c.score,
+            payload: serde_json::Value::Null,
+        })
+        .collect::<Vec<_>>();
+    hits.sort_unstable_by(|a, b| b.score.total_cmp(&a.score).then_with(|| a.id.cmp(&b.id)));
+    hits
+}
+
+/// 并行分片只保留各自的 Top-K，合并时继续使用同一 NodeId 同分规则。
 pub fn search<T: VectorType>(
     query: &[T],
     flat_db_vectors: &[T],
@@ -17,31 +63,9 @@ pub fn search<T: VectorType>(
     min_score: f32,
     id_mapper: impl Fn(usize) -> NodeId + Sync,
 ) -> Vec<SearchHit> {
-    if flat_db_vectors.is_empty() || dim == 0 {
-        return Vec::new();
-    }
-
-    // 使用 rayon 的 par_chunks 将向量池按 dim 分块，多核并行计算每个块的余弦相似度。
-    // 每个线程独立收集自己的命中结果，最后合并排序。
-    // 这是纯安全代码，不涉及任何 unsafe 操作。
-    let hits: Vec<SearchHit> = flat_db_vectors
-        .par_chunks(dim)
-        .enumerate()
-        .filter_map(|(i, vec_slice)| {
-            let score = T::similarity(query, vec_slice);
-            if score >= min_score {
-                Some(SearchHit {
-                    id: id_mapper(i),
-                    score,
-                    payload: serde_json::Value::Null,
-                })
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    sort_and_truncate(hits, top_k)
+    search_filter_map_segments(query, flat_db_vectors, &[], dim, top_k, min_score, |slot| {
+        Some(id_mapper(slot))
+    })
 }
 
 pub(crate) fn search_filter_map<T: VectorType>(
@@ -74,41 +98,81 @@ pub(crate) fn search_filter_map_segments<T: VectorType>(
     min_score: f32,
     id_filter_map: impl Fn(usize) -> Option<NodeId> + Sync,
 ) -> Vec<SearchHit> {
-    if (base.is_empty() && delta.is_empty()) || dim == 0 {
+    if dim == 0
+        || top_k == 0
+        || query.len() != dim
+        || !base.len().is_multiple_of(dim)
+        || !delta.len().is_multiple_of(dim)
+        || query.iter().any(|v| !v.to_f32().is_finite())
+    {
         return Vec::new();
     }
-
-    let hits: Vec<SearchHit> = base
+    let heap = base
         .par_chunks(dim)
         .chain(delta.par_chunks(dim))
         .enumerate()
-        .filter_map(|(i, vec_slice)| {
+        .filter_map(|(i, vector)| {
             let id = id_filter_map(i)?;
-            let score = T::similarity(query, vec_slice);
-            (score >= min_score).then_some(SearchHit {
-                id,
-                score,
-                payload: serde_json::Value::Null,
-            })
+            let score = T::similarity(query, vector);
+            (score.is_finite() && score >= min_score).then_some(Candidate { id, score })
         })
-        .collect();
-
-    sort_and_truncate(hits, top_k)
-}
-
-fn sort_and_truncate(mut hits: Vec<SearchHit>, top_k: usize) -> Vec<SearchHit> {
-    hits.sort_by(|a, b| {
-        b.score
-            .partial_cmp(&a.score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    hits.truncate(top_k);
-    hits
+        .fold(BinaryHeap::new, |mut heap, candidate| {
+            retain_best(&mut heap, candidate, top_k);
+            heap
+        })
+        .reduce(BinaryHeap::new, |mut left, right| {
+            for candidate in right {
+                retain_best(&mut left, candidate, top_k);
+            }
+            left
+        });
+    finish(heap)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 分片线程数和top_k边界遵守独立同分次序() {
+        // 257 跨越并行分片边界；映射倒序让 slot 次序与 ID 次序相反。
+        let flat = [1f32, 0.].repeat(257);
+        for threads in [1, 2, 4] {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .unwrap();
+            for split in [0, 1, 128, 257] {
+                for k in [0, 1, 17, 256, 257, usize::MAX] {
+                    let hits = pool.install(|| {
+                        search_filter_map_segments(
+                            &[1., 0.],
+                            &flat[..split * 2],
+                            &flat[split * 2..],
+                            2,
+                            k,
+                            0.,
+                            |i| (i != 128).then_some(257 - i as u64),
+                        )
+                    });
+                    let expected = (1..=257)
+                        .filter(|id| *id != 129)
+                        .take(k)
+                        .collect::<Vec<_>>();
+                    assert_eq!(hits.iter().map(|h| h.id).collect::<Vec<_>>(), expected);
+                    assert!(hits.iter().all(|h| h.score == 1.));
+                }
+            }
+        }
+        for (query, base, dim) in [
+            (vec![1.], vec![1., 0.], 2),
+            (vec![1., 0.], vec![1.], 2),
+            (vec![], vec![], 0),
+            (vec![f32::NAN, 0.], vec![1., 0.], 2),
+        ] {
+            assert!(search(&query, &base, dim, 1, 0., |_| 1).is_empty());
+        }
+    }
 
     #[test]
     fn filter_map_excludes_candidates_before_top_k() {
@@ -137,7 +201,7 @@ mod tests {
                 .map(|(i, v)| (i as u64, T::similarity(&query, v)))
                 .filter(|(_, s)| *s >= -1.)
                 .collect();
-            reference.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            reference.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
             reference.truncate(13);
             for split in [0, 1, 37, 80] {
                 let hits = search_filter_map_segments(

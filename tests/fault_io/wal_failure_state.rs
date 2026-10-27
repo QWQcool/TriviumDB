@@ -19,6 +19,74 @@ fn config(mode: StorageMode) -> Config {
 }
 
 #[test]
+fn 事务应用失败拒绝部分状态并从完整wal恢复() {
+    let root = support::TestDir::new("transaction_apply_failure");
+    for mode in [StorageMode::Rom, StorageMode::Mmap] {
+        let path = root.file(&format!("{mode:?}.tdb"));
+        let mut db = Database::<f32>::open_with_config(&path, config(mode)).unwrap();
+        db.insert_with_id(1, &[1., 0.], json!({"state":"confirmed"}))
+            .unwrap();
+        db.flush().unwrap();
+        let retained = db.quiver_build_handle();
+        let mut tx = TxBuilder::new();
+        tx.update_payload(1, json!({"state":"updated"}));
+        tx.insert_with_id(2, &[0., 1.], json!({"state":"inserted"}));
+        let guard = fail_io_at(IoPoint::TransactionApply);
+        assert!(matches!(db.commit_tx(tx), Err(TriviumError::Io(_))));
+        drop(guard);
+        let before = std::fs::read(format!("{path}.wal")).unwrap();
+        assert!(matches!(db.get_payload(1), Err(TriviumError::WalClosed)));
+        assert!(matches!(db.node_count(), Err(TriviumError::WalClosed)));
+        assert!(matches!(
+            db.search(&[1., 0.], 1, 0, 0.),
+            Err(TriviumError::WalClosed)
+        ));
+        assert!(matches!(
+            retained.prepare_auto_build(),
+            Err(TriviumError::WalClosed)
+        ));
+        assert!(matches!(
+            db.insert(&[1., 1.], json!({})),
+            Err(TriviumError::WalClosed)
+        ));
+        assert!(matches!(db.flush(), Err(TriviumError::WalClosed)));
+        assert!(matches!(db.close(), Err(TriviumError::WalClosed)));
+        assert_eq!(std::fs::read(format!("{path}.wal")).unwrap(), before);
+        drop(retained);
+        drop(db);
+        let mut recovered = Database::<f32>::open_with_config(&path, config(mode)).unwrap();
+        assert_eq!(
+            recovered.get_payload(1).unwrap(),
+            Some(json!({"state":"updated"}))
+        );
+        assert_eq!(recovered.get(2).unwrap().unwrap().vector, [0., 1.]);
+        assert_eq!(
+            recovered.get_payload(2).unwrap(),
+            Some(json!({"state":"inserted"}))
+        );
+        assert_eq!(recovered.node_count().unwrap(), 2);
+        recovered
+            .insert_with_id(3, &[1., 1.], json!({"state":"after-recovery"}))
+            .unwrap();
+        recovered.close().unwrap();
+        let mut reopened = Database::<f32>::open_with_config(&path, config(mode)).unwrap();
+        assert_eq!(
+            reopened.get_payload(1).unwrap(),
+            Some(json!({"state":"updated"}))
+        );
+        assert_eq!(
+            reopened.get_payload(2).unwrap(),
+            Some(json!({"state":"inserted"}))
+        );
+        assert_eq!(
+            reopened.get_payload(3).unwrap(),
+            Some(json!({"state":"after-recovery"}))
+        );
+        reopened.close().unwrap();
+    }
+}
+
+#[test]
 fn wal失败隔离子进程入口() {
     // 测试驱动以环境变量进入子进程场景，常规枚举不执行进程退出。
     let Some(path) = std::env::var_os("TDB_WAL_FAILURE_CHILD") else {

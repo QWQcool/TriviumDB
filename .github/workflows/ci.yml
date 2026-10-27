@@ -133,6 +133,9 @@ jobs:
       - name: 运行确定性交错与物理策略差分测试
         run: cargo test --target ${{ matrix.target }} --features test-hooks --test concurrency --test differential -- --test-threads=1
 
+      - name: 运行事务应用异常与共享查询隔离测试
+        run: cargo test --target ${{ matrix.target }} --features test-hooks --lib database::transaction::guard_tests -- --test-threads=1
+
       - name: 运行定点 I/O 故障与发布阶段强杀测试
         run: cargo test --target ${{ matrix.target }} --features test-hooks --test fault_io --test fault_power -- --test-threads=1
 
@@ -420,6 +423,7 @@ jobs:
           cargo +nightly test --locked -Zbuild-std --target x86_64-unknown-linux-gnu --features test-hooks --test concurrency -- --test-threads=1
           cargo +nightly test --locked -Zbuild-std --target x86_64-unknown-linux-gnu --lib memory_safety_ -- --test-threads=1
           cargo +nightly test --locked -Zbuild-std --target x86_64-unknown-linux-gnu --features test-hooks --lib database::lifecycle::tests -- --test-threads=1
+          cargo +nightly test --locked -Zbuild-std --target x86_64-unknown-linux-gnu --features test-hooks --lib database::transaction::guard_tests -- --test-threads=1
           cargo +nightly test --locked -Zbuild-std --target x86_64-unknown-linux-gnu --lib storage::compaction::tests -- --test-threads=1
 
   # Miri 只运行无文件映射、无外部调用的小规模内存安全子集。

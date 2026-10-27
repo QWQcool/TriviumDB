@@ -318,8 +318,36 @@ async function runAsyncResourceContract(root) {
   }
 }
 
+function runSearchBoundaries(root) {
+  for (const storageMode of ['rom', 'mmap']) {
+    const file = path.join(root, `search-order-${storageMode}.tdb`)
+    const options = { dim: 2, storageMode, autoBuildQuiver: false }
+    const db = new TriviumDB(file, options)
+    for (const id of [1, 2, 3]) db.insertWithId(id, [1, 0], { value: id })
+    db.delete(1)
+    db.insertWithId(10, [1, 0], { value: 10 })
+    const check = database => assert.deepEqual(database.searchAdvanced([1, 0], {
+      topK: 1, recallK: 1, rerankK: 1, expandDepth: 0, minScore: 0, forceBruteForce: true,
+    }).map(hit => hit.id), [2])
+    check(db)
+    db.updatePayload(2, { value: 2 ** 53 + 4 })
+    db.updatePayload(3, { value: 2 ** 53 })
+    db.updatePayload(10, { value: 2 ** 53 + 2 })
+    db.createOrderedIndex('value')
+    const query = 'FIND {value: {$exists: true}} RETURN * ORDER BY _.value ASC'
+    assert.deepEqual(db.tql(query).map(row => row._.id), ['3', '10', '2'])
+    db.close()
+    const reopened = new TriviumDB(file, options)
+    try {
+      check(reopened)
+      assert.deepEqual(reopened.tql(query).map(row => row._.id), ['3', '10', '2'])
+    } finally { reopened.close() }
+  }
+}
+
 async function main() {
   try {
+    runSearchBoundaries(root)
     runLifecycleContract(root)
     runResourceContract(root)
     runSharedContract(root)

@@ -95,6 +95,8 @@ while (!db.closeTimeout(0)) {
 
 ## 一致快照
 
+快照的 `generation_id` 保存为 manifest 中的代际标识。`GenerationStore` 使用单一路径组件命名代际目录和数据库文件，并在生成路径及解析 current 记录时校验名称。
+
 | 能力 | Rust | Python | Node.js |
 | --- | --- | --- | --- |
 | 创建 | `db.create_snapshot(destination, generation_id)` | `db.create_snapshot(destination, generation_id)` | `db.createSnapshot(destination, generationId)` |

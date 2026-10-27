@@ -363,7 +363,7 @@ pub struct PipelineContext<'a, T: VectorType> {
     profile: bool,
     stages: usize,
     vector_read_bytes: usize,
-    payload_start: crate::observability::PayloadMemoryStats,
+    payload_start: (u64, u64),
 }
 
 impl<'a, T: VectorType> PipelineContext<'a, T> {
@@ -379,7 +379,7 @@ impl<'a, T: VectorType> PipelineContext<'a, T> {
             profile,
             stages: 0,
             vector_read_bytes: 0,
-            payload_start: memtable.payload_memory_stats(),
+            payload_start: memtable.payload_access_counters(),
         }
     }
 
@@ -413,14 +413,10 @@ impl<'a, T: VectorType> PipelineContext<'a, T> {
     }
 
     fn payload_usage(&self) -> (u64, u64) {
-        let current = self.memtable.payload_memory_stats();
+        let current = self.memtable.payload_access_counters();
         (
-            current
-                .payload_lookups
-                .saturating_sub(self.payload_start.payload_lookups),
-            current
-                .payload_parsed_bytes
-                .saturating_sub(self.payload_start.payload_parsed_bytes),
+            current.0.saturating_sub(self.payload_start.0),
+            current.1.saturating_sub(self.payload_start.1),
         )
     }
 

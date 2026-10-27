@@ -135,18 +135,50 @@ impl PropertyKey {
 }
 
 #[derive(Debug, Clone, Default)]
+struct PostingSummary {
+    entries: usize,
+    bytes: usize,
+}
+impl PostingSummary {
+    fn change(&mut self, before: (usize, usize), after: (usize, usize)) {
+        self.entries = self
+            .entries
+            .saturating_sub(before.0)
+            .saturating_add(after.0);
+        self.bytes = self.bytes.saturating_sub(before.1).saturating_add(after.1);
+    }
+}
+fn posting_size(key_len: usize, posting: Option<&Vec<NodeId>>) -> (usize, usize) {
+    posting.map_or((0, 0), |ids| {
+        (
+            ids.len(),
+            key_len + ids.capacity() * std::mem::size_of::<NodeId>(),
+        )
+    })
+}
+fn bitmap_size(key_len: usize, posting: Option<&roaring::RoaringTreemap>) -> (usize, usize) {
+    posting.map_or((0, 0), |ids| {
+        (ids.len() as usize, key_len + ids.serialized_size())
+    })
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct HashPropertyIndex {
+    summary: PostingSummary,
     entries: HashMap<PropertyKey, Vec<NodeId>>,
 }
 
 impl HashPropertyIndex {
     fn insert(&mut self, id: NodeId, value: &Value) {
         if let Some(key) = PropertyKey::from_json(value) {
-            let ids = self.entries.entry(key).or_default();
+            let before = posting_size(key.0.len(), self.entries.get(&key));
+            let ids = self.entries.entry(key.clone()).or_default();
             match ids.binary_search(&id) {
                 Ok(_) => {}
                 Err(position) => ids.insert(position, id),
             }
+            self.summary
+                .change(before, posting_size(key.0.len(), self.entries.get(&key)));
         }
     }
 
@@ -154,6 +186,7 @@ impl HashPropertyIndex {
         let Some(key) = PropertyKey::from_json(value) else {
             return;
         };
+        let before = posting_size(key.0.len(), self.entries.get(&key));
         let mut remove_key = false;
         if let Some(ids) = self.entries.get_mut(&key) {
             if let Ok(position) = ids.binary_search(&id) {
@@ -164,6 +197,8 @@ impl HashPropertyIndex {
         if remove_key {
             self.entries.remove(&key);
         }
+        self.summary
+            .change(before, posting_size(key.0.len(), self.entries.get(&key)));
     }
 }
 
@@ -179,6 +214,7 @@ pub enum PropertyIndexKind {
 
 #[derive(Debug, Clone, Default)]
 struct NgramPropertyIndex {
+    summary: PostingSummary,
     entries: HashMap<String, Vec<NodeId>>,
 }
 
@@ -190,10 +226,13 @@ impl NgramPropertyIndex {
             )
         })?;
         for gram in text_ngrams(text)? {
-            let ids = self.entries.entry(gram).or_default();
+            let before = posting_size(gram.len(), self.entries.get(&gram));
+            let ids = self.entries.entry(gram.clone()).or_default();
             if let Err(position) = ids.binary_search(&id) {
                 ids.insert(position, id);
             }
+            self.summary
+                .change(before, posting_size(gram.len(), self.entries.get(&gram)));
         }
         Ok(())
     }
@@ -206,6 +245,7 @@ impl NgramPropertyIndex {
             return;
         };
         for gram in grams {
+            let before = posting_size(gram.len(), self.entries.get(&gram));
             let mut empty = false;
             if let Some(ids) = self.entries.get_mut(&gram) {
                 if let Ok(position) = ids.binary_search(&id) {
@@ -216,13 +256,35 @@ impl NgramPropertyIndex {
             if empty {
                 self.entries.remove(&gram);
             }
+            self.summary
+                .change(before, posting_size(gram.len(), self.entries.get(&gram)));
         }
     }
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct OrderedPropertyIndex {
+    summary: PostingSummary,
     entries: ArtMap<Vec<NodeId>>,
+    imprecise_keys: usize,
+}
+
+fn imprecise_numeric_key(key: &[u8]) -> bool {
+    if key.len() != 9 || key[0] != 4 {
+        return false;
+    }
+    let ordered = u64::from_be_bytes(std::array::from_fn(|i| key[i + 1]));
+    let bits = if ordered & (1 << 63) != 0 {
+        ordered ^ (1 << 63)
+    } else {
+        !ordered
+    };
+    f64::from_bits(bits).abs() >= (1u64 << 53) as f64
+}
+fn exact_range_bound(value: &Value) -> bool {
+    value
+        .as_f64()
+        .is_none_or(|number| number.is_finite() && number.abs() < (1u64 << 53) as f64)
 }
 
 fn ordered_key(value: &Value) -> Option<PropertyKey> {
@@ -257,13 +319,19 @@ fn ordered_key(value: &Value) -> Option<PropertyKey> {
 impl OrderedPropertyIndex {
     fn insert(&mut self, id: NodeId, value: &Value) {
         if let Some(key) = ordered_key(value) {
+            let before = posting_size(key.0.len(), self.entries.get(key.as_bytes()));
             if let Some(ids) = self.entries.get_mut(key.as_bytes()) {
                 if let Err(position) = ids.binary_search(&id) {
                     ids.insert(position, id);
                 }
             } else {
-                self.entries.insert(key.0, vec![id]);
+                self.imprecise_keys += usize::from(imprecise_numeric_key(key.as_bytes()));
+                self.entries.insert(key.0.clone(), vec![id]);
             }
+            self.summary.change(
+                before,
+                posting_size(key.0.len(), self.entries.get(key.as_bytes())),
+            );
         }
     }
 
@@ -271,6 +339,7 @@ impl OrderedPropertyIndex {
         let Some(key) = ordered_key(value) else {
             return;
         };
+        let before = posting_size(key.0.len(), self.entries.get(key.as_bytes()));
         let mut remove_key = false;
         if let Some(ids) = self.entries.get_mut(key.as_bytes()) {
             if let Ok(position) = ids.binary_search(&id) {
@@ -279,8 +348,13 @@ impl OrderedPropertyIndex {
             remove_key = ids.is_empty();
         }
         if remove_key {
+            self.imprecise_keys -= usize::from(imprecise_numeric_key(key.as_bytes()));
             self.entries.remove(key.as_bytes());
         }
+        self.summary.change(
+            before,
+            posting_size(key.0.len(), self.entries.get(key.as_bytes())),
+        );
     }
 
     fn range(
@@ -351,6 +425,7 @@ struct MappedPostingStore {
     blocks: BTreeMap<(String, PropertyKey), Range<usize>>,
     mapped_bytes: usize,
     posting_entries: usize,
+    field_stats: BTreeMap<String, (usize, usize, usize)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -358,6 +433,7 @@ struct CompositeDefinition(Vec<String>);
 
 #[derive(Debug, Clone, Default)]
 struct CompositePropertyIndex {
+    summary: PostingSummary,
     entries: ArtMap<Vec<NodeId>>,
 }
 
@@ -434,6 +510,7 @@ fn encoded_key_matches(key: &[u8], bound: &[u8], ordering: Ordering, inclusive: 
 
 #[derive(Debug, Clone, Default)]
 struct BitmapPropertyIndex {
+    summary: PostingSummary,
     entries: HashMap<PropertyKey, roaring::RoaringTreemap>,
 }
 
@@ -469,6 +546,55 @@ impl Default for PropertyIndexRegistry {
 }
 
 impl PropertyIndexRegistry {
+    fn refresh_summaries(&mut self) {
+        for index in self.indexes.values_mut() {
+            index.summary = PostingSummary::default();
+            for (key, ids) in index.entries.iter() {
+                index
+                    .summary
+                    .change((0, 0), posting_size(key.0.len(), Some(ids)));
+            }
+        }
+        for index in self.ordered_indexes.values_mut() {
+            index.summary = PostingSummary::default();
+            for (key, ids) in index.entries.entries(false).into_iter() {
+                index
+                    .summary
+                    .change((0, 0), posting_size(key.len(), Some(ids)));
+            }
+            index.imprecise_keys = index
+                .entries
+                .entries(false)
+                .iter()
+                .filter(|(key, _)| imprecise_numeric_key(key))
+                .count();
+        }
+        for index in self.composite_indexes.values_mut() {
+            index.summary = PostingSummary::default();
+            for (key, ids) in index.entries.entries(false).into_iter() {
+                index
+                    .summary
+                    .change((0, 0), posting_size(key.len(), Some(ids)));
+            }
+        }
+        for index in self.ngram_indexes.values_mut() {
+            index.summary = PostingSummary::default();
+            for (key, ids) in index.entries.iter() {
+                index
+                    .summary
+                    .change((0, 0), posting_size(key.len(), Some(ids)));
+            }
+        }
+        for index in self.bitmap_indexes.values_mut() {
+            index.summary = PostingSummary::default();
+            for (key, ids) in index.entries.iter() {
+                index
+                    .summary
+                    .change((0, 0), bitmap_size(key.0.len(), Some(ids)));
+            }
+        }
+    }
+
     pub fn register_unique<I, P>(&mut self, field: &str, payloads: I) -> Result<()>
     where
         I: IntoIterator<Item = (NodeId, P)>,
@@ -650,6 +776,7 @@ impl PropertyIndexRegistry {
             ids.dedup();
         }
         self.indexes.insert(field.to_owned(), index);
+        self.refresh_summaries();
     }
 
     pub fn register_composite<I, P>(&mut self, fields: &[String], payloads: I)
@@ -674,6 +801,7 @@ impl PropertyIndexRegistry {
             index.entries.insert(key, ids);
         }
         self.composite_indexes.insert(definition, index);
+        self.refresh_summaries();
     }
 
     pub fn composite_lookup(
@@ -719,6 +847,13 @@ impl PropertyIndexRegistry {
         descending: bool,
         limit: Option<usize>,
     ) -> Option<(Vec<String>, Vec<NodeId>)> {
+        if !exact_range_bound(value)
+            || equalities
+                .iter()
+                .any(|(_, bound)| !exact_range_bound(bound))
+        {
+            return None;
+        }
         let values = equalities.iter().cloned().collect::<HashMap<_, _>>();
         let (definition, index, prefix) = self
             .composite_indexes
@@ -777,6 +912,7 @@ impl PropertyIndexRegistry {
             }
         }
         self.ngram_indexes.insert(field.to_owned(), index);
+        self.refresh_summaries();
         Ok(())
     }
 
@@ -827,6 +963,7 @@ impl PropertyIndexRegistry {
             }
         }
         self.bitmap_indexes.insert(field.to_owned(), index);
+        self.refresh_summaries();
     }
 
     pub fn bitmap_lookup(&self, field: &str, value: &Value) -> Option<Vec<NodeId>> {
@@ -875,9 +1012,11 @@ impl PropertyIndexRegistry {
         for (key, mut ids) in entries {
             ids.sort_unstable();
             ids.dedup();
+            index.imprecise_keys += usize::from(imprecise_numeric_key(&key));
             index.entries.insert(key, ids);
         }
         self.ordered_indexes.insert(field.to_owned(), index);
+        self.refresh_summaries();
     }
 
     pub fn drop_composite_index(&mut self, fields: &[String]) {
@@ -903,6 +1042,9 @@ impl PropertyIndexRegistry {
         descending: bool,
         limit: Option<usize>,
     ) -> Option<Vec<NodeId>> {
+        if !exact_range_bound(value) {
+            return None;
+        }
         self.ordered_indexes
             .get(field)
             .map(|index| index.range(op, inclusive, value, descending, limit))
@@ -914,9 +1056,9 @@ impl PropertyIndexRegistry {
         descending: bool,
         limit: Option<usize>,
     ) -> Option<Vec<NodeId>> {
-        self.ordered_indexes
-            .get(field)
-            .map(|index| index.ordered_ids(descending, limit))
+        self.ordered_indexes.get(field).and_then(|index| {
+            (index.imprecise_keys == 0).then(|| index.ordered_ids(descending, limit))
+        })
     }
 
     pub fn contains_ordered(&self, field: &str) -> bool {
@@ -1051,116 +1193,96 @@ impl PropertyIndexRegistry {
     }
 
     pub fn stats(&self) -> Vec<PropertyIndexStats> {
-        let mut stats: Vec<_> = self
-            .indexes
-            .iter()
-            .map(|(field, index)| PropertyIndexStats {
-                field: field.clone(),
-                fields: vec![field.clone()],
-                kind: PropertyIndexKind::Hash,
-                unique: self.unique_indexes.contains(field),
-                entry_count: index.entries.values().map(Vec::len).sum(),
-                distinct_count: index.entries.len(),
-                null_count: index
-                    .entries
-                    .iter()
-                    .find(|(key, _)| key.as_bytes() == [0])
-                    .map(|(_, ids)| ids.len())
-                    .unwrap_or_default(),
-            })
-            .chain(self.ordered_indexes.iter().map(|(field, index)| {
-                PropertyIndexStats {
+        let mut stats: Vec<_> =
+            self.indexes
+                .iter()
+                .map(|(field, index)| PropertyIndexStats {
                     field: field.clone(),
                     fields: vec![field.clone()],
-                    kind: PropertyIndexKind::Ordered,
-                    unique: false,
-                    entry_count: index
-                        .entries
-                        .entries(false)
-                        .into_iter()
-                        .map(|(_, ids)| ids.len())
-                        .sum(),
-                    distinct_count: index.entries.len(),
-                    null_count: 0,
-                }
-            }))
-            .chain(self.composite_indexes.iter().map(|(definition, index)| {
-                PropertyIndexStats {
-                    field: definition.0.join(","),
-                    fields: definition.0.clone(),
-                    kind: PropertyIndexKind::Composite,
-                    unique: self.unique_composite_indexes.contains(definition),
-                    entry_count: index
-                        .entries
-                        .entries(false)
-                        .into_iter()
-                        .map(|(_, ids)| ids.len())
-                        .sum(),
-                    distinct_count: index.entries.len(),
-                    null_count: 0,
-                }
-            }))
-            .chain(self.bitmap_indexes.iter().map(|(field, index)| {
-                PropertyIndexStats {
-                    field: field.clone(),
-                    fields: vec![field.clone()],
-                    kind: PropertyIndexKind::Bitmap,
-                    unique: false,
-                    entry_count: index
-                        .entries
-                        .values()
-                        .map(|bitmap| bitmap.len() as usize)
-                        .sum(),
+                    kind: PropertyIndexKind::Hash,
+                    unique: self.unique_indexes.contains(field),
+                    entry_count: index.summary.entries,
                     distinct_count: index.entries.len(),
                     null_count: index
                         .entries
-                        .iter()
-                        .find(|(key, _)| key.as_bytes() == [0])
-                        .map(|(_, bitmap)| bitmap.len() as usize)
+                        .get(&PropertyKey(vec![0]))
+                        .map(Vec::len)
                         .unwrap_or_default(),
-                }
-            }))
-            .chain(
-                self.ngram_indexes
-                    .iter()
-                    .map(|(field, index)| PropertyIndexStats {
-                        field: field.clone(),
-                        fields: vec![field.clone()],
-                        kind: PropertyIndexKind::Ngram,
-                        unique: false,
-                        entry_count: index.entries.values().map(Vec::len).sum(),
+                })
+                .chain(
+                    self.ordered_indexes
+                        .iter()
+                        .map(|(field, index)| PropertyIndexStats {
+                            field: field.clone(),
+                            fields: vec![field.clone()],
+                            kind: PropertyIndexKind::Ordered,
+                            unique: false,
+                            entry_count: index.summary.entries,
+                            distinct_count: index.entries.len(),
+                            null_count: 0,
+                        }),
+                )
+                .chain(self.composite_indexes.iter().map(|(definition, index)| {
+                    PropertyIndexStats {
+                        field: definition.0.join(","),
+                        fields: definition.0.clone(),
+                        kind: PropertyIndexKind::Composite,
+                        unique: self.unique_composite_indexes.contains(definition),
+                        entry_count: index.summary.entries,
                         distinct_count: index.entries.len(),
                         null_count: 0,
-                    }),
-            )
-            .collect();
+                    }
+                }))
+                .chain(self.bitmap_indexes.iter().map(|(field, index)| {
+                    PropertyIndexStats {
+                        field: field.clone(),
+                        fields: vec![field.clone()],
+                        kind: PropertyIndexKind::Bitmap,
+                        unique: false,
+                        entry_count: index.summary.entries,
+                        distinct_count: index.entries.len(),
+                        null_count: index
+                            .entries
+                            .get(&PropertyKey(vec![0]))
+                            .map(|bitmap| bitmap.len() as usize)
+                            .unwrap_or_default(),
+                    }
+                }))
+                .chain(
+                    self.ngram_indexes
+                        .iter()
+                        .map(|(field, index)| PropertyIndexStats {
+                            field: field.clone(),
+                            fields: vec![field.clone()],
+                            kind: PropertyIndexKind::Ngram,
+                            unique: false,
+                            entry_count: index.summary.entries,
+                            distinct_count: index.entries.len(),
+                            null_count: 0,
+                        }),
+                )
+                .collect();
         if let Some(mapped) = &self.mapped {
-            let mut by_field = BTreeMap::<String, (usize, usize, usize)>::new();
-            for ((field, key), range) in &mapped.blocks {
-                let entry = by_field.entry(field.clone()).or_default();
-                let posting_len = range.len() / std::mem::size_of::<NodeId>();
-                entry.0 = entry.0.saturating_add(posting_len);
-                entry.1 = entry.1.saturating_add(1);
-                if key.as_bytes() == [0] {
-                    entry.2 = entry.2.saturating_add(posting_len);
-                }
-            }
-            for (field, (entry_count, distinct_count, null_count)) in by_field {
-                if self.indexes.contains_key(&field) {
+            for (field, &(entry_count, distinct_count, null_count)) in &mapped.field_stats {
+                if self.indexes.contains_key(field) {
                     continue;
                 }
                 stats.push(PropertyIndexStats {
                     fields: vec![field.clone()],
                     field: field.clone(),
                     kind: PropertyIndexKind::Hash,
-                    unique: self.unique_indexes.contains(&field),
+                    unique: self.unique_indexes.contains(field),
                     entry_count,
                     distinct_count,
                     null_count,
                 });
             }
         }
-        stats.sort_by(|left, right| left.field.cmp(&right.field));
+        stats.sort_by(|left, right| {
+            left.field
+                .cmp(&right.field)
+                .then(left.kind.cmp(&right.kind))
+        });
         stats
     }
 
@@ -1177,18 +1299,26 @@ impl PropertyIndexRegistry {
         }
         for (definition, index) in &mut self.composite_indexes {
             if let Some(key) = composite_key(payload, &definition.0) {
+                let before = posting_size(key.len(), index.entries.get(&key));
                 if let Some(ids) = index.entries.get_mut(&key) {
                     if let Err(position) = ids.binary_search(&id) {
                         ids.insert(position, id);
                     }
                 } else {
-                    index.entries.insert(key, vec![id]);
+                    index.entries.insert(key.clone(), vec![id]);
                 }
+                index
+                    .summary
+                    .change(before, posting_size(key.len(), index.entries.get(&key)));
             }
         }
         for (field, index) in &mut self.bitmap_indexes {
             if let Some(key) = payload.get(field).and_then(PropertyKey::from_json) {
-                index.entries.entry(key).or_default().insert(id);
+                let before = bitmap_size(key.0.len(), index.entries.get(&key));
+                index.entries.entry(key.clone()).or_default().insert(id);
+                index
+                    .summary
+                    .change(before, bitmap_size(key.0.len(), index.entries.get(&key)));
             }
         }
         for (field, index) in &mut self.ngram_indexes {
@@ -1211,6 +1341,7 @@ impl PropertyIndexRegistry {
         }
         for (definition, index) in &mut self.composite_indexes {
             if let Some(key) = composite_key(payload, &definition.0) {
+                let before = posting_size(key.len(), index.entries.get(&key));
                 let mut remove_key = false;
                 if let Some(ids) = index.entries.get_mut(&key) {
                     if let Ok(position) = ids.binary_search(&id) {
@@ -1221,16 +1352,23 @@ impl PropertyIndexRegistry {
                 if remove_key {
                     index.entries.remove(&key);
                 }
+                index
+                    .summary
+                    .change(before, posting_size(key.len(), index.entries.get(&key)));
             }
         }
         for (field, index) in &mut self.bitmap_indexes {
-            if let Some(key) = payload.get(field).and_then(PropertyKey::from_json)
-                && let Some(bitmap) = index.entries.get_mut(&key)
-            {
-                bitmap.remove(id);
-                if bitmap.is_empty() {
-                    index.entries.remove(&key);
+            if let Some(key) = payload.get(field).and_then(PropertyKey::from_json) {
+                let before = bitmap_size(key.0.len(), index.entries.get(&key));
+                if let Some(bitmap) = index.entries.get_mut(&key) {
+                    bitmap.remove(id);
+                    if bitmap.is_empty() {
+                        index.entries.remove(&key);
+                    }
                 }
+                index
+                    .summary
+                    .change(before, bitmap_size(key.0.len(), index.entries.get(&key)));
             }
         }
         for (field, index) in &mut self.ngram_indexes {
@@ -1264,88 +1402,32 @@ impl PropertyIndexRegistry {
     }
 
     pub fn estimated_memory_bytes(&self) -> usize {
-        let hash_bytes = self
-            .indexes
+        self.indexes
             .iter()
-            .map(|(field, index)| {
-                field.capacity()
-                    + index
-                        .entries
-                        .iter()
-                        .map(|(key, ids)| {
-                            key.0.capacity() + ids.capacity() * std::mem::size_of::<NodeId>()
-                        })
-                        .sum::<usize>()
-            })
-            .sum::<usize>();
-        let ordered_bytes = self
-            .ordered_indexes
-            .iter()
-            .map(|(field, index)| {
-                field.capacity()
-                    + index
-                        .entries
-                        .entries(false)
-                        .into_iter()
-                        .map(|(key, ids)| {
-                            key.len() + ids.capacity() * std::mem::size_of::<NodeId>()
-                        })
-                        .sum::<usize>()
-            })
-            .sum::<usize>();
-        let composite_bytes = self
-            .composite_indexes
-            .iter()
-            .map(|(definition, index)| {
-                definition.0.iter().map(String::capacity).sum::<usize>()
-                    + index
-                        .entries
-                        .entries(false)
-                        .into_iter()
-                        .map(|(key, ids)| {
-                            key.len() + ids.capacity() * std::mem::size_of::<NodeId>()
-                        })
-                        .sum::<usize>()
-            })
-            .sum::<usize>();
-        let bitmap_bytes = self
-            .bitmap_indexes
-            .iter()
-            .map(|(field, index)| {
-                field.capacity()
-                    + index
-                        .entries
-                        .iter()
-                        .map(|(key, bitmap)| key.0.capacity() + bitmap.serialized_size())
-                        .sum::<usize>()
-            })
-            .sum::<usize>();
-        let ngram_bytes = self
-            .ngram_indexes
-            .iter()
-            .map(|(field, index)| {
-                field.capacity()
-                    + index
-                        .entries
-                        .iter()
-                        .map(|(gram, ids)| {
-                            gram.capacity() + ids.capacity() * std::mem::size_of::<NodeId>()
-                        })
-                        .sum::<usize>()
-            })
-            .sum::<usize>();
-        hash_bytes
-            .saturating_add(ordered_bytes)
-            .saturating_add(composite_bytes)
-            .saturating_add(bitmap_bytes)
-            .saturating_add(ngram_bytes)
-            .saturating_add(self.mapped.as_ref().map_or(0, |mapped| {
-                mapped
-                    .blocks
-                    .keys()
-                    .map(|(field, key)| field.capacity() + key.0.capacity() + 48)
-                    .sum()
-            }))
+            .map(|(field, index)| field.capacity() + index.summary.bytes)
+            .sum::<usize>()
+            + self
+                .ordered_indexes
+                .iter()
+                .map(|(field, index)| field.capacity() + index.summary.bytes)
+                .sum::<usize>()
+            + self
+                .composite_indexes
+                .iter()
+                .map(|(fields, index)| {
+                    fields.0.iter().map(String::capacity).sum::<usize>() + index.summary.bytes
+                })
+                .sum::<usize>()
+            + self
+                .bitmap_indexes
+                .iter()
+                .map(|(field, index)| field.capacity() + index.summary.bytes)
+                .sum::<usize>()
+            + self
+                .ngram_indexes
+                .iter()
+                .map(|(field, index)| field.capacity() + index.summary.bytes)
+                .sum::<usize>()
     }
 }
 
@@ -1838,6 +1920,7 @@ pub fn load_sidecar(
                 field,
                 HashPropertyIndex {
                     entries: entries.into_iter().collect(),
+                    ..Default::default()
                 },
             );
         } else if kind == 1 {
@@ -1849,6 +1932,7 @@ pub fn load_sidecar(
                 field,
                 OrderedPropertyIndex {
                     entries: art_entries,
+                    ..Default::default()
                 },
             );
         } else if kind == 2 {
@@ -1860,6 +1944,7 @@ pub fn load_sidecar(
                 CompositeDefinition(field.split('\0').map(str::to_owned).collect()),
                 CompositePropertyIndex {
                     entries: art_entries,
+                    ..Default::default()
                 },
             );
         } else if kind == 3 {
@@ -1870,6 +1955,7 @@ pub fn load_sidecar(
                         .into_iter()
                         .map(|(key, ids)| (key, ids.into_iter().collect()))
                         .collect(),
+                    ..Default::default()
                 },
             );
         } else if kind == 4 {
@@ -1883,6 +1969,7 @@ pub fn load_sidecar(
                 field,
                 NgramPropertyIndex {
                     entries: ngram_entries,
+                    ..Default::default()
                 },
             );
         }
@@ -1893,13 +1980,25 @@ pub fn load_sidecar(
         ));
     }
     if !all_mapped_blocks.is_empty() {
+        let mut field_stats = BTreeMap::<String, (usize, usize, usize)>::new();
+        for ((field, key), range) in &all_mapped_blocks {
+            let stats = field_stats.entry(field.clone()).or_default();
+            let count = range.len() / std::mem::size_of::<NodeId>();
+            stats.0 += count;
+            stats.1 += 1;
+            if key.as_bytes() == [0] {
+                stats.2 += count;
+            }
+        }
         registry.mapped = Some(Arc::new(MappedPostingStore {
             mapped_bytes: mmap.len(),
             mmap,
             blocks: all_mapped_blocks,
             posting_entries: all_mapped_posting_entries,
+            field_stats,
         }));
     }
+    registry.refresh_summaries();
     Ok(Some(registry))
 }
 
@@ -1908,6 +2007,150 @@ mod tests {
     use super::{PropertyIndexRegistry, PropertyKey};
     use serde_json::json;
     use std::cmp::Ordering;
+
+    fn assert_posting_ledger(registry: &PropertyIndexRegistry) {
+        let mut bytes = 0;
+        let mut expected = Vec::new();
+        use super::PropertyIndexKind as Kind;
+        for (name, index) in &registry.indexes {
+            let count = index.entries.values().map(Vec::len).sum::<usize>();
+            bytes += name.capacity()
+                + index
+                    .entries
+                    .iter()
+                    .map(|(key, ids)| key.0.len() + ids.capacity() * 8)
+                    .sum::<usize>();
+            expected.push((name.clone(), Kind::Hash, count));
+        }
+        for (name, index) in &registry.ordered_indexes {
+            let entries = index.entries.entries(false);
+            bytes += name.capacity()
+                + entries
+                    .iter()
+                    .map(|(key, ids)| key.len() + ids.capacity() * 8)
+                    .sum::<usize>();
+            expected.push((
+                name.clone(),
+                Kind::Ordered,
+                entries.iter().map(|(_, ids)| ids.len()).sum(),
+            ));
+        }
+        for (fields, index) in &registry.composite_indexes {
+            let entries = index.entries.entries(false);
+            bytes += fields.0.iter().map(String::capacity).sum::<usize>()
+                + entries
+                    .iter()
+                    .map(|(key, ids)| key.len() + ids.capacity() * 8)
+                    .sum::<usize>();
+            expected.push((
+                fields.0.join(","),
+                Kind::Composite,
+                entries.iter().map(|(_, ids)| ids.len()).sum(),
+            ));
+        }
+        for (name, index) in &registry.bitmap_indexes {
+            bytes += name.capacity()
+                + index
+                    .entries
+                    .iter()
+                    .map(|(key, ids)| key.0.len() + ids.serialized_size())
+                    .sum::<usize>();
+            expected.push((
+                name.clone(),
+                Kind::Bitmap,
+                index.entries.values().map(|ids| ids.len() as usize).sum(),
+            ));
+        }
+        for (name, index) in &registry.ngram_indexes {
+            bytes += name.capacity()
+                + index
+                    .entries
+                    .iter()
+                    .map(|(key, ids)| key.len() + ids.capacity() * 8)
+                    .sum::<usize>();
+            expected.push((
+                name.clone(),
+                Kind::Ngram,
+                index.entries.values().map(Vec::len).sum(),
+            ));
+        }
+        assert_eq!(registry.estimated_memory_bytes(), bytes);
+        let stats = registry.stats();
+        for (name, kind, count) in expected {
+            assert_eq!(
+                stats
+                    .iter()
+                    .find(|s| s.field == name && s.kind == kind)
+                    .unwrap()
+                    .entry_count,
+                count
+            );
+        }
+    }
+
+    #[test]
+    fn 五类posting账本跨批量注册修改删除和重载保持准确() {
+        let mut payloads = (1..=32)
+            .map(|id| {
+                (
+                    id,
+                    json!({"kind":id%3,"n":id,"name":format!("条目{id}name")}),
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut registry = PropertyIndexRegistry::default();
+        registry.register("kind", payloads.iter().map(|(id, p)| (*id, p)));
+        registry.register_ordered("n", payloads.iter().map(|(id, p)| (*id, p)));
+        registry.register_composite(
+            &["kind".into(), "n".into()],
+            payloads.iter().map(|(id, p)| (*id, p)),
+        );
+        registry.register_bitmap("kind", payloads.iter().map(|(id, p)| (*id, p)));
+        registry
+            .register_ngram("name", payloads.iter().map(|(id, p)| (*id, p)))
+            .unwrap();
+        assert_posting_ledger(&registry);
+        for (id, payload) in &mut payloads {
+            let next = json!({"kind":null,"n":*id+40,"name":"更换条目abcdef"});
+            registry.update(*id, payload, &next);
+            *payload = next;
+            assert_posting_ledger(&registry);
+        }
+        for (id, payload) in payloads.iter().take(8) {
+            registry.remove(*id, payload);
+            assert_posting_ledger(&registry);
+        }
+        let root = std::env::temp_dir().join(format!("tdb-property-ledger-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("sample.tdb");
+        std::fs::write(&path, b"ledger-fixture").unwrap();
+        let path = path.to_str().unwrap();
+        super::save_sidecar(&registry, path, 24, (0, 0)).unwrap();
+        let loaded = super::load_sidecar(path, 24, false, (0, 0))
+            .unwrap()
+            .unwrap();
+        assert_posting_ledger(&loaded);
+        assert_eq!(
+            serde_json::to_value(loaded.stats()).unwrap(),
+            serde_json::to_value(registry.stats()).unwrap()
+        );
+        let mapped = super::load_sidecar(path, 24, true, (0, 0))
+            .unwrap()
+            .unwrap();
+        assert_posting_ledger(&mapped);
+        assert_eq!(
+            serde_json::to_value(mapped.stats()).unwrap(),
+            serde_json::to_value(registry.stats()).unwrap()
+        );
+        drop(mapped);
+        drop(loaded);
+        for (id, payload) in payloads.iter().skip(8) {
+            registry.remove(*id, payload);
+            assert_posting_ledger(&registry);
+        }
+        assert!(registry.stats().iter().all(|s| s.entry_count == 0));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn 稳定键区分_json_标量类型() {
@@ -1969,5 +2212,66 @@ mod tests {
             PropertyKey::from_json(&json!(0.0)),
             PropertyKey::from_json(&json!(-0.0))
         );
+    }
+
+    #[test]
+    fn 大整数范围入口请求精确回退且删除碰撞键后恢复有序扫描() {
+        let payloads = [
+            (1, json!({"tenant":"a","n":9_007_199_254_740_992u64})),
+            (2, json!({"tenant":"a","n":9_007_199_254_740_993u64})),
+            (3, json!({"tenant":"a","n":5})),
+        ];
+        let mut registry = PropertyIndexRegistry::default();
+        registry.register_ordered("n", payloads.iter().map(|(id, p)| (*id, p)));
+        registry.register_composite(
+            &["tenant".into(), "n".into()],
+            payloads.iter().map(|(id, p)| (*id, p)),
+        );
+        for bound in [
+            json!(9_007_199_254_740_992u64),
+            json!(9_007_199_254_740_993u64),
+            json!(-9_007_199_254_740_992i64),
+        ] {
+            assert!(
+                registry
+                    .range_lookup("n", Ordering::Greater, false, &bound, false, Some(1))
+                    .is_none()
+            );
+            assert!(
+                registry
+                    .composite_range_lookup(
+                        &[("tenant".into(), json!("a"))],
+                        "n",
+                        Ordering::Greater,
+                        false,
+                        &bound,
+                        false,
+                        Some(1)
+                    )
+                    .is_none()
+            );
+        }
+        registry.register_composite(
+            &["n".into(), "tenant".into()],
+            payloads.iter().map(|(id, p)| (*id, p)),
+        );
+        assert!(
+            registry
+                .composite_range_lookup(
+                    &[("n".into(), json!(9_007_199_254_740_993u64))],
+                    "tenant",
+                    Ordering::Greater,
+                    false,
+                    &json!("0"),
+                    false,
+                    Some(1)
+                )
+                .is_none()
+        );
+        assert!(registry.ordered_ids("n", false, Some(1)).is_none());
+        registry.remove(1, &payloads[0].1);
+        assert!(registry.ordered_ids("n", false, Some(1)).is_none());
+        registry.remove(2, &payloads[1].1);
+        assert_eq!(registry.ordered_ids("n", false, Some(1)), Some(vec![3]));
     }
 }

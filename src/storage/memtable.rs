@@ -398,6 +398,7 @@ pub struct MemTable<T: VectorType> {
     generation: u64,
     /// 最近一次完整检查点之后是否发生了需要持久化的变更。
     checkpoint_dirty: bool,
+    recovery_required: bool,
     vector_generation: u64,
     property_generation: u64,
     graph_generation: u64,
@@ -420,6 +421,7 @@ pub struct MemTable<T: VectorType> {
     deferred_text_path: Option<String>,
     deferred_text_meta: Option<[u8; 28]>,
     pending_text_mutations: Vec<PendingTextMutation>,
+    pending_text_bytes: usize,
     text_memory_limit: usize,
 
     // 2. 元数据映射（文档型负载）—— 原始 JSON 紧凑存储，按访问惰性解析
@@ -507,6 +509,7 @@ impl<T: VectorType> MemTable<T> {
             next_id: 1, // 从 1 开始，保留 0 作为特殊标记
             generation: 0,
             checkpoint_dirty: true,
+            recovery_required: false,
             vector_generation: 0,
             property_generation: 0,
             graph_generation: 0,
@@ -518,6 +521,7 @@ impl<T: VectorType> MemTable<T> {
             deferred_text_path: None,
             deferred_text_meta: None,
             pending_text_mutations: Vec::new(),
+            pending_text_bytes: 0,
             text_memory_limit: 0,
             payloads: PayloadStore::default(),
             edges: HashMap::new(),
@@ -557,6 +561,7 @@ impl<T: VectorType> MemTable<T> {
             next_id,
             generation: 0,
             checkpoint_dirty: true,
+            recovery_required: false,
             vector_generation: 0,
             property_generation: 0,
             graph_generation: 0,
@@ -568,6 +573,7 @@ impl<T: VectorType> MemTable<T> {
             deferred_text_path: None,
             deferred_text_meta: None,
             pending_text_mutations: Vec::new(),
+            pending_text_bytes: 0,
             text_memory_limit: 0,
             payloads: PayloadStore::default(),
             edges: HashMap::new(),
@@ -1468,6 +1474,10 @@ impl<T: VectorType> MemTable<T> {
 
     /// 设置 QuIVer 同步暂停标记（事务 commit 期间暂停，commit 后恢复）
     #[inline]
+    pub(crate) fn quiver_sync_paused(&self) -> bool {
+        self.quiver_sync_paused
+    }
+
     pub fn set_quiver_sync_paused(&mut self, paused: bool) {
         self.quiver_sync_paused = paused;
     }
@@ -1805,6 +1815,10 @@ impl<T: VectorType> MemTable<T> {
 
     pub(crate) fn payload_memory_stats(&self) -> PayloadMemoryStats {
         self.payloads.memory_stats()
+    }
+
+    pub(crate) fn payload_access_counters(&self) -> (u64, u64) {
+        self.payloads.access_counters()
     }
 
     pub fn configure_payload_cache(&mut self, max_bytes: usize, max_entry_bytes: usize) {
@@ -2344,7 +2358,7 @@ impl<T: VectorType> MemTable<T> {
         let quiver_bytes = self
             .quiver_index
             .as_ref()
-            .map(|index| index.stats().hot_bytes)
+            .map(|index| index.hot_memory_bytes())
             .unwrap_or_default();
         let hot_bytes = property_bytes.saturating_add(quiver_bytes);
         crate::observability::IndexMemoryStats {
@@ -2830,41 +2844,28 @@ impl<T: VectorType> MemTable<T> {
     /// 只计算增量层和合并缓存的实际堆分配。
     pub fn estimated_memory_bytes(&self) -> usize {
         let vec_bytes = self.vec_pool.heap_memory_bytes();
-        let payload_stats = self.payloads.memory_stats();
-        let payload_bytes = payload_stats
-            .directory_bytes
-            .saturating_add(payload_stats.delta_raw_bytes)
-            .saturating_add(payload_stats.parsed_cache_bytes);
-        let edge_bytes: usize = self
-            .edges
-            .values()
-            .map(|es| es.len() * std::mem::size_of::<Edge>())
-            .sum();
+        let payload_bytes = self.payloads.heap_memory_bytes();
+        let edge_count = if self.mapped_graph.is_none() {
+            self.graph_stats_state
+                .read()
+                .unwrap_or_else(|p| p.into_inner())
+                .edge_count
+        } else {
+            0
+        };
+        let edge_bytes = edge_count * std::mem::size_of::<Edge>();
         let index_bytes = self.indices_to_ids.len() * std::mem::size_of::<NodeId>()
             + self.ids_to_indices.len()
                 * (std::mem::size_of::<NodeId>() + std::mem::size_of::<usize>());
-        let label_index_bytes: usize = self
-            .label_index
-            .values()
-            .map(|pairs| pairs.len() * std::mem::size_of::<(NodeId, NodeId)>())
-            .sum();
+        let label_index_bytes = edge_count * std::mem::size_of::<(NodeId, NodeId)>();
         let quiver_bytes = self
             .quiver_index
             .as_ref()
-            .map(|index| index.stats().hot_bytes)
+            .map(|index| index.hot_memory_bytes())
             .unwrap_or_default();
         let text_bytes = self.text_index.estimated_memory_bytes()
             + self.pending_text_mutations.capacity() * std::mem::size_of::<PendingTextMutation>()
-            + self
-                .pending_text_mutations
-                .iter()
-                .map(|mutation| match mutation {
-                    PendingTextMutation::Keyword(_, text) | PendingTextMutation::Text(_, text) => {
-                        text.capacity()
-                    }
-                    PendingTextMutation::Delete(_) => 0,
-                })
-                .sum::<usize>();
+            + self.pending_text_bytes;
         let property_index_bytes = self.property_indexes.estimated_memory_bytes();
         vec_bytes
             + self.bq_cache_bytes()
@@ -2875,6 +2876,18 @@ impl<T: VectorType> MemTable<T> {
             + quiver_bytes
             + text_bytes
             + property_index_bytes
+    }
+
+    pub(crate) fn require_recovery(&mut self) {
+        self.recovery_required = true;
+    }
+
+    pub(crate) fn ensure_readable(&self) -> Result<()> {
+        if self.recovery_required {
+            Err(TriviumError::WalClosed)
+        } else {
+            Ok(())
+        }
     }
 
     pub(crate) fn resource_runtime(&self) -> &crate::resources::ResourceRuntime {
@@ -2943,6 +2956,7 @@ impl<T: VectorType> MemTable<T> {
         if self.contains(id) {
             self.checkpoint_dirty = true;
             if self.deferred_text_path.is_some() {
+                self.pending_text_bytes = self.pending_text_bytes.saturating_add(keyword.len());
                 self.pending_text_mutations
                     .push(PendingTextMutation::Keyword(id, keyword.to_owned()));
             } else {
@@ -2955,6 +2969,7 @@ impl<T: VectorType> MemTable<T> {
         if self.contains(id) {
             self.checkpoint_dirty = true;
             if self.deferred_text_path.is_some() {
+                self.pending_text_bytes = self.pending_text_bytes.saturating_add(text.len());
                 self.pending_text_mutations
                     .push(PendingTextMutation::Text(id, text.to_owned()));
             } else {
@@ -3037,6 +3052,7 @@ impl<T: VectorType> MemTable<T> {
         self.deferred_text_path = None;
         self.deferred_text_meta = None;
         self.pending_text_mutations = Vec::new();
+        self.pending_text_bytes = 0;
     }
 
     pub(crate) fn defer_text_index(&mut self, path: &str) {
@@ -3044,6 +3060,7 @@ impl<T: VectorType> MemTable<T> {
         self.deferred_text_path = Some(path.to_owned());
         self.deferred_text_meta = crate::storage::file_format::deferred_text_metadata(path);
         self.pending_text_mutations = Vec::new();
+        self.pending_text_bytes = 0;
     }
 
     pub(crate) fn text_index_is_deferred(&self) -> bool {
@@ -3157,6 +3174,7 @@ impl<T: VectorType> MemTable<T> {
         self.deferred_text_path = None;
         self.deferred_text_meta = None;
         self.pending_text_mutations = Vec::new();
+        self.pending_text_bytes = 0;
         self.text_index.clear();
         for (id, payload) in self.payloads.iter() {
             if let serde_json::Value::Object(map) = payload.as_ref() {

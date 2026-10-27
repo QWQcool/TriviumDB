@@ -133,6 +133,7 @@ type MappedPayloadRecords = Vec<(NodeId, Range<usize>)>;
 
 pub struct PayloadStore {
     entries: HashMap<NodeId, PayloadEntry>,
+    heap_raw_bytes: usize,
     mapped: Option<Arc<Mmap>>,
     cache: Mutex<ParsedCache>,
     cache_max_bytes: usize,
@@ -318,6 +319,7 @@ impl PayloadStore {
     pub fn new(cache_max_bytes: usize, cache_max_entry_bytes: usize) -> Self {
         Self {
             entries: HashMap::new(),
+            heap_raw_bytes: 0,
             mapped: None,
             cache: Mutex::new(ParsedCache::default()),
             cache_max_bytes,
@@ -379,6 +381,14 @@ impl PayloadStore {
     pub fn insert_raw(&mut self, id: NodeId, raw: &[u8]) -> Result<()> {
         validate_json(raw)?;
         self.invalidate(id);
+        self.heap_raw_bytes = self
+            .heap_raw_bytes
+            .saturating_sub(
+                self.entries
+                    .get(&id)
+                    .map_or(0, |entry| entry.raw.heap_bytes()),
+            )
+            .saturating_add(raw.len());
         self.entries.insert(
             id,
             PayloadEntry {
@@ -390,7 +400,12 @@ impl PayloadStore {
 
     pub fn remove(&mut self, id: NodeId) -> bool {
         self.invalidate(id);
-        self.entries.remove(&id).is_some()
+        if let Some(entry) = self.entries.remove(&id) {
+            self.heap_raw_bytes = self.heap_raw_bytes.saturating_sub(entry.raw.heap_bytes());
+            true
+        } else {
+            false
+        }
     }
 
     pub fn raw(&self, id: NodeId) -> Option<&[u8]> {
@@ -452,6 +467,19 @@ impl PayloadStore {
         self.ids().filter_map(|id| self.get_value(id))
     }
 
+    pub(crate) fn heap_memory_bytes(&self) -> usize {
+        self.entries
+            .capacity()
+            .saturating_mul(std::mem::size_of::<(NodeId, PayloadEntry)>())
+            .saturating_add(self.heap_raw_bytes)
+            .saturating_add(self.cache.lock().unwrap_or_else(|p| p.into_inner()).bytes)
+    }
+
+    pub(crate) fn access_counters(&self) -> (u64, u64) {
+        let cache = self.cache.lock().unwrap_or_else(|p| p.into_inner());
+        (cache.lookups, cache.parsed_bytes)
+    }
+
     pub fn memory_stats(&self) -> PayloadMemoryStats {
         let cache = self.cache.lock().unwrap_or_else(|p| p.into_inner());
         PayloadMemoryStats {
@@ -459,11 +487,7 @@ impl PayloadStore {
                 .entries
                 .capacity()
                 .saturating_mul(std::mem::size_of::<(NodeId, PayloadEntry)>()),
-            delta_raw_bytes: self
-                .entries
-                .values()
-                .map(|entry| entry.raw.heap_bytes())
-                .sum(),
+            delta_raw_bytes: self.heap_raw_bytes,
             parsed_cache_bytes: cache.bytes,
             parsed_cache_entries: cache.values.len(),
             pinned_cache_entries: cache
@@ -494,6 +518,7 @@ impl PayloadStore {
         }
         let mmap = Arc::new(mmap);
         self.entries.clear();
+        self.heap_raw_bytes = 0;
         self.entries.reserve(records.len());
         for (id, range) in records {
             self.entries.insert(
@@ -664,6 +689,33 @@ pub(crate) fn validate_unique_records(records: &[(NodeId, Range<usize>)]) -> Res
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn 原始字节账本跨映射替换删除及无效写入保持准确() {
+        let path = test_path("byte-ledger");
+        let mut store = PayloadStore::new(0, 0);
+        store.insert_raw(1, b"[1,2,3]").unwrap();
+        store.insert_raw(2, b"true").unwrap();
+        assert_eq!(store.memory_stats().delta_raw_bytes, 11);
+        store.save_sidecar(&path, 7).unwrap();
+        let (_, mmap, records) = PayloadStore::open_sidecar(&path).unwrap();
+        store.install_mapped(mmap, records).unwrap();
+        assert_eq!(store.memory_stats().delta_raw_bytes, 0);
+        store.insert_raw(1, b"{\"v\":123}").unwrap();
+        assert_eq!(store.memory_stats().delta_raw_bytes, 9);
+        assert!(store.insert_raw(1, b"invalid").is_err());
+        assert_eq!(store.raw(1), Some(b"{\"v\":123}".as_slice()));
+        assert_eq!(store.memory_stats().delta_raw_bytes, 9);
+        store.insert_raw(1, b"null").unwrap();
+        assert_eq!(store.memory_stats().delta_raw_bytes, 4);
+        assert!(store.remove(2));
+        assert_eq!(store.memory_stats().delta_raw_bytes, 4);
+        assert!(store.remove(1));
+        assert!(!store.remove(1));
+        assert_eq!(store.memory_stats().delta_raw_bytes, 0);
+        drop(store);
+        std::fs::remove_file(path).unwrap();
+    }
 
     fn test_path(name: &str) -> std::path::PathBuf {
         let nonce = SystemTime::now()

@@ -360,8 +360,39 @@ def run_query_budget_contract(root: str) -> None:
             db.close()
 
 
+def run_search_boundaries(root: str) -> None:
+    file = os.path.join(root, "search-order.tdb")
+    options = dict(dim=2, auto_build_quiver=False)
+    db = triviumdb.TriviumDB(file, **options)
+    for node_id in [1, 2, 3]:
+        db.insert_with_id(node_id, [1, 0], {"value": node_id})
+    db.delete(1)
+    db.insert_with_id(10, [1, 0], {"value": 10})
+
+    def check(database: triviumdb.TriviumDB) -> None:
+        hits = database.search_advanced([1, 0], top_k=1, recall_k=1, rerank_k=1,
+                                       expand_depth=0, min_score=0, force_brute_force=True)
+        assert [hit.id for hit in hits] == [2]
+
+    check(db)
+    db.update_payload(2, {"value": 2**64 - 1})
+    db.update_payload(3, {"value": 2**64 - 2})
+    db.update_payload(10, {"value": 2**53 + 1})
+    db.create_ordered_index("value")
+    query = "FIND {value: {$exists: true}} RETURN * ORDER BY _.value ASC"
+    assert [row.row["_"]["id"] for row in db.tql(query)] == [10, 3, 2]
+    db.close()
+    reopened = triviumdb.TriviumDB(file, **options)
+    try:
+        check(reopened)
+        assert [row.row["_"]["id"] for row in reopened.tql(query)] == [10, 3, 2]
+    finally:
+        reopened.close()
+
+
 def main() -> None:
     with tempfile.TemporaryDirectory(prefix="triviumdb-python-public-api-") as root:
+        run_search_boundaries(root)
         run_lifecycle_contract(root)
         run_resource_contract(root)
         run_shared_contract(root)
