@@ -436,6 +436,15 @@ impl Wal {
     /// 格式: [len: u32][bincode bytes][crc32: u32]
     /// 写入后立即 fsync，保证即使 OS 崩溃数据也不丢失
     pub fn append<T: serde::Serialize>(&mut self, entry: &WalEntry<T>) -> Result<()> {
+        let result = self.append_inner(entry);
+        if result.is_err() {
+            // 写入结果不确定时隔离 writer，保留日志供重新打开恢复。
+            self.release_writer();
+        }
+        result
+    }
+
+    fn append_inner<T: serde::Serialize>(&mut self, entry: &WalEntry<T>) -> Result<()> {
         let data = bincode::serialize(entry).map_err(TriviumError::Serialization)?;
         let checksum = crc32fast::hash(&data);
         let len = data.len() as u32;
@@ -463,6 +472,18 @@ impl Wal {
     ///
     /// 会自动打上 TxBegin 和 TxCommit 封条，并且仅在整个 Batch 写入完毕后才做一次 fsync。
     pub fn append_batch<T: serde::Serialize>(
+        &mut self,
+        tx_id: u64,
+        entries: &[WalEntry<T>],
+    ) -> Result<()> {
+        let result = self.append_batch_inner(tx_id, entries);
+        if result.is_err() {
+            self.release_writer();
+        }
+        result
+    }
+
+    fn append_batch_inner<T: serde::Serialize>(
         &mut self,
         tx_id: u64,
         entries: &[WalEntry<T>],
@@ -543,6 +564,14 @@ impl Wal {
     }
 
     fn sync_writer(&mut self) -> Result<bool> {
+        let result = self.sync_writer_inner();
+        if result.is_err() {
+            self.release_writer();
+        }
+        result
+    }
+
+    fn sync_writer_inner(&mut self) -> Result<bool> {
         let Some(writer) = self.writer.as_mut() else {
             return Err(TriviumError::WalClosed);
         };
@@ -789,6 +818,7 @@ impl Wal {
     ///   - 避免 Windows 杀毒软件对"新建文件"的扫描锁定
     ///   - 文件 inode/句柄不变，减少系统调用次数
     pub fn clear(&mut self) -> Result<()> {
+        self.ensure_writable()?;
         // 关闭当前 writer
         self.writer.take();
         let mode = self.sync_mode;

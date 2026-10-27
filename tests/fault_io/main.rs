@@ -16,3 +16,5 @@ mod snapshot_shutdown;
 
 #[cfg(feature = "test-hooks")]
 mod lifecycle_resources;
+#[cfg(feature = "test-hooks")]
+mod wal_failure_state;

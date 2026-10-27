@@ -5,6 +5,45 @@ use triviumdb::database::{Config, StorageMode};
 use triviumdb::storage::snapshot::{restore_snapshot, verify_snapshot};
 
 #[test]
+fn manifest标识仅保存元数据且目录接口拒绝路径组件越界() {
+    use triviumdb::TriviumError;
+    use triviumdb::storage::{
+        generation::GenerationStore,
+        snapshot::{manifest_path, write_manifest},
+    };
+    let root = std::env::temp_dir().join(format!("tdb-manifest-identifier-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join("sample.tdb");
+    let mut db = Database::<f32>::open(path.to_str().unwrap(), 2).unwrap();
+    db.insert_with_id(1, &[1., 0.], serde_json::json!({"value":1}))
+        .unwrap();
+    db.close().unwrap();
+    let id = "../escaped/nested";
+    let manifest = write_manifest(path.to_str().unwrap(), id, "f32", 2, 1).unwrap();
+    assert_eq!(manifest.generation_id, id);
+    assert_eq!(
+        manifest_path(path.to_str().unwrap()),
+        root.join("sample.tdb.manifest.json")
+    );
+    let store = GenerationStore::new(root.join("store"));
+    assert!(matches!(
+        store.generation_dir(id),
+        Err(TriviumError::InvalidInput(_))
+    ));
+    assert!(matches!(
+        store.database_path("valid", "../outside.tdb"),
+        Err(TriviumError::InvalidInput(_))
+    ));
+    assert!(!root.join("store").exists());
+    let stored: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(manifest_path(path.to_str().unwrap())).unwrap())
+            .unwrap();
+    assert_eq!(stored["generation_id"], id);
+    assert_eq!(stored["node_count"], 1);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn 两种存储模式的完整索引快照恢复后事实一致() {
     for (index, mode) in [StorageMode::Mmap, StorageMode::Rom]
         .into_iter()

@@ -9,6 +9,79 @@ import shutil
 import tempfile
 
 import triviumdb
+from write_boundaries import run_write_boundaries
+from index_graph_boundaries import run_index_graph_boundaries
+from query_numeric_indexes import run_query_numeric_indexes
+from tql_semantics import run_tql_semantics
+from tql_boundaries import run_tql_boundaries
+
+
+def run_transaction_contract(root: str) -> None:
+    contract_path = os.path.join(os.path.dirname(__file__), "..", "contracts", "transaction_cases.json")
+    with open(contract_path, encoding="utf-8") as source:
+        contract = json.load(source)
+    for dtype in contract["dtypes"]:
+        for case in contract["cases"]:
+            file = os.path.join(root, f"transaction-{dtype}-mmap-{case['name']}.tdb")
+            options = dict(dim=contract["dimension"], dtype=dtype, auto_build_quiver=False)
+            db = triviumdb.TriviumDB(file, **options)
+            try:
+                for node in contract["setup"]:
+                    db.insert_with_id(node["id"], node["vector"], node["payload"])
+                with open(file + ".wal", "rb") as source:
+                    before_wal = source.read()
+                tx = db.transaction()
+                for operation in case["operations"]:
+                    kind = operation["type"]
+                    if kind == "insert":
+                        tx.insert(operation["vector"], operation["payload"])
+                    elif kind == "insertWithId":
+                        tx.insert_with_id(operation["id"], operation["vector"], operation["payload"])
+                    elif kind == "delete":
+                        tx.delete(operation["id"])
+                    elif kind == "updatePayload":
+                        tx.update_payload(operation["id"], operation["payload"])
+                    elif kind == "updateVector":
+                        tx.update_vector(operation["id"], operation["vector"])
+                    else:
+                        raise AssertionError(f"未知事务契约操作：{kind}")
+                if "error" in case["expected"]:
+                    try:
+                        tx.commit()
+                    except RuntimeError:
+                        pass
+                    else:
+                        raise AssertionError("非法事务必须整批拒绝")
+                    with open(file + ".wal", "rb") as source:
+                        assert source.read() == before_wal
+                else:
+                    assert tx.commit() == case["expected"]["ids"]
+
+                def check(database):
+                    assert sorted(database.all_node_ids()) == [node["id"] for node in case["expected"]["nodes"]]
+                    for expected in case["expected"]["nodes"]:
+                        actual = database.get(expected["id"])
+                        assert actual is not None
+                        assert actual.id == expected["id"]
+                        assert actual.payload == expected["payload"]
+                        assert actual.vector == expected["vector"]
+
+                check(db)
+                replay_file = file + ".replay"
+                shutil.copyfile(file + ".wal", replay_file + ".wal")
+                replay = triviumdb.TriviumDB(replay_file, **options)
+                try:
+                    check(replay)
+                finally:
+                    replay.close()
+                db.close()
+                reopened = triviumdb.TriviumDB(file, **options)
+                try:
+                    check(reopened)
+                finally:
+                    reopened.close()
+            finally:
+                db.close()
 
 
 def run_text_recovery_contract(root: str) -> None:
@@ -291,11 +364,48 @@ def run_query_budget_contract(root: str) -> None:
             db.close()
 
 
+def run_search_boundaries(root: str) -> None:
+    file = os.path.join(root, "search-order.tdb")
+    options = dict(dim=2, auto_build_quiver=False)
+    db = triviumdb.TriviumDB(file, **options)
+    for node_id in [1, 2, 3]:
+        db.insert_with_id(node_id, [1, 0], {"value": node_id})
+    db.delete(1)
+    db.insert_with_id(10, [1, 0], {"value": 10})
+
+    def check(database: triviumdb.TriviumDB) -> None:
+        hits = database.search_advanced([1, 0], top_k=1, recall_k=1, rerank_k=1,
+                                       expand_depth=0, min_score=0, force_brute_force=True)
+        assert [hit.id for hit in hits] == [2]
+
+    check(db)
+    db.update_payload(2, {"value": 2**64 - 1})
+    db.update_payload(3, {"value": 2**64 - 2})
+    db.update_payload(10, {"value": 2**53 + 1})
+    db.create_ordered_index("value")
+    query = "FIND {value: {$exists: true}} RETURN * ORDER BY _.value ASC"
+    assert [row.row["_"]["id"] for row in db.tql(query)] == [10, 3, 2]
+    db.close()
+    reopened = triviumdb.TriviumDB(file, **options)
+    try:
+        check(reopened)
+        assert [row.row["_"]["id"] for row in reopened.tql(query)] == [10, 3, 2]
+    finally:
+        reopened.close()
+
+
 def main() -> None:
     with tempfile.TemporaryDirectory(prefix="triviumdb-python-public-api-") as root:
+        run_search_boundaries(root)
         run_lifecycle_contract(root)
         run_resource_contract(root)
         run_shared_contract(root)
+        run_transaction_contract(root)
+        run_write_boundaries(root)
+        run_index_graph_boundaries(root)
+        run_query_numeric_indexes(root)
+        run_tql_semantics(root)
+        run_tql_boundaries(root)
         run_text_recovery_contract(root)
         run_query_budget_contract(root)
         path = os.path.join(root, "api.tdb")
@@ -361,7 +471,7 @@ def main() -> None:
 
         storage = db.storage_info()
         assert storage["database_format_current"] == 9
-        assert storage["property_index_format"] == 6
+        assert storage["property_index_format"] == 7
         assert storage["node_count"] == 2
 
         vector_prepared = db.prepare_tql(

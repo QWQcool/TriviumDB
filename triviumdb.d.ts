@@ -1,12 +1,16 @@
 /**
  * TriviumDB - AI-native Embedded Database
  * Vector + Graph + Relational in one file.
+ * 数字 ID 的输入与输出均为 JavaScript 安全整数；遇到完整 u64 大 ID 时返回参数错误。
+ * TQL 查询以十进制字符串返回完整 u64 ID。数量参数在整数转换前检查有限性、整数性与范围。
+ * TQL 整数标量及列表、对象中的整数超出安全整数范围时返回十进制字符串。
  */
 
 // ==========================================
 // 辅助类型定义
 // ==========================================
 
+/** u64 分量要求有限非负整数且小于 2**64；number 按 binary64 精度表示。 */
 export type Vector = number[];
 
 export type SyncMode = 'full' | 'normal' | 'off';
@@ -14,7 +18,7 @@ export type SyncMode = 'full' | 'normal' | 'off';
 export type DType = 'f32' | 'f16' | 'u64';
 
 export interface JsSearchHit<T = any> {
-  /** 节点 ID */
+  /** JavaScript 安全整数节点 ID；超范围结果使整个调用返回参数错误。 */
   id: number;
   /** 相似度得分 (余弦相似度或图谱扩散热度) */
   score: number;
@@ -34,6 +38,8 @@ export interface JsEdge {
   label: string;
   /** 边权重 */
   weight: number;
+  /** 边的 JSON 元数据。 */
+  metadata: unknown;
 }
 
 export interface JsIncomingEdge {
@@ -45,6 +51,8 @@ export interface JsIncomingEdge {
   label: string;
   /** 边权重 */
   weight: number;
+  /** 边的 JSON 元数据。 */
+  metadata: unknown;
 }
 
 export type ReachabilityDirection = 'outgoing' | 'incoming' | 'both';

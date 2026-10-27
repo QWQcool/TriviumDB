@@ -1,0 +1,30 @@
+{
+  "records": [
+    {"id":1,"payload":{"kind":"sample","x":1,"arr":[],"obj":{},"marker":1}},
+    {"id":2,"payload":{"kind":"sample","x":2,"arr":[1,2],"obj":{"x":1},"marker":2}},
+    {"id":3,"payload":{"kind":"empty","x":1,"marker":3}}
+  ],
+  "edge_metadata":{"tags":["ok"],"rank":2},
+  "sources":[
+    {"query":"MATCH (n {kind:\"sample\"})","variable":"n"},
+    {"query":"FIND {kind:\"sample\"}","variable":"_"},
+    {"query":"FIND {kind:\"sample\"} AS n WITH n","variable":"n"},
+    {"query":"MATCH (n {kind:\"sample\"}) AS n WITH n","variable":"n"}
+  ],
+  "cases":[
+    {"suffix":"RETURN {var}.arr IS NULL AS a, {var}.obj IS NULL AS o ORDER BY {var}.id ASC","rows":[{"a":false,"o":false},{"a":false,"o":false}]},
+    {"suffix":"RETURN COALESCE({var}.arr,NULL) AS arr, COALESCE({var}.obj,NULL) AS obj ORDER BY {var}.id ASC","rows":[{"arr":[],"obj":{}},{"arr":[1,2],"obj":{"x":1}}]},
+    {"suffix":"RETURN COUNT({var}.arr) AS direct, COUNT(COALESCE({var}.arr,NULL)) AS indirect, COUNT(COALESCE({var}.obj,NULL)) AS objects","rows":[{"direct":2,"indirect":2,"objects":2}]},
+    {"suffix":"RETURN COUNT(COALESCE({var},NULL)) AS entities, SUM({var}) AS total","rows":[{"entities":2,"total":null}]},
+    {"suffix":"RETURN {var} IS NULL AS absent ORDER BY {var}.id ASC","rows":[{"absent":false},{"absent":false}]},
+    {"suffix":"RETURN 1, 2, \"1\", true LIMIT 1","rows":[{"1":1,"2":2,"\"1\"":"1","true":true}]},
+    {"suffix":"RETURN {var}.marker AS id ORDER BY id DESC","rows":[{"id":2},{"id":1}]}
+  ],
+  "edge_cases":[
+    {"query":"MATCH (a)-[e:rel]->(b) WHERE e.weight > 1 RETURN e IS NULL AS absent, e.label AS label, e.metadata AS metadata","rows":[{"absent":false,"label":"rel","metadata":{"tags":["ok"],"rank":2}}]},
+    {"query":"OPTIONAL MATCH (a {x:1})-[e:rel]->(b) RETURN a.id AS id, e IS NULL AS absent, e.weight AS weight ORDER BY id ASC","rows":[{"id":1,"absent":false,"weight":2.0},{"id":3,"absent":true,"weight":null}]},
+    {"query":"OPTIONAL MATCH (a {x:1})-[e:rel]->(b) WHERE e.weight > 3 RETURN a.id AS id, e IS NULL AS absent ORDER BY id ASC","rows":[{"id":1,"absent":true},{"id":3,"absent":true}]},
+    {"query":"MATCH (a)<-[e:rel]-(b) WHERE e.weight > 1 RETURN a.id AS left, b.id AS right","rows":[{"left":2,"right":1}]},
+    {"query":"MATCH ()-[e:rel]->() WHERE e.weight > 1 RETURN e.source AS source, e.target AS target","rows":[{"source":1,"target":2}]}
+  ]
+}

@@ -35,7 +35,7 @@ pub struct TqlQuery {
 #[derive(Debug, Clone)]
 pub struct RankClause {
     pub var: String,
-    pub vector: Vec<f64>,
+    pub vector: Vec<serde_json::Number>,
     pub top_k: usize,
 }
 
@@ -68,7 +68,7 @@ pub struct DiversifyStage {
 pub struct ResidualStage {
     pub input: String,
     pub output: String,
-    pub vector: Vec<f64>,
+    pub vector: Vec<serde_json::Number>,
     pub top_k: usize,
     pub lambda: f32,
     pub threshold: f32,
@@ -264,7 +264,7 @@ pub enum QueryEntry {
     /// SEARCH VECTOR [...] TOP k [EXPAND ...]
     Search {
         /// 已解析或 Prepared 绑定完成的连续查询向量。
-        vector: Vec<f64>,
+        vector: Vec<serde_json::Number>,
         /// 尚待 Prepared 绑定的逐维参数槽 `(下标, 参数名)`。
         /// 执行前必须为空，因此不会进入向量检索热路径。
         vector_parameters: Vec<(usize, String)>,
@@ -435,6 +435,7 @@ pub enum TqlBinaryOp {
 #[derive(Debug, Clone)]
 pub enum TqlLiteral {
     Int(i64),
+    UInt(u64),
     Float(f64),
     Str(String),
     Bool(bool),
@@ -542,7 +543,10 @@ pub enum MutationAction {
     /// SET a.name = "Bob", a.age = 30
     Set(Vec<SetAssignment>),
     /// SET VECTOR(a) = [0.1, 0.2]
-    SetVector { var: String, vector: Vec<f64> },
+    SetVector {
+        var: String,
+        vector: Vec<serde_json::Number>,
+    },
     /// DELETE a
     Delete { vars: Vec<String>, detach: bool },
 }

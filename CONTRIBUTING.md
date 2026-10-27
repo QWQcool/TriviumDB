@@ -173,6 +173,8 @@ QuIVer 是 TriviumDB 的核心 ANN 底座与主要产品卖点。以下规则区
 
 Bug 修复不顺带重构无关模块；不为单次调用创建新抽象；不添加假想兼容层、无用 re-export 或占位 helper；确定无用的代码直接删除；新文件必须有明确且独立的长期职责。
 
+`docs/` 仅存放文档。测试代码、工具脚本和基准代码分别放入 `tests/`、`scripts/` 和 `benches/`；运行产生的报告、原始数据和日志保存在已忽略的产物目录或 CI artifact 中。
+
 #### B2. 单一事实来源
 
 禁止同时存在两个权威 parsed Payload、两套格式版本解释、Core 与绑定层各自实现的过滤、文档与源码不一致的默认值，或 Planner 与执行器对同一算子的不同语义。
@@ -384,6 +386,8 @@ Neither kind of change may break recall semantics, stable ordering, transaction 
 #### B1. Minimal necessary change
 
 A bug fix does not refactor unrelated modules; no new abstraction for a single call site; no speculative compatibility layers, unused re-exports, or placeholder helpers; delete code that is confirmed unused; every new file must have a clear, distinct, long-term responsibility.
+
+`docs/` contains documentation only. Test code, utility scripts, and benchmark code belong in `tests/`, `scripts/`, and `benches/`, respectively; generated reports, raw measurements, and logs belong in ignored output directories or CI artifacts.
 
 #### B2. Single source of truth
 

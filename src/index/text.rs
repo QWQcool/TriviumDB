@@ -42,6 +42,7 @@ struct TextIndexSnapshot {
 struct CompiledKeywords {
     matcher: AhoCorasick,
     keywords: Vec<String>,
+    bytes: usize,
 }
 
 /// 综合文本搜索引擎：AC自动机 (精准关键词触发) + BM25 (大段落兜底打分)
@@ -66,6 +67,8 @@ pub struct TextIndex {
     avg_dl: f32,
     total_docs: usize,
     total_tokens: u128,
+    keyword_bytes: usize,
+    bm25_bytes: usize,
 }
 
 fn tokenize(text: &str) -> Vec<String> {
@@ -123,6 +126,8 @@ impl TextIndex {
         self.avg_dl = 0.0;
         self.total_docs = 0;
         self.total_tokens = 0;
+        self.keyword_bytes = 0;
+        self.bm25_bytes = 0;
     }
 
     /// 注册一个高权重短元特征汇聚点（精准提取并置信度极高）
@@ -133,10 +138,22 @@ impl TextIndex {
         }
         let new_keyword = !self.keyword_to_nodes.contains_key(&kw);
         self.keyword_nodes.insert(id);
-        let nodes = self.keyword_to_nodes.entry(kw).or_default();
+        let before = self
+            .keyword_to_nodes
+            .get_key_value(&kw)
+            .map_or(0, |(term, ids)| term.capacity() + ids.capacity() * 8);
+        let nodes = self.keyword_to_nodes.entry(kw.clone()).or_default();
         if let Err(position) = nodes.binary_search(&id) {
             nodes.insert(position, id);
         }
+        let after = self
+            .keyword_to_nodes
+            .get_key_value(&kw)
+            .map_or(0, |(term, ids)| term.capacity() + ids.capacity() * 8);
+        self.keyword_bytes = self
+            .keyword_bytes
+            .saturating_sub(before)
+            .saturating_add(after);
         if new_keyword {
             self.ac_matcher.take();
         }
@@ -160,7 +177,19 @@ impl TextIndex {
         self.total_tokens += dl as u128;
 
         for (token, tf) in local_tf {
-            self.bm25_tf.entry(token).or_default().insert(id, tf);
+            let before = self
+                .bm25_tf
+                .get_key_value(&token)
+                .map_or(0, |(term, docs)| term.capacity() + docs.capacity() * 16);
+            self.bm25_tf
+                .entry(token.clone())
+                .or_default()
+                .insert(id, tf);
+            let after = self
+                .bm25_tf
+                .get_key_value(&token)
+                .map_or(0, |(term, docs)| term.capacity() + docs.capacity() * 16);
+            self.bm25_bytes = self.bm25_bytes.saturating_sub(before).saturating_add(after);
         }
         self.refresh_statistics();
     }
@@ -177,8 +206,15 @@ impl TextIndex {
     fn remove_document(&mut self, id: NodeId) {
         if let Some(length) = self.doc_lengths.remove(&id) {
             self.total_tokens -= length as u128;
-            self.bm25_tf.retain(|_, documents| {
+            self.bm25_tf.retain(|term, documents| {
+                let before = term.capacity() + documents.capacity() * 16;
                 documents.remove(&id);
+                let after = if documents.is_empty() {
+                    0
+                } else {
+                    term.capacity() + documents.capacity() * 16
+                };
+                self.bm25_bytes = self.bm25_bytes.saturating_sub(before).saturating_add(after);
                 !documents.is_empty()
             });
             self.refresh_statistics();
@@ -192,8 +228,18 @@ impl TextIndex {
             return;
         }
         let before = self.keyword_to_nodes.len();
-        self.keyword_to_nodes.retain(|_, nodes| {
+        self.keyword_to_nodes.retain(|term, nodes| {
+            let before = term.capacity() + nodes.capacity() * 8;
             nodes.retain(|node| *node != id);
+            let after = if nodes.is_empty() {
+                0
+            } else {
+                term.capacity() + nodes.capacity() * 8
+            };
+            self.keyword_bytes = self
+                .keyword_bytes
+                .saturating_sub(before)
+                .saturating_add(after);
             !nodes.is_empty()
         });
         if before != self.keyword_to_nodes.len() {
@@ -215,6 +261,16 @@ impl TextIndex {
             !keyword.is_empty() && !nodes.is_empty()
         });
         self.keyword_nodes = self.keyword_to_nodes.values().flatten().copied().collect();
+        self.keyword_bytes = self
+            .keyword_to_nodes
+            .iter()
+            .map(|(term, ids)| term.capacity() + ids.capacity() * 8)
+            .sum();
+        self.bm25_bytes = self
+            .bm25_tf
+            .iter()
+            .map(|(term, docs)| term.capacity() + docs.capacity() * 16)
+            .sum();
         self.ac_matcher.take();
         self.total_tokens = self
             .doc_lengths
@@ -261,7 +317,16 @@ impl TextIndex {
                     .match_kind(MatchKind::LeftmostLongest)
                     .build(&keywords)
                     .ok()
-                    .map(|matcher| CompiledKeywords { matcher, keywords })
+                    .map(|matcher| {
+                        let bytes = matcher.memory_usage()
+                            + keywords.capacity() * std::mem::size_of::<String>()
+                            + keywords.iter().map(String::capacity).sum::<usize>();
+                        CompiledKeywords {
+                            matcher,
+                            keywords,
+                            bytes,
+                        }
+                    })
             })
             .as_ref()
     }
@@ -271,36 +336,13 @@ impl TextIndex {
     }
 
     pub fn estimated_memory_bytes(&self) -> usize {
-        let keywords = self
-            .keyword_to_nodes
-            .iter()
-            .map(|(term, ids)| term.capacity() + ids.capacity() * std::mem::size_of::<NodeId>())
-            .sum::<usize>();
-        let bm25 = self
-            .bm25_tf
-            .iter()
-            .map(|(term, docs)| {
-                term.capacity()
-                    + docs.capacity()
-                        * (std::mem::size_of::<NodeId>() + std::mem::size_of::<usize>())
-            })
-            .sum::<usize>();
-        let compiled = self
-            .ac_matcher
-            .get()
-            .and_then(Option::as_ref)
-            .map_or(0, |compiled| {
-                compiled.matcher.memory_usage()
-                    + compiled.keywords.capacity() * std::mem::size_of::<String>()
-                    + compiled
-                        .keywords
-                        .iter()
-                        .map(String::capacity)
-                        .sum::<usize>()
-            });
-        keywords
-            + bm25
-            + compiled
+        self.keyword_bytes
+            + self.bm25_bytes
+            + self
+                .ac_matcher
+                .get()
+                .and_then(Option::as_ref)
+                .map_or(0, |compiled| compiled.bytes)
             + self.keyword_nodes.capacity() * std::mem::size_of::<NodeId>()
             + self.doc_lengths.capacity()
                 * (std::mem::size_of::<NodeId>() + std::mem::size_of::<usize>())
@@ -393,6 +435,8 @@ impl TextIndex {
             avg_dl: 0.0,
             total_docs: 0,
             total_tokens: 0,
+            keyword_bytes: 0,
+            bm25_bytes: 0,
         };
         index.retain_nodes(|_| true);
         Ok(index)
@@ -450,5 +494,83 @@ impl TextIndex {
             }
         }
         results
+    }
+}
+
+#[cfg(test)]
+mod ledger_tests {
+    use super::*;
+
+    fn assert_allocations(index: &TextIndex) {
+        // 独立遍历实际容器，核对增量账本；序列化重载允许容量不同。
+        let keywords = index
+            .keyword_to_nodes
+            .iter()
+            .map(|(key, ids)| key.capacity() + ids.capacity() * std::mem::size_of::<NodeId>())
+            .sum::<usize>();
+        let terms = index
+            .bm25_tf
+            .iter()
+            .map(|(key, ids)| {
+                key.capacity() + ids.capacity() * std::mem::size_of::<(NodeId, usize)>()
+            })
+            .sum::<usize>();
+        assert_eq!(index.keyword_bytes, keywords);
+        assert_eq!(index.bm25_bytes, terms);
+        let compiled = index
+            .ac_matcher
+            .get()
+            .and_then(Option::as_ref)
+            .map_or(0, |ac| {
+                ac.matcher.memory_usage()
+                    + ac.keywords.capacity() * std::mem::size_of::<String>()
+                    + ac.keywords.iter().map(String::capacity).sum::<usize>()
+            });
+        assert_eq!(
+            index.estimated_memory_bytes(),
+            keywords
+                + terms
+                + compiled
+                + index.keyword_nodes.capacity() * std::mem::size_of::<NodeId>()
+                + index.doc_lengths.capacity() * std::mem::size_of::<(NodeId, usize)>()
+        );
+    }
+
+    #[test]
+    fn 文本账本覆盖编译替换删除清空与重载() {
+        let mut index = TextIndex::new();
+        for id in 1..=32 {
+            index.add_keyword(id, "共享锚点");
+            index.add_keyword(id, &format!("keyword{id}"));
+            index.add_text(id, &format!("alpha beta word{id} 中文索引"));
+            assert_allocations(&index);
+        }
+        index.add_keyword(1, "共享锚点");
+        index.build();
+        assert_allocations(&index);
+        index.add_text(1, "alpha alpha gamma");
+        assert_allocations(&index);
+        for id in [1, 1, 17, 32] {
+            index.remove_node(id);
+            assert_allocations(&index);
+        }
+        index.retain_nodes(|id| id < 20);
+        assert_allocations(&index);
+        let root = std::env::temp_dir().join(format!("tdb-text-ledger-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("sample.text");
+        index.save_to_file(&path).unwrap();
+        let mut loaded = TextIndex::load_from_file(&path).unwrap();
+        assert_allocations(&loaded);
+        assert_eq!(loaded.search_ac("共享锚点"), index.search_ac("共享锚点"));
+        assert_eq!(
+            loaded.search_bm25("alpha", 1.2, 0.75),
+            index.search_bm25("alpha", 1.2, 0.75)
+        );
+        loaded.build();
+        assert_allocations(&loaded);
+        loaded.clear();
+        assert_allocations(&loaded);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

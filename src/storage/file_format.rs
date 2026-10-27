@@ -258,7 +258,7 @@ fn quiver_path_from_db(db_path: &str) -> String {
     format!("{}.quiver", db_path)
 }
 
-fn file_crc32(path: impl AsRef<Path>) -> std::io::Result<u32> {
+pub(crate) fn file_crc32(path: impl AsRef<Path>) -> std::io::Result<u32> {
     use std::io::Read;
     let mut reader = std::io::BufReader::new(File::open(path)?);
     let mut hasher = crc32fast::Hasher::new();
@@ -497,7 +497,17 @@ fn save_inner<T: VectorType>(
 
     #[cfg(feature = "test-hooks")]
     crate::test_hooks::io_result(crate::test_hooks::IoPoint::PropertySidecarWrite)?;
-    crate::index::property::save_sidecar(memtable.property_indexes(), path, memtable.node_count())?;
+    let payload_fingerprint = if memtable.property_indexes().is_empty() {
+        (0, 0)
+    } else {
+        memtable.payload_fingerprint()
+    };
+    crate::index::property::save_sidecar(
+        memtable.property_indexes(),
+        path,
+        memtable.node_count(),
+        payload_fingerprint,
+    )?;
     #[cfg(feature = "test-hooks")]
     crate::test_hooks::io_result(crate::test_hooks::IoPoint::GraphSidecarWrite)?;
     crate::storage::graph_blocks::save(memtable, path)?;
@@ -1568,13 +1578,17 @@ fn load_property_indexes<T: VectorType>(
     missing_index_policy: crate::database::MissingIndexPolicy,
     mmap_property_postings: bool,
 ) -> Result<()> {
+    if !Path::new(&format!("{db_path}.pidx")).exists() {
+        return Ok(());
+    }
     match crate::index::property::load_sidecar(
         db_path,
         memtable.node_count(),
         mmap_property_postings,
+        memtable.payload_fingerprint(),
     ) {
         Ok(Some(indexes)) => {
-            if indexes.key_encoding_version() < 2 {
+            if indexes.key_encoding_version() < 2 || !indexes.fact_bound {
                 let definitions = indexes.index_definitions();
                 memtable.rebuild_property_indexes_from_definitions(&definitions);
                 tracing::info!(

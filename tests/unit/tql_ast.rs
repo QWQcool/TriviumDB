@@ -23,7 +23,7 @@ fn query_entry_所有变体() {
         filter: Filter::eq("a", serde_json::json!(1)),
     };
     let _search = QueryEntry::Search {
-        vector: vec![1.0, 2.0],
+        vector: vec![1.into(), 2.into()],
         vector_parameters: vec![],
         top_k: 5,
         expand: None,

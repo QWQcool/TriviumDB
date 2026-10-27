@@ -133,6 +133,7 @@ type MappedPayloadRecords = Vec<(NodeId, Range<usize>)>;
 
 pub struct PayloadStore {
     entries: HashMap<NodeId, PayloadEntry>,
+    heap_raw_bytes: usize,
     mapped: Option<Arc<Mmap>>,
     cache: Mutex<ParsedCache>,
     cache_max_bytes: usize,
@@ -318,6 +319,7 @@ impl PayloadStore {
     pub fn new(cache_max_bytes: usize, cache_max_entry_bytes: usize) -> Self {
         Self {
             entries: HashMap::new(),
+            heap_raw_bytes: 0,
             mapped: None,
             cache: Mutex::new(ParsedCache::default()),
             cache_max_bytes,
@@ -379,6 +381,14 @@ impl PayloadStore {
     pub fn insert_raw(&mut self, id: NodeId, raw: &[u8]) -> Result<()> {
         validate_json(raw)?;
         self.invalidate(id);
+        self.heap_raw_bytes = self
+            .heap_raw_bytes
+            .saturating_sub(
+                self.entries
+                    .get(&id)
+                    .map_or(0, |entry| entry.raw.heap_bytes()),
+            )
+            .saturating_add(raw.len());
         self.entries.insert(
             id,
             PayloadEntry {
@@ -390,32 +400,62 @@ impl PayloadStore {
 
     pub fn remove(&mut self, id: NodeId) -> bool {
         self.invalidate(id);
-        self.entries.remove(&id).is_some()
+        if let Some(entry) = self.entries.remove(&id) {
+            self.heap_raw_bytes = self.heap_raw_bytes.saturating_sub(entry.raw.heap_bytes());
+            true
+        } else {
+            false
+        }
     }
 
     pub fn raw(&self, id: NodeId) -> Option<&[u8]> {
         self.entries.get(&id).map(|entry| entry.raw.bytes())
     }
 
+    pub(crate) fn fingerprint(&self) -> (u64, u32) {
+        let mut ids = self.ids().collect::<Vec<_>>();
+        ids.sort_unstable();
+        let mut bytes = 0u64;
+        let mut hash = crc32fast::Hasher::new();
+        for id in ids {
+            let raw = self.entries[&id].raw.bytes();
+            hash.update(&id.to_le_bytes());
+            hash.update(&(raw.len() as u64).to_le_bytes());
+            hash.update(raw);
+            bytes = bytes.saturating_add(raw.len() as u64);
+        }
+        (bytes, hash.finalize())
+    }
+
     pub fn get_value(&self, id: NodeId) -> Option<Arc<serde_json::Value>> {
+        self.try_get_value(id).ok().flatten()
+    }
+
+    pub(crate) fn try_get_value(&self, id: NodeId) -> Result<Option<Arc<serde_json::Value>>> {
         {
             let mut cache = self.cache.lock().unwrap_or_else(|p| p.into_inner());
             cache.lookups = cache.lookups.saturating_add(1);
             if let Some(value) = cache.values.get(&id).map(|entry| Arc::clone(&entry.value)) {
                 cache.hits = cache.hits.saturating_add(1);
                 cache.touch(id);
-                return Some(value);
+                return Ok(Some(value));
             }
             cache.misses = cache.misses.saturating_add(1);
         }
-        let raw = self.raw(id)?;
-        let value = Arc::new(serde_json::from_slice(raw).ok()?);
+        let Some(raw) = self.raw(id) else {
+            return Ok(None);
+        };
+        let value = Arc::new(serde_json::from_slice(raw).map_err(|error| {
+            TriviumError::CorruptedFile(format!(
+                "Payload JSON 解码失败 (Payload JSON decoding failed): id={id}, {error}"
+            ))
+        })?);
         {
             let mut cache = self.cache.lock().unwrap_or_else(|p| p.into_inner());
             cache.parsed_bytes = cache.parsed_bytes.saturating_add(raw.len() as u64);
         }
         self.cache_insert(id, Arc::clone(&value));
-        Some(value)
+        Ok(Some(value))
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (NodeId, Arc<serde_json::Value>)> + '_ {
@@ -427,6 +467,19 @@ impl PayloadStore {
         self.ids().filter_map(|id| self.get_value(id))
     }
 
+    pub(crate) fn heap_memory_bytes(&self) -> usize {
+        self.entries
+            .capacity()
+            .saturating_mul(std::mem::size_of::<(NodeId, PayloadEntry)>())
+            .saturating_add(self.heap_raw_bytes)
+            .saturating_add(self.cache.lock().unwrap_or_else(|p| p.into_inner()).bytes)
+    }
+
+    pub(crate) fn access_counters(&self) -> (u64, u64) {
+        let cache = self.cache.lock().unwrap_or_else(|p| p.into_inner());
+        (cache.lookups, cache.parsed_bytes)
+    }
+
     pub fn memory_stats(&self) -> PayloadMemoryStats {
         let cache = self.cache.lock().unwrap_or_else(|p| p.into_inner());
         PayloadMemoryStats {
@@ -434,11 +487,7 @@ impl PayloadStore {
                 .entries
                 .capacity()
                 .saturating_mul(std::mem::size_of::<(NodeId, PayloadEntry)>()),
-            delta_raw_bytes: self
-                .entries
-                .values()
-                .map(|entry| entry.raw.heap_bytes())
-                .sum(),
+            delta_raw_bytes: self.heap_raw_bytes,
             parsed_cache_bytes: cache.bytes,
             parsed_cache_entries: cache.values.len(),
             pinned_cache_entries: cache
@@ -469,6 +518,7 @@ impl PayloadStore {
         }
         let mmap = Arc::new(mmap);
         self.entries.clear();
+        self.heap_raw_bytes = 0;
         self.entries.reserve(records.len());
         for (id, range) in records {
             self.entries.insert(
@@ -541,13 +591,61 @@ fn read_u64(bytes: &[u8], offset: usize, field: &str) -> Result<u64> {
 }
 
 fn validate_json(raw: &[u8]) -> Result<()> {
-    use serde::Deserialize;
-    let mut deserializer = serde_json::Deserializer::from_slice(raw);
-    serde::de::IgnoredAny::deserialize(&mut deserializer)
-        .map_err(|error| TriviumError::CorruptedFile(format!("Payload JSON 无效: {error}")))?;
-    deserializer
-        .end()
-        .map_err(|error| TriviumError::CorruptedFile(format!("Payload JSON 尾部无效: {error}")))
+    serde_json::from_slice::<serde_json::Value>(raw)
+        .map(|_| ())
+        .map_err(|error| {
+            TriviumError::CorruptedFile(format!(
+                "Payload JSON 无效 (Invalid payload JSON): {error}"
+            ))
+        })
+}
+
+/// 与默认 JSON 解码器保持相同的容器深度边界，计数过程不分配编码缓冲区。
+pub(crate) fn json_encoded_len(value: &serde_json::Value) -> Result<usize> {
+    fn validate_depth(value: &serde_json::Value, depth: usize) -> Result<()> {
+        match value {
+            serde_json::Value::Array(values) => {
+                if depth >= 127 {
+                    return Err(TriviumError::InvalidInput(
+                        "JSON 容器嵌套超过 127 层 (JSON container nesting exceeds 127 levels)"
+                            .into(),
+                    ));
+                }
+                for value in values {
+                    validate_depth(value, depth + 1)?;
+                }
+            }
+            serde_json::Value::Object(values) => {
+                if depth >= 127 {
+                    return Err(TriviumError::InvalidInput(
+                        "JSON 容器嵌套超过 127 层 (JSON container nesting exceeds 127 levels)"
+                            .into(),
+                    ));
+                }
+                for value in values.values() {
+                    validate_depth(value, depth + 1)?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+    struct Counter(usize);
+    impl Write for Counter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 = self.0.saturating_add(bytes.len());
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    validate_depth(value, 0)?;
+    let mut counter = Counter(0);
+    serde_json::to_writer(&mut counter, value).map_err(|error| {
+        TriviumError::InvalidInput(format!("JSON 编码失败 (JSON encoding failed): {error}"))
+    })?;
+    Ok(counter.0)
 }
 
 pub(crate) fn estimate_json_memory(value: &serde_json::Value) -> usize {
@@ -591,6 +689,33 @@ pub(crate) fn validate_unique_records(records: &[(NodeId, Range<usize>)]) -> Res
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn 原始字节账本跨映射替换删除及无效写入保持准确() {
+        let path = test_path("byte-ledger");
+        let mut store = PayloadStore::new(0, 0);
+        store.insert_raw(1, b"[1,2,3]").unwrap();
+        store.insert_raw(2, b"true").unwrap();
+        assert_eq!(store.memory_stats().delta_raw_bytes, 11);
+        store.save_sidecar(&path, 7).unwrap();
+        let (_, mmap, records) = PayloadStore::open_sidecar(&path).unwrap();
+        store.install_mapped(mmap, records).unwrap();
+        assert_eq!(store.memory_stats().delta_raw_bytes, 0);
+        store.insert_raw(1, b"{\"v\":123}").unwrap();
+        assert_eq!(store.memory_stats().delta_raw_bytes, 9);
+        assert!(store.insert_raw(1, b"invalid").is_err());
+        assert_eq!(store.raw(1), Some(b"{\"v\":123}".as_slice()));
+        assert_eq!(store.memory_stats().delta_raw_bytes, 9);
+        store.insert_raw(1, b"null").unwrap();
+        assert_eq!(store.memory_stats().delta_raw_bytes, 4);
+        assert!(store.remove(2));
+        assert_eq!(store.memory_stats().delta_raw_bytes, 4);
+        assert!(store.remove(1));
+        assert!(!store.remove(1));
+        assert_eq!(store.memory_stats().delta_raw_bytes, 0);
+        drop(store);
+        std::fs::remove_file(path).unwrap();
+    }
 
     fn test_path(name: &str) -> std::path::PathBuf {
         let nonce = SystemTime::now()

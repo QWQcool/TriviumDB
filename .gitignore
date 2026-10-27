@@ -42,6 +42,9 @@ package-lock.json
 *.log
 *.tmp
 
+# ══════ 本地规划文档 ══════
+/docs/TEMP-TODO/
+
 # ══════ 系统文件 ══════
 .DS_Store
 Thumbs.db

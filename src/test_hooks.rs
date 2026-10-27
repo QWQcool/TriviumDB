@@ -10,6 +10,7 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ConcurrencyPoint {
+    BeforeSearchReadLock,
     BeforeSnapshotPublish,
     AfterSnapshotPublish,
     BeforeStatefulSearchLock,
@@ -42,6 +43,7 @@ pub enum ConcurrencyPoint {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IoPoint {
+    TransactionApply,
     SnapshotCopy,
     SnapshotSync,
     SnapshotPublish,

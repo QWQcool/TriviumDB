@@ -247,10 +247,10 @@ fn 属性索引_v5_posting块_crc_独立拒绝损坏() {
     seed_database(&path);
     let sidecar = format!("{path}.pidx");
     let mut bytes = std::fs::read(&sidecar).unwrap();
-    assert_eq!(u16::from_le_bytes([bytes[4], bytes[5]]), 6);
+    assert_eq!(u16::from_le_bytes([bytes[4], bytes[5]]), 7);
 
-    let field_len = u32::from_le_bytes(bytes[38..42].try_into().unwrap()) as usize;
-    let entry_count_offset = 42 + field_len;
+    let field_len = u32::from_le_bytes(bytes[50..54].try_into().unwrap()) as usize;
+    let entry_count_offset = 54 + field_len;
     let key_len_offset = entry_count_offset + 8;
     let key_len = u32::from_le_bytes(
         bytes[key_len_offset..key_len_offset + 4]

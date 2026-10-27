@@ -1,0 +1,28 @@
+{
+  "records": [
+    {"id":1,"payload":{"seed":true,"x":11,"obj":{"k":22},"arr":[]}},
+    {"id":2,"payload":{"seed":false,"x":22,"v":3,"obj":{"k":11}}},
+    {"id":3,"payload":{"seed":true,"x":33}},
+    {"id":4,"payload":{"seed":false,"x":44}}
+  ],
+  "edges":[[1,2],[3,2],[2,4]],
+  "cases":[
+    {"query":"FIND {x:11} AS seed WITH seed, seed.x AS before, seed AS origin EXPAND seed [:rel*1..1] AS child RETURN before, origin.id AS origin, child.x AS after","rows":[{"before":11,"origin":1,"after":22}]},
+    {"query":"FIND {seed:true} AS seed WITH seed, seed.x AS before EXPAND seed [:rel*1..1] AS child RETURN seed.id AS origin, before, child.id AS child ORDER BY origin ASC","rows":[{"origin":1,"before":11,"child":2},{"origin":3,"before":33,"child":2}]},
+    {"query":"FIND {x:11} AS seed WITH seed AS origin, seed, seed.x AS before EXPAND seed [:rel*1..1] AS child RETURN origin.id AS origin, seed.id AS seed, before","rows":[{"origin":1,"seed":1,"before":11}]},
+    {"query":"MATCH (n) AS n WITH n, n.x AS before WITH n, before + 1 AS before RETURN n.id AS id, before ORDER BY id ASC","rows":[{"id":1,"before":12},{"id":2,"before":23},{"id":3,"before":34},{"id":4,"before":45}]},
+    {"query":"MATCH (n {id:1}) AS n WITH n.x AS x WITH x AS renamed RETURN *","rows":[{"renamed":11}]},
+    {"query":"MATCH (n {id:1}) AS n WITH n, n.obj AS object, n.arr AS list RETURN object.k AS k, list IS NULL AS absent","rows":[{"k":22,"absent":false}]},
+    {"query":"MATCH (n {id:{$in:[1,2]}}) RETURN n.id AS id, COALESCE(n.v,n) AS chosen ORDER BY chosen ASC","ids":[2,1]},
+    {"query":"MATCH (n {id:{$in:[1,2]}}) AS n WITH n RETURN n.id AS id, COALESCE(n.v,n) AS chosen ORDER BY chosen DESC","ids":[1,2]},
+    {"query":"MATCH (n {id:{$in:[1,2]}}) RETURN n.id AS id, COALESCE(n.obj,NULL) AS chosen ORDER BY chosen.k ASC","ids":[2,1]},
+    {"query":"FIND {seed:true} AS seed WITH seed, seed.x AS before EXPAND seed [:rel*1..1] AS child WITH child, seed, before degree child AS scored RETURN seed.id AS origin, before, scored.id AS target ORDER BY origin ASC","rows":[{"origin":1,"before":11,"target":2},{"origin":3,"before":33,"target":2}]}
+  ],
+  "invalid":[
+    "MATCH (n) AS n WITH n, n.x + missing.x AS total RETURN total",
+    "MATCH (n) AS n WITH n, COALESCE(n.x,missing.x) AS total RETURN total",
+    "MATCH (n) AS n WITH n, COALESCE(n.x,missing.x + 1) IS NULL AS total RETURN total",
+    "MATCH (n) AS n WITH n.x AS scalar WITH scalar AS renamed EXPAND renamed [:rel*1..1] AS bad RETURN bad",
+    "MATCH (n) AS n WITH n AS fresh, fresh.x AS value RETURN value"
+  ]
+}

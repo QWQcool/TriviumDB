@@ -145,10 +145,13 @@ pub(crate) fn execute_pipeline_with_limit<T: VectorType>(
     config: &SearchConfig,
     ctx: &mut HookContext,
 ) -> Result<PipelineOutput> {
+    #[cfg(feature = "test-hooks")]
+    crate::test_hooks::hit(crate::test_hooks::ConcurrencyPoint::BeforeSearchReadLock);
     let runtime = read_or_recover(memtable).resource_runtime().clone();
     let quiver_config = crate::index::quiver::QuIVerConfig::default();
     let (auto_build_snapshot, _build_workspace) = {
         let mt = read_or_recover(memtable);
+        mt.ensure_readable()?;
         if mt.auto_quiver_build_needed() {
             let projected = mt
                 .estimated_memory_bytes()
@@ -181,6 +184,7 @@ pub(crate) fn execute_pipeline_with_limit<T: VectorType>(
 
     drop(_build_workspace);
     let mt = read_or_recover(memtable);
+    mt.ensure_readable()?;
     #[cfg(feature = "test-hooks")]
     crate::test_hooks::hit(crate::test_hooks::ConcurrencyPoint::SearchLockAcquired);
 

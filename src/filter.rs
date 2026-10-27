@@ -61,6 +61,28 @@ pub enum Filter {
 }
 
 impl Filter {
+    /// 逻辑组合返回空，其余条件返回所引用的顶层字段。
+    pub(crate) fn field_name(&self) -> Option<&str> {
+        match self {
+            Self::And(_) | Self::Or(_) => None,
+            Self::Eq(k, _)
+            | Self::Ne(k, _)
+            | Self::Gt(k, _)
+            | Self::Gte(k, _)
+            | Self::Lt(k, _)
+            | Self::Lte(k, _)
+            | Self::Range(k, _, _)
+            | Self::TimeRange(k, _, _)
+            | Self::In(k, _)
+            | Self::Nin(k, _)
+            | Self::Exists(k, _)
+            | Self::Size(k, _)
+            | Self::All(k, _)
+            | Self::TypeMatch(k, _)
+            | Self::StartsWith(k, _)
+            | Self::Contains(k, _) => Some(k),
+        }
+    }
     /// 检查一个 JSON payload 是否满足该过滤条件
     pub fn matches(&self, payload: &Value) -> bool {
         match self {
@@ -381,40 +403,55 @@ fn compare_ordered<T: PartialOrd>(value: T, threshold: T, op: RangeOp) -> bool {
     }
 }
 
+/// 整数保持 i128 比较域；与浮点比较时先分离整数部分和小数部分。
+pub(crate) fn numeric_ordering(
+    actual: &serde_json::Number,
+    expected: &serde_json::Number,
+) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let integer = |n: &serde_json::Number| {
+        n.as_i64()
+            .map(i128::from)
+            .or_else(|| n.as_u64().map(i128::from))
+    };
+    let int_float = |i: i128, f: f64| {
+        if f >= 18_446_744_073_709_551_616. {
+            return Ordering::Less;
+        }
+        if f < i64::MIN as f64 {
+            return Ordering::Greater;
+        }
+        i.cmp(&(f as i128)).then_with(|| {
+            if f.fract() > 0. {
+                Ordering::Less
+            } else if f.fract() < 0. {
+                Ordering::Greater
+            } else {
+                Ordering::Equal
+            }
+        })
+    };
+    match (integer(actual), integer(expected)) {
+        (Some(a), Some(b)) => a.cmp(&b),
+        (Some(a), None) => int_float(a, expected.as_f64().unwrap_or_default()),
+        (None, Some(b)) => int_float(b, actual.as_f64().unwrap_or_default()).reverse(),
+        (None, None) => {
+            let a = actual.as_f64().unwrap_or_default();
+            let b = expected.as_f64().unwrap_or_default();
+            if a == b {
+                Ordering::Equal
+            } else {
+                a.total_cmp(&b)
+            }
+        }
+    }
+}
 fn compare_numbers(
     actual: &serde_json::Number,
     expected: &serde_json::Number,
     op: RangeOp,
 ) -> bool {
-    let ordering = match (
-        actual.as_i64(),
-        actual.as_u64(),
-        expected.as_i64(),
-        expected.as_u64(),
-    ) {
-        (Some(left), _, Some(right), _) => left.cmp(&right),
-        (_, Some(left), _, Some(right)) => left.cmp(&right),
-        (Some(left), _, _, Some(right)) => {
-            if left < 0 {
-                std::cmp::Ordering::Less
-            } else {
-                (left as u64).cmp(&right)
-            }
-        }
-        (_, Some(left), Some(right), _) => {
-            if right < 0 {
-                std::cmp::Ordering::Greater
-            } else {
-                left.cmp(&(right as u64))
-            }
-        }
-        _ => actual
-            .as_f64()
-            .zip(expected.as_f64())
-            .map_or(std::cmp::Ordering::Equal, |(left, right)| {
-                left.total_cmp(&right)
-            }),
-    };
+    let ordering = numeric_ordering(actual, expected);
     match op {
         RangeOp::Gt => ordering.is_gt(),
         RangeOp::Gte => !ordering.is_lt(),
@@ -444,6 +481,40 @@ fn parse_rfc3339_nanos(value: &str) -> Option<i64> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn 混合数值比较覆盖完整整数域和浮点相邻边界() {
+        use std::cmp::Ordering::{Equal, Less};
+        for (left, right, expected) in [
+            (json!(u64::MAX - 1), json!(u64::MAX), Less),
+            (json!(i64::MAX), json!(i64::MAX as u64 + 1), Less),
+            (
+                json!(9_007_199_254_740_992u64),
+                json!(9_007_199_254_740_993u64),
+                Less,
+            ),
+            (json!(u64::MAX), json!(18_446_744_073_709_551_616f64), Less),
+            (json!(i64::MIN), json!(-9_223_372_036_854_775_808f64), Equal),
+            (
+                json!(i64::MIN + 1),
+                json!(-9_223_372_036_854_775_808f64),
+                std::cmp::Ordering::Greater,
+            ),
+            (json!(-1), json!(-0.5), Less),
+            (json!(-0.5), json!(0), Less),
+            (json!(0), json!(-0.), Equal),
+            (json!(0), json!(0.5), Less),
+        ] {
+            assert_eq!(
+                numeric_ordering(left.as_number().unwrap(), right.as_number().unwrap()),
+                expected
+            );
+            assert_eq!(
+                numeric_ordering(right.as_number().unwrap(), left.as_number().unwrap()),
+                expected.reverse()
+            );
+        }
+    }
 
     // ═══════ $startsWith 测试 ═══════
 

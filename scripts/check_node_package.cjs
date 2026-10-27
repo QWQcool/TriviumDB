@@ -52,6 +52,10 @@ try {
   }
   run(['-e', 'process.exitCode = 1; require("./compiled/consumer.js").exercise(process.argv[1]).then(() => { process.exitCode = 0 }, error => { console.error(error) })',
     path.join(sample, 'typed-consumer.tdb')], consumer)
+  const numericRoot = path.join(sample, 'numeric-boundaries')
+  fs.mkdirSync(numericRoot)
+  run(['-e', 'process.exitCode = 1; require(process.argv[1])(process.argv[2], require("triviumdb").TriviumDB).then(() => { process.exitCode = 0 }, error => { console.error(error) })',
+    path.join(root, 'tests/node/numeric_boundaries.js'), numericRoot], consumer)
   console.log('npm 产物的 TypeScript 正反样例及原生运行行为验收通过')
 } finally {
   fs.rmSync(sample, { recursive: true, force: true })
