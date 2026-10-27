@@ -3,9 +3,24 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const contract = require('../contracts/tql_boundary_cases.json')
+const aliases = require('../contracts/tql_alias_cases.json')
 
 module.exports = function tqlBoundaries(root, TriviumDB) {
   const open = (name, extra = {}) => new TriviumDB(path.join(root, `boundaries-${name}.tdb`), { dim: 1, autoBuildQuiver: false, ...extra })
+  const aliasDb = open('aliases')
+  try {
+    for (const record of aliases.records) aliasDb.insertWithId(record.id, [1], record.payload)
+    for (const [a, b] of aliases.edges) aliasDb.link(a, b, 'rel', 1)
+    for (const indexed of [false, true]) {
+      if (indexed) aliasDb.createIndex('x')
+      for (const test of aliases.cases) {
+        const result = aliasDb.tql(test.query)
+        if (test.ids) assert.deepEqual(result.map(row => row.id), test.ids, test.query)
+        else assert.deepEqual(result, test.rows, test.query)
+      }
+    }
+    for (const query of aliases.invalid) assert.throws(() => aliasDb.tql(query), Error)
+  } finally { aliasDb.close() }
   const db = open('values')
   try {
     for (const row of contract.records) db.insertWithId(row.id, [1], row.payload)

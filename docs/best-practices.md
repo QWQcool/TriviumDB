@@ -2,7 +2,7 @@
 
 > 高效使用 TriviumDB 的实战指南：从项目集成到性能调优，从数据建模到避坑指南。
 >
-> 本文按 `0.9.0-beta.2` 编写，见[变更说明](changes/0.9.0-beta.2.md)。
+> 本文按 `0.9.0-beta.3` 编写，见[变更说明](changes/0.9.0-beta.3.md)。
 
 ---
 
@@ -70,7 +70,7 @@ cargo add triviumdb
 
 ```toml
 [dependencies]
-triviumdb = "0.9.0-beta.2"
+triviumdb = "0.9.0-beta.3"
 ```
 
 ### 30 秒入门模板

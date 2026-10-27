@@ -1,6 +1,6 @@
 # TQL (Trivium Query Language) 完整参考
 
-> **版本**: 0.9.0-beta.2；版本记录见 [0.9.0-beta.2 变更说明](changes/0.9.0-beta.2.md)。
+> **版本**: 0.9.0-beta.3；版本记录见 [0.9.0-beta.3 变更说明](changes/0.9.0-beta.3.md)。
 > **定位**: 统一查询 DSL — 融合文档过滤、图模式匹配、向量检索于一体  
 > **前置依赖**: 零外部依赖，纯 Rust 实现
 
@@ -555,6 +555,19 @@ ORDER BY sim DESC LIMIT 10
 ```
 
 可组合阶段包括 `EXPAND`、`FILTER/WHERE`、`RANK`、PageRank、WCC、SCC、K-Core、Articulation Points、Triangle Count、Local Clustering Coefficient、HITS、Harmonic Centrality、Node Similarity、Degree/Betweenness、Leiden、Label Propagation、SA-PPR、`TEXT BM25/AC/HYBRID`、`RESIDUAL`、`DIVERSIFY`、`TOPICS`、`SA_PPR_CONFIG`、`WEIGHTED_PATHS`、`YEN_PATHS`、`ALL_PATHS`、`SHORTEST_PATHS`、`UNION/INTERSECT/EXCEPT` 与 `ITERATE`。每阶段接受预算切片，并在 EXPLAIN 中暴露成本、预计行数、临时字节和物理实现。
+
+WITH 在执行位置对每行求值并保存带类型的投影快照。同一 WITH 的所有右值读取进入该阶段时的作用域，再同时安装别名；后续 WITH 仅保留显式投影的列。表达式递归检查全部变量，标量重命名保留标量类型。
+
+EXPAND 将起点快照传给扩展结果；多个起点汇合到同一节点时，不同的投影环境保持独立逻辑行。节点别名保留原节点身份和属性，数组、对象及标量保留投影值，分组与过滤读取相同快照。保存的投影内容计入实例查询工作区及共享运行时配额。
+
+```sql
+FIND {kind: "seed"} AS seed
+WITH seed, seed.x AS before, seed AS origin
+EXPAND seed [:related*1..1] AS child
+RETURN origin.id AS origin, before, child.x AS after
+```
+
+`before` 保存扩展前的 `seed.x`，`origin` 仍引用起点。ORDER BY 的返回别名保留数字、节点、边、路径和 JSON 容器类型；`ORDER BY chosen` 与 `ORDER BY COALESCE(n.v,n)` 使用相同的类型次序，实体与对象别名也可按其字段排序。
 
 ### 结构图算法
 

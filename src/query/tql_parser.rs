@@ -2098,34 +2098,6 @@ fn collect_expr_vars(expr: &TqlExpr, output: &mut Vec<String>) {
     }
 }
 
-fn expr_var(expr: &TqlExpr) -> Option<&str> {
-    match expr {
-        TqlExpr::Variable(var)
-        | TqlExpr::Property { var, .. }
-        | TqlExpr::Similarity { var }
-        | TqlExpr::GraphScore { var }
-        | TqlExpr::GraphMetric { var, .. }
-        | TqlExpr::TextScore { var }
-        | TqlExpr::DiversityScore { var }
-        | TqlExpr::ResidualScore { var }
-        | TqlExpr::Topic { var }
-        | TqlExpr::TopicScore { var }
-        | TqlExpr::Depth { var }
-        | TqlExpr::PathStrength { var }
-        | TqlExpr::PathCount { var }
-        | TqlExpr::Community { var }
-        | TqlExpr::Path { var }
-        | TqlExpr::PathLength { var }
-        | TqlExpr::PathRank { var }
-        | TqlExpr::PairLeft { var }
-        | TqlExpr::PairRight { var } => Some(var),
-        TqlExpr::Binary { left, right, .. } => expr_var(left).or_else(|| expr_var(right)),
-        TqlExpr::Coalesce(values) => values.iter().find_map(expr_var),
-        TqlExpr::IsNull { expr, .. } => expr_var(expr),
-        TqlExpr::Parameter(_) | TqlExpr::Literal(_) => None,
-    }
-}
-
 fn predicate_vars(predicate: &Predicate, output: &mut Vec<String>) {
     match predicate {
         Predicate::Compare { left, right, .. } => {
@@ -2142,7 +2114,7 @@ fn predicate_vars(predicate: &Predicate, output: &mut Vec<String>) {
     }
 }
 
-fn validate_pipeline_scope(query: &TqlQuery) -> Result<(), String> {
+pub(crate) fn validate_pipeline_scope(query: &TqlQuery) -> Result<(), String> {
     if query.pipeline.is_empty() {
         let pattern = match &query.entry {
             QueryEntry::Match { pattern } | QueryEntry::OptionalMatch { pattern } => pattern,
@@ -2164,15 +2136,18 @@ fn validate_pipeline_scope(query: &TqlQuery) -> Result<(), String> {
                 let mut next = std::collections::BTreeSet::new();
                 let mut next_scalars = std::collections::BTreeSet::new();
                 for item in &with.items {
-                    if let Some(var) = expr_var(&item.expr)
-                        && !scope.contains(var)
-                        && !scalar_aliases.contains(var)
+                    let mut variables = Vec::new();
+                    collect_expr_vars(&item.expr, &mut variables);
+                    if let Some(var) = variables
+                        .iter()
+                        .find(|var| !scope.contains(*var) && !scalar_aliases.contains(*var))
                     {
                         return Err(format!(
                             "WITH 引用了未定义变量 {var} (WITH references undefined variable {var})"
                         ));
                     }
-                    let is_node = matches!(item.expr, TqlExpr::Variable(_));
+                    let is_node =
+                        matches!(&item.expr, TqlExpr::Variable(var) if scope.contains(var));
                     let inserted = if is_node {
                         next.insert(item.alias.clone())
                     } else {
@@ -2186,12 +2161,7 @@ fn validate_pipeline_scope(query: &TqlQuery) -> Result<(), String> {
                         ));
                     }
                 }
-                scalar_aliases = with
-                    .items
-                    .iter()
-                    .filter(|item| !matches!(item.expr, TqlExpr::Variable(_)))
-                    .map(|item| item.alias.clone())
-                    .collect();
+                scalar_aliases = next_scalars;
                 scope = next;
             }
             PipelineStage::Expand(expand) => {

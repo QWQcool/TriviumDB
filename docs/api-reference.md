@@ -1,6 +1,6 @@
 # TriviumDB API 完整参考
 
-> **版本**: `0.9.0-beta.2` 公共 API；见[变更说明](changes/0.9.0-beta.2.md)。
+> **版本**: `0.9.0-beta.3` 公共 API；见[变更说明](changes/0.9.0-beta.3.md)。
 > **语言**: Rust 核心 + Python 绑定 (PyO3) + Node.js 绑定 (napi-rs)  
 > **许可**: Apache-2.0
 
@@ -1162,6 +1162,8 @@ TQL 公共 API 提供 **自由 DIY 混合查询能力**。调用者可以用一�
 支持 MATCH、OPTIONAL MATCH、FIND、SEARCH、WITH 管线、聚合、图算法、路径与集合代数。Rust `tql()` 返回同时承载节点、边、标量、Object 和 Path/List 的一等值；`tql_values()` 为兼容别名，`tql_nodes()` 提供节点绑定容器。Python/Node 的 `tql` 同步承载一等值。
 
 普通查询、WITH 与单跳具名边共享分组、COUNT(expr)、DISTINCT、别名排序与分页。返回列独立保存；省略 AS 时使用表达式名，例如 `Count(*)`。WITH 使用实例行数、内存工作区与取消配置。完整语义见 [TQL 返回处理](tql-reference.md#return--order-by--limit--offset)。
+
+WITH 按行保存求值结果与实体身份，后续扩展、过滤和返回使用保存的值。同一阶段的投影同时赋值，完整检查表达式作用域；节点与对象返回别名支持字段排序。Rust `tql_nodes()` 同样保留被返回的源节点别名。物理管线的 `NodeRow.bindings` 承载共享的 `BindingValue` 快照，投影内存纳入查询与共享资源预算。
 
 MATCH 内联 `id` 和节点的 `.id` 属性使用完整无符号节点 ID；`FIND` 与 `MATCHES` 文档条件读取 Payload 字段。单跳边变量在 WHERE、RETURN、COALESCE、聚合和空值判断中保持边绑定；OPTIONAL MATCH 为符合起点条件且无合格边的记录补齐 Null 列。
 

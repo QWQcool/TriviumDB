@@ -2,7 +2,7 @@
 
 > 从单元测试到属性测试、从覆盖率度量到变异测试：TriviumDB 的多层防御测试体系详解。
 >
-> 本文说明 `0.9.0-beta.2` 的测试与验收方法，见[变更说明](changes/0.9.0-beta.2.md)。
+> 本文说明 `0.9.0-beta.3` 的测试与验收方法，见[变更说明](changes/0.9.0-beta.3.md)。
 
 ---
 
@@ -46,6 +46,8 @@ TriviumDB 采用 **五层防御式测试体系**，从函数级正确性到系�
 `cargo test --test core tql_semantics` 验证普通 MATCH、FIND、WITH 与具名边的完整返回内容、分组、聚合、去重、别名排序和分页。`tests/contracts/tql_return_cases.json` 由 Rust、Python、Node 共同消费；Node 同时通过 `npm run test:package` 在独立安装的 tarball 上执行。DML 用例验证多字段合并、每行 CREATE 作用域、完整 u64 位模式、浮点转换边界、拒绝后的 WAL 内容及关闭重开。纯向量管线在分页后核对具体节点与 Payload 读取量。
 
 `cargo test --test core tql_boundaries` 验证内联 ID、结构 ID 与 Payload 索引域、OPTIONAL 起点过滤、具名边谓词、实体空值、JSON 容器、重复变量、默认列名、Prepared 非法槽位与精确向量输入。固定数值样例覆盖整数/浮点等价表示、2^53 相邻整数、有符号边界及 u64 上限，并在 Hash、Ordered、Bitmap、Composite 配置中核对具体结果。`tests/contracts/tql_boundary_cases.json` 为三端提供固定输入和完整预期；Node 与 Python 的公共 API 入口还验证拒绝后的 WAL 保持、完整大 ID 更新、容器输出及安装制品上的 u64 SEARCH/RANK/Prepared 行为。
+
+`cargo test --features test-hooks --test core tql_aliases -- --test-threads=1` 验证投影快照、多源汇合、连续扩展、同时赋值、标量/节点重命名、递归作用域、实体与对象别名排序，以及串行、并行和融合精排。`tests/contracts/tql_alias_cases.json` 在 Rust Rom/Mmap 与两端实际 SDK 中核对固定完整结果或明确的排序 ID。工作区测试分别检查实例上限与共享配额拒绝，并核对拒绝后配额归还和后续查询。
 
 检索边界使用预先给定的 NodeId 次序验证槽位复用、分段扫描、并行度与 Top-K 截断；数值排序覆盖 `i64/u64` 端点、2^53 相邻整数、正负小数及索引重载。内存计量测试独立遍历实际容器，核对增量账本在替换、重复登记、删除、编译和重载后的值。事务应用故障测试在 WAL 提交后注入失败，要求当前句柄与已准入的共享搜索拒绝部分状态，并在重开后核对完整事务和再次持久化结果。
 

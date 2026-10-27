@@ -15,7 +15,7 @@ pub(super) struct Scope<'a, T: VectorType> {
     pub query: &'a TqlQuery,
     pub mt: &'a MemTable<T>,
     pub limits: &'a TqlLimits,
-    pub pipeline: Option<(&'a str, &'a HashMap<String, TqlExpr>)>,
+    pub pipeline: Option<(&'a str, &'a std::collections::BTreeSet<String>)>,
 }
 
 pub(super) struct Row<T> {
@@ -102,9 +102,7 @@ fn expression<T: VectorType>(
     scope: &Scope<'_, T>,
 ) -> RuntimeValue {
     if let Input::Pipeline(row) = input {
-        let aliases = scope.pipeline.map(|(_, aliases)| aliases);
-        let substituted = aliases.map(|aliases| substitute_scalar_aliases(expr, aliases));
-        return eval_pipeline_row_expr(substituted.as_ref().unwrap_or(expr), row, scope.mt);
+        return eval_pipeline_row_expr(expr, row, scope.mt);
     }
     let Input::Nodes(nodes, edge) = input else {
         return RuntimeValue::Null;
@@ -200,14 +198,6 @@ fn kind_runtime<T: VectorType>(
     })
 }
 
-fn kind_json<T: VectorType>(
-    kind: &ReturnExprKind,
-    input: &Input<'_, T>,
-    scope: &Scope<'_, T>,
-) -> Result<serde_json::Value, TriviumError> {
-    kind_runtime(kind, input, scope).map(runtime_json)
-}
-
 fn runtime_signature(value: RuntimeValue) -> Result<String, TriviumError> {
     let (kind, value) = match value {
         RuntimeValue::Node(id) => ("node", serde_json::json!(id)),
@@ -269,10 +259,7 @@ fn kind_value<T: VectorType>(
     scope: &Scope<'_, T>,
 ) -> Result<TqlValue<T>, TriviumError> {
     if let Input::Pipeline(row) = input {
-        let (name, aliases) = scope.pipeline.ok_or_else(|| {
-            TriviumError::QueryExecution("管线上下文缺失 (Missing pipeline context)".into())
-        })?;
-        return pipeline_kind_value(kind, name, aliases, row, scope.mt);
+        return pipeline_kind_value(kind, row, scope.mt);
     }
     let Input::Nodes(nodes, edge) = input else {
         return Ok(TqlValue::Null);
@@ -373,11 +360,20 @@ fn project<T: VectorType>(
                 }
             }
             Input::Pipeline(_) => {
-                let name = scope.pipeline.map_or("_", |(name, _)| name);
-                values.insert(
-                    name.to_owned(),
-                    kind_value(&ReturnExprKind::Var(name.to_owned()), input, scope)?,
-                );
+                let names = scope
+                    .pipeline
+                    .ok_or_else(|| {
+                        TriviumError::QueryExecution(
+                            "管线作用域缺失 (Missing pipeline scope)".into(),
+                        )
+                    })?
+                    .1;
+                for name in names {
+                    values.insert(
+                        name.clone(),
+                        kind_value(&ReturnExprKind::Var(name.clone()), input, scope)?,
+                    );
+                }
             }
         },
     }
@@ -437,26 +433,16 @@ fn order_value<T: VectorType>(
 ) -> Result<RuntimeValue, TriviumError> {
     Ok(match expr {
         TqlExpr::Property { var, field } => {
-            if let Some(TqlValue::Node(node)) = row.values.get(var) {
-                if field == "id" {
-                    runtime_u64(node.id)
-                } else {
-                    json_to_runtime(&node.payload[field])
-                }
+            if let Some(value) = row.values.get(var) {
+                runtime_property(&tql_value_runtime(value), field, scope.mt)
             } else if let ReturnClause::Expressions(items) = &scope.query.returns
-                && let Some(ReturnExpr {
-                    kind: ReturnExprKind::Var(original),
-                    ..
-                }) = items.iter().find(|item| item.alias.as_ref() == Some(var))
+                && let Some(item) = items.iter().find(|item| item.alias.as_ref() == Some(var))
                 && let Some(index) = row.source
             {
-                expression(
-                    &TqlExpr::Property {
-                        var: original.clone(),
-                        field: field.clone(),
-                    },
-                    &inputs[index],
-                    scope,
+                runtime_property(
+                    &kind_runtime(&item.kind, &inputs[index], scope)?,
+                    field,
+                    scope.mt,
                 )
             } else {
                 row.source.map_or(RuntimeValue::Null, |index| {
@@ -466,12 +452,12 @@ fn order_value<T: VectorType>(
         }
         TqlExpr::Variable(alias) => {
             if let Some(value) = row.values.get(alias) {
-                json_to_runtime(&value_json(value))
+                tql_value_runtime(value)
             } else if let ReturnClause::Expressions(items) = &scope.query.returns
                 && let Some(item) = items.iter().find(|item| item.alias.as_ref() == Some(alias))
                 && let Some(index) = row.source
             {
-                json_to_runtime(&kind_json(&item.kind, &inputs[index], scope)?)
+                kind_runtime(&item.kind, &inputs[index], scope)?
             } else {
                 row.source.map_or(RuntimeValue::Null, |index| {
                     expression(expr, &inputs[index], scope)
@@ -637,16 +623,30 @@ pub(super) fn into_nodes<T: VectorType>(
             Some(Input::Nodes(nodes, _)) => (*nodes).clone(),
             Some(Input::Pipeline(input)) => {
                 let name = scope.pipeline.map_or("_", |(name, _)| name);
-                let projected = row.values.values().find_map(|value| match value {
-                    TqlValue::Node(node) if node.id == input.id => Some(node.clone()),
-                    _ => None,
-                });
-                let node = match projected {
-                    Some(node) => node,
-                    None => build_node(input.id, scope.mt)
-                        .ok_or(TriviumError::NodeNotFound(input.id))?,
+                let names = match &scope.query.returns {
+                    ReturnClause::All => scope.pipeline.map_or_else(
+                        || vec![name.to_owned()],
+                        |(_, names)| names.iter().cloned().collect(),
+                    ),
+                    ReturnClause::Variables(names) => names.clone(),
+                    ReturnClause::Expressions(items) => extract_vars_from_exprs(items),
                 };
-                HashMap::from([(name.to_owned(), node)])
+                let mut bindings = HashMap::new();
+                for name in names {
+                    if let RuntimeValue::Node(id) =
+                        eval_pipeline_row_expr(&TqlExpr::Variable(name.clone()), input, scope.mt)
+                    {
+                        let projected = row.values.values().find_map(|value| match value {
+                            TqlValue::Node(node) if node.id == id => Some(node.clone()),
+                            _ => None,
+                        });
+                        let node = projected
+                            .or_else(|| build_node(id, scope.mt))
+                            .ok_or(TriviumError::NodeNotFound(id))?;
+                        bindings.insert(name, node);
+                    }
+                }
+                bindings
             }
             None => HashMap::new(),
         };

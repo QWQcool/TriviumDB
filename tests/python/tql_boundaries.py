@@ -18,6 +18,26 @@ def run_tql_boundaries(root: str) -> None:
             pass
         else:
             raise AssertionError('非法输入必须明确拒绝')
+    aliases = json.loads((Path(__file__).parents[1] / 'contracts/tql_alias_cases.json').read_text(encoding='utf-8'))
+    db = open_db('aliases')
+    try:
+        for record in aliases['records']:
+            db.insert_with_id(record['id'], [1], record['payload'])
+        for a, b in aliases['edges']:
+            db.link(a, b, 'rel', 1)
+        for indexed in [False, True]:
+            if indexed:
+                db.create_index('x')
+            for case in aliases['cases']:
+                result = rows(db, case['query'])
+                if 'ids' in case:
+                    assert [row['id'] for row in result] == case['ids'], case['query']
+                else:
+                    assert result == case['rows'], case['query']
+        for query in aliases['invalid']:
+            rejects(lambda: db.tql(query))
+    finally:
+        db.close()
     db = open_db('values')
     try:
         for row in contract['records']:

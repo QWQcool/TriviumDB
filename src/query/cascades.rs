@@ -904,18 +904,12 @@ fn histogram_fanout(graph: &crate::storage::memtable::GraphStats) -> f64 {
 fn evaluate_rules(query: &TqlQuery) -> Vec<AppliedRule> {
     let mut rules = Vec::new();
     for (index, stage) in query.pipeline.iter().enumerate() {
-        if let PipelineStage::With(with) = stage {
-            let identity = with.items.len() == 1
-                && matches!(&with.items[0].expr, TqlExpr::Variable(variable) if variable == &with.items[0].alias);
+        if matches!(stage, PipelineStage::With(_)) {
             rules.push(AppliedRule {
                 name: "eliminate_identity_with",
                 stage_index: index,
-                applied: identity,
-                reason: if identity {
-                    "恒等 WITH 不改变作用域或可用列"
-                } else {
-                    "WITH 包含重命名或标量投影"
-                },
+                applied: false,
+                reason: "WITH 在执行点保存值与作用域，保留投影边界",
             });
         }
         if matches!(stage, PipelineStage::Filter(_))

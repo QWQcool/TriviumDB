@@ -17,7 +17,57 @@ use crate::storage::memtable::MemTable;
 use rayon::prelude::*;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::Arc;
 use std::time::Instant;
+
+/// 行投影保留标量、JSON 内容与实体身份，供后续物理阶段直接读取。
+#[derive(Debug, Clone, PartialEq)]
+pub enum BindingValue {
+    Int(i64),
+    UInt(u64),
+    Float(f64),
+    Str(String),
+    Bool(bool),
+    Path(Vec<NodeId>),
+    Json(serde_json::Value),
+    Node(NodeId),
+    Edge(crate::node::EdgeView),
+    Null,
+}
+
+impl BindingValue {
+    fn heap_bytes(&self) -> usize {
+        match self {
+            Self::Str(value) => value.capacity(),
+            Self::Path(value) => value
+                .capacity()
+                .saturating_mul(std::mem::size_of::<NodeId>()),
+            Self::Json(value) => crate::storage::payload_store::estimate_json_memory(value),
+            Self::Edge(value) => value.label.capacity().saturating_add(
+                crate::storage::payload_store::estimate_json_memory(&value.metadata),
+            ),
+            _ => 0,
+        }
+    }
+}
+
+fn compare_bindings(left: &NodeRow, right: &NodeRow) -> std::cmp::Ordering {
+    left.bindings
+        .iter()
+        .flat_map(|values| values.iter())
+        .zip(right.bindings.iter().flat_map(|values| values.iter()))
+        .map(|((a, av), (b, bv))| {
+            a.cmp(b)
+                .then_with(|| super::tql_executor::compare_for_sort(av, bv))
+        })
+        .find(|order| !order.is_eq())
+        .unwrap_or_else(|| {
+            left.bindings
+                .as_ref()
+                .map_or(0, |v| v.len())
+                .cmp(&right.bindings.as_ref().map_or(0, |v| v.len()))
+        })
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -67,6 +117,9 @@ pub enum GraphMetric {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct NodeRow {
     pub id: NodeId,
+    /// WITH 投影快照在扩展分支间共享；不同快照保持独立的逻辑行。
+    #[serde(skip)]
+    pub bindings: Option<Arc<BTreeMap<String, BindingValue>>>,
     pub similarity: Option<ScoreValue>,
     pub property_score: Option<ScoreValue>,
     pub graph_score: Option<ScoreValue>,
@@ -89,6 +142,7 @@ impl NodeRow {
     pub fn new(id: NodeId) -> Self {
         Self {
             id,
+            bindings: None,
             similarity: None,
             property_score: None,
             graph_score: None,
@@ -157,7 +211,7 @@ impl NodeSet {
         self.rows.is_empty()
     }
 
-    fn estimated_bytes(&self) -> usize {
+    pub(crate) fn estimated_bytes(&self) -> usize {
         let inline = self
             .rows
             .len()
@@ -173,7 +227,25 @@ impl NodeSet {
                 )
             })
             .sum::<usize>();
-        inline.saturating_add(graph_metrics)
+        let bindings = self
+            .rows
+            .iter()
+            .filter_map(|row| row.bindings.as_ref())
+            .map(|values| {
+                values.iter().fold(0usize, |bytes, (name, value)| {
+                    bytes
+                        .saturating_add(name.capacity())
+                        .saturating_add(
+                            std::mem::size_of::<(String, BindingValue)>()
+                                + 4 * std::mem::size_of::<usize>(),
+                        )
+                        .saturating_add(value.heap_bytes())
+                })
+            })
+            .fold(0usize, usize::saturating_add);
+        inline
+            .saturating_add(graph_metrics)
+            .saturating_add(bindings)
     }
 
     fn normalize(&mut self) {
@@ -182,6 +254,7 @@ impl NodeSet {
             left.id
                 .cmp(&right.id)
                 .then_with(|| left.pair.cmp(&right.pair))
+                .then_with(|| compare_bindings(left, right))
                 .then_with(|| left.path_rank.cmp(&right.path_rank))
                 .then_with(|| {
                     if left.path_rank.is_some() || right.path_rank.is_some() {
@@ -196,6 +269,7 @@ impl NodeSet {
                 left.path_rank.is_none() && right.path_rank.is_none() || left.path == right.path;
             if (left.id, left.pair, left.path_rank) != (right.id, right.pair, right.path_rank)
                 || !same_ranked_path
+                || !compare_bindings(left, right).is_eq()
             {
                 return false;
             }
@@ -366,6 +440,8 @@ pub struct PipelineContext<'a, T: VectorType> {
     stages: usize,
     vector_read_bytes: usize,
     payload_start: (u64, u64),
+    workspace_bytes: usize,
+    workspaces: Vec<crate::resources::WorkspaceReservation>,
 }
 
 impl<'a, T: VectorType> PipelineContext<'a, T> {
@@ -384,7 +460,19 @@ impl<'a, T: VectorType> PipelineContext<'a, T> {
             stages: 0,
             vector_read_bytes: 0,
             payload_start: memtable.payload_access_counters(),
+            workspace_bytes: 0,
+            workspaces: Vec::new(),
         }
+    }
+
+    pub(crate) fn reserve_row_workspace(&mut self, bytes: usize) -> Result<()> {
+        if bytes > self.workspace_bytes {
+            let extra = bytes - self.workspace_bytes;
+            self.workspaces
+                .push(self.memtable.resource_runtime().reserve_workspace(extra)?);
+            self.workspace_bytes = bytes;
+        }
+        Ok(())
     }
 
     fn begin_stage(&mut self) -> Result<()> {
@@ -466,10 +554,31 @@ pub trait PipelineOperator<T: VectorType> {
     fn apply(&self, input: NodeSet, context: &mut PipelineContext<'_, T>) -> Result<NodeSet>;
 }
 
+struct PipelineWorkspace<'query, 'data, T: VectorType>(&'query mut PipelineContext<'data, T>);
+impl<'data, T: VectorType> std::ops::Deref for PipelineWorkspace<'_, 'data, T> {
+    type Target = PipelineContext<'data, T>;
+    fn deref(&self) -> &Self::Target {
+        self.0
+    }
+}
+impl<T: VectorType> std::ops::DerefMut for PipelineWorkspace<'_, '_, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.0
+    }
+}
+impl<T: VectorType> Drop for PipelineWorkspace<'_, '_, T> {
+    fn drop(&mut self) {
+        self.0.workspaces.clear();
+        self.0.workspace_bytes = 0;
+    }
+}
+
 pub fn execute_pipeline<T: VectorType>(
     context: &mut PipelineContext<'_, T>,
     operators: &[Box<dyn PipelineOperator<T> + '_>],
 ) -> Result<NodeSet> {
+    let mut workspace = PipelineWorkspace(context);
+    let context = &mut *workspace;
     let rows = context.memtable.node_count().min(context.budget.max_nodes);
     let estimate = rows
         .checked_mul(std::mem::size_of::<NodeRow>() + 64)
@@ -483,10 +592,7 @@ pub fn execute_pipeline<T: VectorType>(
                 / (std::mem::size_of::<NodeRow>() + 64).saturating_mul(4),
         });
     }
-    let _workspace = context
-        .memtable
-        .resource_runtime()
-        .reserve_workspace(estimate)?;
+    context.reserve_row_workspace(estimate)?;
     let mut current = NodeSet::empty();
     for operator in operators {
         context.begin_stage()?;
@@ -498,6 +604,7 @@ pub fn execute_pipeline<T: VectorType>(
         }
         current.normalize();
         context.validate_output(&current)?;
+        context.reserve_row_workspace(current.estimated_bytes())?;
         let (payload_lookups, payload_parsed_bytes) = context.validate_payload_budget()?;
         if let (Some(input_rows), Some(started)) = (input_rows, started) {
             context.metrics.push(PipelineStageMetrics {
@@ -1140,6 +1247,7 @@ fn compare_similarity(left: &NodeRow, right: &NodeRow) -> std::cmp::Ordering {
                 .unwrap_or(f32::NEG_INFINITY),
         )
         .then_with(|| left.id.cmp(&right.id))
+        .then_with(|| compare_bindings(left, right))
 }
 
 pub struct PropertyIndexFilter {
@@ -1276,7 +1384,9 @@ impl<T: VectorType> PipelineOperator<T> for Expand {
     fn apply(&self, input: NodeSet, context: &mut PipelineContext<'_, T>) -> Result<NodeSet> {
         // 遍历期间只追加紧凑命中记录；结果确定后一次排序、线性分组并物化 NodeRow。
         // 这避免在热路径维护包含大 NodeRow 的树，也不承担通用 HashMap 的哈希成本。
-        let sources = input.rows.iter().map(|row| row.id).collect::<Vec<_>>();
+        let mut sources = input.rows.iter().map(|row| row.id).collect::<Vec<_>>();
+        sources.sort_unstable();
+        sources.dedup();
         let traversal = context.budget.traversal;
         let config = ReachabilityConfig {
             min_depth: self.min_depth,
@@ -1368,6 +1478,36 @@ impl<T: VectorType> PipelineOperator<T> for Expand {
             hits.extend(output.hits);
         }
         hits.sort_unstable_by_key(|hit| (hit.target_id, hit.source_id, hit.depth));
+        if input.rows.iter().any(|row| row.bindings.is_some()) {
+            let mut parents = BTreeMap::<NodeId, Vec<&NodeRow>>::new();
+            for row in &input.rows {
+                parents.entry(row.id).or_default().push(row);
+            }
+            let mut expanded = Vec::new();
+            for hit in hits {
+                for parent in &parents[&hit.source_id] {
+                    if expanded.len() >= context.budget.max_nodes {
+                        return Err(TriviumError::QueryExecution(
+                            "扩展绑定行超过节点预算 (Expanded binding rows exceed node budget)"
+                                .into(),
+                        ));
+                    }
+                    let mut row = NodeRow::new(hit.target_id);
+                    row.bindings = parent.bindings.clone();
+                    row.provenance.source_ids = vec![hit.source_id];
+                    row.provenance.min_depth = Some(hit.depth);
+                    row.graph_score = Some(ScoreValue {
+                        value: 1.0 / hit.depth.max(1) as f32,
+                        kind: ScoreKind::Exact,
+                    });
+                    expanded.push(row);
+                }
+            }
+            if self.include_input {
+                expanded.extend(input.rows);
+            }
+            return Ok(NodeSet::from_rows(expanded));
+        }
         let mut expanded_rows = Vec::new();
         let mut cursor = 0usize;
         while cursor < hits.len() {
@@ -2487,29 +2627,27 @@ pub enum SetOperation {
 }
 
 pub fn combine_sets(left: NodeSet, right: NodeSet, operation: SetOperation) -> NodeSet {
-    let mut left = left
-        .into_rows()
-        .into_iter()
-        .map(|row| (row.id, row))
-        .collect::<BTreeMap<_, _>>();
+    // 集合接口按 NodeId 返回；同一节点的不同投影环境继续分别保留。
+    let canonical = |rows| {
+        let mut output = NodeSet::from_rows(rows);
+        output.rows.sort_by_key(|row| row.id);
+        output
+    };
+    let mut left = left.into_rows();
+    if matches!(operation, SetOperation::Union) {
+        left.extend(right.into_rows());
+        return canonical(left);
+    }
     let right = right
         .into_rows()
         .into_iter()
         .map(|row| (row.id, row))
         .collect::<BTreeMap<_, _>>();
     match operation {
-        SetOperation::Union => {
-            for (id, row) in right {
-                if let Some(existing) = left.get_mut(&id) {
-                    merge_row(existing, &row);
-                } else {
-                    left.insert(id, row);
-                }
-            }
-        }
+        SetOperation::Union => {}
         SetOperation::Intersect => {
-            left.retain(|id, row| {
-                if let Some(other) = right.get(id) {
+            left.retain_mut(|row| {
+                if let Some(other) = right.get(&row.id) {
                     merge_row(row, other);
                     true
                 } else {
@@ -2517,11 +2655,9 @@ pub fn combine_sets(left: NodeSet, right: NodeSet, operation: SetOperation) -> N
                 }
             });
         }
-        SetOperation::Difference => left.retain(|id, _| !right.contains_key(id)),
+        SetOperation::Difference => left.retain(|row| !right.contains_key(&row.id)),
     }
-    NodeSet {
-        rows: left.into_values().collect(),
-    }
+    canonical(left)
 }
 
 pub fn lower_search_entry<T: VectorType>(
