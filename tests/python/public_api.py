@@ -15,6 +15,7 @@ from query_numeric_indexes import run_query_numeric_indexes
 from tql_semantics import run_tql_semantics
 from tql_boundaries import run_tql_boundaries
 from error_contracts import run_error_contract
+from kernel_boundaries import run_kernel_boundaries
 
 
 def run_transaction_contract(root: str) -> None:
@@ -69,6 +70,7 @@ def run_transaction_contract(root: str) -> None:
 
                 check(db)
                 replay_file = file + ".replay"
+                shutil.copyfile(file, replay_file)
                 shutil.copyfile(file + ".wal", replay_file + ".wal")
                 replay = triviumdb.TriviumDB(replay_file, **options)
                 try:
@@ -403,6 +405,7 @@ def main() -> None:
         run_resource_contract(root)
         run_shared_contract(root)
         run_error_contract(root)
+        run_kernel_boundaries(root)
         run_transaction_contract(root)
         run_write_boundaries(root)
         run_index_graph_boundaries(root)
@@ -473,7 +476,7 @@ def main() -> None:
         ]
 
         storage = db.storage_info()
-        assert storage["database_format_current"] == 9
+        assert storage["database_format_current"] == 10
         assert storage["property_index_format"] == 7
         assert storage["node_count"] == 2
 

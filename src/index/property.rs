@@ -2272,7 +2272,8 @@ pub fn load_sidecar(
                     ));
             }
         }
-        if kind == 0 && !(prefer_mmap_postings && version >= 3) {
+        // 没有 posting 的 Hash 索引也保留字段定义，供只读目录与规划器使用。
+        if kind == 0 && (entry_count == 0 || !(prefer_mmap_postings && version >= 3)) {
             registry.indexes.insert(
                 field,
                 HashPropertyIndex {

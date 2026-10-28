@@ -357,6 +357,7 @@ export type ErrorInteger = number | string;
 export interface ErrorDetailsByCode {
   TDB_IO: { io_kind: string; os_code: number | null };
   TDB_SERIALIZATION: { reason: string };
+  TDB_DTYPE_MISMATCH: { stored: DType; requested: DType };
   TDB_DIMENSION_MISMATCH: { expected: ErrorInteger; got: ErrorInteger };
   TDB_NODE_NOT_FOUND: { id: ErrorInteger };
   TDB_INVALID_VECTOR: { reason: string };

@@ -130,6 +130,10 @@ jobs:
         shell: bash
         run: cargo test --target ${{ matrix.target }} --lib --tests -- --test-threads=1
 
+      - name: 验证 release 小栈解析边界
+        if: runner.os == 'Linux'
+        run: cargo test --release --target ${{ matrix.target }} --test query parser_limits -- --test-threads=1
+
       - name: 运行规划器物化回归测试
         run: cargo test --target ${{ matrix.target }} --test query --features test-hooks tql_planner -- --test-threads=1
 

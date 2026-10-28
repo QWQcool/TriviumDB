@@ -1,7 +1,7 @@
 import {
   TriviumDB, ResourceRuntime, type TriviumDBOptions, type TransactionOperation,
   type JsSearchHit, type PreparedTql, type ShutdownStatus, type StorageInfo,
-  type TriviumDBError, type ErrorInteger,
+  type TriviumDBError, type ErrorInteger, type DType,
 } from 'triviumdb';
 
 function check(condition: boolean, message: string): asserts condition {
@@ -9,6 +9,14 @@ function check(condition: boolean, message: string): asserts condition {
 }
 
 export function inspectCoreError(error: TriviumDBError): void {
+  if (error.code === 'TDB_DTYPE_MISMATCH') {
+    const stored: DType = error.details.stored;
+    const requested: DType = error.details.requested;
+    void [stored, requested];
+    // @ts-expect-error 类型名采用字符串枚举。
+    const invalid: number = error.details.stored;
+    void invalid;
+  }
   if (error.code === 'TDB_DIMENSION_MISMATCH') {
     const expected: ErrorInteger = error.details.expected;
     const got: ErrorInteger = error.details.got;

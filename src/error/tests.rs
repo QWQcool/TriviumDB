@@ -6,6 +6,14 @@ use serde_json::{Value, json};
 pub(crate) fn cases() -> Vec<(E, &'static str, Value)> {
     vec![
         (
+            E::DtypeMismatch {
+                stored: "f32",
+                requested: "f16",
+            },
+            "TDB_DTYPE_MISMATCH",
+            json!({"stored":"f32","requested":"f16"}),
+        ),
+        (
             E::Io(std::io::Error::from_raw_os_error(2)),
             "TDB_IO",
             json!({"io_kind":"NotFound","os_code":2}),
@@ -221,12 +229,12 @@ pub(crate) fn cases() -> Vec<(E, &'static str, Value)> {
         ),
         (
             E::UnsupportedDatabaseVersion {
-                found: 10,
+                found: 11,
                 minimum_supported: 5,
-                current: 9,
+                current: 10,
             },
             "TDB_UNSUPPORTED_DATABASE_VERSION",
-            json!({"found":10,"minimum_supported":5,"current":9}),
+            json!({"found":11,"minimum_supported":5,"current":10}),
         ),
         (
             E::ApiMigrationRequired {

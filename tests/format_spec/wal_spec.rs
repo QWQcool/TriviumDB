@@ -121,6 +121,10 @@ fn wal长度零_最大值_超出剩余和尾部垃圾不越过损坏边界() {
 fn 未提交事务_缺commit与commit后残帧均保持原子恢复() {
     let source = path("wal_transaction_source");
     cleanup(&source);
+    Database::<f32>::open(&source, DIM)
+        .unwrap()
+        .close()
+        .unwrap();
     let mut wal = Wal::open_with_sync(&source, SyncMode::Full).unwrap();
     wal.append_batch(
         1,

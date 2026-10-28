@@ -9,6 +9,7 @@ const os = require('node:os')
 const path = require('node:path')
 const contract = require('../contracts/public_cases.json')
 const { runErrorContract } = require('./error_contracts')
+const { runKernelBoundaries } = require('./kernel_boundaries')
 const { TriviumDB, ResourceRuntime, verifySnapshot, restoreSnapshot } = require('../../index.js')
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'triviumdb-node-public-api-'))
@@ -43,6 +44,7 @@ function runTransactionContract(root) {
           }
           check(db)
           const replayFile = file + '.replay'
+          fs.copyFileSync(file, replayFile)
           fs.copyFileSync(file + '.wal', replayFile + '.wal')
           const replay = new TriviumDB(replayFile, options)
           try { check(replay) } finally { replay.close() }
@@ -357,6 +359,7 @@ async function main() {
     runResourceContract(root)
     runSharedContract(root)
     await runErrorContract(root)
+    runKernelBoundaries(root)
     runTransactionContract(root)
     await require('./write_boundaries.js')(root, TriviumDB)
     await require('./numeric_boundaries.js')(root, TriviumDB)
@@ -431,7 +434,7 @@ async function main() {
     assert.deepEqual(indexes.find(item => item.kind === 'composite').fields, ['tenant', 'region'])
 
     const storage = db.storageInfo()
-    assert.equal(storage.database_format_current, 9)
+    assert.equal(storage.database_format_current, 10)
     assert.equal(storage.property_index_format, 7)
     assert.equal(storage.node_count, 2)
 

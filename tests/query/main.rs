@@ -12,3 +12,5 @@ mod tql_phase2;
 mod tql_pipeline_parser;
 mod tql_planner;
 mod tql_reverse;
+
+mod parser_limits;

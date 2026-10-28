@@ -16,6 +16,12 @@ pub enum TriviumError {
     #[error("向量维度不匹配 (Vector dimension mismatch): 期望 {expected}，实际 {got}")]
     DimensionMismatch { expected: usize, got: usize },
 
+    #[error("向量类型不匹配 (Vector dtype mismatch): stored={stored}, requested={requested}")]
+    DtypeMismatch {
+        stored: &'static str,
+        requested: &'static str,
+    },
+
     #[error("节点不存在 (Node not found): {0}")]
     NodeNotFound(u64),
 
@@ -211,6 +217,7 @@ impl TriviumError {
             Self::Io(_) => "TDB_IO",
             Self::Serialization(_) => "TDB_SERIALIZATION",
             Self::DimensionMismatch { .. } => "TDB_DIMENSION_MISMATCH",
+            Self::DtypeMismatch { .. } => "TDB_DTYPE_MISMATCH",
             Self::NodeNotFound(_) => "TDB_NODE_NOT_FOUND",
             Self::InvalidVector { .. } => "TDB_INVALID_VECTOR",
             Self::PayloadTooLarge { .. } => "TDB_PAYLOAD_TOO_LARGE",
@@ -259,6 +266,9 @@ impl TriviumError {
             }
             Self::Serialization(error) => json!({"reason": error.to_string()}),
             Self::DimensionMismatch { expected, got } => json!({"expected": expected, "got": got}),
+            Self::DtypeMismatch { stored, requested } => {
+                json!({"stored": stored, "requested": requested})
+            }
             Self::NodeNotFound(id)
             | Self::NodeAlreadyExists(id)
             | Self::ConditionalUpdateNotMatched { id } => json!({"id": id}),

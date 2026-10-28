@@ -15,3 +15,5 @@ mod snapshot;
 mod text_index_lifecycle;
 mod vector_memory;
 mod wal_semantics;
+
+mod kernel_boundaries;

@@ -185,7 +185,7 @@ magic(4) + version(1) + generation(8)
 - 发布前流式保存旧文件组，随后同步并发布 `.publish` 撤销日志。当前 `TPUB` v2 日志为 136 字节，记录主文件、向量、marker、QuIVer 及其元数据、文本及其元数据、属性和图索引的存在状态、长度、CRC、代际、存储模式和提交状态，并校验日志自身 CRC。读取同时支持历史 v1 日志。延期保存且正文保持原样时，可保留原文本文件并省去正文备份复制。
 - Mmap 在全部索引同步后发布 marker；Rom 在文件组同步后原子更新日志提交状态，并记录新主文件的长度与 CRC。ReadWrite 打开时检查提交点：未提交则校验备份、恢复旧文件组并回放 WAL；已提交则验证新代并清理日志。恢复复制保留备份，全部恢复文件同步后才清理日志及备份，支持恢复途中再次中断。
 - ReadOnly/Immutable 不执行恢复或清理；有待恢复日志/WAL 时返回 `RecoveryRequired`，保持字节级零写。无有效恢复基础的文件损坏返回 `CorruptedFile`，不构造缺向量、缺 Payload 或空库的伪恢复状态；已提交新代损坏不能回滚旧代。
-- 旧代备份消耗纳入发布的文件组大小所对应的磁盘读写和临时空间，复制使用有界缓冲。同一句柄失败重试保留最初备份，向量从现有 COW 映射和 delta 完整重写。主文件使用 v9、marker 使用 v3；待恢复发布由支持对应日志版本的内核完成。
+- 旧代备份消耗纳入发布的文件组大小所对应的磁盘读写和临时空间，复制使用有界缓冲。映射有效时，同一句柄失败重试保留最初备份；向量映射在替换过程中失效时，实例进入待恢复状态，共享查询句柄统一拒绝后续操作。释放实例后由可写打开恢复文件组并回放 WAL。主文件使用 v10、marker 使用 v3；待恢复发布由支持对应日志版本的内核完成。
 - 默认 `storage::publication_recovery` 用独立日志字节 oracle 验证恢复、损坏拒绝、提交点与只读零写；`test-hooks` 强杀矩阵要求完整恢复所有 `Full` 模式已同步事务，打开失败不能算通过。
 
 ---
@@ -194,18 +194,9 @@ magic(4) + version(1) + generation(8)
 
 **实现位置**：`storage/file_format.rs`
 
-```rust
-const MAGIC: &[u8; 4] = b"TVDB";
+载入先检查历史公共头的 58 字节、`TVDB` 魔数与支持的版本范围。v10 随后校验完整的 74 字节类型头：`VTYP`、dtype、元素宽度、reserved 和头部 CRC32。Rom 的向量块止于 `edge_offset`，Mmap 的 `.vec` 长度与 slot 数、维度、元素宽度精确对应。
 
-if mmap.len() < HEADER_SIZE as usize {
-    return Err(TriviumError::CorruptedFile("文件头长度不足 (File header too short)".into()));
-}
-if &bytes[0..4] != MAGIC {
-    return Err(TriviumError::CorruptedFile("主文件魔数无效 (Invalid database magic)".into()));
-}
-```
-
-防止加载非 TriviumDB 文件或截断损坏文件，同时避免后续偏移量计算出现越界读取。
+ReadWrite/ReadOnly 类型不匹配返回 `DtypeMismatch`，并保留 `stored`、`requested` 字段。发布恢复先验证可信备份的类型，再复制正式文件；Readonly 路径保持原文件组。历史仅 WAL 或无类型空检查点附带非空 WAL 的数据，先用原版本恢复并完成检查点后升级。
 
 ---
 

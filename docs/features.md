@@ -141,7 +141,7 @@ TriviumDB 提供两种互斥的存储模式（`StorageMode`），且**系统支�
 
 ### 2. Mmap 模式（大规模零拷贝优先，默认）
 
-启动时，持续增长的大体积向量与已发布 raw Payload 分别位于 `.vec` 和 generation 化 `.pld.<generation>`；`.tdb` v9 保存节点 slot、关系边和必要元数据，不再重复内嵌完整 raw Payload。
+启动时，持续增长的大体积向量与已发布 raw Payload 分别位于 `.vec` 和 generation 化 `.pld.<generation>`；`.tdb` v10 保存节点 slot、关系边和必要元数据，不再重复内嵌完整 raw Payload。
 
 - **MAP_PRIVATE (COW)**：通过 `memmap2` 库将数 GB 的向量文件映射到操作系统的虚拟内存中。进程不会真的霸占物理内存，而是由 OS 根据查询压力按需（Page Fault）换入换出。
 - **分层向量池（VecPool）**：内存中维护 `基础层（mmap）+ 增量层（Vec）` 两段结构。新插入的向量只进增量层；delete/update 操作对基础层做 COW 写入，直到显式 `flush()` 时统一发布。
@@ -158,7 +158,7 @@ QuIVer 的 BQ、SM 位码与幅值、图拓扑和工作区位于匿名堆内存�
 
 正式查询直接扫描 mmap 基础层与内存增量层，过滤回退、残差和强制精确扫描共用这条路径。单层 `flat_vectors()` 直接借用已有内存；仅显式请求混合两层的连续切片时才生成 merged，并在写入后释放失效副本。Rom 写盘也逐段输出，切换为 Rom 拥有型存储时最多复制一次向量数据。
 
-当前查询不使用历史 `Vec<BqSignature>`。旧 Rust 整库签名接口仍可显式按需生成，容量计入堆内存估算；单条 getter 不分配整库数组。普通查询、flush、重开不物化旧数组。新快照保留原格式已允许的空 `TBQF` 缓存块（16 字节），不再为每个 slot 写入 384 字节。旧 v5 的 32/48-chunk 和后续自描述块继续验证格式几何，读取事实数据后不把旧缓存转成常驻状态；主文件仍为 v9。此处变化不涉及 QuIVer 的 BQ2/SM 位码与导航算法。
+当前查询不使用历史 `Vec<BqSignature>`。旧 Rust 整库签名接口仍可显式按需生成，容量计入堆内存估算；单条 getter 不分配整库数组。普通查询、flush、重开不物化旧数组。新快照保留原格式已允许的空 `TBQF` 缓存块（16 字节），不再为每个 slot 写入 384 字节。旧 v5 的 32/48-chunk 和后续自描述块继续验证格式几何，读取事实数据后不把旧缓存转成常驻状态；主文件使用 v10。此处变化不涉及 QuIVer 的 BQ2/SM 位码与导航算法。
 
 ### VecPool 混合 Flush 策略
 
@@ -203,9 +203,11 @@ QuIVer 按 slot 流式读取 FP16/FP32/mmap 向量，准备 BQ 编码与默认 S
 
 压实在持有 MemTable 写锁期间保存数据，并在保存成功后按 `MemTable → WAL` 锁顺序清理日志。宿主可配置周期维护，或使用 `disable_auto_compaction()` 撤销登记，在选定时段调用同步 `compact()`。关闭任务在已有操作排空后优先调度。
 
-### `.tdb` v9 与 Payload sidecar 布局
+### `.tdb` v10 与 Payload sidecar 布局
 
-Rom 模式仍将完整 Payload 写入单个 `.tdb`。Mmap 模式的 `.tdb` v9 只保存活跃 NodeId slot 和图/BQ 元数据，raw JSON 位于与提交 generation 绑定的 `.pld.<generation>`：
+v10 使用 74 字节文件头，持久化 `f32`、`f16`、`u64` 类型、元素宽度和文件头 CRC32；Rom 向量块及 Mmap `.vec` 的长度须精确等于 slot 数 × 维度 × 元素宽度。新库在容量准入成功后、第一条 WAL 写入前保存空的带类型检查点。
+
+Rom 模式仍将完整 Payload 写入单个 `.tdb`。Mmap 模式的 `.tdb` v10 只保存活跃 NodeId slot 和图/BQ 元数据，raw JSON 位于与提交 generation 绑定的 `.pld.<generation>`：
 
 ```text
 .tdb                 slot + graph + BQ metadata
@@ -216,7 +218,7 @@ Rom 模式仍将完整 Payload 写入单个 `.tdb`。Mmap 模式的 `.tdb` v9 �
 
 `.pld` 目录按 NodeId 严格递增，记录数据连续且每条带 CRC；header/目录 reserved、flags、offset、范围、JSON 完整性和整文件 CRC 均 fail-closed。Writer 先写临时文件并 fsync，再发布 generation marker；只有 marker v3 明确声明的 `.pld` 才可加载，旧 marker 附近的游离 sidecar 会被忽略。generation 文件名避免 Windows 上替换仍被旧 Reader mmap 的同名文件，旧 generation 在失去引用后 best-effort 回收。
 
-加载 v5-v8 时继续读取 `.tdb` 内嵌 Payload。ReadWrite 仅在显式 `flush()`/`compact()` 后迁移到 v9；ReadOnly/Immutable 只读兼容旧格式，不自动迁移、不创建 `.pld`、不修改任何制品。
+加载 v5-v8 时继续读取 `.tdb` 内嵌 Payload。ReadWrite 在后续持久化时发布 v10；空的历史检查点在首次可写打开准入成功后补齐类型身份。ReadOnly/Immutable 按原格式读取，保持原文件组。
 
 > **边持久化格式** 从 v7 起保存任意 JSON `metadata`，唯一键为 `(src, dst, label)`，重复 Upsert 原地覆盖权重与元数据。加载器继续兼容 v5/v6，旧边的元数据恢复为 `null`。BQ 元数据块仍采用从 v6 开始的自描述固定小端序布局。
 >

@@ -9,6 +9,12 @@
 - 两条 CD 共用发布来源校验。Stable Tag 对应 master 发布主线中的同仓库 dev → master 合并提交，并核对同提交 master CI；历史 Release 可在 master 前进后按原 Tag 补发。Beta 保留现行公开测试质量门禁。
 - 来源校验器从工作流提交加载到 Runner 临时目录，历史 Tag 使用原始源码参与验收和构建。
 
+- `.tdb` 升级为 v10：文件头保存 dtype、元素宽度与 CRC；错误类型在写入前拒绝，Rom/Mmap 校验精确向量块长度。新库先完成准入并保存类型检查点，再接收 WAL。非空 v5–v9 检查点按几何验证；历史仅 WAL/无类型空基础附带日志的样本，先用原版本恢复和完成检查点。回退使用升级前备份。旧空库升级按文件组发布并保留索引定义；只读加载保留空 Hash 索引字段。
+- Windows 向量替换或重映射失败导致当前映射失效时，实例及共享句柄进入待恢复状态，保留原 I/O 错误与 WAL，释放后重新打开恢复。
+- TQL 全部字符串解析入口验证完整输入；新增输入大小、token、括号与运算复杂度限制，覆盖连续 NOT 和平坦表达式链。非法写尾部在执行前拒绝。
+- 打开流程在节点、Payload、图、派生索引和 WAL 解码前检查保守峰值及实例预算，最终复核实际估算；容量准入完成后迁移/截断 WAL。预算拒绝释放共享预留并保留恢复依据。恢复阶段暂缓填充解析缓存，成功后按剩余预算设置缓存上限。
+- 新增 Rust、Python、Node 的类型、解析、预算与恢复边界测试；Linux CI 执行 release 2 MiB 小栈解析回归，Windows 测试使用真实共享标志验证文件替换失败。
+
 ## Unreleased
 
 Subsequent changes build on `0.9.0-beta.3`. See the bilingual [release notes](0.9.0-beta.3.md).
@@ -19,3 +25,9 @@ Subsequent changes build on `0.9.0-beta.3`. See the bilingual [release notes](0.
 - Mmap, Rom and snapshot documentation describe the current file group, security references point to current modules, and both READMEs state the Python 3.9–3.12 installation range.
 - Both CD workflows share release provenance validation. Stable tags identify a same-repository dev-to-master merge on master's release history with successful master CI for that exact commit. Historical releases remain eligible for recovery publishing after master advances. Beta releases retain their public-testing quality gates.
 - The provenance validator is loaded from the workflow commit into the runner's temporary directory, while historical tags retain their original source for validation and builds.
+
+- `.tdb` v10 stores dtype, element width and a header CRC. Mismatched types are rejected before writes, and both layouts require exact vector geometry. New databases pass admission and persist type identity before accepting WAL entries. Nonempty v5–v9 checkpoints establish dtype from geometry; historical WAL-only data and untyped empty checkpoints with nonempty WAL must first be recovered and checkpointed with their original version. Downgrades use pre-upgrade backups. Empty legacy databases migrate their complete file group and retain index definitions; read-only loading retains empty Hash index fields.
+- Vector replacement or remapping failures that invalidate a live mapping quarantine the instance and shared query handles. The original I/O error and WAL remain available; release the instance and reopen writable to recover.
+- Every TQL string parser requires complete input consumption. Limits on bytes, tokens, nesting and operators cover repeated NOT and flat expression chains. Invalid mutation tails are rejected before execution.
+- Opening checks conservative allocation peaks for nodes, payloads, graph data, derived indexes and WAL, then verifies the final heap estimate. WAL migration/truncation follows admission. Rejected opens release shared reservations and preserve the WAL for a later retry. Recovery defers parsed-cache population and configures the cache against remaining heap headroom afterward.
+- Rust, Python and Node regressions cover type, parser, budget and recovery boundaries. Linux CI runs optimized parsing on a 2 MiB stack; Windows tests use actual file-sharing flags to exercise replacement failures.

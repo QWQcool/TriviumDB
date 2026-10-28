@@ -764,11 +764,17 @@ impl<T: VectorType> PipelineOperator<T> for QuiverVectorSearch<T> {
             .iter()
             .map(|value| value.to_f32())
             .collect::<Vec<_>>();
+        let mut vector_error = None;
         let hits = index.search(
             &query,
             |slot, output| {
-                let Some((_, vector)) = context.memtable.active_vector_at_slot(slot) else {
-                    return false;
+                let vector = match context.memtable.active_vector_at_slot(slot) {
+                    Ok(Some((_, vector))) => vector,
+                    Ok(None) => return false,
+                    Err(error) => {
+                        vector_error = Some(error);
+                        return false;
+                    }
                 };
                 output.clear();
                 output.extend(vector.iter().map(|value| value.to_f32()));
@@ -780,6 +786,9 @@ impl<T: VectorType> PipelineOperator<T> for QuiverVectorSearch<T> {
                 rerank_limit: Some(self.ef_search.max(self.top_k)),
             },
         );
+        if let Some(error) = vector_error {
+            return Err(error);
+        }
         context.charge_vectors(hits.len())?;
         Ok(NodeSet::from_rows(
             hits.into_iter()

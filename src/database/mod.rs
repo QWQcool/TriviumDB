@@ -36,6 +36,7 @@ use fs2::FileExt;
 use rayon::prelude::*;
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::Duration;
 
@@ -223,7 +224,7 @@ impl<T: VectorType> QuiverBuildHandle<T> {
         resource_task.detach();
         let operation_guard = {
             let mut state = lock_or_recover(&self.lifecycle.0);
-            if state.recovery_required {
+            if state.recovery_required.load(Ordering::Acquire) {
                 return Err(TriviumError::WalClosed);
             }
             if state.lifecycle != DatabaseLifecycle::Open {
@@ -286,7 +287,7 @@ enum DatabaseLifecycle {
 }
 
 struct LifecycleState {
-    recovery_required: bool,
+    recovery_required: Arc<AtomicBool>,
     lifecycle: DatabaseLifecycle,
     active_operations: usize,
     group_commit_owner: Option<std::thread::ThreadId>,
@@ -334,7 +335,10 @@ impl Drop for GroupCommitGuard {
 
 impl OperationGuard {
     fn check_recovery(&self) -> Result<()> {
-        if lock_or_recover(&self.lifecycle.0).recovery_required {
+        if lock_or_recover(&self.lifecycle.0)
+            .recovery_required
+            .load(Ordering::Acquire)
+        {
             Err(TriviumError::WalClosed)
         } else {
             Ok(())
@@ -428,7 +432,7 @@ impl<T: VectorType> SearchHandle<T> {
 
     fn enter_operation(&self) -> Result<OperationGuard> {
         let mut state = lock_or_recover(&self.lifecycle.0);
-        if state.recovery_required {
+        if state.recovery_required.load(Ordering::Acquire) {
             return Err(TriviumError::WalClosed);
         }
         if state.lifecycle != DatabaseLifecycle::Open {
@@ -549,7 +553,7 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
 
     fn enter_operation_kind(&self, maintenance: bool) -> Result<OperationGuard> {
         let mut state = lock_or_recover(&self.lifecycle.0);
-        if state.recovery_required {
+        if state.recovery_required.load(Ordering::Acquire) {
             return Err(TriviumError::WalClosed);
         }
         if state.lifecycle != DatabaseLifecycle::Open {
@@ -676,72 +680,65 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
             )));
         }
 
-        file_format::recover_publication(path, config.access_mode == AccessMode::ReadWrite)?;
+        file_format::recover_publication::<T>(path, config.access_mode == AccessMode::ReadWrite)?;
 
         if config.access_mode == AccessMode::Immutable {
             crate::storage::snapshot::validate_manifest(path, std::any::type_name::<T>(), dim)?;
         }
+        if !std::path::Path::new(path).exists() && Wal::needs_recovery(path) {
+            return Err(TriviumError::CorruptedFile("缺少带类型的基础检查点，请用原版本恢复并导出 (Typed checkpoint missing; recover and export with the original version)".into()));
+        }
         let mut memtable = if std::path::Path::new(path).exists() {
-            file_format::load_with_payload_cache(
+            file_format::load_with_memory_limit(
                 path,
                 config.storage_mode,
                 config.load_text_index,
                 config.access_mode == AccessMode::ReadWrite,
                 config.missing_index_policy,
                 config.access_mode != AccessMode::ReadWrite,
-                Some((config.payload_cache_bytes, config.payload_cache_entry_bytes)),
+                config.memory_limit,
             )?
         } else {
             MemTable::new(dim)
         };
 
+        if memtable.dim() != dim {
+            return Err(TriviumError::DimensionMismatch {
+                expected: memtable.dim(),
+                got: dim,
+            });
+        }
         memtable.set_text_memory_limit(config.memory_limit);
         // 恢复必须从第一条记录开始使用调用方预算，避免先填充默认解析缓存再淘汰。
-        memtable
-            .configure_payload_cache(config.payload_cache_bytes, config.payload_cache_entry_bytes);
-        if config.access_mode == AccessMode::ReadWrite {
-            Wal::upgrade_legacy_wal::<T>(path)?;
-        }
+        memtable.begin_loading(config.memory_limit);
+        memtable.attach_resources(runtime.clone(), reservation);
 
         if Wal::needs_recovery(path) && config.access_mode != AccessMode::ReadWrite {
             return Err(TriviumError::RecoveryRequired {
                 wal_path: format!("{}.wal", path),
             });
         }
+        let mut recovered_offset = None;
         if Wal::needs_recovery(path) {
             let mut entry_count = 0usize;
-            let valid_offset = Wal::replay_entries::<T>(path, |entry| {
-                transaction::replay_entry(&mut memtable, entry)?;
-                entry_count = entry_count.saturating_add(1);
-                Ok(())
-            })?;
+            let restored_bytes = std::cell::Cell::new(memtable.estimated_memory_bytes());
+            let valid_offset =
+                Wal::replay_for_open::<T>(path, config.memory_limit, &restored_bytes, |entry| {
+                    transaction::replay_entry(&mut memtable, entry)?;
+                    memtable.check_load_allocation(0)?;
+                    restored_bytes.set(memtable.estimated_memory_bytes());
+                    entry_count = entry_count.saturating_add(1);
+                    Ok(())
+                })?;
 
             // 回放按完整提交后的事实重建唯一所有者，验证通过后再修改 WAL。
             let unique_definitions = memtable.unique_index_definitions();
             memtable.restore_unique_index_definitions(&unique_definitions)?;
 
-            // 内存恢复成功后才截断损坏或未提交尾部；回放失败保留原 WAL 供重试。
-            let wal_path = format!("{}.wal", path);
-            let wal_file = std::fs::OpenOptions::new().write(true).open(&wal_path)?;
-            wal_file.set_len(valid_offset)?;
-            wal_file.sync_all()?;
+            memtable.check_load_allocation(0)?;
 
-            if entry_count > 0 {
-                tracing::info!(
-                    "已从 WAL 恢复 {} 条记录，安全截断至偏移 {}",
-                    entry_count,
-                    valid_offset
-                );
-            } else {
-                tracing::info!(
-                    "已清除损坏/未提交的 WAL 数据，回退至偏移 {} (Cleared corrupt/uncommitted WAL, truncated to {})",
-                    valid_offset,
-                    valid_offset
-                );
-            }
+            recovered_offset = Some((valid_offset, entry_count));
         }
-
-        memtable.attach_resources(runtime.clone(), reservation);
 
         // TextIndex 由 sidecar 精确恢复；缺失时保持为空，避免打开数据库时
         // 无条件扫描全部 Payload 并改变用户显式 index_text() 的索引语义。
@@ -768,10 +765,42 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
             memtable.try_reserve_for_insert(additional)?;
         }
 
+        memtable.check_load_allocation(0)?;
+        memtable.finish_loading(config.payload_cache_bytes, config.payload_cache_entry_bytes)?;
+        // 所有加载、恢复与容量准入完成后才修改 WAL 尾部或迁移空检查点。
+        if config.access_mode == AccessMode::ReadWrite {
+            if std::path::Path::new(path).exists() {
+                file_format::upgrade_empty_checkpoint(&mut memtable, path, config.storage_mode)?;
+            } else {
+                file_format::initialize::<T>(path, dim)?;
+            }
+        }
+        if config.access_mode == AccessMode::ReadWrite {
+            Wal::admit_legacy_migration(
+                path,
+                config.memory_limit,
+                memtable.estimated_memory_bytes(),
+            )?;
+            Wal::upgrade_legacy_wal::<T>(path)?;
+        }
+        if let Some((offset, entry_count)) = recovered_offset {
+            let file = std::fs::OpenOptions::new()
+                .write(true)
+                .open(format!("{path}.wal"))?;
+            file.set_len(offset)?;
+            file.sync_all()?;
+            tracing::info!(
+                entry_count,
+                offset,
+                "WAL 恢复与尾部截断完成 (WAL recovery and tail truncation completed)"
+            );
+        }
+
         let wal = match config.access_mode {
             AccessMode::ReadWrite => Wal::open_with_sync(path, config.sync_mode)?,
             AccessMode::ReadOnly | AccessMode::Immutable => Wal::disabled(path, config.sync_mode),
         };
+        let recovery_required = memtable.recovery_latch();
         Ok(Self {
             db_path: normalized_path.to_string_lossy().into_owned(),
             memtable: Arc::new(RwLock::new(memtable)),
@@ -796,7 +825,7 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
             lifecycle: Arc::new((
                 Mutex::new(LifecycleState {
                     lifecycle: DatabaseLifecycle::Open,
-                    recovery_required: false,
+                    recovery_required,
                     active_operations: 0,
                     group_commit_owner: None,
                     shutdown_phase: ShutdownPhase::Open,
@@ -3279,6 +3308,46 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         Database::open(&dir.join("test.tdb").to_string_lossy(), 3).unwrap()
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn 向量映射失效会隔离writer与已准入句柄() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let mut db = open_db(&format!("mapping_quarantine_{}", std::process::id()));
+        let path = db.db_path.clone();
+        db.insert_with_id(1, &[1.0, 0.0, 0.0], json!({"state":"accepted"}))
+            .unwrap();
+        db.flush().unwrap();
+        let handle = db.search_handle();
+        let admitted = handle.enter_operation().unwrap();
+        let blocker = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .share_mode(3)
+            .open(format!("{path}.vec"))
+            .unwrap();
+        db.update_vector(1, &[0.0, 1.0, 0.0]).unwrap();
+        assert!(matches!(db.flush(), Err(TriviumError::Io(_))));
+        assert!(matches!(
+            admitted.check_recovery(),
+            Err(TriviumError::WalClosed)
+        ));
+        assert!(matches!(
+            lock_or_recover(&db.wal).ensure_writable(),
+            Err(TriviumError::WalClosed)
+        ));
+        drop(blocker);
+        drop(admitted);
+        drop(handle);
+        drop(db);
+        let mut recovered = Database::<f32>::open(&path, 3).unwrap();
+        let node = recovered.get(1).unwrap().unwrap();
+        assert_eq!(node.vector, vec![0.0, 1.0, 0.0]);
+        assert_eq!(node.payload, json!({"state":"accepted"}));
+        recovered.close().unwrap();
+        drop(recovered);
+        std::fs::remove_dir_all(std::path::Path::new(&path).parent().unwrap()).unwrap();
     }
 
     #[test]

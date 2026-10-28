@@ -62,6 +62,7 @@ pub fn search<T: VectorType>(
     query: &[T],
     top_k: usize,
 ) -> Result<Vec<SearchHit>> {
+    db.ensure_readable()?;
     let runtime = db.resource_runtime();
     let estimate = top_k
         .min(db.internal_slot_count())
@@ -101,27 +102,27 @@ fn search_inner<T: VectorType>(
 
     let candidates = (0..db.internal_slot_count())
         .into_par_iter()
-        .fold(
+        .try_fold(
             || BinaryHeap::with_capacity(top_k),
             |mut heap, slot| {
-                if let Some((id, vector)) = db.active_vector_at_slot(slot) {
+                if let Some((id, vector)) = db.active_vector_at_slot(slot)? {
                     let score = T::similarity(query, vector);
                     if score.is_finite() {
                         insert_candidate(&mut heap, Candidate { id, score }, top_k);
                     }
                 }
-                heap
+                Ok::<_, TriviumError>(heap)
             },
         )
-        .reduce(
+        .try_reduce(
             || BinaryHeap::with_capacity(top_k),
             |mut left, right| {
                 for candidate in right {
                     insert_candidate(&mut left, candidate, top_k);
                 }
-                left
+                Ok(left)
             },
-        );
+        )?;
 
     let mut candidates = candidates.into_vec();
     candidates.sort_by(|left, right| {

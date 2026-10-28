@@ -87,6 +87,7 @@ fn append_raw_wal_entry<T: serde::Serialize>(path: &str, entry: &WalEntry<T>, co
 fn 测试_WAL丢失TxCommit的幽灵事务_被正确截断并保护后续追加() {
     let path = tmp_db("wal_phantom_tx");
     cleanup(&path);
+    Database::<f32>::open(&path, DIM).unwrap().close().unwrap();
 
     // 1. 手动构造一个有头无尾的幽灵事务，以及一个后续的正常独立操作，模拟复杂的断电残留
     append_raw_wal_entry::<f32>(&path, &WalEntry::TxBegin { tx_id: 100 }, false);
@@ -127,6 +128,7 @@ fn 测试_WAL丢失TxCommit的幽灵事务_被正确截断并保护后续追加(
 fn 测试_WAL遇尾部乱码死字节_精确截除防止污染() {
     let path = tmp_db("wal_corrupted_tail");
     cleanup(&path);
+    Database::<f32>::open(&path, DIM).unwrap().close().unwrap();
 
     // 1. 正常的插入
     append_raw_wal_entry::<f32>(
