@@ -21,6 +21,11 @@
 - 图副本在采用前完整验证边、数量和目录，并与主文件端点、标签、边权及 Metadata 逐项比对。只读校验失败保留文件组并返回损坏错误；Writer 可显式重建。校验及 JSON 解码峰值参与加载准入。
 - 增加发布提交前后故障、持有句柄隔离、恢复数据与约束、v7 复合兼容、CRC 一致图畸形样例，以及实际 Python/Node 制品的共享契约验收。
 
+- 浮点余弦在范数、点积或分母发生上溢/下溢时回退到 `f64` 累加，常规有限幅值保留 SIMD；覆盖通用和 384 维缓存范数路径，零向量得分为 `0`。
+- `u64` 基础检索保持完整位模式，统一使用精确汉明匹配位数。自动 QuIVer 构建按浮点 dtype 选择，历史二进制索引副本跳过采用，显式 `u64` 构建返回结构化输入错误；Hook 浮点观察视图的向量改写明确拒绝。
+- 维度迁移在写入前拒绝已有目标文件组，先完成独占暂存构建，再在目标写锁下发布文件组并交接锁。发布使用同盘原子硬链接；提交前只回收本次创建的目录项，提交后保留完整新库。源库和碰撞文件保持原样。
+- 增加独立几何与整数样例、SIMD/缓存范数、三端检索、迁移故障、提交点及目标锁交错测试。
+
 ## Unreleased
 
 Subsequent changes build on `0.9.0-beta.3`. See the bilingual [release notes](0.9.0-beta.3.md).
@@ -43,3 +48,8 @@ Subsequent changes build on `0.9.0-beta.3`. See the bilingual [release notes](0.
 - Node JSON boundaries use length-aware property names throughout CRUD, transactions, filters, business edges, hooks and query results. Nested NUL keys and own `__proto__` data properties round-trip; invalid JSON values and cyclic structures are rejected before writes.
 - Graph sidecars validate every edge, count and directory against each other and compare endpoints, labels, weights and Metadata with main-file facts before adoption. Read-only failures preserve the file group and report corruption; writers can explicitly rebuild the sidecar. Validation and JSON decode peaks participate in load admission.
 - Regression coverage includes pre/post-commit failures, retained handles, recovered data and constraints, v7 composite compatibility, CRC-consistent graph mutations and actual Python/Node artifacts.
+
+- Cosine kernels fall back to f64 accumulation when norms, dot products or denominators overflow or underflow, while ordinary finite magnitudes retain SIMD execution. Both general and cached 384-dimensional paths share the checks; zero vectors score zero.
+- Basic u64 retrieval preserves complete query bit patterns and consistently scores matching bits through exact Hamming search. Automatic QuIVer construction selects floating-point dtypes; historical binary sidecars are skipped, and explicit u64 construction returns a structured input error. Observable floating-point hook query rewrites are rejected for binary fingerprints.
+- Dimension migration rejects existing destination artifacts before writing, builds a private staging database, publishes under the destination write lock, and transfers that lock to the returned instance. Publication uses atomic same-filesystem hard links. Pre-commit failures reclaim only newly created entries; post-commit failures preserve the complete new database. Source data and colliding files remain unchanged.
+- Independent geometry/integer examples, SIMD/cached-norm checks, native SDK retrieval, migration faults, commit boundaries and lock interleavings extend regression coverage.

@@ -21,6 +21,75 @@ use std::path::Path;
 mod publication;
 pub(crate) use publication::recover as recover_publication;
 
+/// 从已关闭的独占暂存库发布全新文件组；目录项以硬链接原子创建，保留目标互斥锁。
+pub(crate) fn publish_new_database<T: VectorType>(source: &str, target: &str) -> Result<()> {
+    validate_checkpoint_type::<T>(source, &vec_path_from_db(source), source)?;
+    let generation = read_marker_generation(&flush_ok_path_from_db(source)).ok_or_else(|| {
+        TriviumError::CorruptedFile(
+            "迁移暂存库缺少提交标记 (Migration staging database has no commit marker)".into(),
+        )
+    })?;
+    if generation != 1 {
+        return Err(TriviumError::InvalidInput(
+            "迁移暂存库必须从第一代发布 (Migration staging database must publish generation one)"
+                .into(),
+        ));
+    }
+    let mut created = Vec::new();
+    let mut committed = false;
+    let result = (|| -> Result<()> {
+        publication::begin(target, generation, StorageMode::Mmap, false)?;
+        let suffixes = crate::storage::snapshot::generation_suffixes(source);
+        for suffix in suffixes
+            .iter()
+            .filter(|suffix| suffix.as_str() != ".flush_ok")
+            .map(String::as_str)
+            .chain(std::iter::once(".wal"))
+        {
+            #[cfg(feature = "test-hooks")]
+            crate::test_hooks::io_result(crate::test_hooks::IoPoint::MigrationPublishFile)?;
+            let destination = format!("{target}{suffix}");
+            // 源文件已经 fsync；同盘链接原子创建完整目录项，同时拒绝覆盖任何既有文件。
+            std::fs::hard_link(format!("{source}{suffix}"), &destination)?;
+            created.push(destination);
+            #[cfg(feature = "test-hooks")]
+            crate::test_hooks::hit(crate::test_hooks::ConcurrencyPoint::MigrationFilePublished);
+            if created.len() == 1 {
+                #[cfg(feature = "test-hooks")]
+                crate::test_hooks::io_result(crate::test_hooks::IoPoint::MigrationAfterFirstFile)?;
+            }
+        }
+        crate::storage::fs::sync_parent_directory(Path::new(target))?;
+        #[cfg(feature = "test-hooks")]
+        crate::test_hooks::io_result(crate::test_hooks::IoPoint::MigrationPublishMarker)?;
+        std::fs::hard_link(flush_ok_path_from_db(source), flush_ok_path_from_db(target))?;
+        committed = true;
+        #[cfg(feature = "test-hooks")]
+        crate::test_hooks::io_result(crate::test_hooks::IoPoint::MigrationAfterCommit)?;
+        crate::storage::fs::sync_parent_directory(Path::new(target))?;
+        publication::cleanup(target)?;
+        Ok(())
+    })();
+    if result.is_err() && !committed {
+        // 全新目标的发布只创建目录项；仅移除本次成功创建的链接，保留发生碰撞的外来文件。
+        for file in created
+            .into_iter()
+            .chain(std::iter::once(format!("{target}.publish.tmp")))
+        {
+            match std::fs::remove_file(&file) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        if publication::pending(target) {
+            publication::cleanup(target)?;
+        }
+        crate::storage::fs::sync_parent_directory(Path::new(target))?;
+    }
+    result
+}
+
 // ══════ 文件头常量 ══════
 const MAGIC: &[u8; 4] = b"TVDB";
 pub const CURRENT_VERSION: u16 = 10;
@@ -2001,6 +2070,10 @@ fn load_quiver_index<T: VectorType>(
     policy: crate::database::MissingIndexPolicy,
 ) -> Result<()> {
     use crate::index::quiver::QuIVer;
+
+    if crate::vector::is_binary_vector::<T>() {
+        return Ok(());
+    }
 
     let quiver_path = quiver_path_from_db(db_path);
     let qp = std::path::Path::new(&quiver_path);

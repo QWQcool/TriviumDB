@@ -39,6 +39,7 @@ pub enum ConcurrencyPoint {
     AfterPublicationRestore,
     AfterSidecarsPersisted,
     AfterPublicationCommitted,
+    MigrationFilePublished,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,6 +64,10 @@ pub enum IoPoint {
     PropertySidecarWrite,
     GraphSidecarWrite,
     CheckpointWalClear,
+    MigrationPublishFile,
+    MigrationAfterFirstFile,
+    MigrationPublishMarker,
+    MigrationAfterCommit,
     WalFlush,
     WalSync,
     WalMigrationCreate,

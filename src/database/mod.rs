@@ -11,6 +11,7 @@
 pub mod config;
 pub mod facade;
 mod lifecycle;
+mod migration;
 pub use lifecycle::{InstanceMemoryStats, InstanceStats, ShutdownPhase, ShutdownStatus};
 pub(crate) mod pipeline;
 pub mod transaction;
@@ -614,6 +615,16 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         runtime: crate::resources::ResourceRuntime,
         reservation: crate::resources::DatabaseReservation,
     ) -> Result<Self> {
+        Self::open_reserved_with_lock(path, config, runtime, reservation, None)
+    }
+
+    fn open_reserved_with_lock(
+        path: &str,
+        config: Config,
+        runtime: crate::resources::ResourceRuntime,
+        reservation: crate::resources::DatabaseReservation,
+        reserved_lock: Option<std::fs::File>,
+    ) -> Result<Self> {
         let dim = config.dim;
 
         // ═══ 维度安全校验 ═══
@@ -656,23 +667,31 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                 "只读模式要求数据库文件已存在: {path}"
             )));
         }
-        let lock_file = match config.access_mode {
-            AccessMode::ReadWrite => Some(
-                std::fs::OpenOptions::new()
-                    .create(true)
-                    .read(true)
-                    .write(true)
-                    .open(&lock_path)?,
-            ),
-            AccessMode::ReadOnly => Some(std::fs::OpenOptions::new().read(true).open(&lock_path)?),
-            AccessMode::Immutable => None,
+        let reserved_lock_held = reserved_lock.is_some();
+        let lock_file = if let Some(lock) = reserved_lock {
+            Some(lock)
+        } else {
+            match config.access_mode {
+                AccessMode::ReadWrite => Some(
+                    std::fs::OpenOptions::new()
+                        .create(true)
+                        .read(true)
+                        .write(true)
+                        .open(&lock_path)?,
+                ),
+                AccessMode::ReadOnly => {
+                    Some(std::fs::OpenOptions::new().read(true).open(&lock_path)?)
+                }
+                AccessMode::Immutable => None,
+            }
         };
-        let locked = match (config.access_mode, lock_file.as_ref()) {
-            (AccessMode::ReadWrite, Some(file)) => file.try_lock_exclusive().is_ok(),
-            (AccessMode::ReadOnly, Some(file)) => file.try_lock_shared().is_ok(),
-            (AccessMode::Immutable, None) => true,
-            _ => false,
-        };
+        let locked = reserved_lock_held
+            || match (config.access_mode, lock_file.as_ref()) {
+                (AccessMode::ReadWrite, Some(file)) => file.try_lock_exclusive().is_ok(),
+                (AccessMode::ReadOnly, Some(file)) => file.try_lock_shared().is_ok(),
+                (AccessMode::Immutable, None) => true,
+                _ => false,
+            };
         if !locked {
             return Err(TriviumError::DatabaseLocked(format!(
                 "Database '{}' is already opened with an incompatible access mode",
@@ -1031,6 +1050,9 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         let _operation = self.enter_operation()?;
 
         self.require_write_access("build_quiver_index")?;
+        if crate::vector::is_binary_vector::<T>() {
+            return Err(TriviumError::InvalidInput("u64 使用汉明精确检索，QuIVer 构建支持浮点向量 (u64 uses exact Hamming retrieval; QuIVer construction supports floating-point vectors)".into()));
+        }
         let cfg = config.unwrap_or_default();
         let (_workspace, snapshot) = {
             let mt = read_or_recover(&self.memtable);
@@ -3219,55 +3241,7 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         T: serde::Serialize + serde::de::DeserializeOwned,
     {
         let _operation = self.enter_operation()?;
-        let mt = read_or_recover(&self.memtable);
-        let mut node_ids = mt.all_node_ids();
-        node_ids.sort();
-
-        let mut new_db = Database::<T>::open_with_runtime(
-            new_path,
-            Config {
-                dim: new_dim,
-                memory_limit: self.memory_limit,
-                ..Default::default()
-            },
-            self.resource_runtime.clone(),
-        )?;
-
-        let zero_vec = vec![T::zero(); new_dim];
-        for &nid in &node_ids {
-            if let Some(payload) = mt.get_payload(nid) {
-                new_db.insert_with_id(nid, &zero_vec, (*payload).clone())?;
-            }
-        }
-
-        for &nid in &node_ids {
-            if let Some(edges) = mt.get_edges(nid) {
-                for edge in edges {
-                    if mt.get_payload(edge.target_id).is_some() {
-                        new_db.upsert_edge(
-                            nid,
-                            edge.target_id,
-                            &edge.label,
-                            edge.weight,
-                            edge.metadata.clone(),
-                        )?;
-                    }
-                }
-            }
-        }
-
-        new_db.flush()?;
-        tracing::info!(
-            "维度迁移完成: {} → {}，共迁移 {} 个节点 (Dimension migration done: {} → {}, {} nodes migrated)",
-            mt.dim(),
-            new_dim,
-            node_ids.len(),
-            mt.dim(),
-            new_dim,
-            node_ids.len()
-        );
-
-        Ok((new_db, node_ids))
+        migration::migrate(self, new_path, new_dim)
     }
 
     // ════════════════════════════════════════════════════════

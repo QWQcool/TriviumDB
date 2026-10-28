@@ -11,6 +11,7 @@ mod proptest_core;
 mod public_api_alignment;
 mod query_numeric_indexes;
 mod quiver_threshold;
+mod retrieval_migration;
 mod runtime_types;
 mod search;
 mod search_boundaries;

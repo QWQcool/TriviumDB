@@ -752,7 +752,11 @@ impl<T: VectorType> PipelineOperator<T> for QuiverVectorSearch<T> {
                 got: self.query.len(),
             });
         }
-        let Some(index) = context.memtable.quiver() else {
+        let Some(index) = context
+            .memtable
+            .quiver()
+            .filter(|_| !crate::vector::is_binary_vector::<T>())
+        else {
             return ExactVectorSearch {
                 query: self.query.clone(),
                 top_k: self.top_k,

@@ -220,6 +220,7 @@ pub(crate) fn execute_pipeline_with_limit<T: VectorType>(
     let mut query_vec_f32: Vec<f32> = query_vector
         .map(|qv| qv.iter().map(|x| x.to_f32()).collect())
         .unwrap_or_default();
+    let original_hook_query = crate::vector::is_binary_vector::<T>().then(|| query_vec_f32.clone());
     {
         let t0 = std::time::Instant::now();
         call_hook(|| hook.on_pre_search(&mut query_vec_f32, &mut safe_cfg, ctx));
@@ -246,7 +247,18 @@ pub(crate) fn execute_pipeline_with_limit<T: VectorType>(
     }
 
     // 如果 Hook 修改了查询向量，需要转回泛型 T
-    let hooked_query: Vec<T> = query_vec_f32.iter().map(|&x| T::from_f32(x)).collect();
+    if original_hook_query
+        .as_ref()
+        .is_some_and(|original| original != &query_vec_f32)
+    {
+        return Err(crate::TriviumError::InvalidInput("u64 查询保持原始位模式，浮点 Hook 查询改写不适用于二进制指纹 (u64 queries preserve their original bits; floating-point hook query rewriting is unavailable for binary fingerprints)".into()));
+    }
+    let hooked_query: Vec<T> =
+        if let Some(original) = query_vector.filter(|_| crate::vector::is_binary_vector::<T>()) {
+            original.to_vec()
+        } else {
+            query_vec_f32.iter().map(|&x| T::from_f32(x)).collect()
+        };
     let query_vector: Option<&[T]> = if query_vector.is_some() {
         Some(&hooked_query)
     } else {
@@ -254,6 +266,12 @@ pub(crate) fn execute_pipeline_with_limit<T: VectorType>(
     };
 
     let config = &safe_cfg;
+    if crate::vector::is_binary_vector::<T>()
+        && config.enable_advanced_pipeline
+        && (config.enable_sparse_residual || config.enable_dpp)
+    {
+        return Err(crate::TriviumError::InvalidInput("u64 支持汉明检索与图扩散，浮点认知重排配置不适用于二进制指纹 (u64 supports Hamming retrieval and graph expansion; floating-point cognitive reranking is unavailable for binary fingerprints)".into()));
+    }
     ctx.record_observation("estimated_heap_bytes", mt.estimated_memory_bytes() as u64);
     ctx.record_observation("mmap_vector_bytes", mt.mmap_vector_bytes() as u64);
     ctx.record_observation("node_count", mt.node_count() as u64);
@@ -290,7 +308,10 @@ pub(crate) fn execute_pipeline_with_limit<T: VectorType>(
         // QuIVer 构建已完成；精确回退直接读取基础层和增量层。
         recall_text_ranked(&mt, config, query_text, &mut sparse_ranking);
         let vector_recall_started = std::time::Instant::now();
-        let route = if !config.force_brute_force && mt.quiver().is_some() {
+        let route = if !crate::vector::is_binary_vector::<T>()
+            && !config.force_brute_force
+            && mt.quiver().is_some()
+        {
             1
         } else {
             0
@@ -598,7 +619,10 @@ fn recall_vector_ranked<T: VectorType>(
     // 2. 索引尚未就绪或 force_brute_force 时执行暴力全扫。
     //    —— 直接扫描基础层和增量层，无需构建合并缓存
     // ═══════════════════════════════════════════════════════
-    let vector_hits: Vec<SearchHit> = if !config.force_brute_force && mt.quiver().is_some() {
+    let vector_hits: Vec<SearchHit> = if !crate::vector::is_binary_vector::<T>()
+        && !config.force_brute_force
+        && mt.quiver().is_some()
+    {
         let approximate_hits = quiver_pipeline(mt, config, query_vector);
         if config.payload_filter.is_some() && approximate_hits.len() < config.top_k {
             tracing::debug!(

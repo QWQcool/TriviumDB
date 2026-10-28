@@ -711,6 +711,9 @@ cargo test --test contracts 共享json契约由rust适配器完整执行
 
 ## 类型、解析与加载边界回归
 
+- `tests/core/retrieval_migration.rs` 以固定整数和几何样例验证各检索入口的完整 `u64` 位模式、汉明分数、Hook 改写拒绝、极端有限浮点自相似度、重开、已有迁移目标字节保持和完整新库迁移。内核向量用例覆盖标量、当前 CPU 支持的 SIMD、384 维缓存范数、极端尺度与零向量，预期来自独立几何关系。
+- `tests/fault_io/migration_publication.rs` 验证暂存构建、首文件发布后、marker 提交前与提交后故障，核对原库、目标完整内容及重试；确定性交错验证目标锁和碰撞文件保留。Node/Python 通过共享 `retrieval_boundaries.json` 在安装制品上核对整数检索、有限浮点分数和迁移拒绝的结构化错误。
+
 - `tests/fault_io/schema_publication.rs` 在发布前备份、属性/图副本写入和提交后 WAL 清理处注入故障，覆盖 Rom/Mmap、单字段/复合唯一约束及创建/删除。断言原始错误、持有句柄时读写隔离、已确认数据保留，以及按提交点重开后的约束、重复值判定和再次持久化。
 - `tests/storage/index_schema_boundaries.rs` 使用独立字段/记录样例验证 NUL、转义、Unicode 与同分隔符不同边界定义的往返、旧 v7 复合副本回退和只读零写；CRC 一致的畸形图样例覆盖 JSON、Metadata、有限边权变更、端点、目录、数量、UTF-8 和保留位，ReadOnly/Immutable 在采用前拒绝，文件组保持原样。正向样例核对平行标签、自环、大 ID 和完整容器 Metadata。两端 `kernel_boundaries` 使用共享字段契约在实际 SDK 产物中验收；Node 同时覆盖嵌套 NUL、`__proto__` 自有属性、CRUD/事务/图/TQL 输出和非法 JSON 拒绝后的 WAL 保持。
 

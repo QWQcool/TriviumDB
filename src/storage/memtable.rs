@@ -1694,7 +1694,8 @@ impl<T: VectorType> MemTable<T> {
     }
 
     pub fn auto_quiver_build_needed(&self) -> bool {
-        self.dim <= crate::index::bq::MAX_BQ_DIM
+        !crate::vector::is_binary_vector::<T>()
+            && self.dim <= crate::index::bq::MAX_BQ_DIM
             && self.auto_build_quiver
             && self.payloads.len() >= auto_quiver_node_threshold(self.dim)
             && self.quiver_index.is_none()
@@ -1822,6 +1823,9 @@ impl<T: VectorType> MemTable<T> {
 
     /// 从持久化文件恢复 QuIVer 索引（跳过重建）
     pub fn set_quiver_index(&mut self, mut quiver: QuIVer) {
+        if crate::vector::is_binary_vector::<T>() {
+            return;
+        }
         self.checkpoint_dirty = true;
         if self.dim <= crate::index::bq::MAX_BQ_DIM {
             if let Err(error) = quiver.prepare_default_sm(|slot, buffer| {
@@ -1945,7 +1949,7 @@ impl<T: VectorType> MemTable<T> {
     }
 
     pub fn build_quiver(&mut self, config: &QuIVerConfig) {
-        if self.dim > crate::index::bq::MAX_BQ_DIM {
+        if crate::vector::is_binary_vector::<T>() || self.dim > crate::index::bq::MAX_BQ_DIM {
             self.quiver_index = None;
             return;
         }
@@ -1953,7 +1957,8 @@ impl<T: VectorType> MemTable<T> {
     }
 
     pub(crate) fn quiver_build_snapshot(&self) -> Option<QuiverBuildSnapshot> {
-        if self.dim > crate::index::bq::MAX_BQ_DIM
+        if crate::vector::is_binary_vector::<T>()
+            || self.dim > crate::index::bq::MAX_BQ_DIM
             || self.vec_pool.total_count() == 0
             || self.payloads.is_empty()
         {
@@ -2007,7 +2012,7 @@ impl<T: VectorType> MemTable<T> {
         source_generation: u64,
         index: QuIVer,
     ) -> bool {
-        if self.vector_generation != source_generation {
+        if crate::vector::is_binary_vector::<T>() || self.vector_generation != source_generation {
             return false;
         }
         self.quiver_index = Some(index);

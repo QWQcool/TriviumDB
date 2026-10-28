@@ -652,6 +652,8 @@ enum DbBackend {
 | `f16` | 2 B | 半精度 | 大规模数据集，内存减半，精度损失极小 |
 | `u64` | 8 B | 整数 | SimHash 等二值化/离散化向量 |
 
+浮点向量使用余弦评分和 QuIVer 加速；相似度内核在异常幅值下通过 `f64` 累加保持有限计算，常规幅值继续使用 SIMD。`u64` 指纹使用原始位模式的精确汉明评分，普通、高级、批量与 TQL 基础检索统一采用匹配位数，构图阈值只作用于浮点向量。
+
 ### 数据转换
 
 Python 侧的 `dict` 与 Rust 侧的 `serde_json::Value` 通过 `pyobject_to_json` / `json_to_pyobject` 双向无损转换。支持的 Python 类型：`None` / `bool` / `int` / `float` / `str` / `list` / `dict`。

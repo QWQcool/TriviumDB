@@ -403,7 +403,7 @@ Rust, Python, and Node.js share the same TQL, Prepared queries, four property-in
 | 🧠 **Cognitive pipeline**        | `search_advanced()` is the toggleable fixed-order official template; TQL freely composes stateless FISTA / parameterized SA-PPR / DPP / NMF, while refractory fatigue remains stateful API-only |
 | 🔌 **Hook system**               | 6-stage pipeline injection points with C/C++ FFI dynamic library plugin support                                            |
 | 📦 **O(1) operations**           | FreeList tombstone reuse + Reverse Hash Net for O(1) reverse edge lookup                                                   |
-| ⚡ **QuIVer ANN index**          | BQ graph construction + default SM-L2 navigation + cosine reranking, hot/cold separation, incremental maintenance         |
+| ⚡ **QuIVer ANN index**          | BQ graph construction + default SM-L2 navigation + cosine reranking for f32/f16 embeddings, hot/cold separation, incremental maintenance         |
 | 💾 **Dual storage**              | Mmap (zero-copy cold start) / Rom (SQLite-style single-file portability)                                                   |
 | 🛡️ **4-layer disaster recovery** | WAL + atomic replacement + dry-run validation + OS-level COW isolation                                                     |
 | 🔄 **Zero-cost transactions**    | `begin_tx()` with pre-validation; errors never pollute memory state                                                        |
@@ -413,6 +413,8 @@ Rust, Python, and Node.js share the same TQL, Prepared queries, four property-in
 | 🌐 **Node.js native**            | napi-rs bindings, `npm install` then `require('triviumdb')`                                                                |
 | 🧰 **Shared resources & diagnostics** | 0.9.0-beta.1: database quotas, protected maintenance memory, thread/task limits, available budgets, and instance/maintenance status |
 | 📸 **Controlled shutdown & snapshots** | 0.9.0-beta.1: shutdown requests, bounded waits, consistent snapshots, verification, and restore to a new directory across Rust/Python/Node |
+
+Floating-point embeddings use cosine retrieval and QuIVer acceleration. Packed `u64` SimHash fingerprints use exact Hamming retrieval with their original bit patterns.
 
 > 📖 Deep dive into architecture and technical details: **[Feature Details](docs/features.md)**
 

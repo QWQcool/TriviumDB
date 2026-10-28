@@ -7,6 +7,43 @@ const { TriviumDB } = require('../../index.js')
 const contract = require('../contracts/kernel_boundaries.json')
 
 function runKernelBoundaries(root) {
+  const retrieval = require('../contracts/retrieval_boundaries.json')
+  for (const [name, test] of Object.entries({ binary: retrieval.binary, metric: retrieval.metric })) {
+    const file = path.join(root, `typed-retrieval-${name}.tdb`)
+    const db = new TriviumDB(file, { dim: 1, dtype: 'u64', autoBuildQuiver: false })
+    test.vectors.forEach((vector, index) => db.insertWithId(index + 1, vector, { index }))
+    for (const result of [db.search([test.query], 2, 0, -1), db.searchExact([test.query], 2)]) {
+      assert.deepEqual(result.map(hit => hit.id), test.expected_ids)
+      assert.deepEqual(result.map(hit => hit.score), test.expected_scores)
+    }
+    db.setAutoBuildQuiver(true)
+    db.close()
+    const reader = new TriviumDB(file, { dim: 1, dtype: 'u64' })
+    assert.deepEqual(reader.search([test.query], 2, 0, -1).map(hit => hit.id), test.expected_ids)
+    reader.close()
+  }
+  for (const [index, scale] of retrieval.float_scales.entries()) {
+    const file = path.join(root, `float-scale-${index}.tdb`)
+    const db = new TriviumDB(file, { dim: 2, autoBuildQuiver: false })
+    db.insertWithId(1, [scale, 0], { self: true })
+    for (const result of [db.searchExact([scale, 0], 1), db.search([scale, 0], 1, 0, -1)]) {
+      assert.deepEqual(result.map(hit => [hit.id, hit.score]), [[1, 1]])
+    }
+    db.close()
+  }
+  {
+    const sourceFile = path.join(root, 'migrate-source.tdb')
+    const targetFile = path.join(root, 'migrate-existing.tdb')
+    const source = new TriviumDB(sourceFile, { dim: 1, autoBuildQuiver: false })
+    source.insertWithId(1, [1], { origin: 'source' })
+    const target = new TriviumDB(targetFile, { dim: 2, autoBuildQuiver: false })
+    target.insertWithId(2, [0, 1], { origin: 'target' }); target.close()
+    const snapshot = () => fs.readdirSync(root).filter(name => name.startsWith('migrate-existing.tdb')).sort().map(name => [name, fs.readFileSync(path.join(root, name))])
+    const before = snapshot()
+    assert.throws(() => source.migrate(targetFile, 2), error => error.code === 'TDB_IO' && error.details.io_kind === 'AlreadyExists')
+    assert.deepEqual(snapshot(), before)
+    source.close()
+  }
   const schema = require('../contracts/index_schema_boundaries.json')
   for (const storageMode of ['rom', 'mmap']) {
     for (const unique of [false, true]) {

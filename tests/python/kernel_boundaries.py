@@ -14,6 +14,40 @@ def expect_error(action, code):
 
 
 def run_kernel_boundaries(root):
+    retrieval = json.loads((Path(__file__).parents[1] / "contracts/retrieval_boundaries.json").read_text(encoding="utf-8"))
+    for name in ["binary", "metric"]:
+        test = retrieval[name]
+        file = str(Path(root) / f"typed-retrieval-{name}.tdb")
+        db = triviumdb.TriviumDB(file, dim=1, dtype="u64", auto_build_quiver=False)
+        for index, vector in enumerate(test["vectors"]):
+            db.insert_with_id(index + 1, vector, {"index": index})
+        for result in [db.search([test["query"]], top_k=2, expand_depth=0, min_score=-1), db.search_exact([test["query"]], 2)]:
+            assert [hit.id for hit in result] == test["expected_ids"]
+            assert [hit.score for hit in result] == test["expected_scores"]
+        db.set_auto_build_quiver(True)
+        db.close()
+        reader = triviumdb.TriviumDB(file, dim=1, dtype="u64")
+        assert [hit.id for hit in reader.search([test["query"]], top_k=2, expand_depth=0, min_score=-1)] == test["expected_ids"]
+        reader.close()
+    for index, scale in enumerate(retrieval["float_scales"]):
+        file = str(Path(root) / f"float-scale-{index}.tdb")
+        db = triviumdb.TriviumDB(file, dim=2, auto_build_quiver=False)
+        db.insert_with_id(1, [scale, 0], {"self": True})
+        for result in [db.search_exact([scale, 0], 1), db.search([scale, 0], top_k=1, expand_depth=0, min_score=-1)]:
+            assert [(hit.id, hit.score) for hit in result] == [(1, 1)]
+        db.close()
+    source_file = str(Path(root) / "migrate-source.tdb")
+    target_file = str(Path(root) / "migrate-existing.tdb")
+    source = triviumdb.TriviumDB(source_file, dim=1, auto_build_quiver=False)
+    source.insert_with_id(1, [1], {"origin": "source"})
+    target = triviumdb.TriviumDB(target_file, dim=2, auto_build_quiver=False)
+    target.insert_with_id(2, [0, 1], {"origin": "target"})
+    target.close()
+    before = {p.name: p.read_bytes() for p in Path(root).glob("migrate-existing.tdb*")}
+    error = expect_error(lambda: source.migrate(target_file, 2), "TDB_IO")
+    assert error.details["io_kind"] == "AlreadyExists"
+    assert {p.name: p.read_bytes() for p in Path(root).glob("migrate-existing.tdb*")} == before
+    source.close()
     schema = json.loads((Path(__file__).parents[1] / "contracts/index_schema_boundaries.json").read_text(encoding="utf-8"))
     for unique in [False, True]:
         file = str(Path(root) / f"schema-fields-{unique}.tdb")
