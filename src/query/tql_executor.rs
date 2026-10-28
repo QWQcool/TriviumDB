@@ -241,9 +241,7 @@ fn admit_input_rows<T: VectorType>(
     let (cap, user_limited) = requested_row_limit(query, full, limits, mt)?;
     if count > cap && !user_limited {
         if full || limits.row_overflow == crate::database::RowOverflowPolicy::Throw {
-            return Err(TriviumError::QueryExecution(format!(
-                "TQL 结果超过 {cap} 行上限 (TQL result exceeds row limit {cap})"
-            )));
+            return Err(TriviumError::QueryRowBudgetExceeded { budget: cap });
         }
         tracing::warn!(
             budget = cap,
@@ -493,7 +491,7 @@ fn execute_binding_rows<T: VectorType>(
         let message =
             format!("TQL 结果超过 {row_limit} 行上限 (TQL result exceeds row limit {row_limit})");
         if requires_full_input || limits.row_overflow == crate::database::RowOverflowPolicy::Throw {
-            return Err(TriviumError::QueryExecution(message));
+            return Err(TriviumError::QueryRowBudgetExceeded { budget: row_limit });
         }
         tracing::warn!("{}；返回明确的部分结果", message);
     }

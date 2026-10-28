@@ -1347,6 +1347,37 @@ db.dropIndex('name')
 
 ## 存储格式观测与迁移错误
 
+### 三端结构化错误
+
+内核的 `TriviumError::code()` 和 `details()` 提供稳定错误码与类别所需字段。Python 的内核异常提供 `code: str`、`details: dict[str, Any]`；Node 的同步异常与异步 Promise 拒绝提供同名属性。消息用于诊断与展示，程序通过错误码和字段处理重试、输入修正与迁移。
+
+| 情况 | `code` | `details` 字段 |
+| --- | --- | --- |
+| 向量维度 | `TDB_DIMENSION_MISMATCH` | `expected`、`got` |
+| 节点不存在/重复 | `TDB_NODE_NOT_FOUND` / `TDB_NODE_ALREADY_EXISTS` | `id` |
+| 唯一约束 | `TDB_UNIQUE_CONSTRAINT` | `fields`、`existing_id`、`conflicting_id` |
+| Prepared 参数 | `TDB_MISSING_QUERY_PARAMETER` / `TDB_UNEXPECTED_QUERY_PARAMETER` | `parameter` |
+| 只读操作 | `TDB_READ_ONLY` | `operation` |
+| 查询行预算 | `TDB_QUERY_BUDGET` | `budget` |
+| Payload 查询预算 | `TDB_PAYLOAD_BUDGET_EXCEEDED` | `dimension`、`used`、`budget` |
+| 实例容量准入 | `TDB_CAPACITY_RESERVATION_REJECTED` | `requested_nodes`、`estimated_bytes`、`current_bytes`、`memory_limit` |
+| 共享资源准入 | `QueueFull` | `resource`、`requested`、`used`、`limit` |
+| 文件系统 | `TDB_IO` | `io_kind`、`os_code`；系统码可为 `null` |
+| 数据库格式版本 | `TDB_UNSUPPORTED_DATABASE_VERSION` | `found`、`minimum_supported`、`current` |
+| API 迁移 | `TDB_API_MIGRATION_REQUIRED` | `removed_api`、`replacement` |
+
+完整类别与字段由 [Rust 错误模型](../src/error.rs)及 [Node 类型声明](../triviumdb.d.ts)列出。Python 的 `TriviumDBError` 继承 `RuntimeError`；已有只读、恢复、代际和资源异常继承它。`InvalidInputError`、`CapacityError`、`SnapshotDestinationError` 分别继承 `ValueError`、`MemoryError`、`FileExistsError`，并提供同样的错误码与详情。SDK 参数提取阶段沿用各语言的参数类型异常。
+
+Node 错误详情中的安全整数使用 Number，超出 `Number.MAX_SAFE_INTEGER` 的整数使用十进制字符串；Python 与 Rust 保留原始整数精度。已有资源错误的 `resource/requested/used/limit` 直接属性继续提供，字段内容与 `details` 相同。
+
+```python
+try:
+    db.execute_prepared_tql(prepared, {})
+except triviumdb.TriviumDBError as error:
+    if error.code == "TDB_MISSING_QUERY_PARAMETER":
+        required_parameter = error.details["parameter"]
+```
+
 `storage_info/storageInfo` 是只读诊断入口，返回产品版本、`.tdb` 当前/最低版本、WAL/Property/Graph/QuIVer/Text/Manifest 格式、dim、node count、访问模式、估算内存和 sidecar 存在状态。它不会创建、修复或重写文件。
 
 ```python

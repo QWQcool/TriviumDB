@@ -1,10 +1,28 @@
 import {
   TriviumDB, ResourceRuntime, type TriviumDBOptions, type TransactionOperation,
   type JsSearchHit, type PreparedTql, type ShutdownStatus, type StorageInfo,
+  type TriviumDBError, type ErrorInteger,
 } from 'triviumdb';
 
 function check(condition: boolean, message: string): asserts condition {
   if (!condition) throw new Error(message);
+}
+
+export function inspectCoreError(error: TriviumDBError): void {
+  if (error.code === 'TDB_DIMENSION_MISMATCH') {
+    const expected: ErrorInteger = error.details.expected;
+    const got: ErrorInteger = error.details.got;
+    void [expected, got];
+    // @ts-expect-error 维度错误详情没有参数名字段。
+    error.details.parameter;
+  }
+  if (error.code === 'TDB_MISSING_QUERY_PARAMETER') {
+    const parameter: string = error.details.parameter;
+    void parameter;
+    // @ts-expect-error 参数名是字符串。
+    const invalid: number = error.details.parameter;
+    void invalid;
+  }
 }
 
 export async function exercise(file: string): Promise<void> {

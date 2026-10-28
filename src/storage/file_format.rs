@@ -1,8 +1,8 @@
-//! `.tdb` 主文件与 `.vec/.flush_ok` 一致性协议。
+//! `.tdb/.vec/.pld.<generation>` 与 `.flush_ok` 文件组一致性协议。
 //!
-//! 主文件保存 Payload、边、slot 和 BQ 元数据，向量可内嵌或分离 mmap。读取路径严格
-//! 校验魔数、版本、偏移、长度和数量关系；写入采用临时文件、fsync、原子替换，并用
-//! `.flush_ok` 将主文件与分离向量文件绑定为同一代快照。
+//! Rom 主文件内嵌向量与 Payload；Mmap v9 的向量和原始 Payload 使用分离文件，主文件
+//! 保存边、slot 和必要元数据。读取校验魔数、版本、几何与 CRC；发布日志保护文件组替换，
+//! `.flush_ok` v3 将主文件、向量与 Payload 绑定到同一 generation。
 
 use crate::VectorType;
 use crate::database::StorageMode;
@@ -42,9 +42,8 @@ const FLUSH_MARKER_V2_SIZE: usize = 41;
 /// magic(4) + version(1) + generation(8) + sizes(24) + file CRCs(12) + marker CRC(4)
 const FLUSH_MARKER_SIZE: usize = 53;
 
-/// flush_ok 提交标记：记录 .tdb 和 .vec 的文件大小及单调递增的 generation 号
-///
-/// 格式：magic(u32) + version(u8) + generation(u64) + tdb_size(u64) + vec_size(u64)
+/// flush_ok v3 提交标记：generation、三份事实文件的长度与 CRC，以及标记自身的 CRC。
+/// 历史 v1/v2 标记按各自字段布局解码。
 struct FlushMarker {
     generation: u64,
     tdb_size: u64,

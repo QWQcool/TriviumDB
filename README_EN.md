@@ -22,7 +22,7 @@
 > TriviumDB provides in-process vector, graph, and document storage for Agent, RAG, and knowledge-graph applications. The host application manages database instances, queries, and persistence through Rust, Python, or Node.js APIs.
 
 [![Rust](https://img.shields.io/badge/Rust-stable-orange?logo=rust)](https://www.rust-lang.org/)
-[![Python](https://img.shields.io/badge/Python-3.9+-blue?logo=python)](https://pypi.org/)
+[![Python 3.9–3.12](https://img.shields.io/badge/Python-3.9%E2%80%933.12-blue?logo=python)](https://pypi.org/)
 [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![arXiv](https://img.shields.io/badge/arXiv-2605.02171-b31b1b.svg)](https://arxiv.org/abs/2605.02171)
 
