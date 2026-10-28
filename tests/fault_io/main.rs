@@ -18,6 +18,8 @@ mod wal_midwrite;
 mod snapshot_shutdown;
 
 #[cfg(feature = "test-hooks")]
+mod detach_batch;
+#[cfg(feature = "test-hooks")]
 mod lifecycle_resources;
 #[cfg(feature = "test-hooks")]
 mod migration_publication;

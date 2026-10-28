@@ -5,7 +5,8 @@ const fs = require('node:fs')
 const path = require('node:path')
 const contract = require('../contracts/kernel_boundaries.json')
 
-function runKernelBoundaries(root, TriviumDB = require('../../index.js').TriviumDB) {
+function runKernelBoundaries(root, TriviumDB = require('../../index.js').TriviumDB, ResourceRuntime = require('../../index.js').ResourceRuntime) {
+  require('./system_boundaries.js').runSystemBoundaries(root, { TriviumDB, ResourceRuntime })
   const graphContract = require('../contracts/graph_query_boundaries.json')
   for (const storageMode of ['rom', 'mmap']) {
     const file = path.join(root, `graph-query-${storageMode}.tdb`)

@@ -209,6 +209,8 @@ generations/
 
 租约不会写入不可变 generation。默认 runtime 目录位于系统临时目录的 `triviumdb-runtime/store-<hash>`，也可以使用 `GenerationStore::with_runtime_dir(root, runtime_dir)` 指定可写位置。generation root 因此可以保持只读。
 
+构造时固定相对根目录和运行目录的绝对位置；默认锁空间在根目录存在后按规范路径解析，根目录创建前后的 Store 共享租约。跨进程参与者使用一致的规范根路径与运行目录配置；跨容器将运行目录设为共享可写挂载，并保持根目录挂载路径一致。Reader 存活期间保持根目录位置稳定。升级时先结束旧版本 Reader 进程，再恢复旧代回收。
+
 generation ID 和数据库文件名必须是单一安全路径组件，`..`、绝对路径和路径分隔符都会被拒绝。旧 Reader 在切代后继续读取原 generation，新 Reader 读取新的 current。调用方应在 Writer 关闭并移除非制品 `.wal/.lock` 后再分发 generation。
 
 CRC32 用于检测随机损坏，不提供对抗性防篡改或来源认证。不可信分发应由外层对 manifest 使用 SHA-256/BLAKE3 并进行数字签名。
@@ -650,6 +652,8 @@ const paths = db.reachable(1, {
 ### search_graph_first — 图候选集内精确向量排名
 
 GraphFirst 先由业务图查询产生 anchor ID 集合，再只在该集合内进行精确向量评分。输入 anchor 会按 NodeId 去重；超过 `max_anchor_nodes` 时直接报错，不会退化为全库搜索。
+
+anchor 容器与有界 Top-K 堆在分配前申请共享工作区，最终命中集合确定后再解析和复制 Payload。精确检索采用相同的最终物化步骤；工作区余额不足返回结构化资源预算错误，失败和完成均归还预留。
 
 ```python
 hits = db.search_graph_first(
@@ -1246,6 +1250,8 @@ Rust 使用 `TqlValue::Object(serde_json::Map<String, serde_json::Value>)` 承�
 支持 CREATE / SET / DELETE / DETACH DELETE 语法，返回受影响行数和新创建的节点 ID。
 
 多字段 SET 按节点累计，重复字段采用最后一次赋值。MATCH … CREATE 每条匹配建立独立的新节点作用域，零匹配返回零次创建。SET VECTOR 按目标 dtype 检查，u64 整数字面量覆盖完整范围；任一目标失败时整个 mutation 保持原子性。
+
+DETACH DELETE 按去重后的节点集合生成统一事务删除，由内核清理入边、出边、平行边与自环。相连节点和同一节点的重复匹配共享同一个 WAL 提交边界，集合外的节点与其剩余关系保持完整。
 
 **Python：**
 ```python

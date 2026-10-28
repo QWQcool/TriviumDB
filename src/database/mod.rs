@@ -2244,9 +2244,20 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         depth: usize,
         labels: Option<&[String]>,
     ) -> Result<Vec<NodeId>> {
-        self.read_operation(|| {
+        self.read_operation(|| -> Result<Vec<NodeId>> {
             use std::collections::{HashMap, VecDeque};
             let mt = read_or_recover(&self.memtable);
+            if !mt.contains(id) || depth == 0 {
+                return Ok(Vec::new());
+            }
+            let bytes = 4usize
+                .checked_mul(192)
+                .and_then(|bytes| bytes.checked_add(256))
+                .ok_or_else(|| TriviumError::CapacityAllocationFailed {
+                    reason: "邻域工作区估算溢出 (Neighborhood workspace estimate overflowed)"
+                        .into(),
+                })?;
+            let mut workspace = mt.resource_runtime().reserve_workspace(bytes)?;
             let mut distances = HashMap::new();
             let mut queue = VecDeque::new();
             distances.insert(id, 0usize);
@@ -2263,9 +2274,18 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                         }) {
                             continue;
                         }
+                        let projected = distances.len().saturating_add(1).max(4);
                         if let std::collections::hash_map::Entry::Vacant(entry) =
                             distances.entry(edge.target_id)
                         {
+                            let bytes = projected
+                                .checked_mul(192)
+                                .and_then(|bytes| bytes.checked_add(256))
+                                .ok_or_else(|| TriviumError::CapacityAllocationFailed {
+                                    reason: "邻域工作区估算溢出 (Neighborhood workspace estimate overflowed)"
+                                        .into(),
+                                })?;
+                            workspace.resize(bytes)?;
                             entry.insert(current_depth + 1);
                             queue.push_back(edge.target_id);
                         }
@@ -2278,8 +2298,8 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                 .map(|(node_id, distance)| (distance, node_id))
                 .collect();
             result.sort_unstable();
-            result.into_iter().map(|(_, node_id)| node_id).collect()
-        })
+            Ok(result.into_iter().map(|(_, node_id)| node_id).collect())
+        })?
     }
 
     pub fn neighbors(&self, id: NodeId, depth: usize) -> Result<Vec<NodeId>> {
@@ -3026,25 +3046,8 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                             tx_ops.push(transaction::TxOp::UpdatePayload { id, payload });
                             affected += 1;
                         }
-                        MutationOp::DeleteNode { id, detach } => {
-                            if detach {
-                                let edges_to_remove: Vec<(u64, u64)> = {
-                                    let mt = read_or_recover(&self.memtable);
-                                    let mut edges = Vec::new();
-                                    if let Some(out_edges) = mt.get_edges(id) {
-                                        for edge in out_edges {
-                                            edges.push((id, edge.target_id));
-                                        }
-                                    }
-                                    for &src_id in mt.get_incoming_sources(id) {
-                                        edges.push((src_id, id));
-                                    }
-                                    edges
-                                };
-                                for (s, d) in edges_to_remove {
-                                    tx_ops.push(transaction::TxOp::Unlink { src: s, dst: d });
-                                }
-                            }
+                        MutationOp::DeleteNode { id, .. } => {
+                            // 事务删除统一清理关联边；整批节点共享同一预检与 WAL 提交边界。
                             tx_ops.push(transaction::TxOp::Delete { id });
                             affected += 1;
                         }

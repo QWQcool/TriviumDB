@@ -711,6 +711,11 @@ cargo test --test contracts 共享json契约由rust适配器完整执行
 
 ## 类型、解析与加载边界回归
 
+- `tests/generation/lease_identity.rs` 验证根目录创建前后重新构造默认 Store、规范路径、点路径、Windows 大小写别名和显式运行目录的租约一致性；实际子进程使用相对根目录构造 Store 后切换工作目录，持有旧 Reader 时回收必须失败，进程退出后再验证回收成功。
+- `tests/core/system_boundaries.rs` 验证共享前台余额为零、预算释放后重试、Top-K 前的 Payload 零读取，以及大库中小范围查询的增量准入。Rust 范围 Filter 通过独立真值表对照 JSON、Prepared AST、Ordered 索引和 Rom/Mmap 重开，覆盖 2^53 相邻整数、i64/u64 端点、小数、Infinity 与 NaN。有限 f64 阈值按其实际表示值比较，完整整数阈值使用 `Filter::Range`。
+- `graph::reachability::admission_tests` 覆盖详细、紧凑、并行和子图执行的工作区拒绝、Metadata 复制中途失败与账本归还；`resources::tests::工作区扩缩容拒绝与释放准确维护两类账本` 验证前台与维护凭证扩缩容。
+- 三端复用 `tests/contracts/system_boundaries.json` 的相连集合删除与预算用例。Python 安装 wheel、Node 本地原生模块及独立安装的 npm 制品均执行三种 dtype 的拒绝、重试、反向边/平行边/自环删除和只读重开断言。`tests/fault_io/detach_batch.rs` 在 WAL flush、fsync 和事务应用处注入故障，以独立完整状态模型验证原子恢复与再次打开。
+
 - `tests/query/match_boundaries.rs` 使用独立物理边样例验证索引前后、反向、具名边、多段平行边与双向自环的行重数；覆盖零跳、环与绑定恢复。父用例在独立进程的 2 MiB 栈中执行 12,000 跳路径、程序化深模式及 55 节点指数路径的预算/期限回归，并要求完整回执。`test-hooks` 用屏障确认展开已经开始后，再取消或等待真实期限。Linux CI 同时运行 release 小栈解析与图遍历测试。
 - `tests/core/retrieval_validation.rs` 验证空库、持有库和重开后的 f32/f16 非有限输入、空 anchor、直接物理算子，以及 `usize::MAX` 附近的 Top-K/召回池在精确和索引路径的完整内容。Rust、Node 与 Python 共享 `graph_query_boundaries.json` 的计数需求；两端实际产物同时验证结构化非法向量错误。
 

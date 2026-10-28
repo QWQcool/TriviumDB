@@ -2,6 +2,11 @@
 
 后续变更以 `0.9.0-beta.3` 为基线；该版本内容见[中英文变更说明](0.9.0-beta.3.md)。
 
+- GenerationStore 固定构造时的相对路径位置，默认运行目录在根目录存在后按规范路径统一确定；跨实例与跨进程 Reader 租约覆盖根目录创建时机、路径别名和工作目录变化。跨进程配置统一根路径与运行目录，升级后在结束旧 Reader 进程后恢复回收。
+- GraphFirst 通过有界 Top-K 堆选择最终命中后物化 Payload。精确检索、可达性各执行模式、邻域和子图为容器、路径、位图、Metadata 与 Payload 副本执行共享工作区准入，状态预留随探索增长，异常退出准确归还账本。
+- Rust 旧数字范围入口复用精确整数/浮点比较；Ordered 规划对大浮点边界使用精确扫描，覆盖正负端点、小数与非有限旧边界。
+- TQL DETACH DELETE 复用统一事务删除，支持相连集合、重复匹配、平行边和自环，保留集合外事实；增加三端共享契约、跨进程租约与 WAL/应用失败后的完整状态恢复测试。
+
 - MATCH 反向遍历按实际边保留平行边行重数，具名与匿名边共用枚举；双向单跳自环计一次，索引前后保持相同计数。
 - 图模式与可变长路径改用显式栈；最小跳数前的探索、边扫描和回溯统一计步并检查取消/期限，工作区提前准入。增加小栈子进程、运行中取消和指数路径回归。
 - 精确、GraphFirst、普通与物理检索算子共享维度和有限值校验；候选池倍增使用饱和算术，超大 Top-K 保持有界结果。
@@ -33,6 +38,11 @@
 ## Unreleased
 
 Subsequent changes build on `0.9.0-beta.3`. See the bilingual [release notes](0.9.0-beta.3.md).
+
+- GenerationStore anchors relative paths at construction and resolves default runtime namespaces from canonical roots once they exist. Lease regressions cover construction timing, aliases, working-directory changes and multiple processes. Cooperating processes use consistent root/runtime paths; retire older Reader processes before resuming reclamation after an upgrade.
+- GraphFirst retains a bounded Top-K heap before materializing Payload. Exact retrieval, every reachability mode, neighborhoods and subgraphs admit containers, paths, bitmaps, Metadata and Payload copies through shared workspace reservations. State reservations grow with exploration and unwind correctly on errors.
+- Legacy Rust numeric ranges reuse exact integer/float ordering. Ordered planning falls back to exact evaluation for large floating-point bounds, with positive/negative endpoints, fractions and nonfinite legacy bounds covered.
+- TQL DETACH DELETE uses the core transaction deletion path for connected sets, repeated bindings, parallel edges and self-loops while preserving external facts. Shared native SDK contracts, cross-process leases and WAL/apply fault tests verify complete recovered states.
 
 - Reverse MATCH traversal preserves a row for every physical parallel edge. Named and unnamed patterns share enumeration; bidirectional single-hop matching counts each self-loop once, with consistent counts before and after indexing.
 - Graph patterns and variable-length paths use explicit stacks. Exploration below the minimum depth, edge scans and backtracking consume a shared step budget and check cancellation/deadlines. Workspace admission precedes traversal. Regressions cover small-stack subprocesses, in-flight interruption and exponential path graphs.

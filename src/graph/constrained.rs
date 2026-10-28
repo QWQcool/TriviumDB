@@ -23,6 +23,13 @@ pub fn rank_within<T: VectorType>(
             "GraphFirst top_k 和 max_anchor_nodes 必须大于 0".into(),
         ));
     }
+    let bytes = anchor_ids
+        .len()
+        .checked_mul(std::mem::size_of::<NodeId>() * 2)
+        .ok_or_else(|| TriviumError::CapacityAllocationFailed {
+            reason: "GraphFirst anchor 工作区溢出 (GraphFirst anchor workspace overflowed)".into(),
+        })?;
+    let _workspace = db.resource_runtime().reserve_workspace(bytes)?;
     let mut anchors = anchor_ids.to_vec();
     anchors.sort_unstable();
     anchors.dedup();
@@ -33,29 +40,5 @@ pub fn rank_within<T: VectorType>(
             max_anchor_nodes
         )));
     }
-    let mut hits = Vec::with_capacity(anchors.len());
-    for id in anchors {
-        let Some(vector) = db.get_vector(id) else {
-            continue;
-        };
-        let Some(payload) = db.get_payload(id) else {
-            continue;
-        };
-        let score = T::similarity(query, vector);
-        if score.is_finite() {
-            hits.push(SearchHit {
-                id,
-                score,
-                payload: (*payload).clone(),
-            });
-        }
-    }
-    hits.sort_by(|left, right| {
-        right
-            .score
-            .total_cmp(&left.score)
-            .then_with(|| left.id.cmp(&right.id))
-    });
-    hits.truncate(top_k);
-    Ok(hits)
+    crate::index::exact::rank_unique_ids(db, query, &anchors, top_k)
 }

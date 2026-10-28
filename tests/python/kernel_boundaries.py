@@ -14,6 +14,8 @@ def expect_error(action, code):
 
 
 def run_kernel_boundaries(root):
+    from system_boundaries import run_system_boundaries
+    run_system_boundaries(root)
     graph_contract = json.loads((Path(__file__).parents[1] / "contracts/graph_query_boundaries.json").read_text(encoding="utf-8"))
     file = str(Path(root) / "graph-query.tdb")
     db = triviumdb.TriviumDB(file, dim=2, auto_build_quiver=False)

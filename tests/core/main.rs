@@ -16,6 +16,7 @@ mod retrieval_validation;
 mod runtime_types;
 mod search;
 mod search_boundaries;
+mod system_boundaries;
 mod tql_aliases;
 mod tql_boundaries;
 mod tql_semantics;

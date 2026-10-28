@@ -2185,6 +2185,13 @@ impl<T: VectorType> MemTable<T> {
         self.payloads.raw(id)
     }
 
+    pub(crate) fn payload_query_peak(&self, id: NodeId) -> Result<usize> {
+        let raw = self
+            .get_payload_raw(id)
+            .ok_or(TriviumError::NodeNotFound(id))?;
+        crate::storage::payload_store::query_decode_peak(raw)
+    }
+
     pub(crate) fn payload_memory_stats(&self) -> PayloadMemoryStats {
         self.payloads.memory_stats()
     }
