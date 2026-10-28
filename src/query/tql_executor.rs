@@ -8,6 +8,8 @@
 //! DML 写操作通过 execute_tql_mutation() 生成 MutationOp 指令，
 //! 由 Database 层统一执行并写入 WAL。
 
+#[path = "tql_match.rs"]
+mod matching;
 #[path = "tql_return.rs"]
 mod returning;
 
@@ -289,6 +291,15 @@ pub(crate) fn validate_pattern(pattern: &TqlPattern) -> Result<(), TriviumError>
             "图模式的节点与边数量不匹配 (Graph pattern node and edge counts do not match)".into(),
         ));
     }
+    if pattern
+        .edges
+        .iter()
+        .any(|edge| edge.hop_range.is_some_and(|range| range.min > range.max))
+    {
+        return Err(TriviumError::QueryExecution(
+            "路径最小跳数超过最大跳数 (Path minimum hops exceed maximum hops)".into(),
+        ));
+    }
     let nodes = pattern
         .nodes
         .iter()
@@ -451,19 +462,12 @@ fn execute_binding_rows<T: VectorType>(
                 memtable,
                 scan_limit,
                 false,
-                limits.query_control.as_ref(),
+                limits,
             )?,
             false,
         ),
         QueryEntry::OptionalMatch { pattern } => (
-            execute_match(
-                pattern,
-                &snapshot_query,
-                memtable,
-                scan_limit,
-                true,
-                limits.query_control.as_ref(),
-            )?,
+            execute_match(pattern, &snapshot_query, memtable, scan_limit, true, limits)?,
             false,
         ),
         QueryEntry::Search {
@@ -1351,7 +1355,7 @@ fn collect_single_edge_rows<T: VectorType>(
         pipeline: None,
     };
     let mut expanded = Vec::new();
-    let mut examined = 0usize;
+    let mut budget = matching::WorkBudget::new(MAX_BUDGET, limits.query_control.as_ref());
     'anchors: for start in candidates {
         limits.check_cancelled()?;
         if left
@@ -1361,35 +1365,10 @@ fn collect_single_edge_rows<T: VectorType>(
         {
             continue;
         }
-        // 物理边按端点与标签排序，并合并双向枚举中的同一自环。
+        // 与匿名边共享物理边枚举、取消和步数预算；排序保留具名边的确定性。
         let mut edges = BTreeMap::new();
-        let outgoing = mt
-            .get_edges(start)
-            .unwrap_or(&[])
-            .iter()
-            .filter(|_| edge_pattern.direction != EdgeDirection::Backward)
-            .map(|edge| (start, edge));
-        let incoming = mt
-            .get_incoming_sources(start)
-            .iter()
-            .filter(|_| edge_pattern.direction != EdgeDirection::Forward)
-            .flat_map(|source| {
-                mt.get_edges(*source)
-                    .unwrap_or(&[])
-                    .iter()
-                    .filter(move |edge| edge.target_id == start)
-                    .map(move |edge| (*source, edge))
-            });
-        for (source, edge) in outgoing.chain(incoming) {
-            if examined >= MAX_BUDGET {
-                return Err(TriviumError::QueryExecution(
-                    "具名边遍历超过步数预算 (Named-edge traversal exceeded its step budget)".into(),
-                ));
-            }
-            examined += 1;
-            if !edge_pattern.labels.is_empty() && !edge_pattern.labels.contains(&edge.label) {
-                continue;
-            }
+        let mut neighbors = matching::Neighbors::new(mt, start, edge_pattern.direction);
+        while let Some((source, edge)) = neighbors.next(mt, &edge_pattern.labels, &mut budget)? {
             let bytes = edges
                 .len()
                 .saturating_add(1)
@@ -2025,6 +2004,7 @@ fn rank_rows_by_node<T: VectorType, R, F: Fn(&R) -> &HashMap<String, Node<T>>>(
             got: query_vector.len(),
         });
     }
+    crate::vector::validate_query_vector(&query_vector, mt.dim())?;
     let mut canonical = BTreeMap::<NodeId, (Vec<NodeId>, R)>::new();
     for row in rows {
         let nodes = bindings(&row);
@@ -2201,7 +2181,7 @@ fn execute_match<T: VectorType>(
     mt: &MemTable<T>,
     row_limit: usize,
     optional: bool,
-    control: Option<&QueryControl>,
+    limits: &TqlLimits,
 ) -> Result<TqlResult<T>, TriviumError> {
     // 建立变量映射
     let mut var_map: HashMap<String, usize> = HashMap::new();
@@ -2237,19 +2217,25 @@ fn execute_match<T: VectorType>(
     };
 
     let mut results = Vec::new();
-    let mut budget: usize = 0;
     let step_budget = if pattern.edges.is_empty() {
         usize::MAX
     } else {
         MAX_BUDGET
     };
 
-    for (scanned, start_id) in start_candidates.enumerate() {
-        if scanned & 0xff == 0
-            && let Some(control) = control
-        {
-            control.check()?;
-        }
+    let bytes = matching::workspace_bytes(planned_pattern, mt.node_count())?;
+    if limits.memory_limit > 0 && bytes > limits.memory_limit {
+        return Err(TriviumError::ResourceBudgetExceeded {
+            resource: "query_memory_bytes",
+            requested: bytes,
+            used: 0,
+            limit: limits.memory_limit,
+        });
+    }
+    let _workspace = mt.resource_runtime().reserve_workspace(bytes)?;
+    let mut budget = matching::WorkBudget::new(step_budget, limits.query_control.as_ref());
+    for start_id in start_candidates {
+        limits.check_cancelled()?;
         if planned_pattern.nodes[0]
             .filter
             .as_ref()
@@ -2259,18 +2245,16 @@ fn execute_match<T: VectorType>(
         }
         let result_start = results.len();
         let mut env = vec![None; var_map.len()];
-        let cont = tql_dfs(
+        let cont = matching::walk(
             mt,
             planned_pattern,
             query.predicate.as_ref(),
             &return_vars,
             &var_map,
-            0, // layer_idx
             &mut env,
             start_id,
             &mut results,
             &mut budget,
-            step_budget,
             row_limit,
         )?;
         if !cont {
@@ -2292,269 +2276,6 @@ fn execute_match<T: VectorType>(
     }
 
     Ok(results)
-}
-
-/// MATCH 的 DFS 遍历
-fn tql_dfs<T: VectorType>(
-    mt: &MemTable<T>,
-    pattern: &TqlPattern,
-    predicate: Option<&Predicate>,
-    return_vars: &[String],
-    var_map: &HashMap<String, usize>,
-    layer_idx: usize,
-    env: &mut Vec<Option<u64>>,
-    current: u64,
-    results: &mut TqlResult<T>,
-    budget: &mut usize,
-    max_budget: usize,
-    row_limit: usize,
-) -> Result<bool, TriviumError> {
-    *budget += 1;
-    if *budget > max_budget {
-        return Err(TriviumError::QueryExecution(format!(
-            "Query exceeded budget of {} steps",
-            max_budget
-        )));
-    }
-
-    let node_pat = &pattern.nodes[layer_idx];
-
-    // 内联 Filter 校验（Q1-B: 支持 Mongo 操作符）
-    if layer_idx > 0
-        && let Some(filter) = &node_pat.filter
-        && !matches_filter_with_id(filter, current, mt)
-    {
-        return Ok(true); // 不匹配，剪枝
-    }
-
-    // 环境入栈
-    let old_val = if let Some(var) = &node_pat.var {
-        let idx = var_map[var];
-        let old = env[idx];
-        if old.is_some_and(|bound| bound != current) {
-            return Ok(true);
-        }
-        env[idx] = Some(current);
-        Some((idx, old))
-    } else {
-        None
-    };
-
-    if layer_idx == pattern.edges.len() {
-        // 路径收敛 → 评估 WHERE
-        let passed = match predicate {
-            Some(pred) => eval_predicate_env(pred, env, var_map, mt),
-            None => true,
-        };
-
-        if passed {
-            let mut row = HashMap::new();
-            for var in return_vars {
-                if let Some(&idx) = var_map.get(var)
-                    && let Some(id) = env[idx]
-                    && let Some(node) = build_node(id, mt)
-                {
-                    row.insert(var.clone(), node);
-                }
-            }
-            results.push(row);
-            if results.len() >= row_limit {
-                if let Some((idx, old)) = old_val {
-                    env[idx] = old;
-                }
-                return Ok(false);
-            }
-        }
-    } else {
-        let edge_pat = &pattern.edges[layer_idx];
-
-        if let Some(hop) = &edge_pat.hop_range {
-            // 可变长路径：使用 DFS 展开 [min..max] 跳
-            let mut visited = HashSet::new();
-            visited.insert(current);
-            let cont = tql_dfs_variable_length(
-                mt,
-                pattern,
-                predicate,
-                return_vars,
-                var_map,
-                layer_idx,
-                env,
-                current,
-                &edge_pat.labels,
-                hop.min,
-                hop.max,
-                0,
-                &mut visited,
-                results,
-                budget,
-                max_budget,
-                row_limit,
-                edge_pat.direction,
-            )?;
-            if !cont {
-                if let Some((idx, old)) = old_val {
-                    env[idx] = old;
-                }
-                return Ok(false);
-            }
-        } else {
-            // 单跳：根据方向遍历
-            let neighbors = collect_neighbors(mt, current, &edge_pat.labels, edge_pat.direction);
-            for next_id in neighbors {
-                let cont = tql_dfs(
-                    mt,
-                    pattern,
-                    predicate,
-                    return_vars,
-                    var_map,
-                    layer_idx + 1,
-                    env,
-                    next_id,
-                    results,
-                    budget,
-                    max_budget,
-                    row_limit,
-                )?;
-                if !cont {
-                    if let Some((idx, old)) = old_val {
-                        env[idx] = old;
-                    }
-                    return Ok(false);
-                }
-            }
-        }
-    }
-
-    // 环境回溯
-    if let Some((idx, old)) = old_val {
-        env[idx] = old;
-    }
-
-    Ok(true)
-}
-
-/// 可变长路径 DFS
-fn tql_dfs_variable_length<T: VectorType>(
-    mt: &MemTable<T>,
-    pattern: &TqlPattern,
-    predicate: Option<&Predicate>,
-    return_vars: &[String],
-    var_map: &HashMap<String, usize>,
-    layer_idx: usize,
-    env: &mut Vec<Option<u64>>,
-    current: u64,
-    labels: &[String],
-    min_depth: usize,
-    max_depth: usize,
-    current_depth: usize,
-    visited: &mut HashSet<u64>,
-    results: &mut TqlResult<T>,
-    budget: &mut usize,
-    max_budget: usize,
-    row_limit: usize,
-    direction: EdgeDirection,
-) -> Result<bool, TriviumError> {
-    // 当前深度在有效范围内 → 继续到下一层（匹配后续节点模式）
-    if current_depth >= min_depth {
-        let cont = tql_dfs(
-            mt,
-            pattern,
-            predicate,
-            return_vars,
-            var_map,
-            layer_idx + 1,
-            env,
-            current,
-            results,
-            budget,
-            max_budget,
-            row_limit,
-        )?;
-        if !cont {
-            return Ok(false);
-        }
-    }
-
-    // 未达最大深度 → 继续展开
-    if current_depth < max_depth {
-        let neighbors = collect_neighbors(mt, current, labels, direction);
-        for next in neighbors {
-            if visited.contains(&next) {
-                continue;
-            }
-
-            visited.insert(next);
-            let cont = tql_dfs_variable_length(
-                mt,
-                pattern,
-                predicate,
-                return_vars,
-                var_map,
-                layer_idx,
-                env,
-                next,
-                labels,
-                min_depth,
-                max_depth,
-                current_depth + 1,
-                visited,
-                results,
-                budget,
-                max_budget,
-                row_limit,
-                direction,
-            )?;
-            visited.remove(&next);
-
-            if !cont {
-                return Ok(false);
-            }
-        }
-    }
-
-    Ok(true)
-}
-
-/// 根据方向收集邻居节点（带标签过滤）
-fn collect_neighbors<T: VectorType>(
-    mt: &MemTable<T>,
-    current: u64,
-    labels: &[String],
-    direction: EdgeDirection,
-) -> Vec<u64> {
-    let mut neighbors = Vec::new();
-
-    // 正向邻居：current 的出边目标
-    if (direction == EdgeDirection::Forward || direction == EdgeDirection::Both)
-        && let Some(edges) = mt.get_edges(current)
-    {
-        for edge in edges {
-            if !labels.is_empty() && !labels.contains(&edge.label) {
-                continue;
-            }
-            neighbors.push(edge.target_id);
-        }
-    }
-
-    // 反向邻居：指向 current 的源节点
-    if direction == EdgeDirection::Backward || direction == EdgeDirection::Both {
-        for &src_id in mt.get_incoming_sources(current) {
-            // 需要验证 src → current 的边是否匹配标签
-            if labels.is_empty() {
-                neighbors.push(src_id);
-            } else if let Some(edges) = mt.get_edges(src_id) {
-                for edge in edges {
-                    if edge.target_id == current && labels.contains(&edge.label) {
-                        neighbors.push(src_id);
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
-    neighbors
 }
 
 // ═══════════════════════════════════════════════════════════════════════

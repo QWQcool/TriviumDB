@@ -13,4 +13,8 @@ mod tql_pipeline_parser;
 mod tql_planner;
 mod tql_reverse;
 
+mod match_boundaries;
 mod parser_limits;
+
+#[path = "../support/mod.rs"]
+mod support;

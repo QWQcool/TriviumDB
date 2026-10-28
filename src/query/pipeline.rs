@@ -687,12 +687,7 @@ impl<T: VectorType> PipelineOperator<T> for ExactVectorSearch<T> {
     }
 
     fn apply(&self, _input: NodeSet, context: &mut PipelineContext<'_, T>) -> Result<NodeSet> {
-        if self.query.len() != context.memtable.dim() {
-            return Err(TriviumError::DimensionMismatch {
-                expected: context.memtable.dim(),
-                got: self.query.len(),
-            });
-        }
+        crate::vector::validate_query_vector(&self.query, context.memtable.dim())?;
         let ids = context.memtable.all_node_ids();
         context.charge_vectors(ids.len())?;
         let mut scored = ids
@@ -746,12 +741,7 @@ impl<T: VectorType> PipelineOperator<T> for QuiverVectorSearch<T> {
     }
 
     fn apply(&self, _input: NodeSet, context: &mut PipelineContext<'_, T>) -> Result<NodeSet> {
-        if self.query.len() != context.memtable.dim() {
-            return Err(TriviumError::DimensionMismatch {
-                expected: context.memtable.dim(),
-                got: self.query.len(),
-            });
-        }
+        crate::vector::validate_query_vector(&self.query, context.memtable.dim())?;
         let Some(index) = context
             .memtable
             .quiver()
@@ -970,6 +960,7 @@ impl<T: VectorType> PipelineOperator<T> for FistaResidualRecall<T> {
     }
 
     fn apply(&self, input: NodeSet, context: &mut PipelineContext<'_, T>) -> Result<NodeSet> {
+        crate::vector::validate_query_vector(&self.query, context.memtable.dim())?;
         const MAX_CANDIDATES: usize = 512;
         const MAX_ITERATIONS: usize = 256;
         if input.is_empty()
@@ -1209,12 +1200,7 @@ impl<T: VectorType> PipelineOperator<T> for ExactRerank<T> {
     }
 
     fn apply(&self, mut input: NodeSet, context: &mut PipelineContext<'_, T>) -> Result<NodeSet> {
-        if self.query.len() != context.memtable.dim() {
-            return Err(TriviumError::DimensionMismatch {
-                expected: context.memtable.dim(),
-                got: self.query.len(),
-            });
-        }
+        crate::vector::validate_query_vector(&self.query, context.memtable.dim())?;
         context.charge_vectors(input.len())?;
         let threads = context.budget.parallelism.threads(input.len());
         let score_row = |mut row: NodeRow| {

@@ -711,6 +711,9 @@ cargo test --test contracts 共享json契约由rust适配器完整执行
 
 ## 类型、解析与加载边界回归
 
+- `tests/query/match_boundaries.rs` 使用独立物理边样例验证索引前后、反向、具名边、多段平行边与双向自环的行重数；覆盖零跳、环与绑定恢复。父用例在独立进程的 2 MiB 栈中执行 12,000 跳路径、程序化深模式及 55 节点指数路径的预算/期限回归，并要求完整回执。`test-hooks` 用屏障确认展开已经开始后，再取消或等待真实期限。Linux CI 同时运行 release 小栈解析与图遍历测试。
+- `tests/core/retrieval_validation.rs` 验证空库、持有库和重开后的 f32/f16 非有限输入、空 anchor、直接物理算子，以及 `usize::MAX` 附近的 Top-K/召回池在精确和索引路径的完整内容。Rust、Node 与 Python 共享 `graph_query_boundaries.json` 的计数需求；两端实际产物同时验证结构化非法向量错误。
+
 - `tests/core/retrieval_migration.rs` 以固定整数和几何样例验证各检索入口的完整 `u64` 位模式、汉明分数、Hook 改写拒绝、极端有限浮点自相似度、重开、已有迁移目标字节保持和完整新库迁移。内核向量用例覆盖标量、当前 CPU 支持的 SIMD、384 维缓存范数、极端尺度与零向量，预期来自独立几何关系。
 - `tests/fault_io/migration_publication.rs` 验证暂存构建、首文件发布后、marker 提交前与提交后故障，核对原库、目标完整内容及重试；确定性交错验证目标锁和碰撞文件保留。Node/Python 通过共享 `retrieval_boundaries.json` 在安装制品上核对整数检索、有限浮点分数和迁移拒绝的结构化错误。
 

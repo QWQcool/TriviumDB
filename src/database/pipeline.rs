@@ -152,6 +152,9 @@ pub(crate) fn execute_pipeline_with_limit<T: VectorType>(
     let (auto_build_snapshot, _build_workspace) = {
         let mt = read_or_recover(memtable);
         mt.ensure_readable()?;
+        if let Some(query) = query_vector {
+            crate::vector::validate_query_vector(query, mt.dim())?;
+        }
         if mt.auto_quiver_build_needed() {
             let projected = mt
                 .estimated_memory_bytes()
@@ -192,23 +195,6 @@ pub(crate) fn execute_pipeline_with_limit<T: VectorType>(
     //  L0: 容错与防御式编程 (Sanity Checks)
     // ═══════════════════════════════════════════════════════
     let dim = mt.dim();
-    if let Some(qv) = query_vector {
-        if qv.len() != dim {
-            return Err(crate::error::TriviumError::DimensionMismatch {
-                expected: dim,
-                got: qv.len(),
-            });
-        }
-        for item in qv {
-            let f = item.to_f32();
-            if f.is_nan() || f.is_infinite() {
-                return Err(crate::error::TriviumError::InvalidVector {
-                    reason: "查询向量包含 NaN 或 Infinity (Query vector contains NaN or Infinity)"
-                        .to_string(),
-                });
-            }
-        }
-    }
 
     // 隔离作用域：强行钳平越界的玄学配置参数，防止底层矩阵求解 Panic 或死循环
     let mut safe_cfg = config.clone();
@@ -324,7 +310,7 @@ pub(crate) fn execute_pipeline_with_limit<T: VectorType>(
         ctx.record_observation("vector_recall_candidates", dense_ranking.len() as u64);
         ctx.record_observation(
             "quiver_ef_search",
-            (effective_recall_k(config).max(1) * 8) as u64,
+            effective_recall_k(config).max(1).saturating_mul(8) as u64,
         );
         // FISTA 基于稠密召回候选，融合后再追加影子排名。
         fuse_rankings_rrf(
@@ -694,9 +680,9 @@ fn quiver_pipeline<T: VectorType + Sync>(
 
     // ef_search 随召回池扩展，保证最终重排有足够候选。
     let recall_k = effective_recall_k(config);
-    let ef_search = recall_k.max(1) * 8;
+    let ef_search = recall_k.max(1).saturating_mul(8);
     let search_cfg = QuIVerSearchConfig {
-        top_k: recall_k.max(1) * 2,
+        top_k: recall_k.max(1).saturating_mul(2),
         ef_search,
         rerank_limit: None,
     };

@@ -63,6 +63,7 @@ pub fn search<T: VectorType>(
     top_k: usize,
 ) -> Result<Vec<SearchHit>> {
     db.ensure_readable()?;
+    crate::vector::validate_query_vector(query, db.dim())?;
     let runtime = db.resource_runtime();
     let estimate = top_k
         .min(db.internal_slot_count())
@@ -83,12 +84,6 @@ fn search_inner<T: VectorType>(
     query: &[T],
     top_k: usize,
 ) -> Result<Vec<SearchHit>> {
-    if query.len() != db.dim() {
-        return Err(TriviumError::DimensionMismatch {
-            expected: db.dim(),
-            got: query.len(),
-        });
-    }
     if top_k == 0 {
         return Err(TriviumError::InvalidInput(
             "search_exact 的 top_k 必须大于 0".into(),

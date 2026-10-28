@@ -3,10 +3,33 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
-const { TriviumDB } = require('../../index.js')
 const contract = require('../contracts/kernel_boundaries.json')
 
-function runKernelBoundaries(root) {
+function runKernelBoundaries(root, TriviumDB = require('../../index.js').TriviumDB) {
+  const graphContract = require('../contracts/graph_query_boundaries.json')
+  for (const storageMode of ['rom', 'mmap']) {
+    const file = path.join(root, `graph-query-${storageMode}.tdb`)
+    const db = new TriviumDB(file, { dim: 2, storageMode, autoBuildQuiver: false })
+    for (const node of graphContract.nodes) db.insertWithId(node.id, [1, 0], { kind: node.kind })
+    for (const [source, target, label] of graphContract.edges) db.link(source, target, label, 1)
+    for (const indexed of [false, true]) {
+      if (indexed) db.createIndex('kind')
+      for (const { query, expected } of graphContract.counts) assert.deepEqual(db.tql(query), [{ total: expected }])
+    }
+    for (const invalid of [NaN, Infinity, -Infinity]) {
+      for (const action of [
+        () => db.search([invalid, 0], 1, 0, -1),
+        () => db.searchExact([invalid, 0], 1),
+        () => db.searchGraphFirst([invalid, 0], [], 1),
+        () => db.searchGraphFirst([invalid, 0], [1], 1),
+      ]) assert.throws(action, error => error.code === 'TDB_INVALID_VECTOR' && typeof error.details.reason === 'string' && error.details.reason.length > 0)
+    }
+    assert.deepEqual(db.search([1, 0], Number.MAX_SAFE_INTEGER, 0, -1).map(hit => hit.id), [1, 2, 3])
+    db.close()
+    const reader = new TriviumDB(file, { dim: 2, storageMode, accessMode: 'readOnly' })
+    for (const { query, expected } of graphContract.counts) assert.deepEqual(reader.tql(query), [{ total: expected }])
+    reader.close()
+  }
   const retrieval = require('../contracts/retrieval_boundaries.json')
   for (const [name, test] of Object.entries({ binary: retrieval.binary, metric: retrieval.metric })) {
     const file = path.join(root, `typed-retrieval-${name}.tdb`)

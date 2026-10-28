@@ -14,6 +14,33 @@ def expect_error(action, code):
 
 
 def run_kernel_boundaries(root):
+    graph_contract = json.loads((Path(__file__).parents[1] / "contracts/graph_query_boundaries.json").read_text(encoding="utf-8"))
+    file = str(Path(root) / "graph-query.tdb")
+    db = triviumdb.TriviumDB(file, dim=2, auto_build_quiver=False)
+    for node in graph_contract["nodes"]:
+        db.insert_with_id(node["id"], [1, 0], {"kind": node["kind"]})
+    for source, target, label in graph_contract["edges"]:
+        db.link(source, target, label, 1)
+    for indexed in [False, True]:
+        if indexed:
+            db.create_index("kind")
+        for case in graph_contract["counts"]:
+            assert [row.row for row in db.tql(case["query"])] == [{"total": case["expected"]}]
+    for invalid in [float("nan"), float("inf"), -float("inf")]:
+        for action in [
+            lambda: db.search([invalid, 0], top_k=1, expand_depth=0, min_score=-1),
+            lambda: db.search_exact([invalid, 0], 1),
+            lambda: db.search_graph_first([invalid, 0], [], 1),
+            lambda: db.search_graph_first([invalid, 0], [1], 1),
+        ]:
+            error = expect_error(action, "TDB_INVALID_VECTOR")
+            assert isinstance(error.details["reason"], str) and error.details["reason"]
+    assert [hit.id for hit in db.search([1, 0], top_k=(1 << 64) - 1, expand_depth=0, min_score=-1)] == [1, 2, 3]
+    db.close()
+    reader = triviumdb.TriviumDB(file, dim=2, access_mode="read_only")
+    for case in graph_contract["counts"]:
+        assert [row.row for row in reader.tql(case["query"])] == [{"total": case["expected"]}]
+    reader.close()
     retrieval = json.loads((Path(__file__).parents[1] / "contracts/retrieval_boundaries.json").read_text(encoding="utf-8"))
     for name in ["binary", "metric"]:
         test = retrieval[name]

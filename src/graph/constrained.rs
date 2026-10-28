@@ -16,12 +16,8 @@ pub fn rank_within<T: VectorType>(
     top_k: usize,
     max_anchor_nodes: usize,
 ) -> Result<Vec<SearchHit>> {
-    if query.len() != db.dim() {
-        return Err(TriviumError::DimensionMismatch {
-            expected: db.dim(),
-            got: query.len(),
-        });
-    }
+    db.ensure_readable()?;
+    crate::vector::validate_query_vector(query, db.dim())?;
     if top_k == 0 || max_anchor_nodes == 0 {
         return Err(TriviumError::InvalidInput(
             "GraphFirst top_k 和 max_anchor_nodes 必须大于 0".into(),

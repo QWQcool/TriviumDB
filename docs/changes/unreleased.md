@@ -2,6 +2,10 @@
 
 后续变更以 `0.9.0-beta.3` 为基线；该版本内容见[中英文变更说明](0.9.0-beta.3.md)。
 
+- MATCH 反向遍历按实际边保留平行边行重数，具名与匿名边共用枚举；双向单跳自环计一次，索引前后保持相同计数。
+- 图模式与可变长路径改用显式栈；最小跳数前的探索、边扫描和回溯统一计步并检查取消/期限，工作区提前准入。增加小栈子进程、运行中取消和指数路径回归。
+- 精确、GraphFirst、普通与物理检索算子共享维度和有限值校验；候选池倍增使用饱和算术，超大 Top-K 保持有界结果。
+
 - 内核统一错误码和结构化详情；Python 异常与 Node 同步/异步错误保留类别、版本、节点、约束、迁移和预算字段。Prepared 缺参/额外参数提供独立类别与参数名，额外参数按名称稳定选择。查询行超限统一返回查询预算错误。
 - Rust 穷尽匹配新增 `MissingQueryParameter`、`UnexpectedQueryParameter` 分支；查询行超限使用 `QueryRowBudgetExceeded`。Node 错误详情的大整数类型为 `number | string`，调用方按字段类型读取。
 - 三端共享真实 API 错误用例，检查完整详情和语言映射；Rust/Python 映射样例涵盖全部核心错误变体。Node 错误字段中的大整数使用十进制字符串。
@@ -29,6 +33,10 @@
 ## Unreleased
 
 Subsequent changes build on `0.9.0-beta.3`. See the bilingual [release notes](0.9.0-beta.3.md).
+
+- Reverse MATCH traversal preserves a row for every physical parallel edge. Named and unnamed patterns share enumeration; bidirectional single-hop matching counts each self-loop once, with consistent counts before and after indexing.
+- Graph patterns and variable-length paths use explicit stacks. Exploration below the minimum depth, edge scans and backtracking consume a shared step budget and check cancellation/deadlines. Workspace admission precedes traversal. Regressions cover small-stack subprocesses, in-flight interruption and exponential path graphs.
+- Exact, GraphFirst, ordinary and physical vector operators share dimension and finite-value validation. Candidate-pool expansion uses saturating arithmetic, keeping oversized Top-K requests bounded by actual candidates.
 
 - Core errors expose stable codes and structured details. Python exceptions and synchronous/asynchronous Node errors retain version, node, constraint, migration and budget fields. Prepared statements report missing and unexpected parameter names through dedicated categories; unexpected names are selected deterministically. Row-limit failures consistently report the query-budget category.
 - Exhaustive Rust matches include the new `MissingQueryParameter` and `UnexpectedQueryParameter` variants. Row-limit failures use `QueryRowBudgetExceeded`. Large integer fields in Node error details have type `number | string`; callers read them according to their runtime type.

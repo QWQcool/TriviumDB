@@ -40,6 +40,7 @@ pub enum ConcurrencyPoint {
     AfterSidecarsPersisted,
     AfterPublicationCommitted,
     MigrationFilePublished,
+    TqlPathStep,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

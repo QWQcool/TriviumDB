@@ -13,6 +13,22 @@ pub(crate) fn is_binary_vector<T: VectorType>() -> bool {
     std::any::TypeId::of::<T>() == std::any::TypeId::of::<u64>()
 }
 
+/// 检索入口在候选生成与工作区分配前统一验证维度和有限值。
+pub(crate) fn validate_query_vector<T: VectorType>(query: &[T], dim: usize) -> crate::Result<()> {
+    if query.len() != dim {
+        return Err(crate::TriviumError::DimensionMismatch {
+            expected: dim,
+            got: query.len(),
+        });
+    }
+    if query.iter().any(|value| !value.to_f32().is_finite()) {
+        return Err(crate::TriviumError::InvalidVector {
+            reason: "查询向量包含 NaN 或 Infinity (Query vector contains NaN or Infinity)".into(),
+        });
+    }
+    Ok(())
+}
+
 #[inline]
 fn finish_cosine(dot: f32, norm_a: f32, norm_b: f32, a: &[f32], b: &[f32]) -> f32 {
     if norm_a.is_normal() && norm_b.is_normal() && dot.is_normal() {

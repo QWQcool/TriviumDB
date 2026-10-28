@@ -12,6 +12,7 @@ mod public_api_alignment;
 mod query_numeric_indexes;
 mod quiver_threshold;
 mod retrieval_migration;
+mod retrieval_validation;
 mod runtime_types;
 mod search;
 mod search_boundaries;
