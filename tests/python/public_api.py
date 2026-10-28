@@ -477,7 +477,7 @@ def main() -> None:
 
         storage = db.storage_info()
         assert storage["database_format_current"] == 10
-        assert storage["property_index_format"] == 7
+        assert storage["property_index_format"] == 8
         assert storage["node_count"] == 2
 
         vector_prepared = db.prepare_tql(

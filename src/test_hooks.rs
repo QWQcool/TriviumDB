@@ -62,6 +62,7 @@ pub enum IoPoint {
     TextMetadataWrite,
     PropertySidecarWrite,
     GraphSidecarWrite,
+    CheckpointWalClear,
     WalFlush,
     WalSync,
     WalMigrationCreate,

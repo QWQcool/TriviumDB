@@ -6,10 +6,15 @@
 #[cfg(feature = "nodejs")]
 #[allow(clippy::module_inception)]
 pub mod nodejs {
+    use crate::bindings::node_json::NodeJson;
     use crate::database::Database as GenericDatabase;
     use napi::bindgen_prelude::{Function, This};
     use napi::{Env, JsObject};
     use napi_derive::napi;
+
+    fn node_json_value(value: impl serde::Serialize) -> serde_json::Result<NodeJson> {
+        serde_json::to_value(value).map(NodeJson)
+    }
 
     struct JsNativeHook {
         object: super::super::node_hook_refs::HookReference,
@@ -36,13 +41,12 @@ pub mod nodejs {
                     return None;
                 }
             };
-            let function: Function<'_, serde_json::Value, serde_json::Value> =
-                match object.get_named_property(name) {
-                    Ok(value) => value,
-                    Err(_) => return None,
-                };
-            match function.call(value) {
-                Ok(result) => Some(result),
+            let function: Function<'_, NodeJson, NodeJson> = match object.get_named_property(name) {
+                Ok(value) => value,
+                Err(_) => return None,
+            };
+            match function.call(value.into()) {
+                Ok(result) => Some(result.0),
                 Err(error) => {
                     ctx.error = Some(format!("Node Hook {name} 执行失败: {error}"));
                     None
@@ -190,11 +194,11 @@ pub mod nodejs {
         env: Env,
         directory: String,
         runtime: Option<JsObject>,
-    ) -> napi::Result<serde_json::Value> {
+    ) -> napi::Result<NodeJson> {
         let runtime = parse_runtime(runtime)?;
         let manifest = crate::storage::snapshot::verify_snapshot_with_runtime(&directory, &runtime)
             .map_err(|e| to_napi_error(env, e))?;
-        serde_json::to_value(manifest).map_err(|e| napi::Error::from_reason(e.to_string()))
+        node_json_value(manifest).map_err(|e| napi::Error::from_reason(e.to_string()))
     }
 
     #[napi]
@@ -203,7 +207,7 @@ pub mod nodejs {
         source: String,
         destination: String,
         runtime: Option<JsObject>,
-    ) -> napi::Result<serde_json::Value> {
+    ) -> napi::Result<NodeJson> {
         let runtime = parse_runtime(runtime)?;
         let manifest = crate::storage::snapshot::restore_snapshot_with_runtime(
             &source,
@@ -211,7 +215,7 @@ pub mod nodejs {
             &runtime,
         )
         .map_err(|e| to_napi_error(env, e))?;
-        serde_json::to_value(manifest).map_err(|e| napi::Error::from_reason(e.to_string()))
+        node_json_value(manifest).map_err(|e| napi::Error::from_reason(e.to_string()))
     }
 
     fn node_tql_scalar_json(value: serde_json::Value) -> serde_json::Value {
@@ -239,7 +243,7 @@ pub mod nodejs {
 
     fn node_tql_row_to_json<T: crate::VectorType>(
         row: std::collections::HashMap<String, crate::query::tql_executor::TqlValue<T>>,
-    ) -> serde_json::Value {
+    ) -> NodeJson {
         use crate::query::tql_executor::TqlValue;
         let mut obj = serde_json::Map::new();
         for (name, value) in row {
@@ -274,7 +278,7 @@ pub mod nodejs {
             };
             obj.insert(name, value);
         }
-        serde_json::Value::Object(obj)
+        serde_json::Value::Object(obj).into()
     }
 
     #[napi]
@@ -405,7 +409,7 @@ pub mod nodejs {
         /// 相似度得分
         pub score: f64,
         /// 节点元数据（JSON 对象）
-        pub payload: serde_json::Value,
+        pub payload: NodeJson,
     }
 
     #[napi(object)]
@@ -443,7 +447,7 @@ pub mod nodejs {
         Ok(JsSearchHit {
             id: node_id_to_js(env, hit.id)?,
             score: hit.score as f64,
-            payload: hit.payload,
+            payload: hit.payload.into(),
         })
     }
 
@@ -453,7 +457,7 @@ pub mod nodejs {
         pub to: f64,
         pub label: String,
         pub weight: f64,
-        pub metadata: serde_json::Value,
+        pub metadata: NodeJson,
     }
 
     #[napi(object)]
@@ -476,7 +480,7 @@ pub mod nodejs {
     #[napi(object)]
     pub struct JsSubgraphNode {
         pub id: f64,
-        pub payload: serde_json::Value,
+        pub payload: NodeJson,
     }
 
     #[napi(object)]
@@ -485,7 +489,7 @@ pub mod nodejs {
         pub target_id: f64,
         pub label: String,
         pub weight: f64,
-        pub metadata: serde_json::Value,
+        pub metadata: NodeJson,
     }
 
     #[napi(object)]
@@ -574,8 +578,8 @@ pub mod nodejs {
         }
 
         #[napi]
-        pub fn stats(&self) -> napi::Result<serde_json::Value> {
-            serde_json::to_value(self.inner.stats())
+        pub fn stats(&self) -> napi::Result<NodeJson> {
+            node_json_value(self.inner.stats())
                 .map_err(|error| napi::Error::from_reason(error.to_string()))
         }
     }
@@ -630,7 +634,7 @@ pub mod nodejs {
         pub force_brute_force: Option<bool>,
         pub custom_query_text: Option<String>,
         /// 类 MongoDB JSON Payload 过滤器，在向量召回阶段生效。
-        pub payload_filter: Option<serde_json::Value>,
+        pub payload_filter: Option<NodeJson>,
         /// CCSA: 扩散方向偏置向量，让图扩散优先沿语义相近的节点方向传播
         pub diffusion_bias: Option<Vec<f64>>,
         /// 图扩散允许的边标签；空数组表示禁止扩散。
@@ -646,7 +650,7 @@ pub mod nodejs {
         pub target_id: f64,
         pub label: String,
         pub weight: f64,
-        pub metadata: serde_json::Value,
+        pub metadata: NodeJson,
     }
 
     /// 完整入边视图
@@ -656,7 +660,7 @@ pub mod nodejs {
         pub target_id: f64,
         pub label: String,
         pub weight: f64,
-        pub metadata: serde_json::Value,
+        pub metadata: NodeJson,
     }
 
     /// 节点完整视图
@@ -664,7 +668,7 @@ pub mod nodejs {
     pub struct JsNodeView {
         pub id: f64,
         pub vector: Vec<f64>,
-        pub payload: serde_json::Value,
+        pub payload: NodeJson,
         pub edges: Vec<JsEdge>,
         pub num_edges: u32,
     }
@@ -695,12 +699,12 @@ pub mod nodejs {
     #[napi(object)]
     pub struct JsHookContext {
         /// 各管线阶段的耗时统计（JSON 对象, 单位: 毫秒）
-        pub timings: serde_json::Value,
+        pub timings: NodeJson,
         /// 每阶段候选数量
-        pub counts: serde_json::Value,
+        pub counts: NodeJson,
         /// Hook 注入的自定义数据
-        pub custom_data: serde_json::Value,
-        pub observations: serde_json::Value,
+        pub custom_data: NodeJson,
+        pub observations: NodeJson,
         /// 管线是否被 Hook 提前终止
         pub aborted: bool,
     }
@@ -934,7 +938,7 @@ pub mod nodejs {
                         to: node_id_to_js(env, step.to)?,
                         label: step.label,
                         weight: round_api_f32(step.weight),
-                        metadata: step.metadata,
+                        metadata: step.metadata.into(),
                     })
                 })
                 .collect::<napi::Result<_>>()?,
@@ -1254,7 +1258,8 @@ pub mod nodejs {
             });
 
             let top_k = parse_positive_usize(env, cfg.top_k.unwrap_or(5.0), "topK")?;
-            let payload_filter = parse_payload_filter(cfg.payload_filter.take())?;
+            let payload_filter =
+                parse_payload_filter(cfg.payload_filter.take().map(|value| value.0))?;
             let core_config = crate::database::SearchConfig {
                 top_k,
                 recall_k: parse_safe_usize(env, cfg.recall_k.unwrap_or(0.0), "recallK")?,
@@ -1333,16 +1338,17 @@ pub mod nodejs {
                 .map(|(stage, count)| (stage.clone(), serde_json::json!(count)))
                 .collect();
             let context = JsHookContext {
-                timings: serde_json::Value::Object(timings_map),
-                counts: serde_json::Value::Object(counts),
-                custom_data: hook_ctx.custom_data,
+                timings: serde_json::Value::Object(timings_map).into(),
+                counts: serde_json::Value::Object(counts).into(),
+                custom_data: hook_ctx.custom_data.into(),
                 observations: serde_json::Value::Object(
                     hook_ctx
                         .observations
                         .iter()
                         .map(|(name, value)| (name.clone(), serde_json::json!(value)))
                         .collect(),
-                ),
+                )
+                .into(),
                 aborted: hook_ctx.abort,
             };
 
@@ -1357,8 +1363,9 @@ pub mod nodejs {
             &mut self,
             env: Env,
             vector: Vec<f64>,
-            payload: serde_json::Value,
+            payload: NodeJson,
         ) -> napi::Result<f64> {
+            let payload = payload.0;
             self.check_generated_ids(env, 1)?;
             match &mut self.inner {
                 DbBackend::F32(db) => {
@@ -1389,8 +1396,12 @@ pub mod nodejs {
             &mut self,
             env: Env,
             vectors: Vec<Vec<f64>>,
-            payloads: Vec<serde_json::Value>,
+            payloads: Vec<NodeJson>,
         ) -> napi::Result<Vec<f64>> {
+            let payloads = payloads
+                .into_iter()
+                .map(|value| value.0)
+                .collect::<Vec<_>>();
             if vectors.len() != payloads.len() {
                 return Err(napi::Error::from_reason("向量列表与负载列表长度不一致"));
             }
@@ -1445,8 +1456,12 @@ pub mod nodejs {
             env: Env,
             ids: Vec<f64>,
             vectors: Vec<Vec<f64>>,
-            payloads: Vec<serde_json::Value>,
+            payloads: Vec<NodeJson>,
         ) -> napi::Result<()> {
+            let payloads = payloads
+                .into_iter()
+                .map(|value| value.0)
+                .collect::<Vec<_>>();
             if ids.len() != vectors.len() || vectors.len() != payloads.len() {
                 return Err(napi::Error::from_reason("ID、向量与负载列表长度不一致"));
             }
@@ -1510,8 +1525,9 @@ pub mod nodejs {
             env: Env,
             id: f64,
             vector: Vec<f64>,
-            payload: serde_json::Value,
+            payload: NodeJson,
         ) -> napi::Result<()> {
+            let payload = payload.0;
             let id = parse_safe_usize(env, id, "id")? as u64;
             match &mut self.inner {
                 DbBackend::F32(db) => {
@@ -1540,8 +1556,9 @@ pub mod nodejs {
             env: Env,
             id: f64,
             vector: Vec<f64>,
-            payload: serde_json::Value,
+            payload: NodeJson,
         ) -> napi::Result<()> {
+            let payload = payload.0;
             let id = parse_safe_usize(env, id, "id")? as u64;
             match &mut self.inner {
                 DbBackend::F32(db) => {
@@ -1571,8 +1588,12 @@ pub mod nodejs {
         pub fn commit_transaction(
             &mut self,
             env: Env,
-            operations: Vec<serde_json::Value>,
+            operations: Vec<NodeJson>,
         ) -> napi::Result<Vec<f64>> {
+            let operations = operations
+                .into_iter()
+                .map(|value| value.0)
+                .collect::<Vec<_>>();
             self.check_transaction_ids(env, &operations)?;
             let ids = match &mut self.inner {
                 DbBackend::F32(db) => db.commit_tx(build_transaction(env, &operations, |value| {
@@ -1592,25 +1613,24 @@ pub mod nodejs {
         }
 
         #[napi]
-        pub fn graph_stats(&self, env: Env) -> napi::Result<serde_json::Value> {
-            serde_json::to_value(
+        pub fn graph_stats(&self, env: Env) -> napi::Result<NodeJson> {
+            node_json_value(
                 dispatch!(self, db => db.graph_stats().map_err(|error| to_napi_error(env, error))?),
             )
             .map_err(|error| napi::Error::from_reason(error.to_string()))
         }
 
         #[napi]
-        pub fn validate_graph(&self, env: Env) -> napi::Result<serde_json::Value> {
-            serde_json::to_value(dispatch!(self, db => db.validate_graph().map_err(|error| to_napi_error(env, error))?))
+        pub fn validate_graph(&self, env: Env) -> napi::Result<NodeJson> {
+            node_json_value(dispatch!(self, db => db.validate_graph().map_err(|error| to_napi_error(env, error))?))
                 .map_err(|error| napi::Error::from_reason(error.to_string()))
         }
 
         #[napi]
-        pub fn repair_graph_indexes(&mut self, env: Env) -> napi::Result<serde_json::Value> {
+        pub fn repair_graph_indexes(&mut self, env: Env) -> napi::Result<NodeJson> {
             let report = dispatch!(self, mut db => db.repair_graph_indexes())
                 .map_err(|error| to_napi_error(env, error))?;
-            serde_json::to_value(report)
-                .map_err(|error| napi::Error::from_reason(error.to_string()))
+            node_json_value(report).map_err(|error| napi::Error::from_reason(error.to_string()))
         }
 
         #[napi]
@@ -1631,14 +1651,14 @@ pub mod nodejs {
                                         target_id: node_id_to_js(env, e.target_id)?,
                                         label: e.label.clone(),
                                         weight: round_api_f32(e.weight),
-                                        metadata: e.metadata.clone(),
+                                        metadata: e.metadata.clone().into(),
                                     })
                                 })
                                 .collect::<napi::Result<_>>()?;
                             Ok(JsNodeView {
                                 id: node_id_to_js(env, n.id)?,
                                 vector: n.vector.iter().map(|&x| x as f64).collect(),
-                                payload: n.payload,
+                                payload: n.payload.into(),
                                 edges: edges_arr,
                                 num_edges,
                             })
@@ -1657,14 +1677,14 @@ pub mod nodejs {
                                         target_id: node_id_to_js(env, e.target_id)?,
                                         label: e.label.clone(),
                                         weight: round_api_f32(e.weight),
-                                        metadata: e.metadata.clone(),
+                                        metadata: e.metadata.clone().into(),
                                     })
                                 })
                                 .collect::<napi::Result<_>>()?;
                             Ok(JsNodeView {
                                 id: node_id_to_js(env, n.id)?,
                                 vector: n.vector.iter().map(|x| x.to_f64()).collect(),
-                                payload: n.payload,
+                                payload: n.payload.into(),
                                 edges: edges_arr,
                                 num_edges,
                             })
@@ -1683,14 +1703,14 @@ pub mod nodejs {
                                         target_id: node_id_to_js(env, e.target_id)?,
                                         label: e.label.clone(),
                                         weight: round_api_f32(e.weight),
-                                        metadata: e.metadata.clone(),
+                                        metadata: e.metadata.clone().into(),
                                     })
                                 })
                                 .collect::<napi::Result<_>>()?;
                             Ok(JsNodeView {
                                 id: node_id_to_js(env, n.id)?,
                                 vector: n.vector.iter().map(|&x| x as f64).collect(),
-                                payload: n.payload,
+                                payload: n.payload.into(),
                                 edges: edges_arr,
                                 num_edges,
                             })
@@ -1702,12 +1722,8 @@ pub mod nodejs {
 
         /// 更新节点元数据
         #[napi]
-        pub fn update_payload(
-            &mut self,
-            env: Env,
-            id: f64,
-            payload: serde_json::Value,
-        ) -> napi::Result<()> {
+        pub fn update_payload(&mut self, env: Env, id: f64, payload: NodeJson) -> napi::Result<()> {
+            let payload = payload.0;
             dispatch!(self, mut db => db.update_payload(parse_node_id(env, id, "id")?, payload))
                 .map_err(|error| to_napi_error(env, error))
         }
@@ -1723,12 +1739,8 @@ pub mod nodejs {
         /// db.patchPayload(id, { name: "Bob" })  // 简写，等价于 $set
         /// ```
         #[napi]
-        pub fn patch_payload(
-            &mut self,
-            env: Env,
-            id: f64,
-            patch: serde_json::Value,
-        ) -> napi::Result<()> {
+        pub fn patch_payload(&mut self, env: Env, id: f64, patch: NodeJson) -> napi::Result<()> {
+            let patch = patch.0;
             dispatch!(self, mut db => db.patch_payload(parse_node_id(env, id, "id")?, patch))
                 .map_err(|error| to_napi_error(env, error))
         }
@@ -1774,9 +1786,11 @@ pub mod nodejs {
             env: Env,
             id: f64,
             field: String,
-            expected: serde_json::Value,
-            replacement: serde_json::Value,
+            expected: NodeJson,
+            replacement: NodeJson,
         ) -> napi::Result<()> {
+            let expected = expected.0;
+            let replacement = replacement.0;
             dispatch!(self, mut db => db.compare_and_set_payload_field(parse_node_id(env, id, "id")?, &field, &expected, replacement))
                 .map_err(|error| to_napi_error(env, error))
         }
@@ -1819,7 +1833,7 @@ pub mod nodejs {
                 target_id: node_id_to_js(env, edge.target_id)?,
                 label: edge.label,
                 weight: round_api_f32(edge.weight),
-                metadata: edge.metadata,
+                metadata: edge.metadata.into(),
             })).transpose()?
             })
         }
@@ -1832,8 +1846,9 @@ pub mod nodejs {
             dst: f64,
             label: String,
             weight: f64,
-            metadata: Option<serde_json::Value>,
+            metadata: Option<NodeJson>,
         ) -> napi::Result<()> {
+            let metadata = metadata.map(|value| value.0);
             dispatch!(self, mut db => db.upsert_edge(
                 parse_node_id(env, src, "src")?,
                 parse_node_id(env, dst, "dst")?,
@@ -1852,8 +1867,9 @@ pub mod nodejs {
             dst: f64,
             label: String,
             weight: Option<f64>,
-            metadata: Option<serde_json::Value>,
+            metadata: Option<NodeJson>,
         ) -> napi::Result<()> {
+            let metadata = metadata.map(|value| value.0);
             dispatch!(self, mut db => db.update_edge(
                 parse_node_id(env, src, "src")?,
                 parse_node_id(env, dst, "dst")?,
@@ -1955,7 +1971,7 @@ pub mod nodejs {
                     .map(|node| {
                         Ok(JsSubgraphNode {
                             id: node_id_to_js(env, node.id)?,
-                            payload: node.payload,
+                            payload: node.payload.into(),
                         })
                     })
                     .collect::<napi::Result<_>>()?,
@@ -1968,7 +1984,7 @@ pub mod nodejs {
                             target_id: node_id_to_js(env, edge.target_id)?,
                             label: edge.label,
                             weight: round_api_f32(edge.weight),
-                            metadata: edge.metadata,
+                            metadata: edge.metadata.into(),
                         })
                     })
                     .collect::<napi::Result<_>>()?,
@@ -2131,8 +2147,9 @@ pub mod nodejs {
             top_k: Option<f64>,
             expand_depth: Option<f64>,
             min_score: Option<f64>,
-            payload_filter: Option<serde_json::Value>,
+            payload_filter: Option<NodeJson>,
         ) -> napi::Result<Vec<JsSearchHit>> {
+            let payload_filter = payload_filter.map(|value| value.0);
             let top_k = parse_positive_usize(env, top_k.unwrap_or(5.0), "topK")?;
 
             let expand_depth = parse_safe_usize(env, expand_depth.unwrap_or(0.0), "expandDepth")?;
@@ -2180,8 +2197,9 @@ pub mod nodejs {
             top_k: Option<f64>,
             expand_depth: Option<f64>,
             min_score: Option<f64>,
-            payload_filter: Option<serde_json::Value>,
+            payload_filter: Option<NodeJson>,
         ) -> napi::Result<JsGroupedSearchResult> {
+            let payload_filter = payload_filter.map(|value| value.0);
             let top_k = parse_positive_usize(env, top_k.unwrap_or(5.0), "topK")?;
             let payload_filter = parse_payload_filter(payload_filter)?;
             let config = crate::database::SearchConfig {
@@ -2289,7 +2307,8 @@ pub mod nodejs {
             });
 
             let top_k = parse_positive_usize(env, cfg.top_k.unwrap_or(5.0), "topK")?;
-            let payload_filter = parse_payload_filter(cfg.payload_filter.take())?;
+            let payload_filter =
+                parse_payload_filter(cfg.payload_filter.take().map(|value| value.0))?;
             let core_config = crate::database::SearchConfig {
                 top_k,
                 recall_k: parse_safe_usize(env, cfg.recall_k.unwrap_or(0.0), "recallK")?,
@@ -2363,8 +2382,9 @@ pub mod nodejs {
             expand_depth: Option<f64>,
             min_score: Option<f64>,
             hybrid_alpha: Option<f64>,
-            payload_filter: Option<serde_json::Value>,
+            payload_filter: Option<NodeJson>,
         ) -> napi::Result<Vec<JsSearchHit>> {
+            let payload_filter = payload_filter.map(|value| value.0);
             let top_k = parse_positive_usize(env, top_k.unwrap_or(5.0), "topK")?;
 
             let expand_depth = parse_safe_usize(env, expand_depth.unwrap_or(2.0), "expandDepth")?;
@@ -2463,9 +2483,10 @@ pub mod nodejs {
         pub fn indexed_lookup(
             &self,
             env: Env,
-            equalities: serde_json::Value,
+            equalities: NodeJson,
             max_results: Option<f64>,
         ) -> napi::Result<Vec<f64>> {
+            let equalities = equalities.0;
             let object = equalities.as_object().ok_or_else(|| {
                 napi::Error::from_reason("equalities 必须是对象 (equalities must be an object)")
             })?;
@@ -2578,14 +2599,14 @@ pub mod nodejs {
         }
 
         #[napi]
-        pub fn index_info(&self, env: Env) -> napi::Result<serde_json::Value> {
-            dispatch!(self, db => serde_json::to_value(db.index_info().map_err(|error| to_napi_error(env, error))?))
+        pub fn index_info(&self, env: Env) -> napi::Result<NodeJson> {
+            dispatch!(self, db => node_json_value(db.index_info().map_err(|error| to_napi_error(env, error))?))
                 .map_err(|error| napi::Error::from_reason(error.to_string()))
         }
 
         #[napi]
-        pub fn storage_info(&self) -> napi::Result<serde_json::Value> {
-            dispatch!(self, db => serde_json::to_value(db.storage_info()))
+        pub fn storage_info(&self) -> napi::Result<NodeJson> {
+            dispatch!(self, db => node_json_value(db.storage_info()))
                 .map_err(|error| napi::Error::from_reason(error.to_string()))
         }
 
@@ -2593,9 +2614,9 @@ pub mod nodejs {
 
         /// 获取节点的 payload（不含向量，比 get() 更轻量）
         #[napi]
-        pub fn get_payload(&self, env: Env, id: f64) -> napi::Result<Option<serde_json::Value>> {
+        pub fn get_payload(&self, env: Env, id: f64) -> napi::Result<Option<NodeJson>> {
             Ok(
-                dispatch!(self, db => db.get_payload(parse_node_id(env, id, "id")?).map_err(|error| to_napi_error(env, error))?),
+                dispatch!(self, db => db.get_payload(parse_node_id(env, id, "id")?).map_err(|error| to_napi_error(env, error))?).map(NodeJson),
             )
         }
 
@@ -2609,7 +2630,7 @@ pub mod nodejs {
                         target_id: node_id_to_js(env, e.target_id)?,
                         label: e.label,
                         weight: round_api_f32(e.weight),
-                        metadata: e.metadata,
+                        metadata: e.metadata.into(),
                     })).collect::<napi::Result<_>>()?
             })
         }
@@ -2630,7 +2651,7 @@ pub mod nodejs {
                     target_id: node_id_to_js(env, edge.target_id)?,
                     label: edge.label,
                     weight: round_api_f32(edge.weight),
-                    metadata: edge.metadata,
+                    metadata: edge.metadata.into(),
                 })).collect::<napi::Result<_>>()?
             })
         }
@@ -2648,7 +2669,7 @@ pub mod nodejs {
         /// const rows = db.tql('FIND {type: "event", heat: {$gte: 0.7}} RETURN *')
         /// ```
         #[napi]
-        pub fn tql(&self, env: Env, query: String) -> napi::Result<Vec<serde_json::Value>> {
+        pub fn tql(&self, env: Env, query: String) -> napi::Result<Vec<NodeJson>> {
             match &self.inner {
                 DbBackend::F32(db) => db
                     .tql_values(&query)
@@ -2677,8 +2698,9 @@ pub mod nodejs {
             &self,
             env: Env,
             prepared: &JsPreparedTql,
-            parameters: serde_json::Value,
-        ) -> napi::Result<Vec<serde_json::Value>> {
+            parameters: NodeJson,
+        ) -> napi::Result<Vec<NodeJson>> {
+            let parameters = parameters.0;
             let object = parameters.as_object().ok_or_else(|| {
                 napi::Error::from_reason(
                     "Prepared TQL 参数必须是对象 (Prepared TQL parameters must be an object)",
@@ -2719,14 +2741,15 @@ pub mod nodejs {
         /// db.tqlMut('MATCH (a {name: "Alice"}) DELETE a')
         /// ```
         #[napi]
-        pub fn tql_mut(&mut self, env: Env, query: String) -> napi::Result<serde_json::Value> {
+        pub fn tql_mut(&mut self, env: Env, query: String) -> napi::Result<NodeJson> {
             let result =
                 dispatch!(self, mut db => db.tql_mut_with_id_limit(&query,9_007_199_254_740_991))
                     .map_err(|error| to_napi_error(env, error))?;
             Ok(serde_json::json!({
                 "affected": result.affected,
                 "createdIds": result.created_ids,
-            }))
+            })
+            .into())
         }
 
         // ── 持久化与管理 ──
@@ -2742,12 +2765,11 @@ pub mod nodejs {
             &mut self,
             env: Env,
             generation_id: String,
-        ) -> napi::Result<serde_json::Value> {
+        ) -> napi::Result<NodeJson> {
             let manifest =
                 dispatch!(self, mut db => db.publish_generation_manifest(&generation_id))
                     .map_err(|error| to_napi_error(env, error))?;
-            serde_json::to_value(manifest)
-                .map_err(|error| napi::Error::from_reason(error.to_string()))
+            node_json_value(manifest).map_err(|error| napi::Error::from_reason(error.to_string()))
         }
 
         /// 运行时切换 WAL 同步模式
@@ -2816,14 +2838,14 @@ pub mod nodejs {
 
         /// 读取多个数据库共享的配额、工作线程和任务统计。
         #[napi]
-        pub fn resource_stats(&self) -> napi::Result<serde_json::Value> {
-            serde_json::to_value(dispatch!(self, db => db.resource_stats()))
+        pub fn resource_stats(&self) -> napi::Result<NodeJson> {
+            node_json_value(dispatch!(self, db => db.resource_stats()))
                 .map_err(|error| napi::Error::from_reason(error.to_string()))
         }
 
         #[napi]
-        pub fn instance_stats(&self) -> napi::Result<serde_json::Value> {
-            serde_json::to_value(dispatch!(self, db => db.instance_stats()))
+        pub fn instance_stats(&self) -> napi::Result<NodeJson> {
+            node_json_value(dispatch!(self, db => db.instance_stats()))
                 .map_err(|error| napi::Error::from_reason(error.to_string()))
         }
 
@@ -2911,21 +2933,17 @@ pub mod nodejs {
             &mut self,
             env: Env,
             this: This<JsObject>,
-        ) -> napi::Result<serde_json::Value> {
+        ) -> napi::Result<NodeJson> {
             let status = dispatch!(self, mut db => db.request_shutdown())
                 .map_err(|e| to_napi_error(env, e))?;
             super::super::node_hook_refs::flush(env, &this)?;
-            serde_json::to_value(status).map_err(|e| napi::Error::from_reason(e.to_string()))
+            node_json_value(status).map_err(|e| napi::Error::from_reason(e.to_string()))
         }
 
         #[napi]
-        pub fn shutdown_status(
-            &self,
-            env: Env,
-            this: This<JsObject>,
-        ) -> napi::Result<serde_json::Value> {
+        pub fn shutdown_status(&self, env: Env, this: This<JsObject>) -> napi::Result<NodeJson> {
             super::super::node_hook_refs::flush(env, &this)?;
-            serde_json::to_value(dispatch!(self, db => db.shutdown_status()))
+            node_json_value(dispatch!(self, db => db.shutdown_status()))
                 .map_err(|e| napi::Error::from_reason(e.to_string()))
         }
 
@@ -2949,11 +2967,11 @@ pub mod nodejs {
             env: Env,
             destination: String,
             generation_id: String,
-        ) -> napi::Result<serde_json::Value> {
+        ) -> napi::Result<NodeJson> {
             let manifest =
                 dispatch!(self, mut db => db.create_snapshot(&destination, &generation_id))
                     .map_err(|e| to_napi_error(env, e))?;
-            serde_json::to_value(manifest).map_err(|e| napi::Error::from_reason(e.to_string()))
+            node_json_value(manifest).map_err(|e| napi::Error::from_reason(e.to_string()))
         }
 
         /// 显式关闭数据库（落盘后释放资源）

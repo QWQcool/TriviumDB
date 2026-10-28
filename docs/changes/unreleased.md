@@ -15,6 +15,12 @@
 - 打开流程在节点、Payload、图、派生索引和 WAL 解码前检查保守峰值及实例预算，最终复核实际估算；容量准入完成后迁移/截断 WAL。预算拒绝释放共享预留并保留恢复依据。恢复阶段暂缓填充解析缓存，成功后按剩余预算设置缓存上限。
 - 新增 Rust、Python、Node 的类型、解析、预算与恢复边界测试；Linux CI 执行 release 2 MiB 小栈解析回归，Windows 测试使用真实共享标志验证文件替换失败。
 
+- 唯一约束创建与删除持有写锁完成发布。发布失败隔离实例和共享句柄；可写重开根据提交点恢复旧约束或采用新约束，再回放 WAL。预检拒绝保持实例可用。
+- `.pidx v8` 使用 JSON 字符串数组保存复合字段列表，保留 NUL、转义及 Unicode。历史复合 posting 由事实扫描提供结果，唯一约束从主文件定义恢复；普通复合索引可按原字段列表重新创建。复合字段名总长最多 1 MiB，数量为 2–65,535。
+- Node JSON 输入输出统一使用带长度的属性名，保留嵌套 NUL 键和 `__proto__` 自有属性，覆盖 CRUD、事务、过滤器、业务边、Hook 和查询结果；非法 JSON 值及循环结构在写入前拒绝。
+- 图副本在采用前完整验证边、数量和目录，并与主文件端点、标签、边权及 Metadata 逐项比对。只读校验失败保留文件组并返回损坏错误；Writer 可显式重建。校验及 JSON 解码峰值参与加载准入。
+- 增加发布提交前后故障、持有句柄隔离、恢复数据与约束、v7 复合兼容、CRC 一致图畸形样例，以及实际 Python/Node 制品的共享契约验收。
+
 ## Unreleased
 
 Subsequent changes build on `0.9.0-beta.3`. See the bilingual [release notes](0.9.0-beta.3.md).
@@ -31,3 +37,9 @@ Subsequent changes build on `0.9.0-beta.3`. See the bilingual [release notes](0.
 - Every TQL string parser requires complete input consumption. Limits on bytes, tokens, nesting and operators cover repeated NOT and flat expression chains. Invalid mutation tails are rejected before execution.
 - Opening checks conservative allocation peaks for nodes, payloads, graph data, derived indexes and WAL, then verifies the final heap estimate. WAL migration/truncation follows admission. Rejected opens release shared reservations and preserve the WAL for a later retry. Recovery defers parsed-cache population and configures the cache against remaining heap headroom afterward.
 - Rust, Python and Node regressions cover type, parser, budget and recovery boundaries. Linux CI runs optimized parsing on a 2 MiB stack; Windows tests use actual file-sharing flags to exercise replacement failures.
+
+- Unique constraint creation and removal hold the write lock through publication. Publication errors quarantine the instance and shared query handles; writable reopening uses the actual commit point to recover the old schema or accept the new schema, then replays WAL. Validation failures leave the instance usable.
+- `.pidx` v8 encodes composite fields as a JSON string array, preserving NUL, escapes and Unicode. Legacy composite postings fall back to ground-truth queries; unique constraints rebuild from authoritative main-file definitions. Recreate ordinary composite indexes with their original field list. Composite names total at most 1 MiB across 2–65,535 fields.
+- Node JSON boundaries use length-aware property names throughout CRUD, transactions, filters, business edges, hooks and query results. Nested NUL keys and own `__proto__` data properties round-trip; invalid JSON values and cyclic structures are rejected before writes.
+- Graph sidecars validate every edge, count and directory against each other and compare endpoints, labels, weights and Metadata with main-file facts before adoption. Read-only failures preserve the file group and report corruption; writers can explicitly rebuild the sidecar. Validation and JSON decode peaks participate in load admission.
+- Regression coverage includes pre/post-commit failures, retained handles, recovered data and constraints, v7 composite compatibility, CRC-consistent graph mutations and actual Python/Node artifacts.

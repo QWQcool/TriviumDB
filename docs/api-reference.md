@@ -1382,8 +1382,8 @@ except triviumdb.TriviumDBError as error:
 
 ```python
 info = db.storage_info()
-print(info["database_format_current"])  # 9
-print(info["property_index_format"])    # 7
+print(info["database_format_current"])  # 10
+print(info["property_index_format"])    # 8
 print(info["sidecars"])
 ```
 
@@ -1608,7 +1608,11 @@ QuIVer 支持增量 Insert/Delete/Update，并保护入口导航树，入口升�
 
 ## 维度迁移
 
-> 文件格式兼容边界：当前 `.tdb` 为 v10，可读取 v5–v10；可写句柄在后续持久化时按当前格式发布。Mmap v9 的 raw Payload 位于 generation 绑定的 `.pld`，详见[持久化布局](features.md)。ReadOnly/Immutable 不升级、不写制品。早于 v5 的主文件必须通过旧内核导出迁移；未来版本明确拒绝。sidecar 独立版本化：`.pidx v7`、`.gidx v3`、`.text v2`、`.quiver v1`。
+> 文件格式兼容边界：当前 `.tdb` 为 v10，可读取 v5–v10；可写句柄在后续持久化时按当前格式发布。Mmap v9 的 raw Payload 位于 generation 绑定的 `.pld`，详见[持久化布局](features.md)。ReadOnly/Immutable 不升级、不写制品。早于 v5 的主文件必须通过旧内核导出迁移；未来版本明确拒绝。sidecar 独立版本化：`.pidx v8`、`.gidx v3`、`.text v2`、`.quiver v1`。
+
+复合索引字段列表按 JSON 数组保存，支持 NUL 和 Unicode 字段名；字段名总长度上限为 1 MiB，字段数量上限为 65,535。旧复合 posting 通过事实扫描保持结果，唯一约束从主文件恢复；普通复合索引可按原字段列表重新创建。唯一约束创建或删除在发布失败后返回原始错误，并将实例标为待恢复，后续读写返回 `TDB_WAL_CLOSED`。释放实例后可写重开，由发布提交点决定恢复旧定义或采用新定义。
+
+Mmap 只读打开在采用 `.gidx` 前校验所有边块、派生目录与主文件事实；语义或结构失配返回 `TDB_CORRUPTED_FILE`，保留原文件组。可写打开从主文件读取业务边，通过 `repair_graph_indexes` 显式发布重建副本。
 
 当需要更换 Embedding 模型（维度发生变化）时，使用 `migrate` 将旧库的结构迁移到新维度。
 

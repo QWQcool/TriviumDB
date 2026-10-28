@@ -14,6 +14,29 @@ def expect_error(action, code):
 
 
 def run_kernel_boundaries(root):
+    schema = json.loads((Path(__file__).parents[1] / "contracts/index_schema_boundaries.json").read_text(encoding="utf-8"))
+    for unique in [False, True]:
+        file = str(Path(root) / f"schema-fields-{unique}.tdb")
+        db = triviumdb.TriviumDB(file, dim=2, auto_build_quiver=False)
+        db.insert_with_id(1, [1, 0], schema["payload"])
+        for fields in schema["definitions"]:
+            if unique:
+                db.create_unique_composite_index(fields)
+            else:
+                db.create_composite_index(fields)
+        db.close()
+        for access in ["read_only", "read_write"]:
+            before = {p.name: p.read_bytes() for p in Path(root).glob(Path(file).name + "*")}
+            reader = triviumdb.TriviumDB(file, dim=2, access_mode=access, auto_build_quiver=False)
+            try:
+                assert reader.get(1).payload == schema["payload"]
+                assert sorted(item["fields"] for item in reader.index_info()) == sorted(schema["definitions"])
+                for fields in schema["definitions"]:
+                    assert reader.indexed_lookup({field: schema["payload"][field] for field in fields}, 10) == schema["expected_ids"]
+            finally:
+                reader.close()
+            if access == "read_only":
+                assert {p.name: p.read_bytes() for p in Path(root).glob(Path(file).name + "*")} == before
     contract = json.loads((Path(__file__).parents[1] / "contracts/kernel_boundaries.json").read_text(encoding="utf-8"))
     for dtype in contract["dtypes"]:
         file = str(Path(root) / f"kernel-{dtype}.tdb")

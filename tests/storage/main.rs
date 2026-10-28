@@ -1,5 +1,7 @@
 #![allow(non_snake_case)]
 //! 按领域聚合的集成测试入口。
+#[path = "../support/mod.rs"]
+mod support;
 
 mod compaction_core;
 mod format_migration;
@@ -16,4 +18,5 @@ mod text_index_lifecycle;
 mod vector_memory;
 mod wal_semantics;
 
+mod index_schema_boundaries;
 mod kernel_boundaries;

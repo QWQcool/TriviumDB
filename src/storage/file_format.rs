@@ -1081,6 +1081,8 @@ pub(crate) fn checkpoint<T: VectorType>(
             }
             return Err(error);
         }
+        #[cfg(feature = "test-hooks")]
+        crate::test_hooks::io_result(crate::test_hooks::IoPoint::CheckpointWalClear)?;
         wal.clear()?;
         memtable.mark_checkpoint_clean();
     }
@@ -1529,62 +1531,100 @@ fn load_edges<T: VectorType>(
     version: u16,
 ) -> Result<()> {
     let mut cursor = edge_offset;
-    while cursor.saturating_add(18) <= file_len {
-        let src_id = read_u64_le(bytes, cursor, "edge src_id")?;
-        cursor += 8;
-        let dst_id = read_u64_le(bytes, cursor, "edge dst_id")?;
-        cursor += 8;
-        let label_len = read_u16_le(bytes, cursor, "edge label_len")? as usize;
-        cursor += 2;
-        if cursor.saturating_add(label_len).saturating_add(4) > file_len {
-            return Err(TriviumError::CorruptedFile(
-                "边记录被截断 (Edge record truncated)".into(),
-            ));
-        }
-        memtable.check_load_allocation(label_len.saturating_mul(5).saturating_add(1024))?;
-        let label = String::from_utf8(bytes[cursor..cursor + label_len].to_vec()).map_err(|e| {
-            TriviumError::CorruptedFile(format!("标签解码错误 (Label decode error): {}", e))
+    while cursor < file_len {
+        let (src_id, edge) = read_graph_edge(bytes, &mut cursor, file_len, version, |extra| {
+            memtable.check_load_allocation(extra)
         })?;
-        cursor += label_len;
-        let weight = read_f32_le(bytes, cursor, "edge weight")?;
-        cursor += 4;
-        if !weight.is_finite() {
-            return Err(TriviumError::CorruptedFile(
-                "边权重不是有限浮点数 (Edge weight is not finite)".into(),
-            ));
-        }
-        let metadata = if version >= 7 {
-            let metadata_len = read_u32_le(bytes, cursor, "edge metadata_len")? as usize;
-            cursor += 4;
-            if cursor.saturating_add(metadata_len) > file_len {
-                return Err(TriviumError::CorruptedFile("边元数据被截断".into()));
-            }
-            memtable.check_load_allocation(
-                metadata_len
-                    .saturating_mul(64)
-                    .saturating_add(label_len.saturating_mul(5))
-                    .saturating_add(1024),
-            )?;
-            let value =
-                serde_json::from_slice(&bytes[cursor..cursor + metadata_len]).map_err(|error| {
-                    TriviumError::CorruptedFile(format!("边元数据解析失败: {error}"))
-                })?;
-            cursor += metadata_len;
-            value
-        } else {
-            serde_json::Value::Null
-        };
-        memtable.check_load_allocation(
-            memtable.estimate_edge_write_bytes(src_id, dst_id, &label, &metadata)?,
+        memtable.check_load_allocation(memtable.estimate_edge_write_bytes(
+            src_id,
+            edge.target_id,
+            &edge.label,
+            &edge.metadata,
+        )?)?;
+        memtable.upsert_edge(
+            src_id,
+            edge.target_id,
+            edge.label,
+            edge.weight,
+            edge.metadata,
         )?;
-        memtable.upsert_edge(src_id, dst_id, label, weight, metadata)?;
-    }
-    if cursor != file_len {
-        return Err(TriviumError::CorruptedFile(
-            "边块尾部存在不完整数据 (Incomplete edge block tail)".into(),
-        ));
     }
     Ok(())
+}
+
+/// 主文件加载和图 sidecar 事实比对共用有界解码器，JSON 分配前执行调用方准入。
+pub(crate) fn read_graph_edge(
+    bytes: &[u8],
+    cursor: &mut usize,
+    end: usize,
+    version: u16,
+    mut admit: impl FnMut(usize) -> Result<()>,
+) -> Result<(u64, crate::node::Edge)> {
+    let bytes = bytes.get(..end).ok_or_else(|| {
+        TriviumError::CorruptedFile("边块越界 (Edge block is out of bounds)".into())
+    })?;
+    let src = read_u64_le(bytes, *cursor, "edge source")?;
+    let dst = read_u64_le(bytes, cursor.saturating_add(8), "edge target")?;
+    let label_len = read_u16_le(bytes, cursor.saturating_add(16), "edge label length")? as usize;
+    *cursor = cursor
+        .checked_add(18)
+        .ok_or_else(|| TriviumError::CorruptedFile("边偏移溢出 (Edge offset overflow)".into()))?;
+    let label_end = cursor.checked_add(label_len).ok_or_else(|| {
+        TriviumError::CorruptedFile("边标签长度溢出 (Edge label length overflow)".into())
+    })?;
+    let label_bytes = bytes.get(*cursor..label_end).ok_or_else(|| {
+        TriviumError::CorruptedFile("边标签被截断 (Edge label is truncated)".into())
+    })?;
+    admit(label_len.saturating_mul(5).saturating_add(1024))?;
+    let label = std::str::from_utf8(label_bytes)
+        .map_err(|error| {
+            TriviumError::CorruptedFile(format!(
+                "边标签不是 UTF-8 (Edge label is not UTF-8): {error}"
+            ))
+        })?
+        .to_owned();
+    let weight = read_f32_le(bytes, label_end, "edge weight")?;
+    *cursor = label_end.checked_add(4).ok_or_else(|| {
+        TriviumError::CorruptedFile("边权重偏移溢出 (Edge weight offset overflow)".into())
+    })?;
+    if !weight.is_finite() {
+        return Err(TriviumError::CorruptedFile(
+            "边权重不是有限数 (Edge weight is not finite)".into(),
+        ));
+    }
+    let metadata = if version >= 7 {
+        let len = read_u32_le(bytes, *cursor, "edge metadata length")? as usize;
+        *cursor = cursor.checked_add(4).ok_or_else(|| {
+            TriviumError::CorruptedFile("边元数据偏移溢出 (Edge metadata offset overflow)".into())
+        })?;
+        let metadata_end = cursor.checked_add(len).ok_or_else(|| {
+            TriviumError::CorruptedFile("边元数据长度溢出 (Edge metadata length overflow)".into())
+        })?;
+        let raw = bytes.get(*cursor..metadata_end).ok_or_else(|| {
+            TriviumError::CorruptedFile("边元数据被截断 (Edge metadata is truncated)".into())
+        })?;
+        admit(
+            len.saturating_mul(64)
+                .saturating_add(label_len.saturating_mul(5))
+                .saturating_add(1024),
+        )?;
+        let value = serde_json::from_slice(raw).map_err(|error| {
+            TriviumError::CorruptedFile(format!("边元数据无效 (Invalid edge metadata): {error}"))
+        })?;
+        *cursor = metadata_end;
+        value
+    } else {
+        serde_json::Value::Null
+    };
+    Ok((
+        src,
+        crate::node::Edge {
+            target_id: dst,
+            label,
+            weight,
+            metadata,
+        },
+    ))
 }
 
 #[derive(Clone, Copy)]
@@ -1822,10 +1862,19 @@ fn admit_sidecar<T: VectorType>(mt: &MemTable<T>, path: &str, expansion: usize) 
 }
 
 fn load_mapped_graph<T: VectorType>(memtable: &mut MemTable<T>, db_path: &str) -> Result<()> {
-    admit_sidecar(memtable, &format!("{db_path}.gidx"), 32)?;
-    if let Some(graph) =
-        crate::storage::graph_blocks::MappedGraphStore::open(db_path, memtable.node_count())?
-    {
+    let peak = match std::fs::metadata(format!("{db_path}.gidx")) {
+        Ok(meta) => usize::try_from(meta.len())
+            .unwrap_or(usize::MAX)
+            .saturating_mul(128),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
+        Err(error) => return Err(error.into()),
+    };
+    memtable.check_load_allocation(peak)?;
+    if let Some(graph) = crate::storage::graph_blocks::MappedGraphStore::open_with_admission(
+        db_path,
+        memtable.node_count(),
+        |extra| memtable.check_load_allocation(peak.saturating_add(extra)),
+    )? {
         memtable.set_mapped_graph(graph);
     }
     Ok(())

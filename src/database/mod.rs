@@ -2549,37 +2549,29 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                 "唯一索引字段不能为空 (Unique index field cannot be empty)".into(),
             ));
         }
-        write_or_recover(&self.memtable).build_property_index(
-            crate::index::property::PropertyIndexKind::Hash,
-            &[field.to_owned()],
-            true,
-            self.memory_limit,
-        )?;
-        self.flush_inner()
+        self.change_property_schema(|mt| {
+            mt.build_property_index(
+                crate::index::property::PropertyIndexKind::Hash,
+                &[field.to_owned()],
+                true,
+                self.memory_limit,
+            )?;
+            Ok(true)
+        })
     }
 
     pub fn create_unique_composite_index(&mut self, fields: &[String]) -> Result<()> {
         let _operation = self.enter_operation()?;
         self.require_write_access("create_unique_composite_index")?;
-        if fields.len() < 2
-            || fields.iter().any(String::is_empty)
-            || fields
-                .iter()
-                .collect::<std::collections::HashSet<_>>()
-                .len()
-                != fields.len()
-        {
-            return Err(TriviumError::InvalidInput(
-                "复合唯一索引至少需要两个非空且不重复的字段 (Composite unique index requires at least two distinct non-empty fields)".into(),
-            ));
-        }
-        write_or_recover(&self.memtable).build_property_index(
-            crate::index::property::PropertyIndexKind::Composite,
-            fields,
-            true,
-            self.memory_limit,
-        )?;
-        self.flush_inner()
+        self.change_property_schema(|mt| {
+            mt.build_property_index(
+                crate::index::property::PropertyIndexKind::Composite,
+                fields,
+                true,
+                self.memory_limit,
+            )?;
+            Ok(true)
+        })
     }
 
     pub fn list_unique_indexes(&self) -> Result<Vec<Vec<String>>> {
@@ -2637,15 +2629,14 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
     pub fn drop_composite_index(&mut self, fields: &[String]) -> Result<()> {
         let _operation = self.enter_operation()?;
         self.require_write_access("drop_composite_index")?;
-        let was_unique = read_or_recover(&self.memtable)
-            .unique_index_definitions()
-            .iter()
-            .any(|definition| definition == fields);
-        write_or_recover(&self.memtable).drop_composite_property_index(fields);
-        if was_unique {
-            self.flush_inner()?;
-        }
-        Ok(())
+        self.change_property_schema(|mt| {
+            let was_unique = mt
+                .unique_index_definitions()
+                .iter()
+                .any(|definition| definition == fields);
+            mt.drop_composite_property_index(fields);
+            Ok(was_unique)
+        })
     }
 
     pub fn drop_bitmap_index(&mut self, field: &str) -> Result<()> {
@@ -2680,15 +2671,36 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
     pub fn drop_index(&mut self, field: &str) -> Result<()> {
         let _operation = self.enter_operation()?;
         self.require_write_access("drop_index")?;
-        let was_unique = read_or_recover(&self.memtable)
-            .unique_index_definitions()
-            .iter()
-            .any(|definition| definition.as_slice() == [field]);
+        self.change_property_schema(|mt| {
+            let was_unique = mt
+                .unique_index_definitions()
+                .iter()
+                .any(|definition| definition.as_slice() == [field]);
+            mt.drop_property_index(field);
+            Ok(was_unique)
+        })
+    }
+
+    /// 约束变更与检查点共用写锁；发布结果不明确时隔离实例，由重开按提交点恢复。
+    fn change_property_schema(
+        &self,
+        change: impl FnOnce(&mut MemTable<T>) -> Result<bool>,
+    ) -> Result<()> {
+        reject_hook_reentrant_write()?;
         let mut mt = write_or_recover(&self.memtable);
-        mt.drop_property_index(field);
-        drop(mt);
-        if was_unique {
-            self.flush_inner()?;
+        mt.ensure_readable()?;
+        let mut wal = lock_or_recover(&self.wal);
+        wal.ensure_writable()?;
+        if !change(&mut mt)? {
+            return Ok(());
+        }
+        if let Err(error) =
+            file_format::checkpoint(&mut mt, &mut wal, &self.db_path, self.storage_mode, false)
+        {
+            // 既覆盖提交前失败，也覆盖提交后 WAL 清理失败，禁止继续使用未确认的约束状态。
+            mt.require_recovery();
+            wal.release_writer();
+            return Err(error);
         }
         Ok(())
     }
@@ -3308,6 +3320,46 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         Database::open(&dir.join("test.tdb").to_string_lossy(), 3).unwrap()
+    }
+
+    #[cfg(feature = "test-hooks")]
+    #[test]
+    fn 约束发布失败隔离已准入共享查询() {
+        use crate::test_hooks::{IoPoint, fail_io_at};
+        let mut db = open_db(&format!("schema_quarantine_{}", std::process::id()));
+        db.insert_with_id(1, &[1., 0., 0.], json!({"email":"one"}))
+            .unwrap();
+        db.flush().unwrap();
+        let handle = db.search_handle();
+        let admitted = handle.enter_operation().unwrap();
+        {
+            let _failure = fail_io_at(IoPoint::PropertySidecarWrite);
+            assert!(matches!(
+                db.create_unique_index("email"),
+                Err(TriviumError::Io(_))
+            ));
+        }
+        assert!(matches!(
+            admitted.check_recovery(),
+            Err(TriviumError::WalClosed)
+        ));
+        assert!(matches!(
+            handle.enter_operation(),
+            Err(TriviumError::WalClosed)
+        ));
+        drop(admitted);
+        drop(handle);
+        let path = db.db_path.clone();
+        drop(db);
+        let mut recovered = Database::<f32>::open(&path, 3).unwrap();
+        assert!(recovered.list_unique_indexes().unwrap().is_empty());
+        assert_eq!(
+            recovered.get_payload(1).unwrap(),
+            Some(json!({"email":"one"}))
+        );
+        recovered.close().unwrap();
+        drop(recovered);
+        std::fs::remove_dir_all(std::path::Path::new(&path).parent().unwrap()).unwrap();
     }
 
     #[cfg(windows)]

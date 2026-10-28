@@ -711,6 +711,9 @@ cargo test --test contracts 共享json契约由rust适配器完整执行
 
 ## 类型、解析与加载边界回归
 
+- `tests/fault_io/schema_publication.rs` 在发布前备份、属性/图副本写入和提交后 WAL 清理处注入故障，覆盖 Rom/Mmap、单字段/复合唯一约束及创建/删除。断言原始错误、持有句柄时读写隔离、已确认数据保留，以及按提交点重开后的约束、重复值判定和再次持久化。
+- `tests/storage/index_schema_boundaries.rs` 使用独立字段/记录样例验证 NUL、转义、Unicode 与同分隔符不同边界定义的往返、旧 v7 复合副本回退和只读零写；CRC 一致的畸形图样例覆盖 JSON、Metadata、有限边权变更、端点、目录、数量、UTF-8 和保留位，ReadOnly/Immutable 在采用前拒绝，文件组保持原样。正向样例核对平行标签、自环、大 ID 和完整容器 Metadata。两端 `kernel_boundaries` 使用共享字段契约在实际 SDK 产物中验收；Node 同时覆盖嵌套 NUL、`__proto__` 自有属性、CRUD/事务/图/TQL 输出和非法 JSON 拒绝后的 WAL 保持。
+
 - `cargo test --test storage kernel_boundaries -- --test-threads=1`：三种 dtype 的 Rom/Mmap 交叉打开、拒绝时文件组字节保持、带类型空检查点与未检查点 WAL、实例/共享预算准入及预算不足后的恢复重试。Windows 用真实文件共享标志阻止 `.vec` 替换，核对当前句柄隔离及重新打开后的向量和精确结果。
 - `cargo test --release --test query parser_limits -- --test-threads=1`：独立进程在 2 MiB 栈中解析连续 NOT、长加法/乘法、逻辑链与函数嵌套，要求正常返回拒绝。普通测试覆盖合法边界、最大维度负向量、完整输入消费，以及非法写尾部下的事实和 WAL 保持。
 - Linux CI 增加 release 小栈解析回归；现有跨平台测试继续执行 Windows 文件占用回归。Python/Node 公共 API 使用 `tests/contracts/kernel_boundaries.json`，基于实际原生模块核对错误码、完整详情、原值与重开事实。

@@ -1,5 +1,8 @@
 #![allow(non_snake_case)]
 //! 按领域聚合的集成测试入口。
+#[cfg(feature = "test-hooks")]
+#[path = "../support/mod.rs"]
+mod support;
 
 #[cfg(feature = "test-hooks")]
 mod deterministic_failpoint;
@@ -16,5 +19,7 @@ mod snapshot_shutdown;
 
 #[cfg(feature = "test-hooks")]
 mod lifecycle_resources;
+#[cfg(feature = "test-hooks")]
+mod schema_publication;
 #[cfg(feature = "test-hooks")]
 mod wal_failure_state;

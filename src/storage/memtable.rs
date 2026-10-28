@@ -2364,15 +2364,10 @@ impl<T: VectorType> MemTable<T> {
         limit: usize,
     ) -> Result<()> {
         use crate::index::property::{PropertyIndexKind, PropertyIndexRegistry};
-        if fields.is_empty()
-            || fields
-                .iter()
-                .any(|field| field.is_empty() || field.len() > 1024 * 1024)
-            || fields.iter().collect::<HashSet<_>>().len() != fields.len()
-            || (kind == PropertyIndexKind::Composite && fields.len() < 2)
-        {
-            return Err(TriviumError::InvalidInput("索引字段必须非空且互不重复，复合索引至少包含两个字段 (Index fields must be non-empty and distinct; composite indexes require at least two fields)".into()));
-        }
+        crate::index::property::validate_index_fields(
+            fields,
+            kind == PropertyIndexKind::Composite,
+        )?;
         if self.property_indexes.has_definition(kind, fields, unique) {
             return Ok(());
         }

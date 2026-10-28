@@ -435,7 +435,7 @@ async function main() {
 
     const storage = db.storageInfo()
     assert.equal(storage.database_format_current, 10)
-    assert.equal(storage.property_index_format, 7)
+    assert.equal(storage.property_index_format, 8)
     assert.equal(storage.node_count, 2)
 
     const vectorPrepared = db.prepareTql('SEARCH VECTOR [$x, $y] TOP 1 RETURN *')

@@ -7,7 +7,64 @@ const { TriviumDB } = require('../../index.js')
 const contract = require('../contracts/kernel_boundaries.json')
 
 function runKernelBoundaries(root) {
+  const schema = require('../contracts/index_schema_boundaries.json')
+  for (const storageMode of ['rom', 'mmap']) {
+    for (const unique of [false, true]) {
+      const file = path.join(root, `schema-fields-${storageMode}-${unique}.tdb`)
+      const options = { dim: 2, storageMode, autoBuildQuiver: false }
+      const db = new TriviumDB(file, options)
+      db.insertWithId(1, [1, 0], schema.payload)
+      for (const fields of schema.definitions) {
+        if (unique) db.createUniqueCompositeIndex(fields)
+        else db.createCompositeIndex(fields)
+      }
+      db.close()
+      for (const accessMode of ['readOnly', 'readWrite']) {
+        const snapshot = () => fs.readdirSync(root).filter(name => name.startsWith(path.basename(file))).sort().map(name => [name, fs.readFileSync(path.join(root, name))])
+        const before = snapshot()
+        const reader = new TriviumDB(file, { ...options, accessMode })
+        try {
+          assert.deepEqual(reader.get(1).payload, schema.payload)
+          const definitions = reader.indexInfo().map(item => item.fields)
+          assert.deepEqual(definitions.sort(), schema.definitions.map(fields => [...fields]).sort())
+          for (const fields of schema.definitions) {
+            const equalities = Object.fromEntries(fields.map(field => [field, schema.payload[field]]))
+            assert.deepEqual(reader.indexedLookup(equalities, 10), schema.expected_ids)
+          }
+        } finally { reader.close() }
+        if (accessMode === 'readOnly') assert.deepEqual(snapshot(), before)
+      }
+    }
+  }
   for (const dtype of contract.dtypes) {
+    const file = path.join(root, `json-fields-${dtype}.tdb`)
+    const db = new TriviumDB(file, { dim: 2, dtype, autoBuildQuiver: false })
+    const special = schema.payload
+    db.insertWithId(1, [1, 0], special)
+    db.batchInsertWithIds([2, 3], [[0, 1], [1, 1]], [special, special])
+    db.updatePayload(1, { wrapper: special })
+    db.patchPayload(2, { $set: { wrapper: special } })
+    db.compareAndSetPayloadField(2, 'a\0b', 1, 7)
+    db.commitTransaction([{ type: 'updatePayload', id: 3, payload: special }])
+    db.upsertEdge(1, 2, 'rel', 1, special)
+    assert.deepEqual(db.getPayload(1), { wrapper: special })
+    assert.equal(db.get(2).payload['a\0b'], 7)
+    const actual = db.get(3).payload
+    assert.deepEqual(actual, special)
+    assert.equal(Object.getPrototypeOf(actual), Object.prototype)
+    assert.ok(Object.hasOwn(actual, '__proto__'))
+    assert.deepEqual(db.getEdge(1, 2, 'rel').metadata, special)
+    assert.deepEqual(db.getEdges(1)[0].metadata, special)
+    assert.deepEqual(db.getIncomingEdges(2)[0].metadata, special)
+    assert.deepEqual(db.searchExact([1, 0], 1)[0].payload, { wrapper: special })
+    assert.deepEqual(db.tql('MATCH (n {id:3}) RETURN n')[0].n.payload, special)
+    const cycle = {}; cycle.self = cycle
+    const before = fs.readFileSync(file + '.wal')
+    for (const invalid of [cycle, { value: 1n }]) {
+      assert.throws(() => db.insert([1, 0], invalid), error => error.code === 'InvalidArg')
+      assert.deepEqual(fs.readFileSync(file + '.wal'), before)
+    }
+    db.close()
     for (const storageMode of ['rom', 'mmap']) {
       const file = path.join(root, `kernel-${dtype}-${storageMode}.tdb`)
       const options = { dim: 2, dtype, storageMode, autoBuildQuiver: false }
