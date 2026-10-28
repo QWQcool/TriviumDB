@@ -19,6 +19,8 @@ dist/
 # ══════ TriviumDB 运行产物 ══════
 *.tdb
 *.tdb.wal
+!tests/fixtures/v0810_text_mmap/sample.tdb
+!tests/fixtures/v0810_text_mmap/sample.tdb.wal
 
 # ══════ Node.js & napi-rs ══════
 node_modules/
@@ -39,6 +41,9 @@ package-lock.json
 # ══════ 构建日志 / 临时文件 ══════
 *.log
 *.tmp
+
+# ══════ 本地规划文档 ══════
+/docs/TEMP-TODO/
 
 # ══════ 系统文件 ══════
 .DS_Store

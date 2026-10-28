@@ -23,16 +23,13 @@ fn expected_groups(reference: &RefDatabase) -> Vec<BTreeMap<String, CanonicalVal
                 ("bucket".into(), CanonicalValue::String(group)),
                 (
                     "max_rank".into(),
-                    CanonicalValue::Float((*ranks.iter().max().unwrap() as f64).to_bits()),
+                    CanonicalValue::Integer(*ranks.iter().max().unwrap()),
                 ),
                 (
                     "min_rank".into(),
-                    CanonicalValue::Float((*ranks.iter().min().unwrap() as f64).to_bits()),
+                    CanonicalValue::Integer(*ranks.iter().min().unwrap()),
                 ),
-                (
-                    "sum_rank".into(),
-                    CanonicalValue::Float((sum as f64).to_bits()),
-                ),
+                ("sum_rank".into(), CanonicalValue::Integer(sum)),
                 ("total".into(), CanonicalValue::Integer(count)),
             ])
         })

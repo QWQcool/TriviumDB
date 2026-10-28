@@ -228,7 +228,7 @@ proptest! {
         let path = tmp_path(&format!("tx_atom_{}", n_good));
         let mut db = Database::<f32>::open(&path, 3).unwrap();
 
-        let initial_count = db.node_count();
+        let initial_count = db.node_count().unwrap();
 
         let mut tx = db.begin_tx();
         for _ in 0..n_good {
@@ -243,14 +243,14 @@ proptest! {
         if inject_bad {
             // 有坏数据：事务应失败
             prop_assert!(result.is_err(), "含 NaN 的事务应失败");
-            prop_assert_eq!(db.node_count(), initial_count,
+            prop_assert_eq!(db.node_count().unwrap(), initial_count,
                 "失败的事务不应改变 node_count");
         } else {
             // 无坏数据：事务应成功
             prop_assert!(result.is_ok(), "合法事务应成功");
             let ids = result.unwrap();
             prop_assert_eq!(ids.len(), n_good);
-            prop_assert_eq!(db.node_count(), initial_count + n_good);
+            prop_assert_eq!(db.node_count().unwrap(), initial_count + n_good);
         }
     }
 }

@@ -435,8 +435,8 @@ fn 算术_coalesce_空值与括号表达式端到端执行() {
     )
     .unwrap();
     let rows = execute_tql_values(&query, &graph()).unwrap();
-    assert!(matches!(rows[0]["precedence"], TqlValue::Float(value) if value == 7.0));
-    assert!(matches!(rows[0]["grouped"], TqlValue::Float(value) if value == 9.0));
+    assert!(matches!(rows[0]["precedence"], TqlValue::Int(7)));
+    assert!(matches!(rows[0]["grouped"], TqlValue::Int(9)));
     assert!(matches!(rows[0]["fallback"], TqlValue::Int(7)));
     assert!(matches!(rows[0]["missing"], TqlValue::Bool(true)));
 }
@@ -459,7 +459,7 @@ fn 管线聚合支持分组_count_数值聚合_collect_和空输入() {
     assert_eq!(total, 3);
     assert!(
         rows.iter()
-            .all(|row| matches!(row["sum_id"], TqlValue::Float(_)))
+            .all(|row| matches!(row["sum_id"], TqlValue::Int(3)))
     );
     assert!(
         rows.iter()

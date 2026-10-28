@@ -5,9 +5,120 @@
 
 import json
 import os
+import shutil
 import tempfile
 
 import triviumdb
+from write_boundaries import run_write_boundaries
+from index_graph_boundaries import run_index_graph_boundaries
+from query_numeric_indexes import run_query_numeric_indexes
+from tql_semantics import run_tql_semantics
+from tql_boundaries import run_tql_boundaries
+
+
+def run_transaction_contract(root: str) -> None:
+    contract_path = os.path.join(os.path.dirname(__file__), "..", "contracts", "transaction_cases.json")
+    with open(contract_path, encoding="utf-8") as source:
+        contract = json.load(source)
+    for dtype in contract["dtypes"]:
+        for case in contract["cases"]:
+            file = os.path.join(root, f"transaction-{dtype}-mmap-{case['name']}.tdb")
+            options = dict(dim=contract["dimension"], dtype=dtype, auto_build_quiver=False)
+            db = triviumdb.TriviumDB(file, **options)
+            try:
+                for node in contract["setup"]:
+                    db.insert_with_id(node["id"], node["vector"], node["payload"])
+                with open(file + ".wal", "rb") as source:
+                    before_wal = source.read()
+                tx = db.transaction()
+                for operation in case["operations"]:
+                    kind = operation["type"]
+                    if kind == "insert":
+                        tx.insert(operation["vector"], operation["payload"])
+                    elif kind == "insertWithId":
+                        tx.insert_with_id(operation["id"], operation["vector"], operation["payload"])
+                    elif kind == "delete":
+                        tx.delete(operation["id"])
+                    elif kind == "updatePayload":
+                        tx.update_payload(operation["id"], operation["payload"])
+                    elif kind == "updateVector":
+                        tx.update_vector(operation["id"], operation["vector"])
+                    else:
+                        raise AssertionError(f"未知事务契约操作：{kind}")
+                if "error" in case["expected"]:
+                    try:
+                        tx.commit()
+                    except RuntimeError:
+                        pass
+                    else:
+                        raise AssertionError("非法事务必须整批拒绝")
+                    with open(file + ".wal", "rb") as source:
+                        assert source.read() == before_wal
+                else:
+                    assert tx.commit() == case["expected"]["ids"]
+
+                def check(database):
+                    assert sorted(database.all_node_ids()) == [node["id"] for node in case["expected"]["nodes"]]
+                    for expected in case["expected"]["nodes"]:
+                        actual = database.get(expected["id"])
+                        assert actual is not None
+                        assert actual.id == expected["id"]
+                        assert actual.payload == expected["payload"]
+                        assert actual.vector == expected["vector"]
+
+                check(db)
+                replay_file = file + ".replay"
+                shutil.copyfile(file + ".wal", replay_file + ".wal")
+                replay = triviumdb.TriviumDB(replay_file, **options)
+                try:
+                    check(replay)
+                finally:
+                    replay.close()
+                db.close()
+                reopened = triviumdb.TriviumDB(file, **options)
+                try:
+                    check(reopened)
+                finally:
+                    reopened.close()
+            finally:
+                db.close()
+
+
+def run_text_recovery_contract(root: str) -> None:
+    source = os.path.join(os.path.dirname(__file__), "..", "fixtures", "v0810_text_mmap")
+    for missing in [False, True]:
+        target = os.path.join(root, f"text-upgrade-{missing}.tdb")
+        for suffix in ["", ".vec", ".flush_ok", ".pld.2", ".text", ".text.meta", ".wal"]:
+            if missing and suffix == ".text.meta":
+                continue
+            shutil.copyfile(os.path.join(source, "sample.tdb" + suffix), target + suffix)
+        db = triviumdb.TriviumDB(target, dim=4, auto_build_quiver=False)
+        db.insert_with_id(5, [0, 0, 1, 0], {})
+        db.flush()
+        db.build_text_index()
+        assert sorted(row.row["hits"]["id"] for row in db.tql(
+            'TEXT BM25 "alpha" TOP 10 AS hits WITH hits RETURN hits')) == [1, 2, 3, 4]
+        db.close()
+        with open(target + ".text", "wb") as output:
+            output.write(b"corrupt")
+        db = triviumdb.TriviumDB(target, dim=4, load_text_index=True, auto_build_quiver=False)
+        with open(target + ".text", "rb") as original:
+            assert original.read() == b"corrupt"
+        try:
+            db.build_text_index()
+        except triviumdb.ImmutableArtifactError:
+            pass
+        else:
+            raise AssertionError("损坏文本应返回结构化校验错误")
+        db.rebuild_text_index([{"id": 1, "text": "restoredtoken", "keywords": ["restoredanchor"]}])
+        db.close()
+        reader = triviumdb.TriviumDB(target, dim=4, load_text_index=True, access_mode="read_only")
+        assert reader.node_count() == 5
+        assert [row.row["hits"]["id"] for row in reader.tql(
+            'TEXT BM25 "restoredtoken" TOP 10 AS hits WITH hits RETURN hits')] == [1]
+        assert [row.row["hits"]["id"] for row in reader.tql(
+            'TEXT AC "restoredanchor" TOP 10 AS hits WITH hits RETURN hits')] == [1]
+        reader.close()
 
 
 def run_lifecycle_contract(root: str) -> None:
@@ -200,6 +311,10 @@ def run_shared_contract(root: str) -> None:
                     db.delete(1)
                 for check in expected[phase]:
                     assert len(db.tql(check["query"])) == check["count"], case["name"]
+        elif case["operation"] == "text_rebuild":
+            db.rebuild_text_index(case["documents"])
+            for check in expected["checks"]:
+                assert len(db.tql(check["query"])) == check["count"], case["name"]
         else:
             raise AssertionError(f"未知共享契约操作: {case['operation']}")
     db.close()
@@ -209,6 +324,18 @@ def run_shared_contract(root: str) -> None:
         pass
     else:
         raise AssertionError("关闭后的文本构建错误必须透传")
+    reader = triviumdb.TriviumDB(path, dim=contract["setup"]["dimension"],
+        load_text_index=True, access_mode="read_only")
+    checks = next(case for case in contract["cases"] if case["operation"] == "text_rebuild")["expected"]["checks"]
+    for check in checks:
+        assert len(reader.tql(check["query"])) == check["count"]
+    try:
+        reader.rebuild_text_index([])
+    except triviumdb.ReadOnlyError:
+        pass
+    else:
+        raise AssertionError("只读句柄的文本重建必须返回写入权限错误")
+    reader.close()
 
 
 def run_query_budget_contract(root: str) -> None:
@@ -237,11 +364,49 @@ def run_query_budget_contract(root: str) -> None:
             db.close()
 
 
+def run_search_boundaries(root: str) -> None:
+    file = os.path.join(root, "search-order.tdb")
+    options = dict(dim=2, auto_build_quiver=False)
+    db = triviumdb.TriviumDB(file, **options)
+    for node_id in [1, 2, 3]:
+        db.insert_with_id(node_id, [1, 0], {"value": node_id})
+    db.delete(1)
+    db.insert_with_id(10, [1, 0], {"value": 10})
+
+    def check(database: triviumdb.TriviumDB) -> None:
+        hits = database.search_advanced([1, 0], top_k=1, recall_k=1, rerank_k=1,
+                                       expand_depth=0, min_score=0, force_brute_force=True)
+        assert [hit.id for hit in hits] == [2]
+
+    check(db)
+    db.update_payload(2, {"value": 2**64 - 1})
+    db.update_payload(3, {"value": 2**64 - 2})
+    db.update_payload(10, {"value": 2**53 + 1})
+    db.create_ordered_index("value")
+    query = "FIND {value: {$exists: true}} RETURN * ORDER BY _.value ASC"
+    assert [row.row["_"]["id"] for row in db.tql(query)] == [10, 3, 2]
+    db.close()
+    reopened = triviumdb.TriviumDB(file, **options)
+    try:
+        check(reopened)
+        assert [row.row["_"]["id"] for row in reopened.tql(query)] == [10, 3, 2]
+    finally:
+        reopened.close()
+
+
 def main() -> None:
     with tempfile.TemporaryDirectory(prefix="triviumdb-python-public-api-") as root:
+        run_search_boundaries(root)
         run_lifecycle_contract(root)
         run_resource_contract(root)
         run_shared_contract(root)
+        run_transaction_contract(root)
+        run_write_boundaries(root)
+        run_index_graph_boundaries(root)
+        run_query_numeric_indexes(root)
+        run_tql_semantics(root)
+        run_tql_boundaries(root)
+        run_text_recovery_contract(root)
         run_query_budget_contract(root)
         path = os.path.join(root, "api.tdb")
         db = triviumdb.TriviumDB(path, dim=2)
@@ -306,7 +471,7 @@ def main() -> None:
 
         storage = db.storage_info()
         assert storage["database_format_current"] == 9
-        assert storage["property_index_format"] == 6
+        assert storage["property_index_format"] == 7
         assert storage["node_count"] == 2
 
         vector_prepared = db.prepare_tql(

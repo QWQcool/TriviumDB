@@ -57,6 +57,7 @@ pub enum TqlToken {
     /// $eq, $gt 等 Mongo 操作符（含 $ 前缀）
     DollarOp(String),
     IntLit(i64),
+    UIntLit(u64),
     FloatLit(f64),
     StringLit(String),
     BoolLit(bool),
@@ -307,6 +308,7 @@ impl TqlLexer {
                                         let num_tok = self.read_number()?;
                                         match num_tok {
                                             TqlToken::IntLit(n) => TqlToken::IntLit(-n),
+                                            TqlToken::UIntLit(n)=>TqlToken::IntLit(i64::try_from(-i128::from(n)).map_err(|_|"负整数字面量超出 i64 范围 (Negative integer literal exceeds i64 range)".to_owned())?),
                                             TqlToken::FloatLit(f) => TqlToken::FloatLit(-f),
                                             _ => TqlToken::Dash,
                                         }
@@ -512,9 +514,14 @@ impl TqlLexer {
             }
             Ok(TqlToken::FloatLit(value))
         } else {
-            Ok(TqlToken::IntLit(
-                num_str.parse().map_err(|e| format!("Bad int: {e}"))?,
-            ))
+            if let Ok(value) = num_str.parse::<i64>() {
+                Ok(TqlToken::IntLit(value))
+            } else {
+                num_str
+                    .parse::<u64>()
+                    .map(TqlToken::UIntLit)
+                    .map_err(|e| format!("整数字面量越界 (Integer literal out of range): {e}"))
+            }
         }
     }
 }

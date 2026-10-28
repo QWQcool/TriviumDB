@@ -183,27 +183,27 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> DatabaseRea
             .search_graph_first(query, anchor_ids, top_k, max_anchor_nodes)
     }
 
-    pub fn get(&self, id: NodeId) -> Option<NodeView<T>> {
+    pub fn get(&self, id: NodeId) -> Result<Option<NodeView<T>>> {
         self.inner.get(id)
     }
 
-    pub fn get_payload(&self, id: NodeId) -> Option<serde_json::Value> {
+    pub fn get_payload(&self, id: NodeId) -> Result<Option<serde_json::Value>> {
         self.inner.get_payload(id)
     }
 
-    pub fn get_edges(&self, id: NodeId) -> Vec<Edge> {
+    pub fn get_edges(&self, id: NodeId) -> Result<Vec<Edge>> {
         self.inner.get_edges(id)
     }
 
-    pub fn get_edge(&self, src: NodeId, dst: NodeId, label: &str) -> Option<Edge> {
+    pub fn get_edge(&self, src: NodeId, dst: NodeId, label: &str) -> Result<Option<Edge>> {
         self.inner.get_edge(src, dst, label)
     }
 
-    pub fn get_incoming_edges(&self, id: NodeId, label: Option<&str>) -> Vec<IncomingEdge> {
+    pub fn get_incoming_edges(&self, id: NodeId, label: Option<&str>) -> Result<Vec<IncomingEdge>> {
         self.inner.get_incoming_edges(id, label)
     }
 
-    pub fn neighbors(&self, id: NodeId, depth: usize) -> Vec<NodeId> {
+    pub fn neighbors(&self, id: NodeId, depth: usize) -> Result<Vec<NodeId>> {
         self.inner.neighbors(id, depth)
     }
 
@@ -212,7 +212,7 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> DatabaseRea
         id: NodeId,
         depth: usize,
         labels: Option<&[String]>,
-    ) -> Vec<NodeId> {
+    ) -> Result<Vec<NodeId>> {
         self.inner.neighbors_with_labels(id, depth, labels)
     }
 
@@ -227,7 +227,7 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> DatabaseRea
             .shortest_path_bidirectional(source, target, label, budget)
     }
 
-    pub fn graph_stats(&self) -> crate::storage::memtable::GraphStats {
+    pub fn graph_stats(&self) -> Result<crate::storage::memtable::GraphStats> {
         self.inner.graph_stats()
     }
 
@@ -271,11 +271,11 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> DatabaseRea
         self.inner.query(input)
     }
 
-    pub fn node_count(&self) -> usize {
+    pub fn node_count(&self) -> Result<usize> {
         self.inner.node_count()
     }
 
-    pub fn contains(&self, id: NodeId) -> bool {
+    pub fn contains(&self, id: NodeId) -> Result<bool> {
         self.inner.contains(id)
     }
 
@@ -283,11 +283,11 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> DatabaseRea
         self.inner.dim()
     }
 
-    pub fn all_node_ids(&self) -> Vec<NodeId> {
+    pub fn all_node_ids(&self) -> Result<Vec<NodeId>> {
         self.inner.all_node_ids()
     }
 
-    pub fn list_indexes(&self) -> Vec<String> {
+    pub fn list_indexes(&self) -> Result<Vec<String>> {
         self.inner.list_indexes()
     }
 

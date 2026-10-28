@@ -7,12 +7,69 @@
 
 use crate::VectorType;
 use crate::database::Database;
-use crate::error::Result;
+use crate::error::{Result, TriviumError};
 use crate::node::NodeId;
 use crate::storage::memtable::MemTable;
 use crate::storage::wal::WalEntry;
 
 use super::{lock_or_recover, write_or_recover};
+
+/// 应用过程异常时保留 WAL，并让共享句柄统一等待重新打开恢复。
+struct ApplicationGuard<'a, T: VectorType> {
+    mt: &'a mut MemTable<T>,
+    wal: &'a std::sync::Mutex<crate::storage::wal::Wal>,
+    lifecycle: &'a std::sync::Mutex<super::LifecycleState>,
+    previous_pause: bool,
+    previous_unique_pause: bool,
+    complete: bool,
+}
+impl<'a, T: VectorType> ApplicationGuard<'a, T> {
+    fn new(
+        mt: &'a mut MemTable<T>,
+        wal: &'a std::sync::Mutex<crate::storage::wal::Wal>,
+        lifecycle: &'a std::sync::Mutex<super::LifecycleState>,
+    ) -> Self {
+        let previous_unique_pause = mt.unique_updates_paused();
+        mt.set_unique_updates_paused(true);
+        let previous_pause = mt.quiver_sync_paused();
+        mt.set_quiver_sync_paused(true);
+        Self {
+            mt,
+            wal,
+            lifecycle,
+            previous_pause,
+            previous_unique_pause,
+            complete: false,
+        }
+    }
+}
+impl<T: VectorType> Drop for ApplicationGuard<'_, T> {
+    fn drop(&mut self) {
+        self.mt.set_quiver_sync_paused(self.previous_pause);
+        self.mt
+            .set_unique_updates_paused(self.previous_unique_pause);
+        if !self.complete {
+            self.mt.require_recovery();
+            lock_or_recover(self.wal).release_writer();
+            lock_or_recover(self.lifecycle).recovery_required = true;
+        }
+    }
+}
+
+static NEXT_TX_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+fn next_transaction_id(counter: &std::sync::atomic::AtomicU64) -> Result<u64> {
+    use std::sync::atomic::Ordering;
+    let mut current = counter.load(Ordering::Relaxed);
+    loop {
+        let next = current.checked_add(1).ok_or_else(|| {
+            TriviumError::InvalidInput("事务 ID 空间已耗尽 (Transaction ID space exhausted)".into())
+        })?;
+        match counter.compare_exchange_weak(current, next, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => return Ok(current),
+            Err(actual) => current = actual,
+        }
+    }
+}
 
 /// WAL 崩溃恢复：回放单条 WAL 记录到 MemTable
 ///
@@ -26,6 +83,18 @@ pub(crate) fn replay_entry<T: VectorType>(mt: &mut MemTable<T>, entry: WalEntry<
             vector,
             payload,
         } => {
+            // 即使检查点已包含此 ID，也要验证日志内容，防止幂等跳过掩盖非法记录。
+            let payload_val = replay_json(&payload, "Insert.payload", id)?;
+            let next_id = id.checked_add(1).filter(|_| id != 0).ok_or_else(|| {
+                TriviumError::CorruptedFile(format!(
+                    "WAL 插入 ID 超出有效范围 (WAL insert ID is out of range): id={id}"
+                ))
+            })?;
+            mt.validate_insert(&vector).map_err(|error| {
+                TriviumError::CorruptedFile(format!(
+                    "WAL 插入向量无效 (Invalid WAL insert vector): id={id}, {error}"
+                ))
+            })?;
             if mt.contains(id) {
                 // 幂等：该 ID 已存在（可能来自 .tdb 加载或重复回放），跳过
                 tracing::debug!(
@@ -33,12 +102,10 @@ pub(crate) fn replay_entry<T: VectorType>(mt: &mut MemTable<T>, entry: WalEntry<
                     id
                 );
             } else {
-                let payload_val: serde_json::Value =
-                    serde_json::from_str(&payload).unwrap_or_default();
-                let _ = mt.raw_insert(id, &vector, payload_val);
+                mt.raw_insert(id, &vector, payload_val)?;
             }
             // 无论是否跳过，都必须推进 next_id 防止后续 insert 复用已物化的 ID
-            mt.advance_next_id(id + 1);
+            mt.advance_next_id(next_id);
         }
         WalEntry::Link {
             src,
@@ -47,9 +114,14 @@ pub(crate) fn replay_entry<T: VectorType>(mt: &mut MemTable<T>, entry: WalEntry<
             weight,
             metadata,
         } => {
+            let metadata = replay_json(&metadata, "Link.metadata", src)?;
+            if !weight.is_finite() {
+                return Err(TriviumError::CorruptedFile(format!(
+                    "WAL 边权重无效 (Invalid WAL edge weight): src={src}, dst={dst}"
+                )));
+            }
             if mt.contains(src) && mt.contains(dst) {
-                let metadata = serde_json::from_str(&metadata).unwrap_or(serde_json::Value::Null);
-                let _ = mt.upsert_edge(src, dst, label, weight, metadata);
+                mt.upsert_edge(src, dst, label, weight, metadata)?;
             }
         }
         WalEntry::Delete { id } => {
@@ -59,24 +131,28 @@ pub(crate) fn replay_entry<T: VectorType>(mt: &mut MemTable<T>, entry: WalEntry<
         }
         WalEntry::Unlink { src, dst } => {
             if mt.contains(src) {
-                let _ = mt.unlink(src, dst);
+                mt.unlink(src, dst)?;
             }
         }
         WalEntry::UnlinkLabel { src, dst, label } => {
             if mt.contains(src) {
-                let _ = mt.unlink_label(src, dst, &label);
+                mt.unlink_label(src, dst, &label)?;
             }
         }
         WalEntry::UpdatePayload { id, payload } => {
+            let payload_val = replay_json(&payload, "UpdatePayload.payload", id)?;
             if mt.contains(id) {
-                let payload_val: serde_json::Value =
-                    serde_json::from_str(&payload).unwrap_or_default();
-                let _ = mt.update_payload(id, payload_val);
+                mt.update_payload(id, payload_val)?;
             }
         }
         WalEntry::UpdateVector { id, vector } => {
+            mt.validate_insert(&vector).map_err(|error| {
+                TriviumError::CorruptedFile(format!(
+                    "WAL 更新向量无效 (Invalid WAL update vector): id={id}, {error}"
+                ))
+            })?;
             if mt.contains(id) {
-                let _ = mt.update_vector(id, &vector);
+                mt.update_vector(id, &vector)?;
             }
         }
         WalEntry::TxBegin { .. } | WalEntry::TxCommit { .. } => {
@@ -84,6 +160,26 @@ pub(crate) fn replay_entry<T: VectorType>(mt: &mut MemTable<T>, entry: WalEntry<
         }
     }
     Ok(())
+}
+
+/// 帧与 CRC 校验通过之后，仍须独立验证业务字段的 JSON 语义。
+fn replay_json(raw: &str, field: &str, id: NodeId) -> Result<serde_json::Value> {
+    serde_json::from_str(raw).map_err(|error| {
+        TriviumError::CorruptedFile(format!(
+            "WAL JSON 无效 (Invalid WAL JSON): field={field}, id={id}, {error}"
+        ))
+    })
+}
+
+/// 提交前确认 JSON 可被恢复端解码，包括 serde_json 的嵌套深度边界。
+fn validate_transaction_json(raw: &str) -> Result<()> {
+    serde_json::from_str::<serde_json::Value>(raw)
+        .map(|_| ())
+        .map_err(|error| {
+            TriviumError::InvalidInput(format!(
+                "事务 JSON 无法持久化并恢复 (Transaction JSON cannot be persisted and recovered): {error}"
+            ))
+        })
 }
 
 // ════════════════════════════════════════════════════════
@@ -137,7 +233,7 @@ pub enum TxOp<T> {
 /// 轻量级事务
 ///
 /// 所有操作在 commit() 前仅缓冲在内存中，不会影响数据库状态。
-/// - `commit()` → 一次性持有锁，按顺序应用到 memtable + WAL，任何一步失败则回滚
+/// - `commit()` → 持锁完成顺序预检与预留，先提交 WAL，再按预检顺序应用到 memtable
 /// - `rollback()` → 丢弃缓冲（或 drop 自动丢弃）
 ///
 /// ```rust,ignore
@@ -232,10 +328,10 @@ impl<'a, T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Transac
     /// 原子提交事务
     ///
     /// 流程（WAL-first 持久化语义）：
-    ///   1. Dry-Run 预检：虚拟状态验证 + 预分配 ID
-    ///   2. 构建 WAL 条目（不触碰 memtable）
-    ///   3. 先写 WAL（若失败则 memtable 完全未变，安全回滚）
-    ///   4. 再应用到 memtable（Infallible，干跑已排除所有异常）
+    ///   1. Dry-Run 预检：按顺序投影状态并确定 ID，预留核心容量
+    ///   2. 构建 WAL 条目并检查 JSON 可恢复性，不修改事实数据
+    ///   3. 先写 WAL，I/O 错误传播且该批内存数据尚未应用
+    ///   4. 使用原始 JSON 值按预检顺序应用，再同步 QuIVer
     pub fn commit(mut self) -> Result<Vec<NodeId>> {
         let ops = std::mem::take(&mut self.ops);
         self.committed = true;
@@ -371,7 +467,7 @@ impl<T: VectorType> Default for TxBuilder<T> {
 
 impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T> {
     /// 原子提交一组事务操作（供 Transaction::commit 和 commit_tx 共用）
-    pub(crate) fn commit_ops(&mut self, ops: Vec<TxOp<T>>) -> Result<Vec<NodeId>> {
+    pub(crate) fn commit_ops(&mut self, mut ops: Vec<TxOp<T>>) -> Result<Vec<NodeId>> {
         let _operation = self.enter_operation()?;
         self.require_write_access("transaction commit")?;
         if ops.is_empty() {
@@ -383,26 +479,28 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         // ════════ 第一阶段：预检前置 (Dry-Run) + 预分配 ID ════════
         let mut sim_next_id = mt.next_id_value();
         let dim = mt.dim();
-        let mut pending_ids = std::collections::HashSet::new();
-        let mut pending_deletes = std::collections::HashSet::new();
-        let mut pre_assigned_ids: Vec<Option<NodeId>> = Vec::with_capacity(ops.len());
+        // 只投影本批触及的 ID；每个操作覆盖前一状态，支持同一 ID 多次删除和重建。
+        let mut node_states = std::collections::HashMap::<NodeId, bool>::new();
 
         macro_rules! check_exists {
             ($id:expr) => {
-                !pending_deletes.contains($id) && (pending_ids.contains($id) || mt.contains(*$id))
+                node_states
+                    .get($id)
+                    .copied()
+                    .unwrap_or_else(|| mt.contains(*$id))
             };
         }
 
-        for op in &ops {
+        for op in &mut ops {
             match op {
-                TxOp::Insert { vector, .. } => {
+                TxOp::Insert { vector, payload } => {
                     if vector.len() != dim {
                         return Err(crate::error::TriviumError::DimensionMismatch {
                             expected: dim,
                             got: vector.len(),
                         });
                     }
-                    for item in vector {
+                    for item in vector.iter() {
                         let f = item.to_f32();
                         if f.is_nan() || f.is_infinite() {
                             return Err(crate::error::TriviumError::InvalidVector {
@@ -412,11 +510,17 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                             });
                         }
                     }
-                    pre_assigned_ids.push(Some(sim_next_id));
-                    pending_ids.insert(sim_next_id);
+                    let id = sim_next_id;
                     sim_next_id = sim_next_id.checked_add(1).ok_or_else(|| {
                         crate::error::TriviumError::InvalidInput("节点 ID 空间已耗尽".into())
                     })?;
+                    node_states.insert(id, true);
+                    // 自动 ID 在 WAL 前归一化，应用阶段直接使用已确定的 ID 与原始 JSON。
+                    *op = TxOp::InsertWithId {
+                        id,
+                        vector: std::mem::take(vector),
+                        payload: std::mem::take(payload),
+                    };
                 }
                 TxOp::InsertWithId { id, vector, .. } => {
                     if *id == 0 {
@@ -433,7 +537,7 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                             got: vector.len(),
                         });
                     }
-                    for item in vector {
+                    for item in vector.iter() {
                         let f = item.to_f32();
                         if f.is_nan() || f.is_infinite() {
                             return Err(crate::error::TriviumError::InvalidVector {
@@ -443,8 +547,7 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                             });
                         }
                     }
-                    pre_assigned_ids.push(Some(*id));
-                    pending_ids.insert(*id);
+                    node_states.insert(*id, true);
                     if *id >= sim_next_id {
                         sim_next_id = id.checked_add(1).ok_or_else(|| {
                             crate::error::TriviumError::InvalidInput("节点 ID 空间已耗尽".into())
@@ -465,26 +568,22 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                             "边权重必须是有限浮点数 (Edge weight must be finite)".into(),
                         ));
                     }
-                    pre_assigned_ids.push(None);
                 }
                 TxOp::Delete { id } => {
                     if !check_exists!(id) {
                         return Err(crate::error::TriviumError::NodeNotFound(*id));
                     }
-                    pending_deletes.insert(*id);
-                    pre_assigned_ids.push(None);
+                    node_states.insert(*id, false);
                 }
                 TxOp::Unlink { src, .. } | TxOp::UnlinkLabel { src, .. } => {
                     if !check_exists!(src) {
                         return Err(crate::error::TriviumError::NodeNotFound(*src));
                     }
-                    pre_assigned_ids.push(None);
                 }
                 TxOp::UpdatePayload { id, .. } => {
                     if !check_exists!(id) {
                         return Err(crate::error::TriviumError::NodeNotFound(*id));
                     }
-                    pre_assigned_ids.push(None);
                 }
                 TxOp::UpdateVector { id, vector } => {
                     if !check_exists!(id) {
@@ -496,7 +595,7 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                             got: vector.len(),
                         });
                     }
-                    for item in vector {
+                    for item in vector.iter() {
                         let f = item.to_f32();
                         if f.is_nan() || f.is_infinite() {
                             return Err(crate::error::TriviumError::InvalidVector {
@@ -506,26 +605,19 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                             });
                         }
                     }
-                    pre_assigned_ids.push(None);
                 }
             }
         }
 
         let mut unique_changes =
-            std::collections::BTreeMap::<NodeId, Option<serde_json::Value>>::new();
-        for (index, op) in ops.iter().enumerate() {
+            std::collections::BTreeMap::<NodeId, Option<&serde_json::Value>>::new();
+        for op in &ops {
             match op {
-                TxOp::Insert { payload, .. } | TxOp::InsertWithId { payload, .. } => {
-                    let id = pre_assigned_ids.get(index).copied().flatten().ok_or_else(|| {
-                        crate::error::TriviumError::InvalidInput(
-                            "事务插入缺少预分配 ID (Transaction insert is missing a pre-assigned ID)"
-                                .into(),
-                        )
-                    })?;
-                    unique_changes.insert(id, Some(payload.clone()));
+                TxOp::InsertWithId { id, payload, .. } => {
+                    unique_changes.insert(*id, Some(payload));
                 }
                 TxOp::UpdatePayload { id, payload } => {
-                    unique_changes.insert(*id, Some(payload.clone()));
+                    unique_changes.insert(*id, Some(payload));
                 }
                 TxOp::Delete { id } => {
                     unique_changes.insert(*id, None);
@@ -533,19 +625,57 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                 _ => {}
             }
         }
-        mt.validate_unique_changes(
-            unique_changes
-                .iter()
-                .map(|(id, payload)| (*id, payload.as_ref())),
-        )?;
 
         let delete_count = ops
             .iter()
             .filter(|op| matches!(op, TxOp::Delete { .. }))
             .count();
-        mt.reserve_text_deletes(delete_count)?;
-        let insert_count = pre_assigned_ids.iter().filter(|id| id.is_some()).count();
-        let estimated_bytes = mt.estimate_reserve_bytes(insert_count)?;
+        let insert_count = ops
+            .iter()
+            .filter(|op| matches!(op, TxOp::InsertWithId { .. }))
+            .count();
+        let mut estimated_bytes = mt.estimate_reserve_bytes(insert_count)?;
+        for op in &ops {
+            if let TxOp::Link {
+                src,
+                dst,
+                label,
+                metadata,
+                ..
+            } = op
+            {
+                estimated_bytes = estimated_bytes
+                    .saturating_add(mt.estimate_edge_write_bytes(*src, *dst, label, metadata)?);
+            }
+            let (value, vector_bytes) = match op {
+                TxOp::InsertWithId {
+                    payload, vector, ..
+                } => (
+                    Some(payload),
+                    vector.len().saturating_mul(std::mem::size_of::<T>()),
+                ),
+                TxOp::UpdatePayload { payload, .. } => (Some(payload), 0),
+                TxOp::Link { metadata, .. } => (Some(metadata), 0),
+                TxOp::UpdateVector { vector, .. } => {
+                    (None, vector.len().saturating_mul(std::mem::size_of::<T>()))
+                }
+                _ => (None, 0),
+            };
+            estimated_bytes = estimated_bytes.saturating_add(vector_bytes);
+            if let Some(value) = value {
+                let encoded = crate::storage::payload_store::json_encoded_len(value)?;
+                if !matches!(op, TxOp::Link { .. }) && encoded > 8 * 1024 * 1024 {
+                    return Err(TriviumError::PayloadTooLarge {
+                        size_bytes: encoded,
+                        max_bytes: 8 * 1024 * 1024,
+                    });
+                }
+                // 同时计入 WAL 编码、原始存储和解析缓存的暂存峰值。
+                estimated_bytes = estimated_bytes
+                    .saturating_add(encoded.saturating_mul(2))
+                    .saturating_add(crate::storage::payload_store::estimate_json_memory(value));
+            }
+        }
         let current_bytes = mt.estimated_memory_bytes();
         if self.memory_limit > 0
             && current_bytes.saturating_add(estimated_bytes) > self.memory_limit
@@ -557,34 +687,31 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                 memory_limit: self.memory_limit,
             });
         }
+        let changes = unique_changes
+            .iter()
+            .map(|(id, payload)| (*id, *payload))
+            .collect::<Vec<_>>();
+        let unique_delta = mt.prepare_unique_delta(&changes)?;
+        mt.ensure_additional_memory(
+            self.memory_limit,
+            estimated_bytes.saturating_add(unique_delta.workspace_bytes()),
+        )?;
+        mt.reserve_unique_delta(&unique_delta)?;
+        drop(unique_changes);
+        mt.reserve_text_deletes(delete_count)?;
         mt.try_reserve_for_insert(insert_count)?;
 
         // ════════ 第二阶段：构建 WAL 条目（不触碰 memtable） ════════
         let mut wal_entries: Vec<WalEntry<T>> = Vec::with_capacity(ops.len());
         let mut generated_ids: Vec<NodeId> = Vec::new();
 
-        for (i, op) in ops.iter().enumerate() {
+        for op in &ops {
             match op {
-                TxOp::Insert { vector, payload } => {
-                    let id = pre_assigned_ids.get(i).copied().flatten().ok_or_else(|| {
-                        crate::error::TriviumError::InvalidInput(
-                            "事务插入缺少预分配 ID (Transaction insert is missing a pre-assigned ID)"
-                                .into(),
-                        )
-                    })?;
-                    let payload_str = payload.to_string();
-                    if payload_str.len() > 8 * 1024 * 1024 {
-                        return Err(crate::error::TriviumError::PayloadTooLarge {
-                            size_bytes: payload_str.len(),
-                            max_bytes: 8 * 1024 * 1024,
-                        });
-                    }
-                    generated_ids.push(id);
-                    wal_entries.push(WalEntry::Insert {
-                        id,
-                        vector: vector.clone(),
-                        payload: payload_str,
-                    });
+                TxOp::Insert { .. } => {
+                    return Err(TriviumError::InvalidInput(
+                        "事务插入缺少预分配 ID (Transaction insert is missing a pre-assigned ID)"
+                            .into(),
+                    ));
                 }
                 TxOp::InsertWithId {
                     id,
@@ -598,6 +725,7 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                             max_bytes: 8 * 1024 * 1024,
                         });
                     }
+                    validate_transaction_json(&payload_str)?;
                     generated_ids.push(*id);
                     wal_entries.push(WalEntry::Insert {
                         id: *id,
@@ -612,12 +740,14 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                     weight,
                     metadata,
                 } => {
+                    let metadata = metadata.to_string();
+                    validate_transaction_json(&metadata)?;
                     wal_entries.push(WalEntry::Link {
                         src: *src,
                         dst: *dst,
                         label: label.clone(),
                         weight: *weight,
-                        metadata: metadata.to_string(),
+                        metadata,
                     });
                 }
                 TxOp::Delete { id } => {
@@ -644,6 +774,7 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                             max_bytes: 8 * 1024 * 1024,
                         });
                     }
+                    validate_transaction_json(&payload_str)?;
                     wal_entries.push(WalEntry::UpdatePayload {
                         id: *id,
                         payload: payload_str,
@@ -661,71 +792,83 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
         // ════════ 第三阶段：先写 WAL（若失败则 memtable 完全未变） ════════
         {
             let mut w = lock_or_recover(&self.wal);
-            let tx_id = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos() as u64;
+            let tx_id = next_transaction_id(&NEXT_TX_ID)?;
             w.append_batch(tx_id, &wal_entries)?;
         }
         #[cfg(feature = "test-hooks")]
         crate::test_hooks::hit(crate::test_hooks::ConcurrencyPoint::AfterWalAppend);
 
-        // ════════ 第四阶段：应用到 memtable（Infallible Apply） ════════
+        // ════════ 第四阶段：按预检顺序应用原始值，不再解码 WAL JSON ════════
         #[cfg(feature = "test-hooks")]
         crate::test_hooks::hit(crate::test_hooks::ConcurrencyPoint::BeforeMemtableApply);
         // 暂停 QuIVer 增量同步，避免事务中途的 QuIVer 状态需要回滚
-        mt.set_quiver_sync_paused(true);
+        let mut application = ApplicationGuard::new(&mut mt, &self.wal, &self.lifecycle.0);
 
-        for entry in &wal_entries {
-            match entry {
-                WalEntry::Insert {
-                    id,
-                    vector,
-                    payload,
-                } => {
-                    let payload_val: serde_json::Value =
-                        serde_json::from_str(payload).unwrap_or_default();
-                    let _ = mt.insert_with_id(*id, vector, payload_val);
+        let apply_result = (|| -> Result<()> {
+            for op in ops {
+                match op {
+                    TxOp::InsertWithId {
+                        id,
+                        vector,
+                        payload,
+                    } => {
+                        application.mt.insert_with_id(id, &vector, payload)?;
+                    }
+                    TxOp::Link {
+                        src,
+                        dst,
+                        label,
+                        weight,
+                        metadata,
+                    } => {
+                        application
+                            .mt
+                            .upsert_edge(src, dst, label, weight, metadata)?;
+                    }
+                    TxOp::Delete { id } => {
+                        application.mt.delete(id)?;
+                    }
+                    TxOp::Unlink { src, dst } => {
+                        application.mt.unlink(src, dst)?;
+                    }
+                    TxOp::UnlinkLabel { src, dst, label } => {
+                        application.mt.unlink_label(src, dst, &label)?;
+                    }
+                    TxOp::UpdatePayload { id, payload } => {
+                        application.mt.update_payload(id, payload)?;
+                    }
+                    TxOp::UpdateVector { id, vector } => {
+                        application.mt.update_vector(id, &vector)?;
+                    }
+                    TxOp::Insert { .. } => {
+                        return Err(TriviumError::InvalidInput(
+                        "事务插入缺少预分配 ID (Transaction insert is missing a pre-assigned ID)"
+                            .into(),
+                    ));
+                    }
                 }
-                WalEntry::Link {
-                    src,
-                    dst,
-                    label,
-                    weight,
-                    metadata,
-                } => {
-                    let metadata =
-                        serde_json::from_str(metadata).unwrap_or(serde_json::Value::Null);
-                    let _ = mt.upsert_edge(*src, *dst, label.clone(), *weight, metadata);
-                }
-                WalEntry::Delete { id } => {
-                    let _ = mt.delete(*id);
-                }
-                WalEntry::Unlink { src, dst } => {
-                    let _ = mt.unlink(*src, *dst);
-                }
-                WalEntry::UnlinkLabel { src, dst, label } => {
-                    let _ = mt.unlink_label(*src, *dst, label);
-                }
-                WalEntry::UpdatePayload { id, payload } => {
-                    let payload_val: serde_json::Value =
-                        serde_json::from_str(payload).unwrap_or_default();
-                    let _ = mt.update_payload(*id, payload_val);
-                }
-                WalEntry::UpdateVector { id, vector } => {
-                    let _ = mt.update_vector(*id, vector);
-                }
-                _ => {}
+                #[cfg(feature = "test-hooks")]
+                crate::test_hooks::io_result(crate::test_hooks::IoPoint::TransactionApply)?;
             }
-        }
+            Ok(())
+        })();
 
         // 恢复 QuIVer 同步
-        mt.set_quiver_sync_paused(false);
+        application
+            .mt
+            .set_quiver_sync_paused(application.previous_pause);
+        apply_result?;
+        application.mt.apply_unique_delta(unique_delta)?;
+        application
+            .mt
+            .set_unique_updates_paused(application.previous_unique_pause);
 
         // ════════ 第五阶段：QuIVer 增量同步（分离时间线） ════════
-        // Phase 4 已成功完成（Infallible），此处不需要回滚能力。
+        // 数据应用已完成后再同步索引，避免应用期间触发中间代际的增量维护。
         // 委托给 MemTable 方法处理，避免直接访问私有字段。
-        mt.quiver_sync_tx_entries(&wal_entries);
+        application.mt.quiver_sync_tx_entries(&wal_entries);
+        application.complete = true;
+        drop(application);
 
         drop(mt);
 
@@ -741,5 +884,133 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
     /// ```
     pub fn commit_tx(&mut self, builder: TxBuilder<T>) -> Result<Vec<NodeId>> {
         self.commit_ops(builder.into_ops())
+    }
+}
+
+#[cfg(test)]
+mod guard_tests {
+    use super::*;
+    use std::sync::{Mutex, atomic::AtomicU64};
+
+    #[cfg(feature = "test-hooks")]
+    #[test]
+    fn 已准入的共享搜索在事务应用失败后同样拒绝部分状态() {
+        use crate::test_hooks::{ConcurrencyPoint, IoPoint, fail_io_at, pause_at};
+        for count in [1, 3] {
+            let root = std::env::temp_dir()
+                .join(format!("tdb-tx-admitted-{count}-{}", std::process::id()));
+            std::fs::create_dir_all(&root).unwrap();
+            let path = root.join("sample.tdb");
+            let mut db = Database::<f32>::open(path.to_str().unwrap(), 2).unwrap();
+            db.insert_with_id(1, &[1., 0.], serde_json::json!({"state":"old"}))
+                .unwrap();
+            let handle = db.search_handle();
+            let barrier = pause_at(ConcurrencyPoint::BeforeSearchReadLock);
+            let query = std::thread::spawn(move || {
+                handle.search_batch(
+                    &vec![vec![1., 0.]; count],
+                    &super::super::SearchConfig {
+                        top_k: 1,
+                        expand_depth: 0,
+                        ..Default::default()
+                    },
+                    &Default::default(),
+                )
+            });
+            barrier.wait_until_arrived();
+            let failure = fail_io_at(IoPoint::TransactionApply);
+            let mut tx = TxBuilder::new();
+            tx.update_payload(1, serde_json::json!({"state":"new"}));
+            tx.insert_with_id(2, &[0., 1.], serde_json::json!({}));
+            let result = db.commit_tx(tx);
+            drop(failure);
+            barrier.release();
+            let result_query = query.join().unwrap();
+            assert!(matches!(result, Err(TriviumError::Io(_))));
+            assert!(matches!(result_query, Err(TriviumError::WalClosed)));
+            drop(db);
+            let mut reopened = Database::<f32>::open(path.to_str().unwrap(), 2).unwrap();
+            assert_eq!(reopened.node_count().unwrap(), 2);
+            assert_eq!(
+                reopened.get_payload(1).unwrap(),
+                Some(serde_json::json!({"state":"new"}))
+            );
+            reopened.close().unwrap();
+            drop(reopened);
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn 事务编号并发唯一且耗尽后保持拒绝() {
+        let counter = AtomicU64::new(1);
+        let batches = std::thread::scope(|scope| {
+            (0..4)
+                .map(|_| {
+                    scope.spawn(|| {
+                        (0..256)
+                            .map(|_| next_transaction_id(&counter).unwrap())
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
+                .map(|h| h.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        let mut ids = batches.into_iter().flatten().collect::<Vec<_>>();
+        ids.sort_unstable();
+        assert_eq!(ids, (1..=1024).collect::<Vec<_>>());
+        let counter = AtomicU64::new(u64::MAX - 1);
+        assert_eq!(next_transaction_id(&counter).unwrap(), u64::MAX - 1);
+        for _ in 0..2 {
+            assert!(matches!(
+                next_transaction_id(&counter),
+                Err(TriviumError::InvalidInput(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn 应用guard正常结束和异常展开均恢复原暂停状态() {
+        for previous in [false, true] {
+            for panicking in [false, true] {
+                let root = std::env::temp_dir().join(format!(
+                    "tdb-tx-guard-{previous}-{panicking}-{}",
+                    std::process::id()
+                ));
+                std::fs::create_dir_all(&root).unwrap();
+                let mut db =
+                    Database::<f32>::open(root.join("sample.tdb").to_str().unwrap(), 2).unwrap();
+                let wal: &Mutex<_> = &db.wal;
+                let mut mt = write_or_recover(&db.memtable);
+                mt.set_quiver_sync_paused(previous);
+                mt.set_unique_updates_paused(previous);
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let mut guard = ApplicationGuard::new(&mut mt, wal, &db.lifecycle.0);
+                    assert!(guard.mt.quiver_sync_paused());
+                    assert!(guard.mt.unique_updates_paused());
+                    if panicking {
+                        panic!("受控事务应用展开");
+                    }
+                    guard.complete = true;
+                }));
+                assert_eq!(result.is_err(), panicking);
+                assert_eq!(mt.quiver_sync_paused(), previous);
+                assert_eq!(mt.unique_updates_paused(), previous);
+                assert_eq!(
+                    lock_or_recover(&db.lifecycle.0).recovery_required,
+                    panicking
+                );
+                drop(mt);
+                if panicking {
+                    assert!(matches!(db.node_count(), Err(TriviumError::WalClosed)));
+                } else {
+                    db.close().unwrap();
+                }
+                drop(db);
+                std::fs::remove_dir_all(root).unwrap();
+            }
+        }
     }
 }

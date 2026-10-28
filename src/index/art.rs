@@ -601,6 +601,7 @@ impl<V> ArtMap<V> {
         output
     }
 
+    #[cfg(test)]
     pub(crate) fn range_values(
         &self,
         bound: &[u8],
@@ -619,6 +620,32 @@ impl<V> ArtMap<V> {
                 descending,
                 &mut output,
                 limit,
+                None,
+            );
+        }
+        output
+    }
+    /// 将类型前缀约束下推到树遍历，跨类型子树在候选截断前被排除。
+    pub(crate) fn range_values_in_kind(
+        &self,
+        bound: &[u8],
+        ordering: Ordering,
+        inclusive: bool,
+        descending: bool,
+        limit: usize,
+        kind: u8,
+    ) -> Vec<&V> {
+        let mut output = Vec::with_capacity(limit.min(self.len));
+        if let Some(root) = self.root.as_deref() {
+            collect_range_values(
+                root,
+                bound,
+                ordering,
+                inclusive,
+                descending,
+                &mut output,
+                limit,
+                Some(kind),
             );
         }
         output
@@ -906,11 +933,25 @@ fn collect_range_values<'a, V>(
     descending: bool,
     output: &mut Vec<&'a V>,
     limit: usize,
+    kind: Option<u8>,
 ) {
     if output.len() >= limit {
         return;
     }
-    match subtree_relation(node, bound, ordering, inclusive) {
+    let homogeneous = if let Some(kind) = kind {
+        let first = first_key(node).and_then(|key| key.first()).copied();
+        let last = last_key(node).and_then(|key| key.first()).copied();
+        if first.is_some_and(|first| first > kind) || last.is_some_and(|last| last < kind) {
+            return;
+        }
+        first == Some(kind) && last == Some(kind)
+    } else {
+        true
+    };
+    match homogeneous
+        .then(|| subtree_relation(node, bound, ordering, inclusive))
+        .flatten()
+    {
         Some(true) => {
             collect_all_values(node, descending, output, limit);
             return;
@@ -920,25 +961,31 @@ fn collect_range_values<'a, V>(
     }
     if !descending {
         if let Some(terminal) = &node.terminal
+            && kind.is_none_or(|kind| terminal.key.first() == Some(&kind))
             && key_matches(&terminal.key, bound, ordering, inclusive)
         {
             output.push(&terminal.value);
         }
         for (_, child) in node.children.iter(false) {
-            collect_range_values(child, bound, ordering, inclusive, descending, output, limit);
+            collect_range_values(
+                child, bound, ordering, inclusive, descending, output, limit, kind,
+            );
             if output.len() >= limit {
                 break;
             }
         }
     } else {
         for (_, child) in node.children.iter(true) {
-            collect_range_values(child, bound, ordering, inclusive, descending, output, limit);
+            collect_range_values(
+                child, bound, ordering, inclusive, descending, output, limit, kind,
+            );
             if output.len() >= limit {
                 break;
             }
         }
         if output.len() < limit
             && let Some(terminal) = &node.terminal
+            && kind.is_none_or(|kind| terminal.key.first() == Some(&kind))
             && key_matches(&terminal.key, bound, ordering, inclusive)
         {
             output.push(&terminal.value);

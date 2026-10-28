@@ -904,18 +904,12 @@ fn histogram_fanout(graph: &crate::storage::memtable::GraphStats) -> f64 {
 fn evaluate_rules(query: &TqlQuery) -> Vec<AppliedRule> {
     let mut rules = Vec::new();
     for (index, stage) in query.pipeline.iter().enumerate() {
-        if let PipelineStage::With(with) = stage {
-            let identity = with.items.len() == 1
-                && matches!(&with.items[0].expr, TqlExpr::Variable(variable) if variable == &with.items[0].alias);
+        if matches!(stage, PipelineStage::With(_)) {
             rules.push(AppliedRule {
                 name: "eliminate_identity_with",
                 stage_index: index,
-                applied: identity,
-                reason: if identity {
-                    "恒等 WITH 不改变作用域或可用列"
-                } else {
-                    "WITH 包含重命名或标量投影"
-                },
+                applied: false,
+                reason: "WITH 在执行点保存值与作用域，保留投影边界",
             });
         }
         if matches!(stage, PipelineStage::Filter(_))
@@ -1273,6 +1267,7 @@ fn predicate_property_field(predicate: &Predicate) -> Option<&str> {
 fn literal_value(literal: &TqlLiteral) -> serde_json::Value {
     match literal {
         TqlLiteral::Int(value) => (*value).into(),
+        TqlLiteral::UInt(value) => (*value).into(),
         TqlLiteral::Float(value) => serde_json::Number::from_f64(*value)
             .map_or(serde_json::Value::Null, serde_json::Value::Number),
         TqlLiteral::Str(value) => value.clone().into(),
@@ -1399,7 +1394,9 @@ fn collect_predicate_fields(predicate: &Predicate, output: &mut Vec<String>) {
     match predicate {
         Predicate::Compare { left, right, .. } => {
             for expression in [left, right] {
-                if let TqlExpr::Property { field, .. } = expression {
+                if let TqlExpr::Property { field, .. } = expression
+                    && field != "id"
+                {
                     output.push(field.clone());
                 }
             }

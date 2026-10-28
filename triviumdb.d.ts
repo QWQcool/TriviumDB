@@ -1,12 +1,16 @@
 /**
  * TriviumDB - AI-native Embedded Database
  * Vector + Graph + Relational in one file.
+ * 数字 ID 的输入与输出均为 JavaScript 安全整数；遇到完整 u64 大 ID 时返回参数错误。
+ * TQL 查询以十进制字符串返回完整 u64 ID。数量参数在整数转换前检查有限性、整数性与范围。
+ * TQL 整数标量及列表、对象中的整数超出安全整数范围时返回十进制字符串。
  */
 
 // ==========================================
 // 辅助类型定义
 // ==========================================
 
+/** u64 分量要求有限非负整数且小于 2**64；number 按 binary64 精度表示。 */
 export type Vector = number[];
 
 export type SyncMode = 'full' | 'normal' | 'off';
@@ -14,7 +18,7 @@ export type SyncMode = 'full' | 'normal' | 'off';
 export type DType = 'f32' | 'f16' | 'u64';
 
 export interface JsSearchHit<T = any> {
-  /** 节点 ID */
+  /** JavaScript 安全整数节点 ID；超范围结果使整个调用返回参数错误。 */
   id: number;
   /** 相似度得分 (余弦相似度或图谱扩散热度) */
   score: number;
@@ -34,6 +38,8 @@ export interface JsEdge {
   label: string;
   /** 边权重 */
   weight: number;
+  /** 边的 JSON 元数据。 */
+  metadata: unknown;
 }
 
 export interface JsIncomingEdge {
@@ -45,6 +51,8 @@ export interface JsIncomingEdge {
   label: string;
   /** 边权重 */
   weight: number;
+  /** 边的 JSON 元数据。 */
+  metadata: unknown;
 }
 
 export type ReachabilityDirection = 'outgoing' | 'incoming' | 'both';
@@ -760,6 +768,9 @@ export class TriviumDB {
    */
   buildTextIndex(): void;
 
+  /** 从完整正文与关键词集合重建文本索引，通过 flush 或 close 持久化。 */
+  rebuildTextIndex(documents: Array<{ id: number; text: string; keywords?: string[] }>): void;
+
   // ── 属性二级索引 ──
 
   /**
@@ -866,7 +877,7 @@ export class TriviumDB {
   instanceStats(): InstanceStats;
   requestShutdown(): ShutdownStatus;
   shutdownStatus(): ShutdownStatus;
-  /** 超时返回 false；后台继续持有数据和文件锁，true 表示关闭已完成 */
+  /** 超时返回 false；后台继续持有数据和文件锁，true 表示持久化及数据库文件、Hook 资源释放完成 */
   closeTimeout(timeoutMs: number): boolean;
   /** 创建新的独立快照目录；已有目标返回 TDB_SNAPSHOT_EXISTS */
   createSnapshot(destination: string, generationId: string): SnapshotManifest;
@@ -889,7 +900,7 @@ export class TriviumDB {
   /** 返回存储内的所有活跃点数量 */
   nodeCount(): number;
 
-  /** 显式关闭数据库（落盘后释放资源）；关闭后该对象的后续数据库操作会抛出错误 */
+  /** 显式关闭并释放 WAL、mmap、Payload 与数据库持有的 Hook；关闭后数据访问抛错，状态与配置诊断仍可读取 */
   close(): void;
 
   /** `close()` 的幂等资源释放别名，供不支持 Explicit Resource Management 的环境调用 */

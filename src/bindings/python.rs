@@ -7,6 +7,7 @@
 #[allow(clippy::module_inception)]
 pub mod python {
     use crate::database::Database as GenericDatabase;
+    use pyo3::exceptions::PyValueError;
     use pyo3::prelude::*;
     use pyo3::types::{PyDict, PyList};
 
@@ -79,7 +80,7 @@ pub mod python {
         fn stats(&self, py: Python<'_>) -> PyResult<PyObject> {
             let value = serde_json::to_value(self.inner.stats())
                 .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
-            Ok(json_to_pyobject(py, &value))
+            json_to_pyobject(py, &value)
         }
     }
 
@@ -169,11 +170,13 @@ pub mod python {
                     "metadata": edge.metadata,
                 }),
                 TqlValue::Int(value) => serde_json::json!(value),
+                TqlValue::UInt(value) => serde_json::json!(value),
                 TqlValue::Float(value) => serde_json::json!(value),
                 TqlValue::String(value) => serde_json::json!(value),
                 TqlValue::Bool(value) => serde_json::json!(value),
                 TqlValue::Path(value) => serde_json::json!(value),
                 TqlValue::List(value) => serde_json::Value::Array(value),
+                TqlValue::Object(value) => serde_json::Value::Object(value),
                 TqlValue::Null => serde_json::Value::Null,
             };
             output.insert(name, value);
@@ -235,8 +238,8 @@ pub mod python {
     fn to_py_reachability(
         py: Python<'_>,
         result: crate::graph::reachability::ReachabilityResult,
-    ) -> PyReachabilityResult {
-        PyReachabilityResult {
+    ) -> PyResult<PyReachabilityResult> {
+        Ok(PyReachabilityResult {
             source_id: result.source_id,
             target_id: result.target_id,
             depth: result.depth,
@@ -244,15 +247,17 @@ pub mod python {
             steps: result
                 .steps
                 .into_iter()
-                .map(|step| PyReachabilityStep {
-                    from_id: step.from,
-                    to_id: step.to,
-                    label: step.label,
-                    weight: round_api_f32(step.weight),
-                    metadata: json_to_pyobject(py, &step.metadata),
+                .map(|step| {
+                    Ok(PyReachabilityStep {
+                        from_id: step.from,
+                        to_id: step.to,
+                        label: step.label,
+                        weight: round_api_f32(step.weight),
+                        metadata: json_to_pyobject(py, &step.metadata)?,
+                    })
                 })
-                .collect(),
-        }
+                .collect::<PyResult<Vec<_>>>()?,
+        })
     }
 
     /// Python 侧的查询命中结果
@@ -355,12 +360,12 @@ pub mod python {
         ((value as f64) * 1_000_000.0).round() / 1_000_000.0
     }
 
-    fn search_hit_to_python(py: Python<'_>, hit: crate::node::SearchHit) -> PySearchHit {
-        PySearchHit {
+    fn search_hit_to_python(py: Python<'_>, hit: crate::node::SearchHit) -> PyResult<PySearchHit> {
+        Ok(PySearchHit {
             id: hit.id,
             score: hit.score,
-            payload: json_to_pyobject(py, &hit.payload),
-        }
+            payload: json_to_pyobject(py, &hit.payload)?,
+        })
     }
 
     /// Python 侧的节点完整视图
@@ -439,75 +444,116 @@ pub mod python {
 
     // ════════ 辅助转换 ════════
 
-    fn json_to_pyobject(py: Python<'_>, val: &serde_json::Value) -> PyObject {
+    fn json_to_pyobject(py: Python<'_>, val: &serde_json::Value) -> PyResult<PyObject> {
+        use pyo3::IntoPyObjectExt;
         match val {
-            serde_json::Value::Null => py.None(),
-            serde_json::Value::Bool(b) => (*b)
-                .into_pyobject(py)
-                .unwrap()
-                .to_owned()
-                .into_any()
-                .unbind(),
+            serde_json::Value::Null => Ok(py.None()),
+            serde_json::Value::Bool(b) => b.into_py_any(py),
             serde_json::Value::Number(n) => {
                 if let Some(i) = n.as_i64() {
-                    i.into_pyobject(py).unwrap().into_any().unbind()
+                    i.into_py_any(py)
+                } else if let Some(u) = n.as_u64() {
+                    u.into_py_any(py)
                 } else {
                     n.as_f64()
-                        .unwrap_or(0.0)
-                        .into_pyobject(py)
-                        .unwrap()
-                        .into_any()
-                        .unbind()
+                        .ok_or_else(|| {
+                            PyValueError::new_err("JSON 数值无效 (Invalid JSON number)")
+                        })?
+                        .into_py_any(py)
                 }
             }
-            serde_json::Value::String(s) => s.into_pyobject(py).unwrap().into_any().unbind(),
+            serde_json::Value::String(s) => s.into_py_any(py),
             serde_json::Value::Array(arr) => {
-                let list = PyList::new(py, arr.iter().map(|v| json_to_pyobject(py, v))).unwrap();
-                list.into_any().unbind()
+                let values = arr
+                    .iter()
+                    .map(|v| json_to_pyobject(py, v))
+                    .collect::<PyResult<Vec<_>>>()?;
+                Ok(PyList::new(py, values)?.into_any().unbind())
             }
             serde_json::Value::Object(map) => {
                 let dict = PyDict::new(py);
                 for (k, v) in map {
-                    let _ = dict.set_item(k, json_to_pyobject(py, v));
+                    dict.set_item(k, json_to_pyobject(py, v)?)?;
                 }
-                dict.into_any().unbind()
+                Ok(dict.into_any().unbind())
             }
         }
     }
 
-    fn pyobject_to_json(obj: &Bound<'_, PyAny>) -> serde_json::Value {
-        if obj.is_none() {
-            serde_json::Value::Null
-        } else if let Ok(b) = obj.extract::<bool>() {
-            serde_json::Value::Bool(b)
-        } else if let Ok(i) = obj.extract::<i64>() {
-            serde_json::json!(i)
-        } else if let Ok(f) = obj.extract::<f64>() {
-            serde_json::json!(f)
-        } else if let Ok(s) = obj.extract::<String>() {
-            serde_json::Value::String(s)
-        } else if let Ok(dict) = obj.downcast::<PyDict>() {
-            let mut map = serde_json::Map::new();
-            for (k, v) in dict.iter() {
-                if let Ok(key) = k.extract::<String>() {
-                    map.insert(key, pyobject_to_json(&v));
-                }
+    fn pyobject_to_json(obj: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
+        fn convert(obj: &Bound<'_, PyAny>, depth: usize) -> PyResult<serde_json::Value> {
+            use pyo3::exceptions::{PyOverflowError, PyTypeError};
+            use pyo3::types::{PyBool, PyFloat, PyInt, PyString, PyTuple};
+            if obj.is_none() {
+                return Ok(serde_json::Value::Null);
             }
-            serde_json::Value::Object(map)
-        } else if let Ok(list) = obj.downcast::<PyList>() {
-            let arr: Vec<serde_json::Value> =
-                list.iter().map(|item| pyobject_to_json(&item)).collect();
-            serde_json::Value::Array(arr)
-        } else {
-            serde_json::Value::Null
+            if obj.is_instance_of::<PyBool>() {
+                return Ok(obj.extract::<bool>()?.into());
+            }
+            if obj.is_instance_of::<PyInt>() {
+                if let Ok(value) = obj.extract::<i64>() {
+                    return Ok(value.into());
+                }
+                return obj
+                    .extract::<u64>()
+                    .map(serde_json::Value::from)
+                    .map_err(|_| {
+                        PyOverflowError::new_err(
+                            "JSON 整数超出 i64/u64 范围 (JSON integer exceeds i64/u64 range)",
+                        )
+                    });
+            }
+            if obj.is_instance_of::<PyFloat>() {
+                return serde_json::Number::from_f64(obj.extract()?)
+                    .map(serde_json::Value::Number)
+                    .ok_or_else(|| {
+                        PyValueError::new_err("JSON 浮点数必须有限 (JSON floats must be finite)")
+                    });
+            }
+            if obj.is_instance_of::<PyString>() {
+                return Ok(obj.extract::<String>()?.into());
+            }
+            if depth >= 127 {
+                return Err(PyValueError::new_err(
+                    "JSON 容器嵌套超过 127 层 (JSON container nesting exceeds 127 levels)",
+                ));
+            }
+            if let Ok(dict) = obj.downcast::<PyDict>() {
+                let mut map = serde_json::Map::new();
+                for (k, v) in dict.iter() {
+                    if !k.is_instance_of::<PyString>() {
+                        return Err(PyTypeError::new_err(
+                            "JSON 对象键必须是字符串 (JSON object keys must be strings)",
+                        ));
+                    }
+                    map.insert(k.extract::<String>()?, convert(&v, depth + 1)?);
+                }
+                return Ok(serde_json::Value::Object(map));
+            }
+            let values = if let Ok(list) = obj.downcast::<PyList>() {
+                list.iter()
+                    .map(|v| convert(&v, depth + 1))
+                    .collect::<PyResult<Vec<_>>>()?
+            } else if let Ok(tuple) = obj.downcast::<PyTuple>() {
+                tuple
+                    .iter()
+                    .map(|v| convert(&v, depth + 1))
+                    .collect::<PyResult<Vec<_>>>()?
+            } else {
+                return Err(PyTypeError::new_err(
+                    "Payload 包含不支持的类型 (Payload contains an unsupported type)",
+                ));
+            };
+            Ok(serde_json::Value::Array(values))
         }
+        convert(obj, 0)
     }
 
     use crate::filter::Filter;
 
     fn dict_to_filter(_py: Python<'_>, dict: &Bound<'_, PyDict>) -> PyResult<Filter> {
         // 将 PyDict 转为 serde_json::Value，再统一调用 Filter::from_json
-        let json_val = pyobject_to_json(&dict.clone().into_any());
+        let json_val = pyobject_to_json(&dict.clone().into_any())?;
         Filter::from_json(&json_val).map_err(pyo3::exceptions::PyValueError::new_err)
     }
 
@@ -650,8 +696,7 @@ pub mod python {
             let ffi_hook = crate::hook::FfiHook::load(lib_path).map_err(|e| {
                 pyo3::exceptions::PyRuntimeError::new_err(format!("加载 FFI Hook 失败: {}", e))
             })?;
-            dispatch!(self, mut db => db.set_hook(ffi_hook));
-            Ok(())
+            dispatch!(self, mut db => db.set_hook(ffi_hook)).map_err(to_py_error)
         }
 
         /// 清除当前已注册的 Hook，恢复为默认的零开销 NoopHook
@@ -675,9 +720,29 @@ pub mod python {
         ///
         /// db.set_hook(MyHook())
         /// ```
-        fn set_hook(&mut self, hook: PyObject) {
+        fn set_hook(&mut self, hook: PyObject) -> PyResult<()> {
             let wrapper = PySearchHookWrapper { py_hook: hook };
-            dispatch!(self, mut db => db.set_hook(wrapper));
+            dispatch!(self, mut db => db.set_hook(wrapper)).map_err(to_py_error)
+        }
+
+        fn __traverse__(
+            &self,
+            visit: pyo3::PyVisit<'_>,
+        ) -> std::result::Result<(), pyo3::PyTraverseError> {
+            // GC 遍历不获取 GIL，也不等待正在关闭的 Hook 槽。
+            dispatch!(self, db => db.try_with_hook(|hook| {
+                // 原生查询仍持有 Hook 时，该引用属于 GC 图之外的活动根。
+                if std::sync::Arc::strong_count(hook) == 1
+                    && let Some(wrapper) = (hook.as_ref() as &dyn std::any::Any).downcast_ref::<PySearchHookWrapper>()
+                {
+                    visit.call(&wrapper.py_hook)?;
+                }
+                Ok(())
+            })).unwrap_or(Ok(()))
+        }
+
+        fn __clear__(&mut self) {
+            dispatch!(self, mut db => db.clear_hook());
         }
 
         /// 带 Hook 上下文的检索：返回 (hits, context)
@@ -737,12 +802,14 @@ pub mod python {
             // 转换搜索结果
             let hits: Vec<PySearchHit> = results
                 .into_iter()
-                .map(|h| PySearchHit {
-                    id: h.id,
-                    score: h.score,
-                    payload: json_to_pyobject(py, &h.payload),
+                .map(|h| {
+                    Ok(PySearchHit {
+                        id: h.id,
+                        score: h.score,
+                        payload: json_to_pyobject(py, &h.payload)?,
+                    })
                 })
-                .collect();
+                .collect::<PyResult<Vec<_>>>()?;
 
             // 转换 HookContext → PyHookContext
             let timings_dict = PyDict::new(py);
@@ -756,7 +823,7 @@ pub mod python {
             let ctx = PyHookContext {
                 timings: timings_dict.into_any().unbind(),
                 counts: counts_dict.into_any().unbind(),
-                custom_data: json_to_pyobject(py, &hook_ctx.custom_data),
+                custom_data: json_to_pyobject(py, &hook_ctx.custom_data)?,
                 observations: hook_ctx
                     .observations
                     .iter()
@@ -778,7 +845,7 @@ pub mod python {
             vector: Bound<'_, PyAny>,
             payload: &Bound<'_, PyAny>,
         ) -> PyResult<u64> {
-            let json = pyobject_to_json(payload);
+            let json = pyobject_to_json(payload)?;
             match &mut self.inner {
                 DbBackend::F32(db) => {
                     let vec: Vec<f32> = vector.extract()?;
@@ -803,7 +870,7 @@ pub mod python {
             vector: Bound<'_, PyAny>,
             payload: &Bound<'_, PyAny>,
         ) -> PyResult<()> {
-            let json = pyobject_to_json(payload);
+            let json = pyobject_to_json(payload)?;
             match &mut self.inner {
                 DbBackend::F32(db) => {
                     let vec: Vec<f32> = vector.extract()?;
@@ -828,7 +895,7 @@ pub mod python {
             vector: Bound<'_, PyAny>,
             payload: &Bound<'_, PyAny>,
         ) -> PyResult<()> {
-            let json = pyobject_to_json(payload);
+            let json = pyobject_to_json(payload)?;
             match &mut self.inner {
                 DbBackend::F32(db) => db.upsert_with_id(id, &vector.extract::<Vec<f32>>()?, json),
                 DbBackend::F16(db) => {
@@ -849,12 +916,24 @@ pub mod python {
             dispatch!(self, mut db => db.link(src, dst, label, weight)).map_err(to_py_error)
         }
 
-        fn get_edge(&self, py: Python<'_>, src: u64, dst: u64, label: &str) -> Option<PyEdge> {
-            dispatch!(self, db => db.get_edge(src, dst, label)).map(|edge| PyEdge {
-                target_id: edge.target_id,
-                label: edge.label,
-                weight: round_api_f32(edge.weight),
-                metadata: json_to_pyobject(py, &edge.metadata),
+        fn get_edge(
+            &self,
+            py: Python<'_>,
+            src: u64,
+            dst: u64,
+            label: &str,
+        ) -> PyResult<Option<PyEdge>> {
+            Ok({
+                dispatch!(self, db => db.get_edge(src, dst, label).map_err(to_py_error)?)
+                    .map(|edge| -> PyResult<PyEdge> {
+                        Ok(PyEdge {
+                            target_id: edge.target_id,
+                            label: edge.label,
+                            weight: round_api_f32(edge.weight),
+                            metadata: json_to_pyobject(py, &edge.metadata)?,
+                        })
+                    })
+                    .transpose()?
             })
         }
 
@@ -869,6 +948,7 @@ pub mod python {
         ) -> PyResult<()> {
             let metadata = metadata
                 .map(pyobject_to_json)
+                .transpose()?
                 .unwrap_or(serde_json::Value::Null);
             dispatch!(self, mut db => db.upsert_edge(src, dst, label, weight, metadata))
                 .map_err(to_py_error)
@@ -888,7 +968,7 @@ pub mod python {
                 dst,
                 label,
                 weight,
-                metadata.map(pyobject_to_json),
+                metadata.map(pyobject_to_json).transpose()?,
             ))
             .map_err(to_py_error)
         }
@@ -944,14 +1024,16 @@ pub mod python {
             }
             .map_err(to_py_error)?;
 
-            Ok(results
+            results
                 .into_iter()
-                .map(|h| PySearchHit {
-                    id: h.id,
-                    score: h.score,
-                    payload: json_to_pyobject(py, &h.payload),
+                .map(|h| {
+                    Ok(PySearchHit {
+                        id: h.id,
+                        score: h.score,
+                        payload: json_to_pyobject(py, &h.payload)?,
+                    })
                 })
-                .collect())
+                .collect::<PyResult<Vec<_>>>()
         }
 
         #[pyo3(signature = (query_vector, top_k=5, recall_k=0, rerank_k=0, expand_depth=2, min_score=0.1, payload_filter=None, max_edges_per_node=0, min_edge_weight=0.0, edge_direction="out"))]
@@ -1006,7 +1088,7 @@ pub mod python {
                     .semantic_hits
                     .into_iter()
                     .map(|hit| search_hit_to_python(py, hit))
-                    .collect::<Vec<_>>()
+                    .collect::<PyResult<Vec<_>>>()?
                     .into_pyobject(py)
                     .unwrap()
                     .into_any()
@@ -1015,7 +1097,7 @@ pub mod python {
                     .graph_hits
                     .into_iter()
                     .map(|hit| search_hit_to_python(py, hit))
-                    .collect::<Vec<_>>()
+                    .collect::<PyResult<Vec<_>>>()?
                     .into_pyobject(py)
                     .unwrap()
                     .into_any()
@@ -1065,18 +1147,20 @@ pub mod python {
             }
             .map_err(to_py_error)?;
 
-            Ok(results
+            results
                 .into_iter()
                 .map(|hits| {
                     hits.into_iter()
-                        .map(|hit| PySearchHit {
-                            id: hit.id,
-                            score: hit.score,
-                            payload: json_to_pyobject(py, &hit.payload),
+                        .map(|hit| {
+                            Ok(PySearchHit {
+                                id: hit.id,
+                                score: hit.score,
+                                payload: json_to_pyobject(py, &hit.payload)?,
+                            })
                         })
-                        .collect()
+                        .collect::<PyResult<Vec<_>>>()
                 })
-                .collect())
+                .collect::<PyResult<Vec<_>>>()
         }
 
         #[pyo3(signature = (
@@ -1181,14 +1265,16 @@ pub mod python {
             }
             .map_err(to_py_error)?;
 
-            Ok(results
+            results
                 .into_iter()
-                .map(|h| PySearchHit {
-                    id: h.id,
-                    score: h.score,
-                    payload: json_to_pyobject(py, &h.payload),
+                .map(|h| {
+                    Ok(PySearchHit {
+                        id: h.id,
+                        score: h.score,
+                        payload: json_to_pyobject(py, &h.payload)?,
+                    })
                 })
-                .collect())
+                .collect::<PyResult<Vec<_>>>()
         }
 
         #[pyo3(signature = (query_vector, query_text, top_k=5, expand_depth=2, min_score=0.1, hybrid_alpha=0.7, payload_filter=None))]
@@ -1237,14 +1323,16 @@ pub mod python {
                 }
             }
             .map_err(to_py_error)?;
-            Ok(results
+            results
                 .into_iter()
-                .map(|h| PySearchHit {
-                    id: h.id,
-                    score: h.score,
-                    payload: json_to_pyobject(py, &h.payload),
+                .map(|h| {
+                    Ok(PySearchHit {
+                        id: h.id,
+                        score: h.score,
+                        payload: json_to_pyobject(py, &h.payload)?,
+                    })
                 })
-                .collect())
+                .collect::<PyResult<Vec<_>>>()
         }
 
         fn delete_many_atomic(&mut self, ids: Vec<u64>) -> PyResult<usize> {
@@ -1258,8 +1346,8 @@ pub mod python {
             expected: &Bound<'_, PyAny>,
             replacement: &Bound<'_, PyAny>,
         ) -> PyResult<()> {
-            let expected = pyobject_to_json(expected);
-            let replacement = pyobject_to_json(replacement);
+            let expected = pyobject_to_json(expected)?;
+            let replacement = pyobject_to_json(replacement)?;
             dispatch!(self, mut db => db.compare_and_set_payload_field(id, field, &expected, replacement))
                 .map_err(to_py_error)
         }
@@ -1283,7 +1371,7 @@ pub mod python {
             id: u64,
             payload: &Bound<'_, PyAny>,
         ) -> PyResult<()> {
-            let json = pyobject_to_json(payload);
+            let json = pyobject_to_json(payload)?;
             dispatch!(self, mut db => db.update_payload(id, json)).map_err(to_py_error)
         }
 
@@ -1304,7 +1392,7 @@ pub mod python {
             id: u64,
             patch: &Bound<'_, PyAny>,
         ) -> PyResult<()> {
-            let json = pyobject_to_json(patch);
+            let json = pyobject_to_json(patch)?;
             dispatch!(self, mut db => db.patch_payload(id, json)).map_err(to_py_error)
         }
         fn update_vector(&mut self, vector: Bound<'_, PyAny>, id: u64) -> PyResult<()> {
@@ -1337,6 +1425,37 @@ pub mod python {
             dispatch!(self, mut db => db.build_text_index()).map_err(to_py_error)
         }
 
+        /// 从完整正文与关键词集合重建文本索引，通过 flush 或 close 持久化。
+        fn rebuild_text_index(&mut self, documents: Vec<Bound<'_, PyDict>>) -> PyResult<()> {
+            let documents = documents
+                .iter()
+                .map(|document| {
+                    for key in document.keys() {
+                        let key = key.extract::<String>()?;
+                        if !matches!(key.as_str(), "id" | "text" | "keywords") {
+                            return Err(PyValueError::new_err(format!("文本重建字段无效：{key}")));
+                        }
+                    }
+                    Ok(crate::index::text::TextIndexDocument {
+                        id: document
+                            .get_item("id")?
+                            .ok_or_else(|| PyValueError::new_err("文本重建记录缺少 id"))?
+                            .extract()?,
+                        text: document
+                            .get_item("text")?
+                            .ok_or_else(|| PyValueError::new_err("文本重建记录缺少 text"))?
+                            .extract()?,
+                        keywords: document
+                            .get_item("keywords")?
+                            .map(|value| value.extract())
+                            .transpose()?
+                            .unwrap_or_default(),
+                    })
+                })
+                .collect::<PyResult<Vec<_>>>()?;
+            dispatch!(self, mut db => db.rebuild_text_index(&documents)).map_err(to_py_error)
+        }
+
         // ════════ 属性二级索引 ════════
 
         /// 创建属性索引：对指定 payload 字段建立倒排索引，加速 MATCH/FIND 查询
@@ -1352,7 +1471,7 @@ pub mod python {
             equalities: &Bound<'_, PyAny>,
             max_results: usize,
         ) -> PyResult<Vec<u64>> {
-            let value = pyobject_to_json(equalities);
+            let value = pyobject_to_json(equalities)?;
             let object = value.as_object().ok_or_else(|| {
                 pyo3::exceptions::PyValueError::new_err(
                     "equalities 必须是对象 (equalities must be an object)",
@@ -1393,8 +1512,8 @@ pub mod python {
                 .map_err(to_py_error)
         }
 
-        fn list_unique_indexes(&self) -> Vec<Vec<String>> {
-            dispatch!(self, db => db.list_unique_indexes())
+        fn list_unique_indexes(&self) -> PyResult<Vec<Vec<String>>> {
+            Ok(dispatch!(self, db => db.list_unique_indexes().map_err(to_py_error)?))
         }
 
         fn create_index(&mut self, field: &str) -> PyResult<()> {
@@ -1431,35 +1550,46 @@ pub mod python {
         }
 
         fn index_info(&self, py: Python<'_>) -> PyResult<PyObject> {
-            let value = dispatch!(self, db => serde_json::to_value(db.index_info()))
-                .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
-            Ok(json_to_pyobject(py, &value))
+            let value =
+                dispatch!(self, db => serde_json::to_value(db.index_info().map_err(to_py_error)?))
+                    .map_err(|error| {
+                        pyo3::exceptions::PyRuntimeError::new_err(error.to_string())
+                    })?;
+            json_to_pyobject(py, &value)
         }
 
         fn storage_info(&self, py: Python<'_>) -> PyResult<PyObject> {
             let value = dispatch!(self, db => serde_json::to_value(db.storage_info()))
                 .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
-            Ok(json_to_pyobject(py, &value))
+            json_to_pyobject(py, &value)
         }
 
         // ════════ 轻量级单字段查询 ════════
 
         /// 获取节点的 payload（不含向量，比 get() 更轻量）
-        fn get_payload(&self, py: Python<'_>, id: u64) -> Option<PyObject> {
-            dispatch!(self, db => db.get_payload(id)).map(|p| json_to_pyobject(py, &p))
+        fn get_payload(&self, py: Python<'_>, id: u64) -> PyResult<Option<PyObject>> {
+            Ok({
+                dispatch!(self, db => db.get_payload(id).map_err(to_py_error)?)
+                    .map(|p| json_to_pyobject(py, &p))
+                    .transpose()?
+            })
         }
 
         /// 获取节点的出边列表
-        fn get_edges(&self, py: Python<'_>, id: u64) -> Vec<PyEdge> {
-            dispatch!(self, db => db.get_edges(id))
-                .into_iter()
-                .map(|e| PyEdge {
-                    target_id: e.target_id,
-                    label: e.label,
-                    weight: round_api_f32(e.weight),
-                    metadata: json_to_pyobject(py, &e.metadata),
-                })
-                .collect()
+        fn get_edges(&self, py: Python<'_>, id: u64) -> PyResult<Vec<PyEdge>> {
+            Ok({
+                dispatch!(self, db => db.get_edges(id).map_err(to_py_error)?)
+                    .into_iter()
+                    .map(|e| {
+                        Ok(PyEdge {
+                            target_id: e.target_id,
+                            label: e.label,
+                            weight: round_api_f32(e.weight),
+                            metadata: json_to_pyobject(py, &e.metadata)?,
+                        })
+                    })
+                    .collect::<PyResult<Vec<_>>>()?
+            })
         }
 
         #[pyo3(signature = (id, label=None))]
@@ -1468,78 +1598,88 @@ pub mod python {
             py: Python<'_>,
             id: u64,
             label: Option<&str>,
-        ) -> Vec<PyIncomingEdge> {
-            dispatch!(self, db => db.get_incoming_edges(id, label))
-                .into_iter()
-                .map(|edge| PyIncomingEdge {
-                    source_id: edge.source_id,
-                    target_id: edge.target_id,
-                    label: edge.label,
-                    weight: round_api_f32(edge.weight),
-                    metadata: json_to_pyobject(py, &edge.metadata),
-                })
-                .collect()
+        ) -> PyResult<Vec<PyIncomingEdge>> {
+            Ok({
+                dispatch!(self, db => db.get_incoming_edges(id, label).map_err(to_py_error)?)
+                    .into_iter()
+                    .map(|edge| {
+                        Ok(PyIncomingEdge {
+                            source_id: edge.source_id,
+                            target_id: edge.target_id,
+                            label: edge.label,
+                            weight: round_api_f32(edge.weight),
+                            metadata: json_to_pyobject(py, &edge.metadata)?,
+                        })
+                    })
+                    .collect::<PyResult<Vec<_>>>()?
+            })
         }
 
         fn get(&self, py: Python<'_>, id: u64) -> PyResult<Option<PyNodeView>> {
             match &self.inner {
                 DbBackend::F32(db) => {
-                    if let Some(n) = db.get(id) {
+                    if let Some(n) = db.get(id).map_err(to_py_error)? {
                         return Ok(Some(PyNodeView {
                             id: n.id,
                             vector: n.vector.into_pyobject(py).unwrap().into_any().unbind(),
-                            payload: json_to_pyobject(py, &n.payload),
+                            payload: json_to_pyobject(py, &n.payload)?,
                             edges: n
                                 .edges
                                 .iter()
-                                .map(|e| PyEdge {
-                                    target_id: e.target_id,
-                                    label: e.label.clone(),
-                                    weight: round_api_f32(e.weight),
-                                    metadata: json_to_pyobject(py, &e.metadata),
+                                .map(|e| {
+                                    Ok(PyEdge {
+                                        target_id: e.target_id,
+                                        label: e.label.clone(),
+                                        weight: round_api_f32(e.weight),
+                                        metadata: json_to_pyobject(py, &e.metadata)?,
+                                    })
                                 })
-                                .collect(),
+                                .collect::<PyResult<Vec<_>>>()?,
                             num_edges: n.edges.len(),
                         }));
                     }
                 }
                 DbBackend::F16(db) => {
-                    if let Some(n) = db.get(id) {
+                    if let Some(n) = db.get(id).map_err(to_py_error)? {
                         let f32_vec: Vec<f32> = n.vector.into_iter().map(|f| f.to_f32()).collect();
                         return Ok(Some(PyNodeView {
                             id: n.id,
                             vector: f32_vec.into_pyobject(py).unwrap().into_any().unbind(),
-                            payload: json_to_pyobject(py, &n.payload),
+                            payload: json_to_pyobject(py, &n.payload)?,
                             edges: n
                                 .edges
                                 .iter()
-                                .map(|e| PyEdge {
-                                    target_id: e.target_id,
-                                    label: e.label.clone(),
-                                    weight: round_api_f32(e.weight),
-                                    metadata: json_to_pyobject(py, &e.metadata),
+                                .map(|e| {
+                                    Ok(PyEdge {
+                                        target_id: e.target_id,
+                                        label: e.label.clone(),
+                                        weight: round_api_f32(e.weight),
+                                        metadata: json_to_pyobject(py, &e.metadata)?,
+                                    })
                                 })
-                                .collect(),
+                                .collect::<PyResult<Vec<_>>>()?,
                             num_edges: n.edges.len(),
                         }));
                     }
                 }
                 DbBackend::U64(db) => {
-                    if let Some(n) = db.get(id) {
+                    if let Some(n) = db.get(id).map_err(to_py_error)? {
                         return Ok(Some(PyNodeView {
                             id: n.id,
                             vector: n.vector.into_pyobject(py).unwrap().into_any().unbind(),
-                            payload: json_to_pyobject(py, &n.payload),
+                            payload: json_to_pyobject(py, &n.payload)?,
                             edges: n
                                 .edges
                                 .iter()
-                                .map(|e| PyEdge {
-                                    target_id: e.target_id,
-                                    label: e.label.clone(),
-                                    weight: round_api_f32(e.weight),
-                                    metadata: json_to_pyobject(py, &e.metadata),
+                                .map(|e| {
+                                    Ok(PyEdge {
+                                        target_id: e.target_id,
+                                        label: e.label.clone(),
+                                        weight: round_api_f32(e.weight),
+                                        metadata: json_to_pyobject(py, &e.metadata)?,
+                                    })
                                 })
-                                .collect(),
+                                .collect::<PyResult<Vec<_>>>()?,
                             num_edges: n.edges.len(),
                         }));
                     }
@@ -1549,8 +1689,15 @@ pub mod python {
         }
 
         #[pyo3(signature = (id, depth=1, labels=None))]
-        fn neighbors(&self, id: u64, depth: usize, labels: Option<Vec<String>>) -> Vec<u64> {
-            dispatch!(self, db => db.neighbors_with_labels(id, depth, labels.as_deref()))
+        fn neighbors(
+            &self,
+            id: u64,
+            depth: usize,
+            labels: Option<Vec<String>>,
+        ) -> PyResult<Vec<u64>> {
+            Ok({
+                dispatch!(self, db => db.neighbors_with_labels(id, depth, labels.as_deref()).map_err(to_py_error)?)
+            })
         }
 
         #[pyo3(signature = (id, min_depth=1, max_depth=1, labels=None, direction="outgoing", max_visited_nodes=10_000, max_results=10_000, max_edges=50_000))]
@@ -1592,9 +1739,9 @@ pub mod python {
                     results
                         .into_iter()
                         .map(|result| to_py_reachability(py, result))
-                        .collect()
+                        .collect::<PyResult<Vec<_>>>()
                 })
-                .map_err(to_py_error)
+                .map_err(to_py_error)?
         }
 
         #[pyo3(signature = (id, min_depth=1, max_depth=1, labels=None, direction="outgoing", max_visited_nodes=10_000, max_results=10_000, max_edges=50_000))]
@@ -1635,7 +1782,7 @@ pub mod python {
                 dispatch!(self, db => db.reachable_detailed(id, &config)).map_err(to_py_error)?;
             let value = serde_json::to_value(output)
                 .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
-            Ok(json_to_pyobject(py, &value))
+            json_to_pyobject(py, &value)
         }
 
         #[pyo3(signature = (id, min_depth=1, max_depth=1, labels=None, direction="outgoing", max_visited_nodes=10_000, max_results=10_000, max_edges=50_000))]
@@ -1676,7 +1823,7 @@ pub mod python {
                 dispatch!(self, db => db.query_subgraph(id, &config)).map_err(to_py_error)?;
             let value = serde_json::to_value(output)
                 .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
-            Ok(json_to_pyobject(py, &value))
+            json_to_pyobject(py, &value)
         }
 
         #[pyo3(signature = (query_vector, anchor_ids, top_k, max_anchor_nodes=100_000))]
@@ -1705,14 +1852,15 @@ pub mod python {
                 }
             }
             .map_err(to_py_error)?;
-            Ok(hits
-                .into_iter()
-                .map(|hit| PySearchHit {
-                    id: hit.id,
-                    score: hit.score,
-                    payload: json_to_pyobject(py, &hit.payload),
+            hits.into_iter()
+                .map(|hit| {
+                    Ok(PySearchHit {
+                        id: hit.id,
+                        score: hit.score,
+                        payload: json_to_pyobject(py, &hit.payload)?,
+                    })
                 })
-                .collect())
+                .collect::<PyResult<Vec<_>>>()
         }
 
         #[pyo3(signature = (query_vector, top_k))]
@@ -1739,26 +1887,32 @@ pub mod python {
                 }
             }
             .map_err(to_py_error)?;
-            Ok(hits
-                .into_iter()
-                .map(|hit| PySearchHit {
-                    id: hit.id,
-                    score: hit.score,
-                    payload: json_to_pyobject(py, &hit.payload),
+            hits.into_iter()
+                .map(|hit| {
+                    Ok(PySearchHit {
+                        id: hit.id,
+                        score: hit.score,
+                        payload: json_to_pyobject(py, &hit.payload)?,
+                    })
                 })
-                .collect())
+                .collect::<PyResult<Vec<_>>>()
         }
 
         fn graph_stats(&self, py: Python<'_>) -> PyResult<PyObject> {
-            let value = serde_json::to_value(dispatch!(self, db => db.graph_stats()))
-                .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
-            Ok(json_to_pyobject(py, &value))
+            let value =
+                serde_json::to_value(dispatch!(self, db => db.graph_stats().map_err(to_py_error)?))
+                    .map_err(|error| {
+                        pyo3::exceptions::PyRuntimeError::new_err(error.to_string())
+                    })?;
+            json_to_pyobject(py, &value)
         }
 
         fn validate_graph(&self, py: Python<'_>) -> PyResult<PyObject> {
-            let value = serde_json::to_value(dispatch!(self, db => db.validate_graph()))
-                .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
-            Ok(json_to_pyobject(py, &value))
+            let value = serde_json::to_value(
+                dispatch!(self, db => db.validate_graph().map_err(to_py_error)?),
+            )
+            .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
+            json_to_pyobject(py, &value)
         }
 
         fn repair_graph_indexes(&mut self, py: Python<'_>) -> PyResult<PyObject> {
@@ -1766,11 +1920,11 @@ pub mod python {
                 dispatch!(self, mut db => db.repair_graph_indexes()).map_err(to_py_error)?;
             let value = serde_json::to_value(report)
                 .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
-            Ok(json_to_pyobject(py, &value))
+            json_to_pyobject(py, &value)
         }
 
-        fn node_count(&self) -> usize {
-            dispatch!(self, db => db.node_count())
+        fn node_count(&self) -> PyResult<usize> {
+            Ok(dispatch!(self, db => db.node_count().map_err(to_py_error)?))
         }
 
         fn flush(&mut self) -> PyResult<()> {
@@ -1782,7 +1936,7 @@ pub mod python {
                 .map_err(to_py_error)?;
             let value = serde_json::to_value(manifest)
                 .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
-            Ok(Python::with_gil(|py| json_to_pyobject(py, &value)))
+            Python::with_gil(|py| json_to_pyobject(py, &value))
         }
 
         fn dim(&self) -> usize {
@@ -1790,8 +1944,8 @@ pub mod python {
         }
 
         /// 获取所有活跃节点的 ID 列表
-        fn all_node_ids(&self) -> Vec<u64> {
-            dispatch!(self, db => db.all_node_ids())
+        fn all_node_ids(&self) -> PyResult<Vec<u64>> {
+            Ok(dispatch!(self, db => db.all_node_ids().map_err(to_py_error)?))
         }
 
         /// 维度迁移：将当前数据库的所有节点和边迁移到一个新维度的数据库。
@@ -1838,8 +1992,8 @@ pub mod python {
             dispatch!(self, mut db => db.set_auto_build_quiver(enabled)).map_err(to_py_error)
         }
 
-        fn clear_search_state(&self) {
-            dispatch!(self, db => db.clear_search_state());
+        fn clear_search_state(&self) -> PyResult<()> {
+            dispatch!(self, db => db.clear_search_state()).map_err(to_py_error)
         }
 
         fn disable_auto_compaction(&mut self) {
@@ -1876,33 +2030,35 @@ pub mod python {
             let stats = dispatch!(self, db => db.resource_stats());
             let value = serde_json::to_value(stats)
                 .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
-            Ok(json_to_pyobject(py, &value))
+            json_to_pyobject(py, &value)
         }
 
         fn instance_stats(&self, py: Python<'_>) -> PyResult<PyObject> {
             let stats = dispatch!(self, db => db.instance_stats());
             let value = serde_json::to_value(stats)
                 .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
-            Ok(json_to_pyobject(py, &value))
+            json_to_pyobject(py, &value)
         }
 
         fn estimated_memory(&self) -> usize {
             dispatch!(self, db => db.estimated_memory())
         }
 
-        fn __len__(&self) -> usize {
+        fn __len__(&self) -> PyResult<usize> {
             self.node_count()
         }
 
-        fn __contains__(&self, id: u64) -> bool {
-            dispatch!(self, db => db.contains(id))
+        fn __contains__(&self, id: u64) -> PyResult<bool> {
+            Ok(dispatch!(self, db => db.contains(id).map_err(to_py_error)?))
         }
 
         fn __repr__(&self) -> String {
             format!(
                 "TriviumDB(dtype={}, nodes={}, dim={})",
                 self.dtype,
-                self.node_count(),
+                self.node_count()
+                    .map(|count| count.to_string())
+                    .unwrap_or_else(|_| "已关闭".into()),
                 self.dim()
             )
         }
@@ -1940,7 +2096,7 @@ pub mod python {
                     for (i, payload_obj) in payloads.iter().enumerate() {
                         let vec_obj = vectors.get_item(i)?;
                         let vec: Vec<f32> = vec_obj.extract()?;
-                        tx.insert(&vec, pyobject_to_json(&payload_obj));
+                        tx.insert(&vec, pyobject_to_json(&payload_obj)?);
                     }
                     db.commit_tx(tx).map_err(to_py_error)
                 }
@@ -1951,7 +2107,7 @@ pub mod python {
                         let vec: Vec<f32> = vec_obj.extract()?;
                         let vec16: Vec<half::f16> =
                             vec.into_iter().map(half::f16::from_f32).collect();
-                        tx.insert(&vec16, pyobject_to_json(&payload_obj));
+                        tx.insert(&vec16, pyobject_to_json(&payload_obj)?);
                     }
                     db.commit_tx(tx).map_err(to_py_error)
                 }
@@ -1960,7 +2116,7 @@ pub mod python {
                     for (i, payload_obj) in payloads.iter().enumerate() {
                         let vec_obj = vectors.get_item(i)?;
                         let vec: Vec<u64> = vec_obj.extract()?;
-                        tx.insert(&vec, pyobject_to_json(&payload_obj));
+                        tx.insert(&vec, pyobject_to_json(&payload_obj)?);
                     }
                     db.commit_tx(tx).map_err(to_py_error)
                 }
@@ -1985,7 +2141,7 @@ pub mod python {
                     let mut tx = crate::database::TxBuilder::new();
                     for (i, payload_obj) in payloads.iter().enumerate() {
                         let vec: Vec<f32> = vectors.get_item(i)?.extract()?;
-                        tx.insert_with_id(ids[i], &vec, pyobject_to_json(&payload_obj));
+                        tx.insert_with_id(ids[i], &vec, pyobject_to_json(&payload_obj)?);
                     }
                     db.commit_tx(tx).map(|_| ()).map_err(to_py_error)
                 }
@@ -1995,7 +2151,7 @@ pub mod python {
                         let vec: Vec<f32> = vectors.get_item(i)?.extract()?;
                         let vec16: Vec<half::f16> =
                             vec.into_iter().map(half::f16::from_f32).collect();
-                        tx.insert_with_id(ids[i], &vec16, pyobject_to_json(&payload_obj));
+                        tx.insert_with_id(ids[i], &vec16, pyobject_to_json(&payload_obj)?);
                     }
                     db.commit_tx(tx).map(|_| ()).map_err(to_py_error)
                 }
@@ -2003,7 +2159,7 @@ pub mod python {
                     let mut tx = crate::database::TxBuilder::new();
                     for (i, payload_obj) in payloads.iter().enumerate() {
                         let vec: Vec<u64> = vectors.get_item(i)?.extract()?;
-                        tx.insert_with_id(ids[i], &vec, pyobject_to_json(&payload_obj));
+                        tx.insert_with_id(ids[i], &vec, pyobject_to_json(&payload_obj)?);
                     }
                     db.commit_tx(tx).map(|_| ()).map_err(to_py_error)
                 }
@@ -2039,7 +2195,7 @@ pub mod python {
                                 let node_dict = PyDict::new(py);
                                 let _ = node_dict.set_item("id", node.id);
                                 let _ = node_dict
-                                    .set_item("payload", json_to_pyobject(py, &node.payload));
+                                    .set_item("payload", json_to_pyobject(py, &node.payload)?);
                                 let _ = node_dict.set_item("num_edges", node.edges.len());
                                 let _ = py_row.set_item(name, node_dict);
                             }
@@ -2051,11 +2207,14 @@ pub mod python {
                                 let _ = edge_dict.set_item("label", edge.label);
                                 let _ = edge_dict.set_item("weight", edge.weight);
                                 let _ = edge_dict
-                                    .set_item("metadata", json_to_pyobject(py, &edge.metadata));
+                                    .set_item("metadata", json_to_pyobject(py, &edge.metadata)?);
                                 let _ = py_row.set_item(name, edge_dict);
                             }
                             TqlValue::Int(value) => {
                                 let _ = py_row.set_item(name, value);
+                            }
+                            TqlValue::UInt(value) => {
+                                py_row.set_item(name, value)?;
                             }
                             TqlValue::Float(value) => {
                                 let _ = py_row.set_item(name, value);
@@ -2072,8 +2231,14 @@ pub mod python {
                             TqlValue::List(value) => {
                                 let _ = py_row.set_item(
                                     name,
-                                    json_to_pyobject(py, &serde_json::Value::Array(value)),
+                                    json_to_pyobject(py, &serde_json::Value::Array(value))?,
                                 );
+                            }
+                            TqlValue::Object(value) => {
+                                py_row.set_item(
+                                    name,
+                                    json_to_pyobject(py, &serde_json::Value::Object(value))?,
+                                )?;
                             }
                             TqlValue::Null => {
                                 let _ = py_row.set_item(name, py.None());
@@ -2118,7 +2283,7 @@ pub mod python {
             let mut values = std::collections::HashMap::new();
             for (key, value) in parameters.iter() {
                 let name: String = key.extract()?;
-                let json = pyobject_to_json(&value);
+                let json = pyobject_to_json(&value)?;
                 values.insert(
                     name,
                     crate::query::tql_prepared::TqlParamValue::from_json(&json)
@@ -2139,7 +2304,7 @@ pub mod python {
             .map_err(to_py_error)?;
             rows.into_iter()
                 .map(|row| {
-                    let value = json_to_pyobject(py, &row);
+                    let value = json_to_pyobject(py, &row)?;
                     Ok(PyQueryRow { row: value })
                 })
                 .collect()
@@ -2270,13 +2435,13 @@ pub mod python {
             let status = dispatch!(self, mut db => db.request_shutdown()).map_err(to_py_error)?;
             let value = serde_json::to_value(status)
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-            Ok(json_to_pyobject(py, &value))
+            json_to_pyobject(py, &value)
         }
 
         fn shutdown_status(&self, py: Python<'_>) -> PyResult<PyObject> {
             let value = serde_json::to_value(dispatch!(self, db => db.shutdown_status()))
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-            Ok(json_to_pyobject(py, &value))
+            json_to_pyobject(py, &value)
         }
 
         fn close_timeout(&mut self, py: Python<'_>, timeout_ms: u64) -> PyResult<bool> {
@@ -2297,7 +2462,7 @@ pub mod python {
                 .map_err(to_py_error)?;
             let value = serde_json::to_value(manifest)
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-            Ok(json_to_pyobject(py, &value))
+            json_to_pyobject(py, &value)
         }
 
         /// 显式关闭数据库（落盘后释放资源）
@@ -2348,25 +2513,23 @@ pub mod python {
         fn insert(
             &mut self,
             _py: Python<'_>,
-            vector: Vec<f64>,
+            vector: Bound<'_, PyAny>,
             payload: &Bound<'_, PyAny>,
         ) -> PyResult<()> {
             check_finished!(self);
-            let json = pyobject_to_json(payload);
+            let json = pyobject_to_json(payload)?;
             match self.builder.as_mut().expect("TxBuilder missing") {
                 TxBuilderBackend::F32(b) => {
-                    let v: Vec<f32> = vector.iter().map(|&x| x as f32).collect();
+                    let v: Vec<f32> = vector.extract()?;
                     b.insert(&v, json);
                 }
                 TxBuilderBackend::F16(b) => {
-                    let v: Vec<half::f16> = vector
-                        .iter()
-                        .map(|&x| half::f16::from_f32(x as f32))
-                        .collect();
+                    let values: Vec<f32> = vector.extract()?;
+                    let v: Vec<half::f16> = values.into_iter().map(half::f16::from_f32).collect();
                     b.insert(&v, json);
                 }
                 TxBuilderBackend::U64(b) => {
-                    let v: Vec<u64> = vector.iter().map(|&x| x as u64).collect();
+                    let v: Vec<u64> = vector.extract()?;
                     b.insert(&v, json);
                 }
             }
@@ -2378,25 +2541,23 @@ pub mod python {
             &mut self,
             _py: Python<'_>,
             id: u64,
-            vector: Vec<f64>,
+            vector: Bound<'_, PyAny>,
             payload: &Bound<'_, PyAny>,
         ) -> PyResult<()> {
             check_finished!(self);
-            let json = pyobject_to_json(payload);
+            let json = pyobject_to_json(payload)?;
             match self.builder.as_mut().expect("TxBuilder missing") {
                 TxBuilderBackend::F32(b) => {
-                    let v: Vec<f32> = vector.iter().map(|&x| x as f32).collect();
+                    let v: Vec<f32> = vector.extract()?;
                     b.insert_with_id(id, &v, json);
                 }
                 TxBuilderBackend::F16(b) => {
-                    let v: Vec<half::f16> = vector
-                        .iter()
-                        .map(|&x| half::f16::from_f32(x as f32))
-                        .collect();
+                    let values: Vec<f32> = vector.extract()?;
+                    let v: Vec<half::f16> = values.into_iter().map(half::f16::from_f32).collect();
                     b.insert_with_id(id, &v, json);
                 }
                 TxBuilderBackend::U64(b) => {
-                    let v: Vec<u64> = vector.iter().map(|&x| x as u64).collect();
+                    let v: Vec<u64> = vector.extract()?;
                     b.insert_with_id(id, &v, json);
                 }
             }
@@ -2449,7 +2610,7 @@ pub mod python {
             payload: &Bound<'_, PyAny>,
         ) -> PyResult<()> {
             check_finished!(self);
-            let json = pyobject_to_json(payload);
+            let json = pyobject_to_json(payload)?;
             match self.builder.as_mut().expect("TxBuilder missing") {
                 TxBuilderBackend::F32(b) => b.update_payload(id, json),
                 TxBuilderBackend::F16(b) => b.update_payload(id, json),
@@ -2459,22 +2620,20 @@ pub mod python {
         }
 
         /// 缓冲一个更新向量操作
-        fn update_vector(&mut self, id: u64, vector: Vec<f64>) -> PyResult<()> {
+        fn update_vector(&mut self, id: u64, vector: Bound<'_, PyAny>) -> PyResult<()> {
             check_finished!(self);
             match self.builder.as_mut().expect("TxBuilder missing") {
                 TxBuilderBackend::F32(b) => {
-                    let v: Vec<f32> = vector.iter().map(|&x| x as f32).collect();
+                    let v: Vec<f32> = vector.extract()?;
                     b.update_vector(id, &v);
                 }
                 TxBuilderBackend::F16(b) => {
-                    let v: Vec<half::f16> = vector
-                        .iter()
-                        .map(|&x| half::f16::from_f32(x as f32))
-                        .collect();
+                    let values: Vec<f32> = vector.extract()?;
+                    let v: Vec<half::f16> = values.into_iter().map(half::f16::from_f32).collect();
                     b.update_vector(id, &v);
                 }
                 TxBuilderBackend::U64(b) => {
-                    let v: Vec<u64> = vector.iter().map(|&x| x as u64).collect();
+                    let v: Vec<u64> = vector.extract()?;
                     b.update_vector(id, &v);
                 }
             }
@@ -2589,50 +2748,62 @@ pub mod python {
 
         /// 将 Rust Vec<SearchHit> 转换为 Python list[dict]
         fn hits_to_py(py: Python<'_>, hits: &[crate::node::SearchHit]) -> PyResult<PyObject> {
-            let list = pyo3::types::PyList::new(
-                py,
-                hits.iter().map(|h| {
+            let values = hits
+                .iter()
+                .map(|h| -> PyResult<_> {
                     let d = PyDict::new(py);
-                    let _ = d.set_item("id", h.id);
-                    let _ = d.set_item("score", h.score);
-                    let _ = d.set_item("payload", json_to_pyobject(py, &h.payload));
-                    d
-                }),
-            )?;
-            Ok(list.into_any().unbind())
+                    d.set_item("id", h.id)?;
+                    d.set_item("score", h.score)?;
+                    d.set_item("payload", json_to_pyobject(py, &h.payload)?)?;
+                    Ok(d)
+                })
+                .collect::<PyResult<Vec<_>>>()?;
+            Ok(PyList::new(py, values)?.into_any().unbind())
         }
 
-        /// 将 Python list[dict] 转换回 Rust Vec<SearchHit>
-        fn py_to_hits(py: Python<'_>, obj: &PyObject) -> Vec<crate::node::SearchHit> {
-            let mut hits = Vec::new();
-            if let Ok(list) = obj.bind(py).downcast::<pyo3::types::PyList>() {
-                for item in list.iter() {
-                    if let Ok(dict) = item.downcast::<PyDict>() {
-                        let id = dict
-                            .get_item("id")
-                            .ok()
-                            .flatten()
-                            .and_then(|v| v.extract::<u64>().ok())
-                            .unwrap_or(0);
-                        let score = dict
-                            .get_item("score")
-                            .ok()
-                            .flatten()
-                            .and_then(|v| v.extract::<f32>().ok())
-                            .unwrap_or(0.0);
-                        let payload = dict
-                            .get_item("payload")
-                            .ok()
-                            .flatten()
-                            .map(|v| pyobject_to_json(&v))
-                            .unwrap_or(serde_json::Value::Null);
-                        if id != 0 && score.is_finite() {
-                            hits.push(crate::node::SearchHit { id, score, payload });
-                        }
+        fn py_to_hits(py: Python<'_>, obj: &PyObject) -> PyResult<Vec<crate::node::SearchHit>> {
+            let list = obj.bind(py).downcast::<PyList>()?;
+            list.iter()
+                .map(|item| {
+                    let dict = item.downcast::<PyDict>()?;
+                    let required = |name: &str| {
+                        dict.get_item(name)?.ok_or_else(|| {
+                            PyValueError::new_err(format!(
+                                "Hook 命中缺少字段 (Hook hit field missing): {name}"
+                            ))
+                        })
+                    };
+                    let id = required("id")?.extract::<u64>()?;
+                    let score = required("score")?.extract::<f32>()?;
+                    if id == 0 || !score.is_finite() {
+                        return Err(PyValueError::new_err(
+                            "Hook 命中 ID 或分数无效 (Invalid hook hit ID or score)",
+                        ));
                     }
+                    let payload = dict
+                        .get_item("payload")?
+                        .map(|v| pyobject_to_json(&v))
+                        .transpose()?
+                        .unwrap_or_default();
+                    Ok(crate::node::SearchHit { id, score, payload })
+                })
+                .collect()
+        }
+
+        fn set_context_data(
+            py: Python<'_>,
+            dict: &Bound<'_, PyDict>,
+            ctx: &mut crate::hook::HookContext,
+        ) -> bool {
+            match json_to_pyobject(py, &ctx.custom_data)
+                .and_then(|v| dict.set_item("custom_data", v))
+            {
+                Ok(()) => true,
+                Err(error) => {
+                    Self::record_python_error(ctx, "context", error);
+                    false
                 }
             }
-            hits
         }
     }
 
@@ -2649,7 +2820,9 @@ pub mod python {
                     && let Ok(py_vec) = pyo3::types::PyList::new(py, query_vector.iter())
                 {
                     let py_ctx = PyDict::new(py);
-                    let _ = py_ctx.set_item("custom_data", json_to_pyobject(py, &ctx.custom_data));
+                    if !Self::set_context_data(py, &py_ctx, ctx) {
+                        return;
+                    }
                     let _ = py_ctx.set_item("abort", ctx.abort);
 
                     match method.call1((&py_vec, &py_ctx)) {
@@ -2681,9 +2854,18 @@ pub mod python {
                     return None;
                 };
                 let py_ctx = PyDict::new(py);
-                let _ = py_ctx.set_item("custom_data", json_to_pyobject(py, &ctx.custom_data));
+                if !Self::set_context_data(py, &py_ctx, ctx) {
+                    return None;
+                }
                 match method.call1((query_vector.to_vec(), py_ctx)) {
-                    Ok(result) if !result.is_none() => Some(Self::py_to_hits(py, &result.unbind())),
+                    Ok(result) if !result.is_none() => match Self::py_to_hits(py, &result.unbind())
+                    {
+                        Ok(hits) => Some(hits),
+                        Err(error) => {
+                            Self::record_python_error(ctx, "on_custom_recall", error);
+                            None
+                        }
+                    },
                     Ok(_) => None,
                     Err(error) => {
                         Self::record_python_error(ctx, "on_custom_recall", error);
@@ -2711,10 +2893,17 @@ pub mod python {
                     }
                 };
                 let py_ctx = PyDict::new(py);
-                let _ = py_ctx.set_item("custom_data", json_to_pyobject(py, &ctx.custom_data));
+                if !Self::set_context_data(py, &py_ctx, ctx) {
+                    return;
+                }
                 match method.call1((py_hits, py_ctx)) {
                     Ok(result) if !result.is_none() => {
-                        *seeds = Self::py_to_hits(py, &result.unbind());
+                        match Self::py_to_hits(py, &result.unbind()) {
+                            Ok(value) => *seeds = value,
+                            Err(error) => {
+                                Self::record_python_error(ctx, "on_pre_graph_expand", error)
+                            }
+                        }
                     }
                     Ok(_) => {}
                     Err(error) => Self::record_python_error(ctx, "on_pre_graph_expand", error),
@@ -2738,12 +2927,19 @@ pub mod python {
                         }
                     };
                     let py_ctx = PyDict::new(py);
-                    let _ = py_ctx.set_item("custom_data", json_to_pyobject(py, &ctx.custom_data));
+                    if !Self::set_context_data(py, &py_ctx, ctx) {
+                        return;
+                    }
 
                     match method.call1((&py_hits, &py_ctx)) {
                         Ok(result) if !result.is_none() => {
                             let obj = result.unbind();
-                            *hits = Self::py_to_hits(py, &obj);
+                            match Self::py_to_hits(py, &obj) {
+                                Ok(value) => *hits = value,
+                                Err(error) => {
+                                    Self::record_python_error(ctx, "on_post_recall", error)
+                                }
+                            }
                         }
                         Ok(_) => {}
                         Err(error) => Self::record_python_error(ctx, "on_post_recall", error),
@@ -2768,10 +2964,18 @@ pub mod python {
                         }
                     };
                     let py_ctx = PyDict::new(py);
-                    let _ = py_ctx.set_item("custom_data", json_to_pyobject(py, &ctx.custom_data));
+                    if !Self::set_context_data(py, &py_ctx, ctx) {
+                        return None;
+                    }
                     match method.call1((&py_hits, &py_ctx)) {
                         Ok(result) if !result.is_none() => {
-                            return Some(Self::py_to_hits(py, &result.unbind()));
+                            return match Self::py_to_hits(py, &result.unbind()) {
+                                Ok(hits) => Some(hits),
+                                Err(error) => {
+                                    Self::record_python_error(ctx, "on_rerank", error);
+                                    None
+                                }
+                            };
                         }
                         Ok(_) => {}
                         Err(error) => Self::record_python_error(ctx, "on_rerank", error),
@@ -2797,10 +3001,17 @@ pub mod python {
                         }
                     };
                     let py_ctx = PyDict::new(py);
-                    let _ = py_ctx.set_item("custom_data", json_to_pyobject(py, &ctx.custom_data));
+                    if !Self::set_context_data(py, &py_ctx, ctx) {
+                        return;
+                    }
                     match method.call1((&py_hits, &py_ctx)) {
                         Ok(result) if !result.is_none() => {
-                            *hits = Self::py_to_hits(py, &result.unbind());
+                            match Self::py_to_hits(py, &result.unbind()) {
+                                Ok(value) => *hits = value,
+                                Err(error) => {
+                                    Self::record_python_error(ctx, "on_post_search", error)
+                                }
+                            }
                         }
                         Ok(_) => {}
                         Err(error) => Self::record_python_error(ctx, "on_post_search", error),
@@ -2837,7 +3048,7 @@ pub mod python {
             .map_err(to_py_error)?;
         let value = serde_json::to_value(manifest)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(json_to_pyobject(py, &value))
+        json_to_pyobject(py, &value)
     }
 
     #[pyfunction]
@@ -2862,7 +3073,7 @@ pub mod python {
             .map_err(to_py_error)?;
         let value = serde_json::to_value(manifest)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(json_to_pyobject(py, &value))
+        json_to_pyobject(py, &value)
     }
 
     #[pymodule]

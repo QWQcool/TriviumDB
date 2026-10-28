@@ -336,15 +336,19 @@ fn apply_operation(operation: &Operation, db: &mut Database<f32>, model: &mut Re
             assert_eq!(model.nodes.len(), before);
         }
         Operation::TransactionRejected { duplicate_id } => {
-            let before_ids = db.all_node_ids();
-            let before_payload = db.get_payload(*duplicate_id);
+            let before_ids = db.all_node_ids().unwrap();
+            let before_payload = db.get_payload(*duplicate_id).unwrap();
             let mut tx = db.begin_tx();
             tx.update_payload(*duplicate_id, payload_for(7_777));
             tx.insert_with_id(*duplicate_id, &vector_for(7_777), payload_for(7_777));
             assert!(tx.commit().is_err(), "非法事务必须整体拒绝");
-            assert_eq!(db.all_node_ids(), before_ids, "失败事务不得改变节点集合");
             assert_eq!(
-                db.get_payload(*duplicate_id),
+                db.all_node_ids().unwrap(),
+                before_ids,
+                "失败事务不得改变节点集合"
+            );
+            assert_eq!(
+                db.get_payload(*duplicate_id).unwrap(),
                 before_payload,
                 "失败事务不得提交前序更新"
             );
@@ -354,9 +358,11 @@ fn apply_operation(operation: &Operation, db: &mut Database<f32>, model: &mut Re
 
 fn canonical_edges(db: &Database<f32>) -> BTreeSet<ReferenceEdge> {
     db.all_node_ids()
+        .unwrap()
         .into_iter()
         .flat_map(|source| {
             db.get_edges(source)
+                .unwrap()
                 .into_iter()
                 .map(move |edge| ReferenceEdge {
                     source,
@@ -369,11 +375,15 @@ fn canonical_edges(db: &Database<f32>) -> BTreeSet<ReferenceEdge> {
 }
 
 fn assert_matches_model(db: &Database<f32>, model: &ReferenceDb, context: &str) {
-    let actual_ids = db.all_node_ids().into_iter().collect::<BTreeSet<_>>();
+    let actual_ids = db
+        .all_node_ids()
+        .unwrap()
+        .into_iter()
+        .collect::<BTreeSet<_>>();
     let expected_ids = model.nodes.keys().copied().collect::<BTreeSet<_>>();
     assert_eq!(actual_ids, expected_ids, "{context}: NodeId 集合不一致");
     assert_eq!(
-        db.node_count(),
+        db.node_count().unwrap(),
         model.nodes.len(),
         "{context}: node_count 不一致"
     );
@@ -381,6 +391,7 @@ fn assert_matches_model(db: &Database<f32>, model: &ReferenceDb, context: &str) 
     for (&id, expected) in &model.nodes {
         let actual = db
             .get(id)
+            .unwrap()
             .unwrap_or_else(|| panic!("{context}: 缺少节点 {id}"));
         assert_eq!(
             actual.vector, expected.vector,
@@ -400,6 +411,7 @@ fn assert_matches_model(db: &Database<f32>, model: &ReferenceDb, context: &str) 
     for &target in model.nodes.keys() {
         let actual = db
             .get_incoming_edges(target, None)
+            .unwrap()
             .into_iter()
             .map(|edge| {
                 (

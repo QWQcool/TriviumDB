@@ -122,7 +122,7 @@ fn tdb格式变异全部拒绝或安全降级且绝不改写损坏输入() {
         let before = snapshot(&candidate);
         let result = Database::<f32>::open_read_only(&candidate, 4);
         if let Ok(database) = result {
-            let _ = database.node_count();
+            let _ = database.node_count().unwrap();
             let _ = database.search(&[1.0, 0.0, 0.0, 0.0], 3, 0, -1.0);
         }
         assert_eq!(

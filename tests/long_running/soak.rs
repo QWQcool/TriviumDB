@@ -1,104 +1,126 @@
 #![allow(non_snake_case)]
 //! GJB-5000B 长时间稳定性浸泡测试
 //!
-//! 验证 TriviumDB 在持续高负载下内存不泄漏、文件大小有界。
-//! 这些测试标记为 #[ignore]，仅在 CI 中通过 `cargo test -- --ignored` 运行。
+//! 验证 TriviumDB 在有界数据量和持续负载下的 RSS 增长、文件大小与查询内容。
+//! 长时用例标记为 #[ignore]，通过 `cargo test --test long_running soak -- --ignored` 运行。
 
 use triviumdb::database::Database;
 
 const DIM: usize = 4;
 
 fn tmp_db(name: &str) -> String {
-    let dir = std::env::temp_dir().join("triviumdb_test");
-    std::fs::create_dir_all(&dir).ok();
-    dir.join(format!("soak_{}", name))
-        .to_string_lossy()
-        .to_string()
+    let dir = std::env::temp_dir().join("triviumdb_test").join(format!(
+        "soak_{name}_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir.join("sample.tdb").to_string_lossy().to_string()
 }
 
 fn cleanup(path: &str) {
-    for ext in &["", ".wal", ".vec", ".lock", ".flush_ok"] {
-        std::fs::remove_file(format!("{}{}", path, ext)).ok();
-    }
+    let root = std::path::Path::new(path).parent().unwrap();
+    assert_eq!(
+        root.parent().unwrap(),
+        std::env::temp_dir().join("triviumdb_test")
+    );
+    assert!(
+        root.file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("soak_")
+    );
+    std::fs::remove_dir_all(root).unwrap();
 }
 
-/// 获取当前进程的近似堆内存占用
-/// 使用命令行工具避免引入额外依赖
-fn get_rss_bytes() -> usize {
-    #[cfg(windows)]
-    {
-        // 使用 Rust 的 GlobalAlloc 统计不可用，回退为粗略估计
-        // 通过 tasklist 获取 Working Set（仅用于趋势检测，不需精确值）
-        let pid = std::process::id();
-        if let Ok(output) = std::process::Command::new("tasklist")
-            .args(["/FI", &format!("PID eq {}", pid), "/FO", "CSV", "/NH"])
+/// 读取操作系统进程观测；采样失败和零值都使验收失败。
+fn get_rss_bytes() -> u64 {
+    #[cfg(target_os = "windows")]
+    let rss = {
+        use std::os::windows::process::CommandExt;
+        let output = std::process::Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                &format!("(Get-Process -Id {}).WorkingSet64", std::process::id()),
+            ])
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW：独立采样进程使用隐藏窗口。
             .output()
-        {
-            let text = String::from_utf8_lossy(&output.stdout);
-            // 格式: "name","pid","session","session#","mem usage"
-            // mem usage 格式: "123,456 K"
-            if let Some(last) = text.trim().split('"').rev().nth(1) {
-                let cleaned: String = last.chars().filter(|c| c.is_ascii_digit()).collect();
-                return cleaned.parse::<usize>().unwrap_or(0) * 1024; // KB → bytes
-            }
-        }
-        0
-    }
-    #[cfg(not(windows))]
-    {
-        if let Ok(content) = std::fs::read_to_string("/proc/self/statm") {
-            let rss_pages: usize = content
-                .split_whitespace()
-                .nth(1)
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0);
-            rss_pages * 4096
-        } else {
-            0
-        }
-    }
+            .expect("无法启动 Windows 进程内存采样命令");
+        assert!(output.status.success(), "Windows 进程内存采样命令执行失败");
+        std::str::from_utf8(&output.stdout)
+            .expect("RSS 观测编码错误")
+            .trim()
+            .parse::<u64>()
+            .expect("RSS 观测缺失或格式错误")
+    };
+    #[cfg(target_os = "linux")]
+    let rss = {
+        let status = std::fs::read_to_string("/proc/self/status").expect("进程内存观测文件不可读");
+        let mut fields = status
+            .lines()
+            .find_map(|line| line.strip_prefix("VmRSS:"))
+            .expect("进程内存观测缺少 VmRSS")
+            .split_whitespace();
+        let kib = fields
+            .next()
+            .expect("RSS 观测缺少数值")
+            .parse::<u64>()
+            .expect("RSS 数值格式错误");
+        assert_eq!(fields.next(), Some("kB"), "RSS 观测单位必须为 KiB");
+        kib.checked_mul(1024).expect("RSS 单位换算溢出")
+    };
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+    let rss = {
+        let output = std::process::Command::new("ps")
+            .args(["-o", "rss=", "-p", &std::process::id().to_string()])
+            .output()
+            .expect("无法启动进程内存采样命令");
+        assert!(output.status.success(), "进程内存采样命令执行失败");
+        std::str::from_utf8(&output.stdout)
+            .expect("RSS 观测编码错误")
+            .trim()
+            .parse::<u64>()
+            .expect("RSS 观测缺失或格式错误")
+            .checked_mul(1024)
+            .expect("RSS 单位换算溢出")
+    };
+    assert!(rss > 0, "RSS 观测必须为正数");
+    rss
+}
+
+#[test]
+fn RSS采样必须取得有效进程观测() {
+    assert!(get_rss_bytes() > 0);
 }
 
 // ════════════════════════════════════════════════════════════════
-//  1. 内存不泄漏浸泡（5 分钟版本，CI 跑 30 分钟可调参数）
+//  1. 五分钟有界数据量 RSS 增长验收
 // ════════════════════════════════════════════════════════════════
 
 #[test]
 #[ignore]
-fn SOAK_01_连续运行5分钟_内存不泄漏() {
+fn SOAK_01_连续运行5分钟_RSS增长有界() {
     let path = tmp_db("mem_leak");
-    cleanup(&path);
 
     let mut db = Database::<f32>::open(&path, DIM).unwrap();
-    let start = std::time::Instant::now();
-    let duration = std::time::Duration::from_secs(300); // 5 分钟
-
+    // 先完成一轮写入、查询和压实，使 RSS 基线包含首次分配和维护开销。
+    let mut live = std::collections::VecDeque::new();
+    write_round(&mut db, &mut live, 0);
+    db.compact().unwrap();
+    db.flush().unwrap();
     let initial_rss = get_rss_bytes();
-    let mut round = 0u64;
+    let start = std::time::Instant::now();
+    let duration = std::time::Duration::from_secs(300); // 五分钟持续负载验收窗口。
+    let mut round = 1u64;
     let mut peak_rss = initial_rss;
 
     while start.elapsed() < duration {
-        // 插入 100 个节点
-        {
-            let mut tx = db.begin_tx();
-            for j in 0..100u32 {
-                let v = [round as f32, j as f32, 0.0, 0.0];
-                tx.insert(&v, serde_json::json!({"r": round, "j": j}));
-            }
-            tx.commit().unwrap();
-        }
-
-        // 搜索 10 次
-        for _ in 0..10 {
-            let _ = db.search(&[round as f32, 0.0, 0.0, 0.0], 10, 0, 0.0);
-        }
-
-        // 删除前半部分
-        let ids = db.all_node_ids();
-        let to_delete: Vec<u64> = ids.iter().take(ids.len() / 2).copied().collect();
-        for id in to_delete {
-            db.delete(id).unwrap();
-        }
+        write_round(&mut db, &mut live, round);
 
         // 每 10 轮 compact + flush
         if round.is_multiple_of(10) {
@@ -115,6 +137,8 @@ fn SOAK_01_连续运行5分钟_内存不泄漏() {
         round += 1;
     }
 
+    db.compact().unwrap();
+    db.flush().unwrap();
     let final_rss = get_rss_bytes();
 
     eprintln!("  浸泡测试完成: {} 轮", round);
@@ -125,17 +149,43 @@ fn SOAK_01_连续运行5分钟_内存不泄漏() {
         final_rss / 1024 / 1024
     );
 
-    // 最终 RSS 不超过初始值的 3 倍（考虑到 Rust allocator 的 fragmentation）
-    if initial_rss > 0 {
-        assert!(
-            final_rss < initial_rss * 3,
-            "疑似内存泄漏: initial={}MB, final={}MB",
-            initial_rss / 1024 / 1024,
-            final_rss / 1024 / 1024,
-        );
-    }
-
+    // 三倍是当前有界负载的进程 RSS 增长验收界限。
+    assert!(
+        final_rss < initial_rss.checked_mul(3).unwrap(),
+        "RSS 增长超限：初始={}MiB，最终={}MiB",
+        initial_rss / 1024 / 1024,
+        final_rss / 1024 / 1024,
+    );
+    let mut actual = db.all_node_ids().unwrap();
+    actual.sort_unstable();
+    assert_eq!(actual, live.into_iter().collect::<Vec<_>>());
+    db.close().unwrap();
     cleanup(&path);
+}
+
+fn write_round(db: &mut Database<f32>, live: &mut std::collections::VecDeque<u64>, round: u64) {
+    // 每轮写入一百条，保留最新一百条，使逻辑数据量保持有界。
+    for offset in 1..=100 {
+        let id = round * 100 + offset;
+        db.insert_with_id(
+            id,
+            &[id as f32, 1.0, 0.0, 0.0],
+            serde_json::json!({"id":id}),
+        )
+        .unwrap();
+        live.push_back(id);
+    }
+    while live.len() > 100 {
+        db.delete(live.pop_front().unwrap()).unwrap();
+    }
+    for _ in 0..10 {
+        let hits = db.search(&[1.0, 0.0, 0.0, 0.0], 10, 0, 0.0).unwrap();
+        assert_eq!(hits.len(), 10, "有界负载的向量查询必须返回 Top 10");
+        for hit in hits {
+            assert!(live.contains(&hit.id), "查询返回已删除或未写入节点");
+            assert_eq!(hit.payload, serde_json::json!({"id":hit.id}));
+        }
+    }
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -146,41 +196,20 @@ fn SOAK_01_连续运行5分钟_内存不泄漏() {
 #[ignore]
 fn SOAK_02_连续flush_500轮_文件大小不膨胀() {
     let path = tmp_db("file_bloat");
-    cleanup(&path);
 
     let mut db = Database::<f32>::open(&path, DIM).unwrap();
 
-    // 先建立基准大小
-    for i in 0..100u32 {
-        db.insert(&[i as f32, 0.0, 0.0, 0.0], serde_json::json!({"idx": i}))
-            .unwrap();
-    }
+    let mut live = std::collections::VecDeque::new();
+    write_round(&mut db, &mut live, 0);
+    db.compact().unwrap();
     db.flush().unwrap();
 
     let baseline_size = file_total_size(&path);
     eprintln!("  基准文件大小: {}KB", baseline_size / 1024);
 
     // 500 轮: insert → delete → compact → flush
-    for round in 0..500u32 {
-        // 插入 50 个
-        {
-            let mut tx = db.begin_tx();
-            for j in 0..50u32 {
-                tx.insert(
-                    &[round as f32, j as f32, 0.0, 0.0],
-                    serde_json::json!({"r": round}),
-                );
-            }
-            tx.commit().unwrap();
-        }
-
-        // 删除最旧的 50 个
-        let ids = db.all_node_ids();
-        let to_delete: Vec<u64> = ids.iter().take(50.min(ids.len())).copied().collect();
-        for id in to_delete {
-            let _ = db.delete(id);
-        }
-
+    for round in 1..=500 {
+        write_round(&mut db, &mut live, round);
         db.compact().unwrap();
         db.flush().unwrap();
     }
@@ -192,7 +221,7 @@ fn SOAK_02_连续flush_500轮_文件大小不膨胀() {
         baseline_size / 1024
     );
 
-    // 文件大小不应超过基准的 5 倍（节点总数有界）
+    // 五倍空间界限覆盖递增序号与文件组的页面分配，逻辑节点数始终为一百。
     assert!(
         final_size < baseline_size * 5,
         "文件大小膨胀: baseline={}KB, final={}KB",
@@ -200,16 +229,21 @@ fn SOAK_02_连续flush_500轮_文件大小不膨胀() {
         final_size / 1024
     );
 
+    let mut actual = db.all_node_ids().unwrap();
+    actual.sort_unstable();
+    assert_eq!(actual, live.into_iter().collect::<Vec<_>>());
+    db.close().unwrap();
     cleanup(&path);
 }
 
 fn file_total_size(path: &str) -> u64 {
-    let mut total = 0u64;
-    for ext in &["", ".wal", ".vec"] {
-        let p = format!("{}{}", path, ext);
-        if let Ok(meta) = std::fs::metadata(&p) {
-            total += meta.len();
-        }
-    }
-    total
+    assert!(
+        std::fs::metadata(path).unwrap().len() > 0,
+        "主文件观测必须存在且包含内容"
+    );
+    // 每个样本独占目录，统计全部文件组，包含独立 Payload 和索引文件。
+    std::fs::read_dir(std::path::Path::new(path).parent().unwrap())
+        .unwrap()
+        .map(|entry| entry.unwrap().metadata().unwrap().len())
+        .sum()
 }

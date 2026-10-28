@@ -193,22 +193,37 @@ fn child_main() {
     let db_path = std::env::var("HW_CRASH_DB_PATH").expect("缺少 HW_CRASH_DB_PATH");
     let mode = std::env::var("HW_CRASH_MODE").expect("缺少 HW_CRASH_MODE");
 
-    let mut db = triviumdb::Database::<f32>::open(&db_path, DIM).unwrap();
+    let mut db = triviumdb::Database::<f32>::open_with_config(
+        &db_path,
+        triviumdb::database::Config {
+            dim: DIM,
+            sync_mode: triviumdb::storage::wal::SyncMode::Normal,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     // 通用的「flush 后追加 WAL 再崩溃」模式
+    let write_base = std::env::var("HW_CRASH_BASE")
+        .map(|value| value.parse::<u64>().expect("崩溃写入基数必须为整数"))
+        .unwrap_or(0);
     let do_flush_then_wal = |db: &mut triviumdb::Database<f32>| {
         for i in 0..5u32 {
-            db.insert(
-                &[i as f32, 0.0, 0.0, 0.0],
-                serde_json::json!({"phase": "flushed", "seq": i}),
+            let seq = write_base + u64::from(i);
+            db.insert_with_id(
+                seq + 1,
+                &[seq as f32, 0.0, 0.0, 0.0],
+                serde_json::json!({"phase": "flushed", "seq": seq}),
             )
             .unwrap();
         }
         db.flush().unwrap();
         for i in 5..8u32 {
-            db.insert(
-                &[i as f32, 0.0, 0.0, 0.0],
-                serde_json::json!({"phase": "wal_only", "seq": i}),
+            let seq = write_base + u64::from(i);
+            db.insert_with_id(
+                seq + 1,
+                &[seq as f32, 0.0, 0.0, 0.0],
+                serde_json::json!({"phase": "wal_only", "seq": seq}),
             )
             .unwrap();
         }
@@ -254,7 +269,8 @@ fn child_main() {
             // 大 Payload 压力：每个节点携带 ~8KB JSON，压测 WAL BufWriter
             let fat_value = "X".repeat(8000);
             for i in 0..5u32 {
-                db.insert(
+                db.insert_with_id(
+                    u64::from(i) + 1,
                     &[i as f32, 2.0, 0.0, 0.0],
                     serde_json::json!({"fat": fat_value, "seq": i}),
                 )
@@ -262,7 +278,8 @@ fn child_main() {
             }
             db.flush().unwrap();
             for i in 5..8u32 {
-                db.insert(
+                db.insert_with_id(
+                    u64::from(i) + 1,
                     &[i as f32, 2.0, 0.0, 0.0],
                     serde_json::json!({"fat": fat_value, "seq": i}),
                 )
@@ -312,7 +329,38 @@ fn run_crash_child_env(
     for (k, v) in extra_env {
         cmd.env(k, v);
     }
-    cmd.status().expect("启动子进程失败")
+    #[cfg(unix)]
+    {
+        // 故障样本由操作系统直接接收汇编触发的信号；保留 ASan 内存插桩与其余选项。
+        let signal_options = match mode {
+            "div_zero_after_flush" => "handle_sigfpe=0",
+            "null_deref_after_flush" => "handle_segv=0:handle_sigbus=0",
+            _ => "",
+        };
+        if !signal_options.is_empty() {
+            let mut options = std::env::var_os("ASAN_OPTIONS").unwrap_or_default();
+            if !options.is_empty() {
+                options.push(":");
+            }
+            options.push(signal_options);
+            cmd.env("ASAN_OPTIONS", options);
+        }
+    }
+    let status = cmd.status().expect("启动子进程失败");
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        assert!(
+            status.signal().is_some(),
+            "崩溃子进程必须由信号终止：{status}"
+        );
+    }
+    #[cfg(windows)]
+    assert!(
+        status.code().is_some_and(|code| code < 0),
+        "崩溃子进程必须以 Windows 异常状态终止：{status}"
+    );
+    status
 }
 
 #[test]
@@ -338,29 +386,27 @@ fn assert_crash_and_recover(path: &str, mode: &str, label: &str) {
     let db = triviumdb::Database::<f32>::open(path, DIM)
         .unwrap_or_else(|e| panic!("{}: 崩溃后重新打开数据库失败: {}", label, e));
 
-    assert!(
-        db.node_count() >= 5,
-        "{}: 至少应恢复 5 个已 flush 节点，实际 {}",
-        label,
-        db.node_count()
+    // Normal 契约要求已返回成功的 WAL 写入抵御进程崩溃；此处未模拟操作系统断电。
+    let mut ids = db.all_node_ids().unwrap();
+    ids.sort_unstable();
+    assert_eq!(
+        ids,
+        (1..=8).collect::<Vec<_>>(),
+        "{label}：确认写入必须完整恢复"
     );
-
-    // 验证 flushed 阶段节点的 payload 语义完整性
-    let mut flushed = 0;
-    for &id in &db.all_node_ids() {
-        if let Some(p) = db.get_payload(id)
-            && p.get("phase").and_then(|v| v.as_str()) == Some("flushed")
-        {
-            flushed += 1;
-        }
+    for id in 1..=8 {
+        let seq = id - 1;
+        let phase = if seq < 5 { "flushed" } else { "wal_only" };
+        let node = db.get(id).unwrap().expect("恢复节点必须包含完整记录");
+        assert_eq!(node.vector, vec![seq as f32, 0.0, 0.0, 0.0]);
+        assert_eq!(node.payload, serde_json::json!({"phase":phase, "seq":seq}));
     }
-    assert_eq!(flushed, 5, "{}: 5 个 flushed 节点 payload 应完整", label);
 
     eprintln!(
         "  ✅ {}: {} 个节点存活（5 flush + {} WAL）",
         label,
-        db.node_count(),
-        db.node_count().saturating_sub(5)
+        db.node_count().unwrap(),
+        db.node_count().unwrap().saturating_sub(5)
     );
 }
 
@@ -448,7 +494,7 @@ fn HW07_写入中途UD2崩溃_数据库仍可打开() {
 
     let result = triviumdb::Database::<f32>::open(&path, DIM);
     match &result {
-        Ok(db) => eprintln!("  ✅ 中途崩溃恢复：{} 个节点存活", db.node_count()),
+        Ok(db) => eprintln!("  ✅ 中途崩溃恢复：{} 个节点存活", db.node_count().unwrap()),
         Err(_) if !std::path::Path::new(&path).exists() => {
             eprintln!("  ✅ 数据库文件不存在（从未 flush），预期行为");
         }
@@ -466,32 +512,43 @@ fn HW08_大Payload_8KB_WAL缓冲压力崩溃恢复() {
 
     let status = run_crash_child(&path, "big_payload_crash");
     assert!(!status.success(), "子进程应异常退出");
+    #[cfg(all(unix, any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        assert_eq!(status.signal(), Some(4), "子进程必须实际触发非法指令信号");
+    }
+    #[cfg(all(windows, target_arch = "x86_64"))]
+    assert_eq!(
+        status.code().map(|code| code as u32),
+        Some(0xC000001D),
+        "子进程必须实际触发 Windows 非法指令异常"
+    );
 
     let db = triviumdb::Database::<f32>::open(&path, DIM).expect("大 Payload 崩溃后打开失败");
 
-    assert!(
-        db.node_count() >= 5,
-        "至少 5 个已 flush 的大 payload 节点应存活"
+    // 五条进入检查点，三条由 Normal WAL 确认；八条均须抵御本次进程崩溃。
+    let mut ids = db.all_node_ids().unwrap();
+    ids.sort_unstable();
+    assert_eq!(
+        ids,
+        (1..=8).collect::<Vec<_>>(),
+        "确认的大 Payload 写入必须完整恢复"
     );
-
-    // 验证大 payload 的数据完整性（不是被截断的 JSON）
-    for &id in &db.all_node_ids() {
-        if let Some(p) = db.get_payload(id)
-            && let Some(fat) = p.get("fat").and_then(|v| v.as_str())
-        {
-            assert_eq!(
-                fat.len(),
-                8000,
-                "节点 {} 的 fat 字段应为 8000 字节，实际 {}",
-                id,
-                fat.len()
-            );
-        }
+    // 8000 字节跨过 WAL 缓冲边界；每条恢复记录都须保持完整正文、序号及向量。
+    for id in 1..=8 {
+        let seq = id - 1;
+        let node = db.get(id).unwrap().expect("恢复节点必须包含完整记录");
+        assert_eq!(node.vector, vec![seq as f32, 2.0, 0.0, 0.0]);
+        assert_eq!(
+            node.payload,
+            serde_json::json!({"fat": "X".repeat(8000), "seq": seq})
+        );
     }
     eprintln!(
         "  ✅ 大 Payload 崩溃恢复：{} 个节点，数据完整",
-        db.node_count()
+        db.node_count().unwrap()
     );
+    drop(db);
     cleanup(&path);
 }
 
@@ -517,35 +574,34 @@ fn HW09_连续三次崩溃_累积WAL回放恢复() {
         // 每轮崩溃后验证数据库仍可打开
         let db = triviumdb::Database::<f32>::open(&path, DIM)
             .unwrap_or_else(|e| panic!("轮次 {} 崩溃后打开失败: {}", round, e));
-        eprintln!("  轮次 {}: {} 个节点存活", round, db.node_count());
+        eprintln!("  轮次 {}: {} 个节点存活", round, db.node_count().unwrap());
     }
 
     // 最终验证：3 轮各写入 3 个节点，全部 9 个已确认提交的节点必须通过 WAL 回放恢复
     let db = triviumdb::Database::<f32>::open(&path, DIM).unwrap();
     assert_eq!(
-        db.node_count(),
+        db.node_count().unwrap(),
         9,
         "连续 3 轮崩溃-写入后，WAL 回放应恢复全部 9 个已确认提交的节点，实际恢复 {} 个",
-        db.node_count()
+        db.node_count().unwrap()
     );
     // 验证恢复的节点数据可读
-    for &id in &db.all_node_ids() {
+    for &id in &db.all_node_ids().unwrap() {
         assert!(
-            db.get(id).is_some(),
+            db.get(id).unwrap().is_some(),
             "WAL 恢复的节点 {} 应能通过 get() 获取",
             id
         );
     }
     eprintln!(
         "  ✅ 连续 3 次崩溃后最终恢复：{} 个节点（数据完整性已验证）",
-        db.node_count()
+        db.node_count().unwrap()
     );
 
     cleanup(&path);
 }
 
-/// 全异常向量交叉轰炸 — 同一个 DB 连续遭受不同类型的硬件异常
-/// 每次用不同的 CPU 异常杀死进程，验证引擎对任何异常向量都能恢复
+/// 同一数据库跨六种进程异常累积写入，每轮八条确认记录均须保留完整内容。
 #[test]
 fn HW10_全异常向量交叉轰炸_同一DB连续恢复() {
     let path = tmp_db("hw10_crossfire");
@@ -561,10 +617,8 @@ fn HW10_全异常向量交叉轰炸_同一DB连续恢复() {
     ];
 
     for (i, (mode, label)) in modes.iter().enumerate() {
-        // 每轮先清理再重建，确保每种异常独立验证恢复
-        cleanup(&path);
-
-        let status = run_crash_child(&path, mode);
+        let base = (i * 8).to_string();
+        let status = run_crash_child_env(&path, mode, &[("HW_CRASH_BASE", &base)]);
         assert!(
             !status.success(),
             "轮次 {} ({}): 子进程应异常退出",
@@ -575,19 +629,27 @@ fn HW10_全异常向量交叉轰炸_同一DB连续恢复() {
         let db = triviumdb::Database::<f32>::open(&path, DIM)
             .unwrap_or_else(|e| panic!("轮次 {} ({}) 崩溃后打开失败: {}", i, label, e));
 
-        assert!(
-            db.node_count() >= 5,
-            "轮次 {} ({}): 至少 5 节点存活，实际 {}",
-            i,
-            label,
-            db.node_count()
+        let expected_count = ((i + 1) * 8) as u64;
+        let mut ids = db.all_node_ids().unwrap();
+        ids.sort_unstable();
+        assert_eq!(
+            ids,
+            (1..=expected_count).collect::<Vec<_>>(),
+            "轮次 {i} ({label}) 的累计写入不完整"
         );
+        for id in 1..=expected_count {
+            let seq = id - 1;
+            let phase = if seq % 8 < 5 { "flushed" } else { "wal_only" };
+            let node = db.get(id).unwrap().expect("累计恢复的节点必须存在");
+            assert_eq!(node.vector, vec![seq as f32, 0.0, 0.0, 0.0]);
+            assert_eq!(node.payload, serde_json::json!({"phase":phase,"seq":seq}));
+        }
 
         eprintln!(
             "  ✅ 轮次 {} [{}]: {} 个节点恢复",
             i,
             label,
-            db.node_count()
+            db.node_count().unwrap()
         );
     }
 

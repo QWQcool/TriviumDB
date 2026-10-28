@@ -64,13 +64,13 @@ pub fn dump(path: &str, dtype: DType, format: OutputFormat) -> CliResult {
     println!(
         "{} 存活节点总数 / Live nodes: {}",
         "挂载成功 / Open succeeded!".green(),
-        handle.node_count()
+        handle.node_count()?
     );
     println!("{}", "─".repeat(50));
 
     let mut rows: CliRows = Vec::new();
-    for id in handle.get_all_ids() {
-        if let Some(node) = handle.get(id) {
+    for id in handle.get_all_ids()? {
+        if let Some(node) = handle.get(id)? {
             let mut row = HashMap::new();
             row.insert("node".to_string(), node);
             rows.push(row);

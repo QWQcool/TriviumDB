@@ -2,7 +2,7 @@
 
 > 高效使用 TriviumDB 的实战指南：从项目集成到性能调优，从数据建模到避坑指南。
 >
-> 本文按 `0.9.0-beta.1` 编写，见[变更说明](changes/0.9.0-beta.1.md)。
+> 本文按 `0.9.0-beta.3` 编写，见[变更说明](changes/0.9.0-beta.3.md)。
 
 ---
 
@@ -70,7 +70,7 @@ cargo add triviumdb
 
 ```toml
 [dependencies]
-triviumdb = "0.9.0-beta.1"
+triviumdb = "0.9.0-beta.3"
 ```
 
 ### 30 秒入门模板
@@ -166,7 +166,7 @@ TriviumDB v0.4 引入了 **Rom / Mmap 双存储引擎**，在打开数据库时�
 | **Rom（单文件）** | O(N) 全量加载 | = 数据体积 | 单一 `.tdb` | 知识库 < 50 万节点、需要一键打包转移 |
 | **Mmap（分离，默认）** | ~O(1) 映射 | ≈ 目录 + delta + 有界缓存 + 工作集 | `.tdb` + `.vec` + `.pld.<generation>` + `.flush_ok` | 超大规模数据、追求冷启动与 Payload 堆占用可控 |
 
-Mmap 发布前会流式备份旧主文件、向量与 marker，再写 `.publish` 撤销日志；临时空间和额外磁盘读写随旧主文件与向量文件大小增长。中断后先由 ReadWrite 打开恢复，再执行 flush/close 后迁移或复制完整提交代。保存崩溃现场时须保留 `.publish`、`.publish.0/1/2`、WAL 与相关 Payload 文件；不要手动删除恢复日志或只复制半发布的正式文件。ReadOnly/Immutable 只返回待恢复错误，不修复现场。
+检查点通过 `.publish` 管理主数据、向量、marker、QuIVer、文本、属性和图索引文件组，流式备份使用有界内存，临时磁盘空间随被备份文件组增长。中断后先由 ReadWrite 打开恢复，再执行 flush/close 后迁移或复制完整提交代。保存崩溃现场时保留 `.publish`、全部 `.publish.N` 备份、WAL、相关 Payload 代际与正式文件组。ReadOnly/Immutable 保持现场原样，并通过待恢复错误交由 Writer 处理。
 
 > 表中的映射工作集由 OS PageCache 管理。均匀随机访问的性能与工作集驻留、缺页读取和 SSD 队列压力相关。生产容量评估同时采集 p99/p999、主缺页速率、RSS/RssFile、swap/pagefile、磁盘 `await` 和平均 QPS。
 
@@ -523,13 +523,13 @@ tx.link(person_id, 9999, "attended", 1.0);
 
 // 第 2 步：commit 两阶段执行
 // 阶段 1: 干跑验证 → 维度 OK？节点存在？ID 未冲突？
-// 阶段 2: 验证通过后一次性物理写入，不会中途失败
+// 阶段 2: 提交 WAL 后应用数据，写入错误通过 Result 返回
 let ids = tx.commit()?;
 ```
 
 ### 事务内 insert_with_id 后立即 link：完全安全
 
-由于干跑阶段有虚拟状态叠加（`pending_ids`），在同一个事务里先 `insert_with_id(999)`，再 `link(999, ...)` 是完全合法的——验证器能感知到 999 将要存在。
+预检按操作顺序投影节点状态。在同一个事务里先 `insert_with_id(999)`，再 `link(999, ...)` 时，连边可直接使用新节点；同一 ID 删除后重建，也可立即参与 Payload、向量和图关系更新。
 
 ```rust
 let mut tx = db.begin_tx();
@@ -546,7 +546,7 @@ let _ = tx.commit()?;
 | `NodeNotFound` | `link`/`delete`/`update` 引用了不存在的 ID |
 | ID 已存在 | `insert_with_id` 的 ID 在已有库或同事务中重复 |
 
-> ✅ 任何 `commit()` 返回的 `Err` 都意味着底层数据完全未被修改，可以安全重试或放弃。
+预检失败保持原节点、索引、ID 分配状态和 WAL，可修改缓冲操作后重新提交。WAL I/O 错误保留原始原因供宿主处理；进程重启时按日志封条与同步模式完成恢复。
 
 ---
 
@@ -698,6 +698,8 @@ results = db.search_advanced(
 
 同一节点的 `index_text()` 会替换旧正文，多字段内容应拼接后一次登记；传入空字符串仅清除 BM25 正文。`index_keyword()` 可以登记多个别名，同节点重复登记同一规范化关键词不重复加分。删除节点会清理正文和关键词；修改 Payload 不会自动更新独立登记的正文。
 
+保存完整正文与别名来源后，可通过 `rebuild_text_index(documents)`（Node.js：`rebuildTextIndex`）生成完整文本索引，再调用 `flush()` 持久化。重建记录使用 `id`、`text` 和 `keywords` 字段；其集合定义本次保留的全部正文与关键词。元数据缺失的历史快照在完整格式校验后可恢复，异常文本文件保留供宿主恢复使用。
+
 正文与别名登记不在事务 WAL 中，应保留权威来源以便重建，并通过 `flush()` 或可写句柄的 `close()` 持久化。两个汉字的名字可使用 BM25 或 `CONTAINS` 扫描回退，不能使用要求至少三个字符的 N-gram 查询。
 
 ### ❌ 坑 1：维度不匹配
@@ -829,7 +831,7 @@ SM状态随构图生成；增量插入只追加新节点的紧凑位码与幅值
 | 低于当前维度的动态阈值 | **BruteForce** | 100% 精确召回 |
 | 达到动态阈值 + 首次构建完成 | **QuIVer (BQ构图 + SM-L2导航)** | 紧凑位码和图常驻，原始向量按预算做余弦精排 |
 
-动态阈值为 `ceil(8,000,000 / dim)`，并限制在 2,500–10,000 节点。例如 768 维为 10,000，1536 维约 5,209，3072 维约 2,605。
+动态阈值为 `ceil(666,667 / dim)`，并限制在 209–834 节点。例如 768 维为 834，1536 维为 435，3072 维为 218。
 
 ### 快速达到 QuIVer 激活
 
@@ -997,7 +999,7 @@ impl SearchHook for AuthHook {
 // 注册 Hook
 db.set_hook(AuthHook {
     allowed_user_ids: vec!["admin".into(), "agent_001".into()],
-});
+})?;
 
 // 使用带上下文的检索
 let mut hook_ctx = HookContext::new();
@@ -1146,6 +1148,8 @@ results = db.search_advanced(
 ### 四、WAL 回放与启动延迟：定时提交策略
 
 **边界**：如果长期进行写操作但从未调用 `flush()`，所有变更都会堆积在 `.wal` 文件里。下次启动时，引擎需要逐条回放这些日志来重建内存状态，积累越多，启动越慢。
+
+恢复按顺序交付已提交操作，复用单帧缓冲，事务临时空间随最大待提交批次增长。`payload_cache_bytes` / `payload_cache_mb` / `payloadCacheMb` 在索引恢复与 WAL 回放之前生效；设为零时，解析结果使用后立即释放。启动容量评估分别记录峰值 RSS、加载完成后的 RSS、匿名堆与文件驻留页。
 
 **规避策略**：
 

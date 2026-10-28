@@ -29,6 +29,9 @@ pub struct VecPool<T: VectorType> {
     vec_path: Option<PathBuf>,
     /// MAP_PRIVATE 映射：读取来自文件，写入仅影响进程私有页
     mmap: Option<memmap2::MmapMut>,
+    /// Windows 加载结束时复用同一文件身份建立冷映射，随后释放此临时句柄。
+    #[cfg(windows)]
+    startup_file: Option<std::fs::File>,
     /// mmap 区域中的向量数量
     mmap_count: usize,
 
@@ -79,6 +82,8 @@ impl<T: VectorType> VecPool<T> {
             dim,
             vec_path: None,
             mmap: None,
+            #[cfg(windows)]
+            startup_file: None,
             mmap_count: 0,
             delta: Vec::new(),
             merged: Vec::new(),
@@ -139,19 +144,12 @@ impl<T: VectorType> VecPool<T> {
             }
 
             if file_len > 0 {
-                // SAFETY: MAP_PRIVATE (copy-on-write)
-                //   - 读取来自文件页，OS 按需加载
-                //   - 写入创建私有副本（COW page），不影响磁盘文件
-                //   - VectorType 要求 T: Pod + Zeroable，所以字节对齐和全零初始化是安全的
-                let mmap = unsafe {
-                    memmap2::MmapOptions::new()
-                        .len(expected_size)
-                        .map_copy(&file)
-                        .map_err(TriviumError::Io)?
-                };
-
-                Self::validate_mapping(&mmap)?;
+                let mmap = Self::map_file(&file, expected_size)?;
                 pool.mmap = Some(mmap);
+                #[cfg(windows)]
+                {
+                    pool.startup_file = Some(file);
+                }
                 pool.mmap_count = expected_count;
 
                 // 建立映射后立刻提交顺序预读建议：
@@ -167,6 +165,29 @@ impl<T: VectorType> VecPool<T> {
 
         pool.invalidate_cache();
         Ok(pool)
+    }
+
+    fn map_file(file: &std::fs::File, length: usize) -> Result<memmap2::MmapMut> {
+        // SAFETY：文件由当前加载流程持有且覆盖已校验的映射长度；调用方按发布协议
+        // 保证映射存续期间基础文件不被原地修改。写入产生 COW 页，随后校验 T 的对齐。
+        let mapping = unsafe { memmap2::MmapOptions::new().len(length).map_copy(file)? };
+        Self::validate_mapping(&mapping)?;
+        Ok(mapping)
+    }
+
+    /// 加载期扫描完成后回收干净向量页，保留已有 COW 修改与增量。
+    pub(crate) fn finish_loading(&mut self) -> Result<()> {
+        #[cfg(windows)]
+        if let Some(file) = self.startup_file.take()
+            && !self.has_dirty_base
+            && let Some(mapping) = self.mmap.as_ref()
+        {
+            // 使用原文件句柄，避免重新解析路径而切换到另一个文件代际。
+            let cold_mapping = Self::map_file(&file, mapping.len())?;
+            self.mmap = Some(cold_mapping);
+        }
+        self.advise_dontneed();
+        Ok(())
     }
 
     /// 向量总数（基础层 + 增量层）
@@ -338,6 +359,8 @@ impl<T: VectorType> VecPool<T> {
     ///
     /// 为转换为 Rom 模式后能够安全删除 .vec 文件提供保障。
     pub fn detach_mmap(&mut self) {
+        #[cfg(windows)]
+        self.startup_file.take();
         if self.mmap.is_some() {
             // 已有有效合并结果时转移所有权；否则只复制一次形成 Rom 所需的拥有型向量。
             let new_delta = if self.merged_valid {
@@ -375,6 +398,8 @@ impl<T: VectorType> VecPool<T> {
     ///   - I/O 代价 = O(总数据量)，将 COW 脏页固化回磁盘
     ///   - 适合有 delete/update 的场景
     pub fn flush(&mut self, vec_path: &Path) -> Result<usize> {
+        #[cfg(windows)]
+        self.startup_file.take();
         let total = self.total_count();
 
         // ── 边界情况：无数据 ──
@@ -550,8 +575,13 @@ impl<T: VectorType> VecPool<T> {
     ///
     /// 非 Unix 平台（Windows）此函数编译为空，零开销。
     pub fn advise_dontneed(&self) {
+        // 私有映射中的未落盘更新必须保留，丢弃这些 COW 页会恢复成磁盘旧值。
         #[cfg(unix)]
-        if let Some(ref m) = self.mmap {
+        if !self.has_dirty_base
+            && let Some(ref m) = self.mmap
+        {
+            // SAFETY：此映射没有未落盘修改，页内容可从仍持有的同代文件完整重载；
+            // 调用方仅回收驻留页，映射长度、地址与读取引用的生命周期保持不变。
             let _ = unsafe { m.unchecked_advise(memmap2::UncheckedAdvice::DontNeed) };
             tracing::debug!(
                 "[VecPool] madvise(DONTNEED)：释放 {} MB 冷页 (releasing cold pages)",
@@ -643,5 +673,72 @@ impl<T: VectorType> VecPool<T> {
     /// 估算逻辑上管理的总向量数据大小（含 mmap 部分）
     pub fn total_data_bytes(&self) -> usize {
         self.total_count() * self.dim * std::mem::size_of::<T>()
+    }
+}
+
+#[cfg(test)]
+mod startup_tests {
+    use super::*;
+
+    fn check<T: VectorType>() {
+        let root = std::env::temp_dir().join(format!(
+            "tdb-冷映射-{}-{}-{}",
+            std::process::id(),
+            std::any::type_name::<T>().replace(':', "_"),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("sample.vec");
+        let original = [T::from_f32(1.), T::from_f32(2.), T::from_f32(3.)];
+        let updated = [T::from_f32(4.), T::from_f32(5.), T::from_f32(6.)];
+        std::fs::write(&path, bytemuck::cast_slice::<T, u8>(&original)).unwrap();
+        for dirty in [false, true] {
+            let mut pool = VecPool::<T>::open(&path, 3, 1).unwrap();
+            #[cfg(windows)]
+            let previous_address = pool.mmap.as_ref().unwrap().as_ptr();
+            if dirty {
+                pool.update(0, &updated);
+            }
+            pool.push(&updated);
+            pool.finish_loading().unwrap();
+            assert_eq!(
+                pool.get(0).unwrap(),
+                if dirty { &updated } else { &original }
+            );
+            assert_eq!(pool.get(1).unwrap(), &updated);
+            #[cfg(windows)]
+            {
+                assert!(pool.startup_file.is_none(), "加载完成必须释放临时文件句柄");
+                if !dirty {
+                    assert_ne!(
+                        pool.mmap.as_ref().unwrap().as_ptr(),
+                        previous_address,
+                        "干净映射必须完成冷映射替换"
+                    );
+                } else {
+                    assert_eq!(
+                        pool.mmap.as_ref().unwrap().as_ptr(),
+                        previous_address,
+                        "未落盘的 COW 映射必须保留"
+                    );
+                }
+            }
+            assert_eq!(
+                std::fs::read(&path).unwrap(),
+                bytemuck::cast_slice::<T, u8>(&original)
+            );
+        }
+        std::fs::remove_file(path).unwrap();
+        std::fs::remove_dir(root).unwrap();
+    }
+
+    #[test]
+    fn 三种向量类型加载结束保留干净值及_cow和增量() {
+        check::<f32>();
+        check::<half::f16>();
+        check::<u64>();
     }
 }

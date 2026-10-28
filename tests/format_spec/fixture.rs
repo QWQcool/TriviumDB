@@ -116,8 +116,8 @@ pub fn directory_snapshot(path: &str) -> BTreeMap<String, Vec<u8>> {
 pub fn assert_read_only_zero_write(path: &str) {
     let before = directory_snapshot(path);
     if let Ok(database) = Database::<f32>::open_read_only(path, DIM) {
-        let _ = database.node_count();
-        let _ = database.get_payload(1);
+        let _ = database.node_count().unwrap();
+        let _ = database.get_payload(1).unwrap();
         let _ = database.search(&[1.0, 1.0, 0.0, -1.0], 3, 0, -1.0);
     }
     assert_eq!(

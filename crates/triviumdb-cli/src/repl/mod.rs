@@ -67,7 +67,10 @@ fn banner(handle: &DbHandle, path: &str) {
     let line = format!(
         "TriviumDB REPL | {path} | dim={} | nodes={} | {}",
         handle.dim(),
-        handle.node_count(),
+        handle
+            .node_count()
+            .map(|count| count.to_string())
+            .unwrap_or_else(|error| error.to_string()),
         handle.dtype()
     );
     println!("{}", line.cyan().bold());
@@ -222,7 +225,10 @@ fn print_help() {
 fn print_stats(handle: &DbHandle) {
     println!(
         "nodes={} | dim={} | dtype={} | est_memory={}",
-        handle.node_count(),
+        handle
+            .node_count()
+            .map(|count| count.to_string())
+            .unwrap_or_else(|error| error.to_string()),
         handle.dim(),
         handle.dtype(),
         human_bytes(handle.estimated_memory() as u64),
@@ -231,12 +237,24 @@ fn print_stats(handle: &DbHandle) {
 
 /// 采样最多 1000 个节点，统计 payload 顶层字段出现次数与类型集合。
 fn print_schema(handle: &DbHandle) {
-    let ids = handle.get_all_ids();
+    let ids = match handle.get_all_ids() {
+        Ok(ids) => ids,
+        Err(error) => {
+            eprintln!("读取节点失败：{error}");
+            return;
+        }
+    };
     let mut fields: BTreeMap<String, (usize, BTreeSet<&'static str>)> = BTreeMap::new();
     let mut sampled = 0usize;
 
     for id in ids.iter().take(1000) {
-        if let Some(Value::Object(obj)) = handle.get_payload(*id) {
+        if let Some(Value::Object(obj)) = match handle.get_payload(*id) {
+            Ok(payload) => payload,
+            Err(error) => {
+                eprintln!("读取 Payload 失败：{error}");
+                return;
+            }
+        } {
             for (k, v) in &obj {
                 let entry = fields.entry(k.clone()).or_default();
                 entry.0 += 1;

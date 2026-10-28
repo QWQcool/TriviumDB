@@ -1,6 +1,6 @@
 # TQL (Trivium Query Language) 完整参考
 
-> **版本**: 0.9.0-beta.1；版本记录见 [0.9.0-beta.1 变更说明](changes/0.9.0-beta.1.md)。
+> **版本**: 0.9.0-beta.3；版本记录见 [0.9.0-beta.3 变更说明](changes/0.9.0-beta.3.md)。
 > **定位**: 统一查询 DSL — 融合文档过滤、图模式匹配、向量检索于一体  
 > **前置依赖**: 零外部依赖，纯 Rust 实现
 
@@ -224,6 +224,8 @@ MATCH (a {id: 42}) RETURN a
 
 > 💡 当内联属性包含 `{id: N}` 时，执行器会启用 **O(1) 主键哈希短路**，跳过全表扫描直接定位节点。
 
+MATCH 内联 `id` 条件和节点的 `.id` 属性引用结构 ID，支持完整 `u64` 整数及 `$in`、范围等条件；负数按实际数值比较。`FIND` 与 `MATCHES` 的文档条件读取 Payload 字段。Payload 自身的 `id` 属性索引服务于文档过滤，结构 ID 排序使用节点 ID。
+
 ### 边模式
 
 ```sql
@@ -300,11 +302,15 @@ RETURN b
 
 | 规则 | 说明 |
 |------|------|
-| 路径中间/末尾节点**必须**指定变量名 | `(a)-[]->(b)` ✅ / `(a)-[]->()` ❌ |
-| 包含边的路径中起始节点**必须**指定变量名 | `(a)-[]->(b)` ✅ / `()-[]->(b)` ❌ |
+| 单跳具名边支持匿名端点 | `MATCH ()-[e:rel]->() RETURN e` |
+| 其他含边路径的节点使用具名变量 | `MATCH (a)-[]->(b) RETURN a, b` |
 | 纯单节点查询允许匿名 | `MATCH (n) RETURN n` ✅ |
 | 变量在 RETURN 中引用 | `RETURN a, b` |
 | `RETURN *` 返回所有绑定变量 | `RETURN *` |
+
+重复节点变量约束为同一节点，例如 `(a)-[:rel]->(a)` 匹配自环。节点和边使用各自的变量名；WHERE、RETURN 与 ORDER BY 在已声明的作用域中求值。单跳边变量支持 `e.weight`、`e.label`、`e.source`、`e.target`、`e.metadata` 以及 Metadata 自定义字段，并可用于 WHERE、COALESCE、IS NULL 和聚合。
+
+OPTIONAL MATCH 首先筛选符合起点条件的节点；每个起点沿满足模式和 WHERE 的边产生行，无合格边时保留起点并将后续节点与边列补为 Null。具名边的 `RETURN *` 同样包含这些 Null 列。
 
 ### 执行器安全机制
 
@@ -335,6 +341,8 @@ SEARCH VECTOR [0.1, 0.2, 0.3] TOP 5 RETURN *
 -- 支持负数和科学计数法分量
 SEARCH VECTOR [1e-5, -4.8E-1, 8e-1] TOP 10 RETURN *
 ```
+
+SEARCH、RANK 与 RESIDUAL 向量按数据库 dtype 转换。u64 分量保留 `0..=18446744073709551615` 的整数位模式；负数、小数和超范围分量返回错误。f32/f16 在转换后检查有限范围。字面量和 SEARCH Prepared 数值参数使用同一转换规则，空库同样执行输入校验。
 
 ### 带图扩散 (EXPAND)
 
@@ -501,7 +509,11 @@ RETURN COUNT(*) AS total, AVG(a.score) AS avg_score
 ```
 
 - `FIND` / `SEARCH` 场景下，`RETURN *` 将节点绑定到隐式变量 `_`
-- `MATCH` 场景下，`RETURN *` 返回模式中所有具名节点变量
+- `MATCH` 场景下，`RETURN *` 返回模式中具名节点与单跳具名边变量
+
+普通查询、WITH 管线与单跳具名边共用返回处理。计算表达式按实际值参与去重与分组；返回列与输入绑定分别保存，聚合别名可与输入节点变量同名。省略 `AS` 时，列名采用表达式文本，例如 `Count(*)`、`n.x`。
+
+字面量采用其规范文本作为默认列名，例如 `RETURN 1, 2` 返回 `{"1":1,"2":2}`。重复列名返回查询错误，可用独立的 `AS` 别名命名。Prepared 参数的默认列名在绑定前确定，`RETURN $a, $b` 的列名始终为 `$a` 和 `$b`。`id`、`coalesce` 等函数同名别名可直接用于 ORDER BY；函数调用使用括号。
 
 ### ORDER BY
 
@@ -510,7 +522,10 @@ ORDER BY b.age ASC          -- 升序（默认）
 ORDER BY b.age DESC         -- 降序
 ORDER BY a.name, b.age DESC -- 多字段排序
 ORDER BY _.heat DESC        -- FIND/SEARCH 场景
+ORDER BY adjusted DESC      -- RETURN 中定义的别名
 ```
+
+混合类型采用固定的升序类型次序：数字、字符串、布尔、数组、对象、节点、边、路径、Null；DESC 反转该次序。同类数组和对象按内容递归比较，数字采用精确整数与浮点比较。
 
 ### LIMIT / OFFSET
 
@@ -520,6 +535,8 @@ LIMIT 10 OFFSET 20    -- 跳过前 20 条，返回 10 条
 ```
 
 **执行顺序**：`WHERE 过滤 → RANK（如有）→ 聚合/DISTINCT → ORDER BY → OFFSET → LIMIT`
+
+RETURN 别名在 ORDER BY 中可用，也可参与排序算术；WHERE 与 RETURN 表达式使用各自的输入作用域。WITH 承接实例的 `max_query_rows`、`row_overflow`、内存预算与取消控制。显式 LIMIT 可覆盖默认行数上限，OFFSET + LIMIT 继续接受内存准入；聚合、去重与完整排序要求完整输入。管线工作区在执行前按候选规模保守预留。
 
 ---
 
@@ -538,6 +555,19 @@ ORDER BY sim DESC LIMIT 10
 ```
 
 可组合阶段包括 `EXPAND`、`FILTER/WHERE`、`RANK`、PageRank、WCC、SCC、K-Core、Articulation Points、Triangle Count、Local Clustering Coefficient、HITS、Harmonic Centrality、Node Similarity、Degree/Betweenness、Leiden、Label Propagation、SA-PPR、`TEXT BM25/AC/HYBRID`、`RESIDUAL`、`DIVERSIFY`、`TOPICS`、`SA_PPR_CONFIG`、`WEIGHTED_PATHS`、`YEN_PATHS`、`ALL_PATHS`、`SHORTEST_PATHS`、`UNION/INTERSECT/EXCEPT` 与 `ITERATE`。每阶段接受预算切片，并在 EXPLAIN 中暴露成本、预计行数、临时字节和物理实现。
+
+WITH 在执行位置对每行求值并保存带类型的投影快照。同一 WITH 的所有右值读取进入该阶段时的作用域，再同时安装别名；后续 WITH 仅保留显式投影的列。表达式递归检查全部变量，标量重命名保留标量类型。
+
+EXPAND 将起点快照传给扩展结果；多个起点汇合到同一节点时，不同的投影环境保持独立逻辑行。节点别名保留原节点身份和属性，数组、对象及标量保留投影值，分组与过滤读取相同快照。保存的投影内容计入实例查询工作区及共享运行时配额。
+
+```sql
+FIND {kind: "seed"} AS seed
+WITH seed, seed.x AS before, seed AS origin
+EXPAND seed [:related*1..1] AS child
+RETURN origin.id AS origin, before, child.x AS after
+```
+
+`before` 保存扩展前的 `seed.x`，`origin` 仍引用起点。ORDER BY 的返回别名保留数字、节点、边、路径和 JSON 容器类型；`ORDER BY chosen` 与 `ORDER BY COALESCE(n.v,n)` 使用相同的类型次序，实体与对象别名也可按其字段排序。
 
 ### 结构图算法
 
@@ -621,7 +651,21 @@ RETURN clustered, topic(clustered) AS topic_id, topic_score(clustered) AS confid
 
 表达式支持 `+ - * /`、括号优先级、参数、属性、一等分数、`COALESCE`、`IS NULL/IS NOT NULL`、`path()` 与 `path_length()`。认知管线新增 `text_score()`、`diversity_score()`、`residual_score()`、`topic()` 与 `topic_score()`；未携带对应分数的行返回 Null。除零、非数值算术和非有限结果返回 Null，不 panic。
 
+整数的字面量、属性、节点 ID 与 Prepared 参数覆盖 `i64::MIN..=u64::MAX`；Rust 一等值使用 `Int(i64)`、`UInt(u64)`、`Float(f64)`。`WHERE`、排序与 `MIN/MAX` 共用精确数值比较，整数和浮点混合比较保持整数精度。浮点相等比较使用实际数值相等；`+0.0` 与 `-0.0` 相等。
+
+整数之间的 `+ - *` 和整数 `SUM` 保留整数结果，超出整数域时返回 Null。含浮点操作数的算术、除法与 `AVG` 使用 binary64；除法仅将实际的正负零视为零分母，有限的小分母正常计算。`MIN/MAX` 保留选中数值的类型和值。
+
+Python 返回精确 `int`。Node 的整数标量在安全整数范围内返回 `number`，超范围时返回十进制字符串，`COLLECT` 等列表中的整数采用相同转换；整节点结果中的 ID 继续使用字符串。例如，`RETURN 18446744073709551613 AS value` 在 Python 中返回整数，在 Node 中返回字符串 `"18446744073709551613"`。
+
+数组和对象保留 JSON 形态，空数组与空对象同样是有效值。`COALESCE` 返回首个非 Null 值，`IS NULL` 根据实际空值判断；数组、对象按内容参与分组与 DISTINCT。Rust 对象结果使用 `TqlValue::Object`，Python 返回 dict，Node 返回 object 并递归保留大整数的十进制表示。节点和边作为实体值参与表达式，COUNT 可统计实体，SUM/AVG/MIN/MAX 处理数值输入。
+
+TQL 数值等值谓词采用相同的索引候选和精确复核语义：整数 `1` 与浮点 `1.0` 数值相等，2^53 以上的相邻整数保持可区分。文档 Filter 与 Hash/Bitmap 的 JSON 类型键继续按其文档值契约工作。
+
 聚合支持 `COUNT/SUM/AVG/MIN/MAX/COLLECT` 与 aggregate `DISTINCT`。RETURN 中非聚合表达式构成隐式分组键；`DISTINCT b.id`、`DISTINCT id(b)` 和 `DISTINCT b.field` 均按实际投影值去重。空输入 `COUNT(*)=0`，其他无值聚合返回 Null。Rust 的 `tql()` 与 Python/Node 动态语言入口均返回统一一等值；`tql_nodes()` 保留给只需要节点绑定的 Rust 调用方，`tql_values()` 是兼容别名。
+
+`COUNT(*)` 统计匹配行，`COUNT(expr)` 统计求值后非 Null 的值；`0`、`false`、空字符串与空容器均为有效值。当前聚合去重语法为 `RETURN DISTINCT COUNT(n.g) AS total`，表示先对 `n.g` 的非 Null 值去重，再计数。单跳具名边按实际边产生行，多标签平行边分别参与计数。
+
+写入操作沿匹配行生成事务。`MATCH … CREATE` 的零匹配产生零次创建，每条匹配拥有独立的新节点变量作用域；同一行内的边引用对应的新节点。多字段 SET 按文本顺序累计到同一节点，重复字段采用最后一次赋值，合并后提交一次 Payload 替换。整条 mutation 通过内核事务完成预检、预算准入与原子提交。
 
 ## 向量更新
 
@@ -633,6 +677,8 @@ SET VECTOR(n) == [1e-5, 0.2, -0.3]
 ```
 
 目标匹配集不受查询返回行上限静默截断。向量维度必须与数据库一致，且所有分量必须为有限值；任一目标或向量校验失败时，事务整体不提交。该语法当前使用数字字面量；需要参数化或批量向量写入时使用事务 API。
+
+SET VECTOR 从字面量保留数值类型，并按目标 dtype 转换。`u64` 保留 `0..=18446744073709551615` 的整数位模式，负数、小数与超范围值在写 WAL 前拒绝；f32/f16 在转换后检查有限范围。Rust mutation AST 的 `SetVector.vector` 使用 `Vec<serde_json::Number>`，自定义 `VectorType` 可覆盖 `from_json_number()` 定义数值转换。
 
 ## Prepared TQL
 
@@ -647,6 +693,8 @@ rows = db.execute_prepared_tql(prepared, {"x": 0.2, "y": 0.8, "bonus": 4})
 `SEARCH VECTOR` 的方括号内可混合有限数字字面量与 Prepared 数值参数，例如 `[1e-5, $y, -3E-1]`。十进制字面量支持 `e`/`E` 科学计数法以及正负指数；不完整指数和溢出到非有限值的数字会在解析期 fail-closed。参数只在 bind 阶段写入连续向量，绑定完成后复用与字面量完全相同的 QuIVer/精确检索热路径，不增加候选打分开销。
 
 Node 使用 `prepareTql/executePreparedTql`，Rust 使用 `prepare_tql/execute_prepared_tql`。缺参、额外参数、非数值向量参数和非有限数值全部 fail-closed；同一 Prepared 对象可重复绑定执行。
+
+直接执行包含未绑定参数的查询返回明确错误。Rust 手工构造 Prepared AST 时，向量参数槽位必须有效且唯一；绑定过程检查槽位边界并保持原始整数精度。
 
 ## 路径与集合代数
 
@@ -760,6 +808,7 @@ TQL 由七个协作模块组成，延续项目既有的模块化拆分：
 | **Cascades** | `query/cascades.rs` | Memo、物理候选、成本与预算 |
 | **Pipeline** | `query/pipeline.rs` | NodeSet 与图/集合/路径算子 |
 | **Executor** | `query/tql_executor.rs` | 一等值、聚合和结果投影 |
+| **Return processing** | `query/tql_return.rs` | 共享表达式求值、分组、去重、排序与分页 |
 | **Prepared** | `query/tql_prepared.rs` | 严格参数绑定 |
 
 ### 执行流程
@@ -771,7 +820,7 @@ TQL 文本
   → Cascades Memo（统计、成本、预算与确定性 tie-break）
   → PipelineOperator（索引访问、NodeSet、图、路径、集合与迭代）
   → 表达式/聚合/排序/分页
-  → TqlValueResult（Node、标量、Path、List、Null）
+  → TqlValueResult（Node、Edge、标量、Path、List、Object、Null）
 ```
 
 `FIND` 可选择主键、Hash/Ordered/Composite/Bitmap、索引交集或 Fast Tags + 精确校验；`SEARCH` 可选择可用的向量访问路径与 exact fallback；`MATCH`、图算法和路径阶段复用 `.gidx`/内存图目录。Cascades 是确定性、有界、统计感知且成本驱动的优化器，不宣称穷举意义上的数学全局最优。

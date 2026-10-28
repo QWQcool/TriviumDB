@@ -33,7 +33,10 @@ fn render_title(f: &mut Frame, app: &App, area: Rect) {
         " TriviumDB │ {} │ dim={} │ nodes={} │ {} ",
         app.path,
         app.handle.dim(),
-        app.handle.node_count(),
+        app.handle
+            .node_count()
+            .map(|count| count.to_string())
+            .unwrap_or_else(|error| error.to_string()),
         app.handle.dtype(),
     );
     let p = Paragraph::new(title).style(

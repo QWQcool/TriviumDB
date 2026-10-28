@@ -96,7 +96,10 @@ fn 事务交错_WAL完整提交后才允许应用MemTable() {
     waiter.release();
     let (db, ids) = thread.join().unwrap();
     assert_eq!(ids.len(), 1);
-    assert_eq!(db.get_payload(ids[0]).unwrap()["phase"], "committed");
+    assert_eq!(
+        db.get_payload(ids[0]).unwrap().unwrap()["phase"],
+        "committed"
+    );
 
     drop(db);
     cleanup(&path);
@@ -130,8 +133,11 @@ fn 压实交错_主数据已保存但WAL未清理时释放后可完整重载() {
     drop(db);
 
     let reopened = Database::<f32>::open(&path, DIM).unwrap();
-    assert_eq!(reopened.node_count(), 1);
-    assert_eq!(reopened.get_payload(id).unwrap()["state"], "must-survive");
+    assert_eq!(reopened.node_count().unwrap(), 1);
+    assert_eq!(
+        reopened.get_payload(id).unwrap().unwrap()["state"],
+        "must-survive"
+    );
     drop(reopened);
     cleanup(&path);
 }
@@ -428,7 +434,7 @@ fn Fatigue清理交错_只能在线性顺序上发生于完整查询之间() {
     assert_eq!(query.join().unwrap().len(), 1);
     clear_entered.wait_until_arrived();
     clear_entered.release();
-    clear.join().unwrap();
+    clear.join().unwrap().unwrap();
     drop(db);
     cleanup(&path);
 }
@@ -477,7 +483,7 @@ fn 查询写交错_更新向量必须等待完整查询释放读锁() {
     writer_acquired.wait_until_arrived();
     writer_acquired.release();
     writer.join().unwrap().unwrap();
-    assert_eq!(db.get(id).unwrap().vector, [0.0, 1.0, 0.0, 0.0]);
+    assert_eq!(db.get(id).unwrap().unwrap().vector, [0.0, 1.0, 0.0, 0.0]);
     drop(db);
     cleanup(&path);
 }

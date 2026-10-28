@@ -186,7 +186,7 @@ impl CorrectedSmIndex {
                 }
             }
             st.candidates.extend(st.results.drain());
-            st.candidates.sort_unstable();
+            self.order_rerank_candidates(&mut st.candidates, budget, uses_anchor);
             #[cfg(feature = "test-hooks")]
             crate::test_hooks::hit(crate::test_hooks::ConcurrencyPoint::QuiverCandidateProduced);
             if TRACE {
@@ -233,8 +233,10 @@ impl CorrectedSmIndex {
             if TRACE {
                 trace.exact.extend(st.exact.iter().map(|x| x.0));
             }
-            st.exact
-                .sort_unstable_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+            st.exact.sort_unstable_by(|a, b| {
+                b.1.total_cmp(&a.1)
+                    .then_with(|| self.ids[a.0 as usize].cmp(&self.ids[b.0 as usize]))
+            });
             let neighbors = st
                 .exact
                 .iter()

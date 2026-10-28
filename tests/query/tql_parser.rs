@@ -73,7 +73,10 @@ fn 表达式递归预算_与外层谓词共享限制() {
 
 #[test]
 fn 表达式递归预算_同级表达式不累计深度() {
-    let expressions = vec!["coalesce((n.value), 0)"; 256].join(", ");
+    let expressions = (0..256)
+        .map(|index| format!("coalesce((n.value), 0) AS v{index}"))
+        .collect::<Vec<_>>()
+        .join(", ");
     parse_tql(&format!(
         "MATCH (n) RETURN {expressions} ORDER BY coalesce((n.value), 0)"
     ))
@@ -318,7 +321,10 @@ fn MATCH_RANK解析() {
             .unwrap();
     let rank = query.rank.unwrap();
     assert_eq!(rank.var, "doc");
-    assert_eq!(rank.vector, vec![1.0, 0.0]);
+    assert_eq!(
+        serde_json::json!(rank.vector),
+        serde_json::json!([1.0, 0.0])
+    );
     assert_eq!(rank.top_k, 3);
 }
 
@@ -434,7 +440,10 @@ fn SEARCH_基础向量检索() {
     } = &q.entry
     {
         assert_eq!(vector.len(), 3);
-        assert!((vector[0] - 0.1).abs() < 1e-10);
+        assert_eq!(
+            serde_json::json!(vector),
+            serde_json::json!([0.1, 0.2, 0.3])
+        );
         assert_eq!(*top_k, 10);
         assert!(expand.is_none());
     } else {
@@ -460,8 +469,8 @@ fn SEARCH_带EXPAND() {
 fn SEARCH_负数向量() {
     let q = parse_tql(r#"SEARCH VECTOR [-0.5, 0.3, -1] TOP 5 RETURN *"#).unwrap();
     if let QueryEntry::Search { vector, .. } = &q.entry {
-        assert!((vector[0] - (-0.5)).abs() < 1e-10);
-        assert!((vector[2] - (-1.0)).abs() < 1e-10);
+        assert_eq!(vector[0].as_f64(), Some(-0.5));
+        assert_eq!(vector[2].as_f64(), Some(-1.0));
     } else {
         panic!("Expected Search entry");
     }

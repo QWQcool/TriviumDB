@@ -145,10 +145,13 @@ pub(crate) fn execute_pipeline_with_limit<T: VectorType>(
     config: &SearchConfig,
     ctx: &mut HookContext,
 ) -> Result<PipelineOutput> {
+    #[cfg(feature = "test-hooks")]
+    crate::test_hooks::hit(crate::test_hooks::ConcurrencyPoint::BeforeSearchReadLock);
     let runtime = read_or_recover(memtable).resource_runtime().clone();
     let quiver_config = crate::index::quiver::QuIVerConfig::default();
     let (auto_build_snapshot, _build_workspace) = {
         let mt = read_or_recover(memtable);
+        mt.ensure_readable()?;
         if mt.auto_quiver_build_needed() {
             let projected = mt
                 .estimated_memory_bytes()
@@ -181,6 +184,7 @@ pub(crate) fn execute_pipeline_with_limit<T: VectorType>(
 
     drop(_build_workspace);
     let mt = read_or_recover(memtable);
+    mt.ensure_readable()?;
     #[cfg(feature = "test-hooks")]
     crate::test_hooks::hit(crate::test_hooks::ConcurrencyPoint::SearchLockAcquired);
 
@@ -589,9 +593,9 @@ fn recall_vector_ranked<T: VectorType>(
 
     // ═══════════════════════════════════════════════════════
     // 动态引擎路由：
-    // 1. QuIVer Vamana 图搜索（N >= 10,000 时由 ensure_vectors_cache 自动构建）
+    // 1. 使用查询准备阶段已就绪的 QuIVer 图索引。
     //    —— 冷热分离：f32 向量按需从 mmap 读取，无需物化全量 flat 数组
-    // 2. 暴力全扫（N < 10,000 或 force_brute_force）
+    // 2. 索引尚未就绪或 force_brute_force 时执行暴力全扫。
     //    —— 直接扫描基础层和增量层，无需构建合并缓存
     // ═══════════════════════════════════════════════════════
     let vector_hits: Vec<SearchHit> = if !config.force_brute_force && mt.quiver().is_some() {
@@ -614,7 +618,7 @@ fn recall_vector_ranked<T: VectorType>(
     ranking.extend(vector_hits.into_iter().map(|hit| (hit.id, hit.score)));
 }
 
-/// 暴力全扫管线（N < 10,000 或 force_brute_force 时使用）
+/// 暴力全扫管线，供索引尚未就绪或 force_brute_force 时使用。
 fn brute_force_pipeline<T: VectorType + Sync>(
     mt: &MemTable<T>,
     config: &SearchConfig,

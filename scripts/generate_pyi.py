@@ -71,6 +71,7 @@ PARAM_TYPES = {
     "payload": "Any", "payloads": "Sequence[Any]", "patch": "Mapping[str, Any]",
     "metadata": "Any",
     "payload_filter": "Mapping[str, Any]",
+    "documents": "Sequence[Mapping[str, Any]]",
     "labels": "Sequence[str]", "expand_labels": "Sequence[str]", "fields": "Sequence[str]",
     "parameters": "Mapping[str, Any]", "prepared": "PreparedTql", "hook": "Any",
     "exc_type": "object", "_exc_type": "object", "_exc_val": "object", "_exc_tb": "object",
@@ -117,7 +118,7 @@ for _ret, _quals in {
             "TriviumDB.update_payload TriviumDB.patch_payload TriviumDB.update_vector "
             "TriviumDB.delete TriviumDB.link TriviumDB.upsert_edge TriviumDB.update_edge "
             "TriviumDB.unlink TriviumDB.index_text "
-            "TriviumDB.index_keyword TriviumDB.build_text_index TriviumDB.create_index "
+            "TriviumDB.index_keyword TriviumDB.build_text_index TriviumDB.rebuild_text_index TriviumDB.create_index "
             "TriviumDB.create_ordered_index TriviumDB.create_composite_index TriviumDB.create_bitmap_index "
             "TriviumDB.drop_index TriviumDB.drop_ordered_index TriviumDB.drop_composite_index TriviumDB.drop_bitmap_index TriviumDB.flush TriviumDB.compact "
             "TriviumDB.enable_auto_compaction TriviumDB.disable_auto_compaction "

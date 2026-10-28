@@ -1,0 +1,103 @@
+{
+  "dimension": 4,
+  "dtypes": ["f32", "f16", "u64"],
+  "storage_modes": ["rom", "mmap"],
+  "setup": [
+    {"id": 10, "vector": [1, 0, 0, 0], "payload": {"version": "original"}},
+    {"id": 20, "vector": [0, 0, 0, 1], "payload": {"version": "peer"}}
+  ],
+  "cases": [
+    {
+      "name": "recreated_duplicate_rejects_entire_batch",
+      "operations": [
+        {"type": "delete", "id": 10},
+        {"type": "insertWithId", "id": 10, "vector": [0, 1, 0, 0], "payload": {"version": "A"}},
+        {"type": "insertWithId", "id": 10, "vector": [0, 0, 1, 0], "payload": {"version": "B"}}
+      ],
+      "expected": {
+        "error": "NodeAlreadyExists",
+        "nodes": [
+          {"id": 10, "vector": [1, 0, 0, 0], "payload": {"version": "original"}},
+          {"id": 20, "vector": [0, 0, 0, 1], "payload": {"version": "peer"}}
+        ]
+      }
+    },
+    {
+      "name": "recreated_node_accepts_payload_and_vector_updates",
+      "operations": [
+        {"type": "delete", "id": 10},
+        {"type": "insertWithId", "id": 10, "vector": [0, 1, 0, 0], "payload": {"version": "A"}},
+        {"type": "updatePayload", "id": 10, "payload": {"version": "updated"}},
+        {"type": "updateVector", "id": 10, "vector": [0, 0, 1, 0]}
+      ],
+      "expected": {
+        "ids": [10],
+        "nodes": [
+          {"id": 10, "vector": [0, 0, 1, 0], "payload": {"version": "updated"}},
+          {"id": 20, "vector": [0, 0, 0, 1], "payload": {"version": "peer"}}
+        ]
+      }
+    },
+    {
+      "name": "multiple_recreations_return_each_insertion_id",
+      "operations": [
+        {"type": "delete", "id": 10},
+        {"type": "insertWithId", "id": 10, "vector": [0, 1, 0, 0], "payload": {"version": "A"}},
+        {"type": "delete", "id": 10},
+        {"type": "insertWithId", "id": 10, "vector": [0, 0, 1, 0], "payload": {"version": "B"}}
+      ],
+      "expected": {
+        "ids": [10, 10],
+        "nodes": [
+          {"id": 10, "vector": [0, 0, 1, 0], "payload": {"version": "B"}},
+          {"id": 20, "vector": [0, 0, 0, 1], "payload": {"version": "peer"}}
+        ]
+      }
+    },
+    {
+      "name": "recreated_node_can_be_deleted_again",
+      "operations": [
+        {"type": "delete", "id": 10},
+        {"type": "insertWithId", "id": 10, "vector": [0, 1, 0, 0], "payload": {"version": "A"}},
+        {"type": "delete", "id": 10}
+      ],
+      "expected": {
+        "ids": [10],
+        "nodes": [{"id": 20, "vector": [0, 0, 0, 1], "payload": {"version": "peer"}}]
+      }
+    },
+    {
+      "name": "update_after_final_delete_rejects_entire_batch",
+      "operations": [
+        {"type": "delete", "id": 10},
+        {"type": "insertWithId", "id": 10, "vector": [0, 1, 0, 0], "payload": {"version": "A"}},
+        {"type": "delete", "id": 10},
+        {"type": "updatePayload", "id": 10, "payload": {"version": "invalid"}}
+      ],
+      "expected": {
+        "error": "NodeNotFound",
+        "nodes": [
+          {"id": 10, "vector": [1, 0, 0, 0], "payload": {"version": "original"}},
+          {"id": 20, "vector": [0, 0, 0, 1], "payload": {"version": "peer"}}
+        ]
+      }
+    },
+    {
+      "name": "automatic_and_recreated_ids_share_one_allocator",
+      "operations": [
+        {"type": "insert", "vector": [0, 1, 0, 0], "payload": {"version": "automatic"}},
+        {"type": "delete", "id": 10},
+        {"type": "insertWithId", "id": 10, "vector": [0, 0, 1, 0], "payload": {"version": "B"}},
+        {"type": "updatePayload", "id": 21, "payload": {"version": "updated"}}
+      ],
+      "expected": {
+        "ids": [21, 10],
+        "nodes": [
+          {"id": 10, "vector": [0, 0, 1, 0], "payload": {"version": "B"}},
+          {"id": 20, "vector": [0, 0, 0, 1], "payload": {"version": "peer"}},
+          {"id": 21, "vector": [0, 1, 0, 0], "payload": {"version": "updated"}}
+        ]
+      }
+    }
+  ]
+}

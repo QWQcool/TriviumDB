@@ -33,6 +33,22 @@ pub trait VectorType:
 
     /// 从 f32 构造单元素（用于产生数学计算后的残差向量等机制）
     fn from_f32(v: f32) -> Self;
+
+    /// 按目标 dtype 校验并转换 JSON 数值；整数类型覆盖此方法以保留完整位模式。
+    fn from_json_number(value: &serde_json::Number) -> crate::Result<Self> {
+        let number = value
+            .as_f64()
+            .ok_or_else(|| crate::TriviumError::InvalidVector {
+                reason: "向量分量必须为数值 (Vector components must be numeric)".into(),
+            })?;
+        let converted = Self::from_f32(number as f32);
+        if !(number as f32).is_finite() || !converted.to_f32().is_finite() {
+            return Err(crate::TriviumError::InvalidVector {
+                reason: "向量分量超出目标类型的有限范围 (Vector component exceeds the finite range of its dtype)".into(),
+            });
+        }
+        Ok(converted)
+    }
 }
 
 // ════════ SIMD 多级回退内核：余弦相似度 ════════
@@ -508,6 +524,22 @@ impl VectorType for u64 {
     #[inline]
     fn from_f32(v: f32) -> Self {
         v as u64
+    }
+
+    fn from_json_number(value: &serde_json::Number) -> crate::Result<Self> {
+        if let Some(integer) = value.as_u64() {
+            return Ok(integer);
+        }
+        if let Some(number) = value.as_f64()
+            && number.is_finite()
+            && (0.0..18_446_744_073_709_551_616.0).contains(&number)
+            && number.fract() == 0.0
+        {
+            return Ok(number as u64);
+        }
+        Err(crate::TriviumError::InvalidVector {
+            reason: "u64 向量分量必须是范围内的非负整数 (u64 vector components must be non-negative integers within range)".into(),
+        })
     }
 }
 

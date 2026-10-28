@@ -1,6 +1,6 @@
 # TriviumDB API 完整参考
 
-> **版本**: `0.9.0-beta.1` 公共 API；见[变更说明](changes/0.9.0-beta.1.md)。
+> **版本**: `0.9.0-beta.3` 公共 API；见[变更说明](changes/0.9.0-beta.3.md)。
 > **语言**: Rust 核心 + Python 绑定 (PyO3) + Node.js 绑定 (napi-rs)  
 > **许可**: Apache-2.0
 
@@ -235,12 +235,14 @@ let mut db = Database::<f32>::open_with_config("my_data.tdb", Config {
 })?;
 
 // 运行时切换同步模式
-db.set_sync_mode(SyncMode::Off);
+db.set_sync_mode(SyncMode::Off)?;
 ```
 
-`close()` 会先进入 `Closing`，拒绝新操作并等待已经进入的操作结束，再执行最终 flush。只有 flush 成功后才释放文件锁并进入 `Closed`；flush 失败会恢复为 `Open` 且继续持有文件锁。关闭后的旧对象不能再次用于查询、写入或 flush。
+`close()` 先进入 `Closing`，拒绝新操作并等待已有操作结束，完成必要检查点及最终 WAL 同步，再释放 WAL、mmap、Payload、数据库持有的 Hook 与文件锁并进入 `Closed`。关闭成功后，即使包装对象仍被持有，数据库自身的文件资源也已释放；没有其他占用时可以立即移动、删除文件组或重新打开。持久化失败会返回原始错误，恢复为 `Open` 并保留内存和文件锁供重试。
 
-Mmap `flush()` 在发布新事实前流式备份旧 `.tdb/.vec/.flush_ok` 并发布 `.publish` 撤销日志，因此额外磁盘读写与临时空间随旧主文件和向量文件大小增长。ReadWrite `open()` 在加载前恢复未完成发布，再回放 WAL；已提交的新 marker 不会回滚。主文件 v9、marker v3 保持不变；损坏日志或备份返回 `CorruptedFile`。详见[恢复协议](security.md#8-mmap-三文件一致性标记flush_ok-v3)。
+数据访问统一执行生命周期检查：Rust 的 `get`、`get_payload`、`get_edge`、`get_edges`、`get_incoming_edges`、`get_all_ids`、`all_node_ids`、`node_count`、`contains`、`neighbors`、`neighbors_with_labels`、`shortest_path`、`graph_stats`、`validate_graph`、`list_indexes`、`list_unique_indexes`、`index_info` 与 `clear_search_state` 返回 `Result`；`set_hook` 也返回 `Result<()>`。调用方使用 `?` 或显式处理错误。Python/Node 的打开状态返回类型保持一致，关闭后抛错。状态、资源统计和配置诊断继续可读。
+
+`flush()` 通过 `.publish` 撤销日志管理主数据、向量、QuIVer、文本、属性与图索引文件组。Mmap 在各文件同步后提交 marker，Rom 在同步后提交日志状态；ReadWrite `open()` 先完成中断恢复，再流式回放 WAL。备份使用有界缓冲，额外磁盘空间与纳入发布的旧文件组大小对应。主文件使用 v9、marker 使用 v3、发布日志使用 v2，并支持读取历史 v1 日志。协议见[恢复说明](security.md#8-mmap-三文件一致性标记flush_ok-v3)。
 
 **泛型类型参数 `T`：**
 
@@ -391,7 +393,7 @@ if node:
 
 **Rust：**
 ```rust
-if let Some(view) = db.get(42) {
+if let Some(view) = db.get(42)? {
     println!("ID={}, edges={}", view.id, view.edges.len());
     println!("payload={:?}", view.payload);
 }
@@ -484,7 +486,7 @@ if (db.contains(42)) console.log('节点存在')
 
 ### link — 建立有向边
 
-在两个节点之间建立一条有向带权边。边以 `(src, dst, label)` 三元组唯一；重复调用会更新 weight，不会增加重复边。两个端点必须已存在，weight 必须是有限 `f32`，否则在写 WAL 前返回错误。
+在两个节点之间建立一条有向带权边。边以 `(src, dst, label)` 三元组唯一；重复调用会更新 weight，不会增加重复边。两个端点必须已存在，weight 必须是有限 `f32`。标签长度最多为 65,535 个 UTF-8 字节，标签、Metadata、图索引容量与暂存峰值在写 WAL 前执行校验和预算准入。
 
 **Python：**
 ```python
@@ -675,6 +677,8 @@ const hits = db.searchGraphFirst(
 ### search_hybrid — 双路混合认知检索 (强推)
 
 TriviumDB 核心杀手锏：引入稀疏文本表示（BM25/AC自动机）与稠密向量（Dense Vector）构成双路融合召回锚定，再在第二阶段进行图谱激活扩散。这极大弥补了纯向量检索容易导致的专有名词幻觉（Hallucination）。
+
+固定混合检索的稀疏分数为 AC 关键词命中次数与 BM25 分数之和，再与向量排名进行 RRF 融合，`text_boost` 控制稀疏排名的融合权重。需要独立配置关键词权重时，可使用 TQL 的 `TEXT HYBRID ... AC_WEIGHT ...`；`TEXT AC` 与 `TEXT BM25` 分别提供独立文本召回。
 
 **Python：**
 ```python
@@ -943,12 +947,12 @@ const results = db.search(queryVec)  // 自动经过 C++ Hook
 use triviumdb::hook::FfiHook;
 
 let ffi_hook = FfiHook::load("./libmy_plugin.so")?;
-db.set_hook(ffi_hook);
+db.set_hook(ffi_hook)?;
 ```
 
 ### clear_hook — 清除已注册 Hook
 
-清除当前的 Hook，恢复为默认的零开销 `NoopHook`。
+清除当前的 Hook，恢复为默认的空实现 `NoopHook`。
 
 **Python：**
 ```python
@@ -1048,10 +1052,10 @@ impl SearchHook for MyHook {
 }
 
 // 注册 Hook
-db.set_hook(MyHook);
+db.set_hook(MyHook)?;
 ```
 
-> 💡 **零开销设计**：未注册 Hook 时，默认的 `NoopHook` 的所有方法均为空实现，编译器会将它们完全内联消除，对无 Hook 的普通检索完全零开销。
+默认 `NoopHook` 的回调为空实现。查询通过共享 Hook 槽取得本次执行的所有权，调用方可按需注册和替换扩展。
 
 > ⚠️ **FFI 插件安全提示**：`FfiHook` 加载的动态库将在进程内执行任意代码，请确保动态库来源可信。
 
@@ -1155,7 +1159,13 @@ TQL 公共 API 提供 **自由 DIY 混合查询能力**。调用者可以用一�
 
 ### tql / tql_values
 
-支持 MATCH、OPTIONAL MATCH、FIND、SEARCH、WITH 管线、聚合、图算法、路径与集合代数。Rust `tql()` 只适合纯节点绑定；标量、聚合、Path/List 必须使用 `tql_values()`。Python/Node 的 `tql` 已自动承载一等值。
+支持 MATCH、OPTIONAL MATCH、FIND、SEARCH、WITH 管线、聚合、图算法、路径与集合代数。Rust `tql()` 返回同时承载节点、边、标量、Object 和 Path/List 的一等值；`tql_values()` 为兼容别名，`tql_nodes()` 提供节点绑定容器。Python/Node 的 `tql` 同步承载一等值。
+
+普通查询、WITH 与单跳具名边共享分组、COUNT(expr)、DISTINCT、别名排序与分页。返回列独立保存；省略 AS 时使用表达式名，例如 `Count(*)`。WITH 使用实例行数、内存工作区与取消配置。完整语义见 [TQL 返回处理](tql-reference.md#return--order-by--limit--offset)。
+
+WITH 按行保存求值结果与实体身份，后续扩展、过滤和返回使用保存的值。同一阶段的投影同时赋值，完整检查表达式作用域；节点与对象返回别名支持字段排序。Rust `tql_nodes()` 同样保留被返回的源节点别名。物理管线的 `NodeRow.bindings` 承载共享的 `BindingValue` 快照，投影内存纳入查询与共享资源预算。
+
+MATCH 内联 `id` 和节点的 `.id` 属性使用完整无符号节点 ID；`FIND` 与 `MATCHES` 文档条件读取 Payload 字段。单跳边变量在 WHERE、RETURN、COALESCE、聚合和空值判断中保持边绑定；OPTIONAL MATCH 为符合起点条件且无合格边的记录补齐 Null 列。
 
 **Python：**
 ```python
@@ -1183,7 +1193,9 @@ rows.forEach(row => console.log(row.b.payload))
 let rows = db.tql("MATCH (a)-[:knows]->(b) WHERE b.age > 20 RETURN b")?;
 for row in &rows {
     if let Some(node) = row.get("b") {
-        println!("{}: {:?}", node.id, node.payload);
+        if let Some(node) = node.as_node() {
+            println!("节点 (Node) {}: {:?}", node.id, node.payload);
+        }
     }
 }
 ```
@@ -1204,20 +1216,28 @@ const rows = db.executePreparedTql(prepared, { bonus: 4 })
 
 Prepared 参数只接受 null/bool/string/number；缺参、额外参数、数组/对象和非有限数值明确失败。
 
+SEARCH 向量的字面量与数值参数按数据库 dtype 转换，u64 分量保持整数位模式。RANK 和 RESIDUAL 的向量字面量采用相同转换。Rust 的 `QueryEntry::Search.vector`、`RankClause.vector` 和 `ResidualStage.vector` 使用 `Vec<serde_json::Number>`；`pipeline::lower_search_entry()` 返回 `Result`，调用方传播数值转换错误。
+
 ### 一等值映射
 
 | TQL 值 | Python | Node |
 |---|---|---|
 | Node | dict | object，NodeId 为字符串 |
 | Edge | `{type, source, target, label, weight, metadata}` | `{type, source, target, label, weight, metadata}`，NodeId 为字符串 |
-| Int/Float/String/Bool | 原生标量 | 原生标量 |
+| Int/UInt | 精确 int | 安全整数为 number；超范围整数为十进制字符串 |
+| Float/String/Bool | 原生标量 | 原生标量 |
 | Path | `list[int]` | `string[]`，避免 u64 精度损失 |
 | List | list | array |
+| Object | dict，嵌套整数保持精度 | object，嵌套超安全整数转十进制字符串 |
 | Null | None | null |
+
+Rust 使用 `TqlValue::Object(serde_json::Map<String, serde_json::Value>)` 承载对象。数组和对象作为完整 JSON 值参与空值判断、COALESCE、去重与分组；节点和边按实体身份参与表达式求值。
 
 ### tql_mut — 执行 TQL 写操作
 
 支持 CREATE / SET / DELETE / DETACH DELETE 语法，返回受影响行数和新创建的节点 ID。
+
+多字段 SET 按节点累计，重复字段采用最后一次赋值。MATCH … CREATE 每条匹配建立独立的新节点作用域，零匹配返回零次创建。SET VECTOR 按目标 dtype 检查，u64 整数字面量覆盖完整范围；任一目标失败时整个 mutation 保持原子性。
 
 **Python：**
 ```python
@@ -1283,6 +1303,12 @@ ReturnList := Ident (',' Ident)* | '*'
 
 删除接口使用对应 `drop_*` 名称。`index_info/indexInfo` 返回 kind、完整 fields、entry/distinct/null 计数并稳定排序。
 
+Ordered 索引提供完整排序候选时要求字段覆盖全部活动节点、类型统一为数字或字符串，并满足数值精度边界；其他情况按 Payload 排序。复合索引的前缀与范围访问检查后续字段的覆盖情况，缺失字段或容器值使访问路径回退到完整候选扫描。完整标量等值条件继续使用复合索引并执行事实复核。复合唯一约束使用保持 JSON 标量类型和值的完整键，精确区分相邻大整数；打开数据库时从 Payload 事实恢复约束映射。
+
+Ordered 范围候选按边界类型访问 ART 子树，再执行 LIMIT/OFFSET；数字与字符串混合存储时保持范围查询结果完整。复合唯一约束先验证事务最终键集合，提交阶段统一移除旧所有者、安装最终所有者，支持同一节点多次改键、删除重建与多节点交换。
+
+Hash、Ordered、Bitmap、Composite、N-gram 及唯一索引创建共享预算准入。构建先检查冷记录解析与 posting/键构建峰值，在隔离候选中验证并建立索引，成功后安装到实例。预算不足、非法字段值或唯一键重复时保留已有索引、约束、Payload 缓存和 WAL。重复创建已有同类定义保持幂等。
+
 ### create_index — 创建 Hash 属性索引
 
 对指定的 JSON Payload 字段建立 O(1) 倒排索引。创建时自动回填全表现有数据，后续 insert / update_payload / delete 自动维护索引一致性。
@@ -1306,7 +1332,7 @@ db.create_index("name");
 
 ### drop_index — 删除 Hash 属性索引
 
-删除指定字段的索引。查询仍然可用，只是退化为 O(N) 全表扫描。
+删除指定字段的 Hash 索引及其唯一约束定义。查询按剩余可用索引或 O(N) 扫描执行；删除唯一索引后，字段允许写入重复值，关闭和重开保持此定义。
 
 **Python：**
 ```python
@@ -1325,12 +1351,12 @@ db.dropIndex('name')
 
 ```python
 info = db.storage_info()
-print(info["database_format_current"])  # 7
-print(info["property_index_format"])    # 4
+print(info["database_format_current"])  # 9
+print(info["property_index_format"])    # 7
 print(info["sidecars"])
 ```
 
-历史 API 不再静默翻译：`tql_mut` 读查询、patch 普通对象简写、Node 数字构造参数分别返回迁移错误；Rust `open_with_sync` 已删除。历史无头 WAL 返回 `UnsupportedWalVersion`；带记录的旧版本 WAL 需用旧内核恢复并 flush。恰好只有版本头、没有记录的旧 WAL 可由 ReadWrite 打开流程原子升级，ReadOnly/Immutable 保持零写并要求先由 Writer 完成升级。
+`tql_mut` 读查询、patch 普通对象简写、Node 数字构造参数分别返回迁移错误；Rust 同步配置通过 `Config.sync_mode` 提供。ReadWrite 打开支持完整校验并原子迁移 v2 WAL，当前 v3 WAL 按帧流式恢复。ReadOnly/Immutable 保持物理零写，旧格式升级由 Writer 完成。无头、未知版本及非法迁移输入返回结构化错误。
 
 ## 持久化与压缩
 
@@ -1489,6 +1515,24 @@ db.build_text_index()
 
 文本登记通过 `flush()` 或可写句柄的 `close()` 持久化，尚不属于 `Transaction` 的 WAL 操作。应用需保留权威正文与别名来源，以便重新登记。
 
+历史 `.text`（TIDX v2）快照缺少 `.text.meta` 时，完整格式校验通过后可恢复正文与关键词，并在保存时补齐长度和 CRC。已有元数据中的文本长度和 CRC 用于校验内容；主文件长度随存储布局和节点变化更新。加载异常时保留原文本文件，错误消息区分长度、CRC、元数据格式与快照格式。
+
+### rebuild_text_index — 按完整集合重建文本索引
+
+Rust 使用 `rebuild_text_index(&[TextIndexDocument])`，Python 使用 `rebuild_text_index(documents)`，Node.js 使用 `rebuildTextIndex(documents)`。每条记录包含 `id`、`text` 与可选的 `keywords`。
+
+```python
+db.rebuild_text_index([
+    {"id": 42, "text": "完整正文", "keywords": ["实体别名", "产品名称"]},
+    {"id": 43, "text": "另一篇正文", "keywords": []},
+])
+db.flush()
+```
+
+提供的集合构成重建后的完整文本索引，空集合清空全部正文与关键词。内核验证节点、重复记录、关键词和工作区预算，构建成功后整体替换内存索引，随后通过 `flush()` 或可写关闭持久化。宿主可用保存的权威正文和别名恢复文本检索。
+
+检查点将主数据、文本及其元数据、属性索引和图索引纳入发布恢复组。可写打开先恢复中断的文件组，再回放 WAL。Mmap 在索引同步完成后提交 `.flush_ok`；Rom 在完整文件组同步后提交发布日志。
+
 ---
 
 ## 工具方法
@@ -1505,7 +1549,7 @@ print(f"共 {len(ids)} 个节点")
 
 **Rust：**
 ```rust
-let ids = db.all_node_ids();     // Vec<NodeId>
+let ids = db.all_node_ids()?;    // Vec<NodeId>
 ```
 
 ### QuIVer 自动索引说明
@@ -1521,7 +1565,7 @@ QuIVer 是自研 ANN 图索引，常规查询自动选择与维护索引。从 `
 
 完整模式、生命周期与度量限制见 [QuIVer 架构说明](quiver.md)。
 
-自动阈值按 `ceil(8,000,000 / dim)` 计算并限制在 2,500–10,000 节点；384/768 维为 10,000，1024 维约 7,813，1536 维约 5,209，3072 维约 2,605。
+自动阈值按 `ceil(666,667 / dim)` 计算并限制在 209–834 节点；384/768 维为 834，1024 维为 652，1536 维为 435，3072 维为 218。
 
 QuIVer 支持增量 Insert/Delete/Update，并保护入口导航树，入口升层时连接旧树。旧索引通过重建应用 `0.8.10` 的签名多样性和连通性规则；查询召回率由数据、搜索参数与精排预算共同决定。索引以 `.tdb.quiver` 持久化，并通过 `.tdb.quiver.meta` 的主数据代际、文件尺寸、节点数、维度与 CRC 校验后 mmap 加载。有效图按保存的邻接表加载，默认 SM 状态从原始向量池流式恢复，启动时读取相应冷向量；断连图按缺失索引策略重建或返回错误。显式评分模式由宿主重新配置。TextIndex 对应 `.tdb.text` 和 `.tdb.text.meta`。
 
@@ -1533,7 +1577,7 @@ QuIVer 支持增量 Insert/Delete/Update，并保护入口导航树，入口升�
 
 ## 维度迁移
 
-> 文件格式兼容边界：当前 `.tdb` 为 v9，可读取 v5–v9；可写句柄在后续持久化时按当前格式发布。Mmap v9 的 raw Payload 位于 generation 绑定的 `.pld`，详见[持久化布局](features.md)。ReadOnly/Immutable 不升级、不写制品。早于 v5 的主文件必须通过旧内核导出迁移；未来版本明确拒绝。sidecar 独立版本化：`.pidx v6`、`.gidx v2`、`.text v2`、`.quiver v1`。
+> 文件格式兼容边界：当前 `.tdb` 为 v9，可读取 v5–v9；可写句柄在后续持久化时按当前格式发布。Mmap v9 的 raw Payload 位于 generation 绑定的 `.pld`，详见[持久化布局](features.md)。ReadOnly/Immutable 不升级、不写制品。早于 v5 的主文件必须通过旧内核导出迁移；未来版本明确拒绝。sidecar 独立版本化：`.pidx v7`、`.gidx v3`、`.text v2`、`.quiver v1`。
 
 当需要更换 Embedding 模型（维度发生变化）时，使用 `migrate` 将旧库的结构迁移到新维度。
 
@@ -1583,11 +1627,12 @@ new_db.flush()?;
 
 ## 事务支持
 
-TriviumDB 提供轻量级事务，采用**验证前置（Dry-Run）架构**：所有操作先缓冲在内存中，`commit()` 分两阶段执行——首先在纯内存验证全部约束（维度、节点存在性、ID 冲突），全部通过后才一次性写入。
+TriviumDB 提供轻量级事务，采用**验证前置（Dry-Run）架构**：操作先缓冲在内存中，`commit()` 按操作顺序检查节点存在状态、维度、ID 冲突、唯一约束和 JSON 可恢复性，完成容量预留后提交 WAL，再按同一顺序应用数据。
 
 **特性：**
-- `commit()` 返回 `Err` 时，**底层数据没有被修改一个字节**，可加入日志后安全重试
-- 在同一事务内，`insert_with_id(999)` 后立即 `link(..., 999)` 是完全合法的（虚拟状态叠加给 999 号打过标记）
+- 预检失败保持原节点、索引、ID 分配状态与 WAL；WAL 写入失败时内存数据保持原样，并向调用方返回原始错误
+- 同一事务内，新插入或删除后重建的节点可立即参与 Payload 更新、向量更新、连边和再次删除；当前仍存在的 ID 再次插入时返回 `NodeAlreadyExists`
+- 返回的 ID 按插入操作排序。`delete(10) → insert_with_id(10) → delete(10) → insert_with_id(10)` 成功时返回 `[10, 10]`，最终节点内容来自最后一次插入
 - `rollback()`（或直接 `drop` 事务对象）将丢弃所有缓冲操作
 
 ```rust
@@ -1669,3 +1714,22 @@ Hook 管线执行上下文，通过 `search_with_context()` 返回。
 | `timings` | `timings` | `stage_timings` | `dict` / `Object` / `Vec<(String, Duration)>` | 各管线阶段的耗时（Python/JS 单位毫秒） |
 | `custom_data` | `customData` | `custom_data` | `dict` / `Object` / `serde_json::Value` | Hook 注入的自定义数据 |
 | `aborted` | `aborted` | `abort` | `bool` | 管线是否被 Hook 提前终止 |
+
+
+## 写入与数值边界
+
+Payload 与边元数据采用 JSON 解码一致的容器深度边界，最多 127 层。直接写入、事务、Upsert、条件更新及 `$set` 补丁在追加 WAL 前校验最终值；单个 Payload 的编码大小上限为 8 MiB。`get()`、`get_payload()` 的解码异常返回结构化损坏错误。Payload 更新、补丁和事务的预算准入计入编码缓冲、原始字节与解析值的增量暂存，失败时保留节点、索引与 WAL。
+
+`$inc` 对整数执行精确的有符号/无符号加法，结果覆盖 `i64::MIN..=u64::MAX`；负结果使用 `i64`，非负整数结果使用 `u64`。缺失字段从零开始递增。小数参与运算时检查整数到浮点的精确转换、有限结果与有效增量。溢出、类型错误及精度损失返回参数错误，整份补丁保持原子性。
+
+Python 的直接写入、批量与事务按 dtype 提取向量，`u64` 分量保留 `0..=2**64-1` 的整数精度。Payload 支持 `None`、布尔、`i64/u64` 整数、有限浮点数、字符串、列表、元组和字符串键字典；元组保存为 JSON 数组。超范围整数、非有限数、非字符串键、循环引用和其他对象在写入前返回异常。读取 JSON 的无符号整数时返回精确 Python `int`。
+
+Rust 和 Python 的节点 ID 写入范围为 `1..=u64::MAX-1`；`0` 与 `u64::MAX` 为保留边界，自动分配耗尽时在写 WAL 前返回参数错误。JSON Payload 的整数保留完整 `i64/u64` 范围。
+
+Node 的数值节点 ID 输入与输出使用 `0..=Number.MAX_SAFE_INTEGER` 内的整数；插入 ID 遵守内核的非零约束。搜索、批量搜索、节点、图遍历与索引查询遇到超范围结果时，整个调用返回 `TDB_INVALID_INPUT`。TQL 查询使用十进制字符串返回完整 `u64` ID。自动插入、批量、事务与 TQL CREATE 在写 WAL 前检查待分配 ID；迁移在创建目标文件前检查返回 ID。
+
+Node 数量参数在转换为整数前检查原始 Number 的有限性、整数性与安全范围。`topK` 与维度要求正整数；其他数量参数保留各自的零值语义。`u64` 向量分量要求有限、非负、整数且小于 `2**64`，直接操作、批量、事务与各检索入口采用一致校验；JavaScript `number` 按 binary64 表示分量。
+
+WAL 追加、flush 或同步失败时返回原始错误并隔离该 writer。后续写入与检查点返回 `WalClosed`；调用方释放数据库句柄并重新打开后继续使用。恢复保留此前已确认数据，失败操作的结果按实际持久化的完整日志确定。业务方可使用稳定 ID 核对该操作后再重试。
+
+事务 WAL 完整提交后，若内存应用阶段发生错误或异常展开，实例及其共享搜索句柄进入恢复等待状态，数据操作返回 `WalClosed`。释放全部相关句柄并重新打开，恢复端应用完整提交事务。事务编号使用进程内单调计数，达到编号上限时返回参数错误。

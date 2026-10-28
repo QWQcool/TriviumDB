@@ -943,6 +943,7 @@ pub struct QuIVer {
     default_sm: Option<corrected_sm::CorrectedSmIndex>,
     layer0: FlatAdj,
     upper_layers: Vec<Vec<Vec<u32>>>,
+    upper_bytes: usize,
     node_max_layer: Vec<u8>,
 
     // ID 映射
@@ -1035,6 +1036,7 @@ impl QuIVer {
             },
             layer0: FlatAdj::new(m0 * 2 + 1),
             upper_layers: Vec::new(),
+            upper_bytes: 0,
             node_max_layer: Vec::new(),
             ids: Vec::new(),
             slot_indices: Vec::new(),
@@ -1079,10 +1081,12 @@ impl QuIVer {
         // 扩展 upper layers
         while self.upper_layers.len() < level {
             // upper_layers[0] = layer 1, [1] = layer 2, ...
+            self.upper_bytes += self.n * std::mem::size_of::<Vec<u32>>();
             self.upper_layers.push(vec![Vec::new(); self.n]);
         }
         for ul in self.upper_layers.iter_mut() {
             ul.push(Vec::new());
+            self.upper_bytes += std::mem::size_of::<Vec<u32>>();
         }
 
         self.n += 1;
@@ -1199,6 +1203,7 @@ impl QuIVer {
                 // 正向边
                 for &nb in &selected {
                     if !self.upper_layers[ul][idx as usize].contains(&nb) {
+                        self.upper_bytes += 4;
                         self.upper_layers[ul][idx as usize].push(nb);
                     }
                 }
@@ -1224,6 +1229,10 @@ impl QuIVer {
                         self.dim,
                         self.alpha,
                     );
+                    self.upper_bytes = self
+                        .upper_bytes
+                        .saturating_sub(self.upper_layers[ul][nb as usize].len() * 4)
+                        .saturating_add(pruned.len() * 4);
                     self.upper_layers[ul][nb as usize] = pruned;
                 }
             }
@@ -1964,10 +1973,19 @@ impl QuIVer {
         F: FnMut(usize, &mut Vec<f32>) -> bool,
         S: NavigationScorer,
     {
-        if self.n == 0 {
+        if self.n == 0
+            || config.top_k == 0
+            || query.len() != self.dim
+            || query.iter().any(|value| !value.is_finite())
+        {
             return Vec::new();
         }
-        assert_eq!(query.len(), self.dim);
+        let normalized_config = QuIVerSearchConfig {
+            top_k: config.top_k.min(self.n),
+            ef_search: config.ef_search.max(config.top_k).min(self.n),
+            rerank_limit: config.rerank_limit.map(|limit| limit.min(self.n)),
+        };
+        let config = &normalized_config;
         let query_signature = Bq2Signature::from_vector(query);
         let mut entry = self.entry_point;
         for layer in (1..=self.max_level).rev() {
@@ -1997,7 +2015,7 @@ impl QuIVer {
                 }
             }
         }
-        let candidates = self.beam_search_l0_dual(
+        let mut candidates = self.beam_search_l0_dual(
             &query_signature,
             entry,
             config.ef_search,
@@ -2005,26 +2023,33 @@ impl QuIVer {
             signal_quota_ppm,
             signal_seed_ids,
         );
+        self.sort_rerank_candidates(&mut candidates);
         let rerank_limit = config.rerank_limit().min(candidates.len());
         let mut buffer = Vec::with_capacity(self.dim);
         let mut scored = Vec::with_capacity(rerank_limit);
-        for &(_, internal) in candidates.iter().take(rerank_limit) {
+        for &(_, internal) in &candidates {
+            if scored.len() >= rerank_limit {
+                break;
+            }
             if self.tombstones[internal as usize]
                 || !scorer.accept_result(self.ids[internal as usize])
             {
                 continue;
             }
             let slot = self.slot_indices[internal as usize];
-            if get_vec_f32(slot, &mut buffer) && buffer.len() == self.dim {
+            if get_vec_f32(slot, &mut buffer)
+                && buffer.len() == self.dim
+                && buffer.iter().all(|v| v.is_finite())
+            {
                 scored.push((cosine_similarity_f32(query, &buffer), internal));
             }
         }
+        scored.retain(|value| value.0.is_finite());
         scored.sort_unstable_by(|left, right| {
             right
                 .0
-                .partial_cmp(&left.0)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| left.1.cmp(&right.1))
+                .total_cmp(&left.0)
+                .then_with(|| self.ids[left.1 as usize].cmp(&self.ids[right.1 as usize]))
         });
         scored
             .into_iter()
@@ -2045,10 +2070,19 @@ impl QuIVer {
         F: FnMut(usize, &mut Vec<f32>) -> bool,
         S: NavigationScorer,
     {
-        if self.n == 0 {
+        if self.n == 0
+            || config.top_k == 0
+            || query.len() != self.dim
+            || query.iter().any(|value| !value.is_finite())
+        {
             return Vec::new();
         }
-        assert_eq!(query.len(), self.dim);
+        let normalized_config = QuIVerSearchConfig {
+            top_k: config.top_k.min(self.n),
+            ef_search: config.ef_search.max(config.top_k).min(self.n),
+            rerank_limit: config.rerank_limit.map(|limit| limit.min(self.n)),
+        };
+        let config = &normalized_config;
         let dim = self.dim;
 
         let q_sig = Bq2Signature::from_vector(query);
@@ -2091,13 +2125,14 @@ impl QuIVer {
             return SCRATCH_384.with(|cell| {
                 let mut scratch = cell.borrow_mut();
                 scratch.visited.grow(self.n);
-                let bq_candidates = self.beam_search_l0_384_with_scorer(
+                let mut bq_candidates = self.beam_search_l0_384_with_scorer(
                     &q_sig,
                     cur_node,
                     config.ef_search,
                     &mut scratch,
                     scorer,
                 );
+                self.sort_rerank_candidates(&mut bq_candidates);
                 #[cfg(feature = "test-hooks")]
                 crate::test_hooks::hit(
                     crate::test_hooks::ConcurrencyPoint::QuiverCandidateProduced,
@@ -2114,7 +2149,7 @@ impl QuIVer {
                 )
             });
         }
-        let bq_candidates = VISITED.with(|cell| {
+        let mut bq_candidates = VISITED.with(|cell| {
             let mut visited = cell.borrow_mut();
             if visited.len < self.n {
                 visited.grow(self.n);
@@ -2127,6 +2162,7 @@ impl QuIVer {
                 scorer,
             )
         });
+        self.sort_rerank_candidates(&mut bq_candidates);
         #[cfg(feature = "test-hooks")]
         crate::test_hooks::hit(crate::test_hooks::ConcurrencyPoint::QuiverCandidateProduced);
 
@@ -2137,22 +2173,37 @@ impl QuIVer {
         let rerank_limit = config.rerank_limit().min(bq_candidates.len());
         let mut buf: Vec<f32> = Vec::with_capacity(dim);
         let mut scored: Vec<(f32, u32)> = Vec::with_capacity(rerank_limit);
-        for &(_, nid) in bq_candidates.iter().take(rerank_limit) {
+        for &(_, nid) in &bq_candidates {
+            if scored.len() >= rerank_limit {
+                break;
+            }
             if self.tombstones[nid as usize] || !scorer.accept_result(self.ids[nid as usize]) {
                 continue;
             }
             let slot = self.slot_indices[nid as usize];
-            if get_vec_f32(slot, &mut buf) && buf.len() == dim {
+            if get_vec_f32(slot, &mut buf) && buf.len() == dim && buf.iter().all(|v| v.is_finite())
+            {
                 scored.push((cosine_similarity_f32(query, &buf), nid));
             }
         }
-        scored.sort_unstable_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+        scored.retain(|value| value.0.is_finite());
+        scored.sort_unstable_by(|a, b| {
+            b.0.total_cmp(&a.0)
+                .then_with(|| self.ids[a.1 as usize].cmp(&self.ids[b.1 as usize]))
+        });
 
         scored
             .iter()
             .take(config.top_k)
             .map(|&(sim, nid)| (self.ids[nid as usize], sim))
             .collect()
+    }
+
+    fn sort_rerank_candidates(&self, candidates: &mut [(NonNanF32, u32)]) {
+        candidates.sort_unstable_by(|a, b| {
+            a.0.cmp(&b.0)
+                .then_with(|| self.ids[a.1 as usize].cmp(&self.ids[b.1 as usize]))
+        });
     }
 
     fn rerank_candidates_384<F, S>(
@@ -2176,21 +2227,31 @@ impl QuIVer {
                 .reserve(rerank_limit - scratch.scored.capacity());
         }
         let query_norm = cosine_query_norm_f32_384(query).unwrap_or_default();
-        for &(_, nid) in bq_candidates.iter().take(rerank_limit) {
+        for &(_, nid) in bq_candidates {
+            if scratch.scored.len() >= rerank_limit {
+                break;
+            }
             if self.tombstones[nid as usize] || !scorer.accept_result(self.ids[nid as usize]) {
                 continue;
             }
             let slot = self.slot_indices[nid as usize];
-            if get_vec_f32(slot, &mut scratch.vector) && scratch.vector.len() == 384 {
+            if get_vec_f32(slot, &mut scratch.vector)
+                && scratch.vector.len() == 384
+                && scratch.vector.iter().all(|v| v.is_finite())
+            {
                 scratch.scored.push((
                     cosine_similarity_f32_384_with_query_norm(query, &scratch.vector, query_norm),
                     nid,
                 ));
             }
         }
-        scratch
-            .scored
-            .sort_unstable_by(|left, right| right.0.partial_cmp(&left.0).unwrap());
+        scratch.scored.retain(|value| value.0.is_finite());
+        scratch.scored.sort_unstable_by(|left, right| {
+            right
+                .0
+                .total_cmp(&left.0)
+                .then_with(|| self.ids[left.1 as usize].cmp(&self.ids[right.1 as usize]))
+        });
         scratch
             .scored
             .iter()
@@ -2284,10 +2345,12 @@ impl QuIVer {
 
             self.layer0.push_empty();
             while self.upper_layers.len() < level {
+                self.upper_bytes += self.n * std::mem::size_of::<Vec<u32>>();
                 self.upper_layers.push(vec![Vec::new(); self.n]);
             }
             for ul in self.upper_layers.iter_mut() {
                 ul.push(Vec::new());
+                self.upper_bytes += std::mem::size_of::<Vec<u32>>();
             }
 
             self.n += 1;
@@ -2376,9 +2439,11 @@ impl QuIVer {
                     let ul = l - 1;
                     for &nb in &selected {
                         if !self.upper_layers[ul][idx as usize].contains(&nb) {
+                            self.upper_bytes += 4;
                             self.upper_layers[ul][idx as usize].push(nb);
                         }
                         if !self.upper_layers[ul][nb as usize].contains(&idx) {
+                            self.upper_bytes += 4;
                             self.upper_layers[ul][nb as usize].push(idx);
                         }
                     }
@@ -2456,6 +2521,7 @@ impl QuIVer {
         self.entry_point = 0;
         self.max_level = 0;
         self.upper_layers.clear();
+        self.upper_bytes = 0;
         self.visited = Bitset::new(n);
         self.layer0.reset_full(n);
 
@@ -2573,6 +2639,7 @@ impl QuIVer {
         self.entry_point = 0;
         self.max_level = 0;
         self.upper_layers.clear();
+        self.upper_bytes = 0;
         self.visited = Bitset::new(n);
         self.layer0.reset_full(n);
 
@@ -2674,10 +2741,12 @@ impl QuIVer {
 
             self.layer0.push_empty();
             while self.upper_layers.len() < level {
+                self.upper_bytes += self.n * std::mem::size_of::<Vec<u32>>();
                 self.upper_layers.push(vec![Vec::new(); self.n]);
             }
             for ul in self.upper_layers.iter_mut() {
                 ul.push(Vec::new());
+                self.upper_bytes += std::mem::size_of::<Vec<u32>>();
             }
 
             self.n += 1;
@@ -2744,9 +2813,8 @@ impl QuIVer {
                         }
                     }
 
-                    let this_addr = self as *mut Self as usize;
-                    selected.par_iter().for_each(|&nb| unsafe {
-                        let this = &mut *(this_addr as *mut Self);
+                    for &nb in &selected {
+                        let this = &mut *self;
                         let mut nb_candidates: Vec<(u32, u32)> = this
                             .layer0
                             .neighbors(nb)
@@ -2760,14 +2828,16 @@ impl QuIVer {
                         nb_candidates.sort_unstable_by_key(|&(d, _)| d);
                         let pruned = this.select_layer0_neighbors(nb, &nb_candidates);
                         this.layer0.set_neighbors(nb, &pruned);
-                    });
+                    }
                 } else {
                     let ul = l - 1;
                     for &nb in &selected {
                         if !self.upper_layers[ul][idx as usize].contains(&nb) {
+                            self.upper_bytes += 4;
                             self.upper_layers[ul][idx as usize].push(nb);
                         }
                         if !self.upper_layers[ul][nb as usize].contains(&idx) {
+                            self.upper_bytes += 4;
                             self.upper_layers[ul][nb as usize].push(idx);
                         }
                     }
@@ -2835,31 +2905,29 @@ impl QuIVer {
         }
     }
 
+    /// 热路径使用常数时间计量；度数分布留给显式诊断接口。
+    pub(crate) fn hot_memory_bytes(&self) -> usize {
+        self.bq_store.hot_bytes()
+            + self.layer0.data.len() * 4
+            + self.upper_bytes
+            + self.connectivity_parents.capacity() * std::mem::size_of::<u32>()
+            + self
+                .corrected_sm
+                .as_ref()
+                .map_or(0, |model| model.routing_owned_bytes())
+            + self
+                .default_sm
+                .as_ref()
+                .map_or(0, |model| model.routing_owned_bytes())
+    }
+
     pub fn stats(&self) -> QuIVerStats {
-        let hot_bq = self.bq_store.hot_bytes();
-        let hot_l0 = self.layer0.data.len() * 4;
-        let hot_upper: usize = self
-            .upper_layers
-            .iter()
-            .map(|l| l.iter().map(|adj| adj.len() * 4 + 24).sum::<usize>())
-            .sum();
         let tombstone_count = self.tombstones.iter().filter(|&&t| t).count();
 
         QuIVerStats {
             n: self.n,
             max_level: self.max_level,
-            hot_bytes: hot_bq
-                + hot_l0
-                + hot_upper
-                + self.connectivity_parents.capacity() * std::mem::size_of::<u32>()
-                + self
-                    .corrected_sm
-                    .as_ref()
-                    .map_or(0, |model| model.routing_owned_bytes())
-                + self
-                    .default_sm
-                    .as_ref()
-                    .map_or(0, |model| model.routing_owned_bytes()),
+            hot_bytes: self.hot_memory_bytes(),
             tombstone_count,
             dirty_count: self.dirty_count,
             avg_degree_l0: if self.n > 0 {
@@ -3392,6 +3460,11 @@ impl QuIVer {
                 data: l0_data,
                 stride,
             },
+            upper_bytes: upper_layers
+                .iter()
+                .flat_map(|layer| layer.iter())
+                .map(|row| row.len() * 4 + std::mem::size_of::<Vec<u32>>())
+                .sum(),
             upper_layers,
             node_max_layer,
             ids,
@@ -4127,5 +4200,71 @@ mod tests {
             rerank_limit: Some(30),
         };
         assert_eq!(cfg3.rerank_limit(), 100); // max(rerank_limit, top_k)
+    }
+
+    #[test]
+    fn 热内存账本跨三条构图追加删除和重载保持准确() {
+        fn check(index: &QuIVer) {
+            let upper = index
+                .upper_layers
+                .iter()
+                .flat_map(|layer| layer.iter())
+                .map(|row| std::mem::size_of::<Vec<u32>>() + row.len() * 4)
+                .sum::<usize>();
+            assert_eq!(index.upper_bytes, upper);
+            let sm = index
+                .corrected_sm
+                .as_ref()
+                .map_or(0, |sm| sm.routing_owned_bytes())
+                + index
+                    .default_sm
+                    .as_ref()
+                    .map_or(0, |sm| sm.routing_owned_bytes());
+            let expected = index.bq_store.hot_bytes()
+                + index.layer0.data.len() * 4
+                + upper
+                + index.connectivity_parents.capacity() * 4
+                + sm;
+            assert_eq!(index.hot_memory_bytes(), expected);
+            assert_eq!(index.stats().hot_bytes, expected);
+        }
+        let cfg = QuIVerConfig {
+            m: 8,
+            ef_construction: 32,
+            alpha: 1.2,
+        };
+        let vectors = make_random_vectors(160, 8, 5739);
+        for builder in 0..3 {
+            let mut index = QuIVer::new(8, &cfg);
+            check(&index);
+            let ids = (1..=160).collect::<Vec<_>>();
+            let slots = (0..160).collect::<Vec<_>>();
+            match builder {
+                0 => index.batch_build(&vectors, &ids, &slots),
+                1 => index.batch_build_experimental(&vectors, &ids, &slots),
+                _ => index.batch_build_experimental_v2_checked(&vectors, &ids, &slots),
+            }
+            check(&index);
+            index.batch_build_experimental(
+                &vectors[..8 * 16],
+                &(161..=176).collect::<Vec<_>>(),
+                &(160..176).collect::<Vec<_>>(),
+            );
+            check(&index);
+            index.insert(&vectors[..8], 177, 176, &mut 23579);
+            check(&index);
+            index.soft_delete(1);
+            check(&index);
+            let root = std::env::temp_dir().join(format!(
+                "tdb-quiver-ledger-{builder}-{}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&root).unwrap();
+            let path = root.join("sample.quiv");
+            index.save_to_file(&path).unwrap();
+            let loaded = QuIVer::load_from_file(&path).unwrap();
+            check(&loaded);
+            std::fs::remove_dir_all(root).unwrap();
+        }
     }
 }

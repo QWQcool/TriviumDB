@@ -356,8 +356,12 @@ async fn metrics(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     )
 }
 
-async fn list_indexes(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "indexes": state.engine.index_info() }))
+async fn list_indexes(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    Ok(Json(
+        serde_json::json!({ "indexes": state.engine.index_info()? }),
+    ))
 }
 
 async fn create_index(
@@ -680,7 +684,7 @@ async fn tql(
             request.profile,
             false,
             started,
-            Some((query, state.engine.index_fields())),
+            Some((query, state.engine.index_fields()?)),
         )
     }
 }

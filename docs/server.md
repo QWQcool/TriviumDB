@@ -1,6 +1,6 @@
 # TriviumDB Server（HTTP 服务端版）
 
-> **版本**: v0.9.0-beta.1 版本源码（Server 仍为 nightly 预览）；见[变更说明](changes/0.9.0-beta.1.md)。
+> **版本**: v0.9.0-beta.3 版本源码（Server 为 nightly 预览）；见[变更说明](changes/0.9.0-beta.3.md)。
 > **语言**: Rust（Axum + Tokio，仅服务端 crate，嵌入式核心零依赖侵入）
 > **许可**: Apache-2.0
 
@@ -266,14 +266,18 @@ Writer Actor 由 supervisor 监管。异常退出会设置失败状态、关闭�
 - JSON 响应受 16 MiB 上限约束；NDJSON 只流式编码 HTTP 输出，Core 算子仍受自己的内存与查询预算约束；
 - 安装方式和跨平台二进制以 GitHub Release 的 nightly 说明为准。
 
-## 控制台浏览器回归测试
+## 按需开发自测
 
-安装测试工具后运行页内自检。测试启动临时本地静态服务并禁止外网请求，不连接真实数据库，也不会写入用户数据。
+Server 与 WebUI 的接口、交互和视觉方案随 nightly 演进。开发者按需运行当前实现的自测：
 
 ```bash
-npm install --no-save playwright@1.62.1
+cargo test -p triviumdb-server
+
+npm install --no-save --ignore-scripts playwright@1.64.1
 npx playwright install chromium
 node scripts/test_webui.cjs
 ```
 
 已有 Chromium 时可通过 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` 指定可执行文件。测试覆盖查询交互、流式响应、虚拟表格、HTML 注入防护，以及真实边的方向、去重和并行标签。
+
+截图记录、可选比对与手动 workflow 见 [nightly WebUI 开发诊断](webui-testing.md)。常规嵌入式验收覆盖 Core、SDK 与 CLI。

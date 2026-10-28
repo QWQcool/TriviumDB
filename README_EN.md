@@ -47,7 +47,7 @@ Our goal: **SQLite for AI applications.**
 - 🧠 **AI-native** — Optional hybrid recall (AC-automaton BM25 + dense vector) triggers graph spreading activation, with built-in cognitive pipelines (FISTA / DPP / PPR)
 - 🛡️ **4-layer data safety** — Atomic replacement + WAL + dry-run transaction validation + mmap COW isolation; `.flush_ok` v3 binds `.tdb/.vec/.pld`, while prior-generation backups and an undo journal recover interrupted publication. Backups add disk I/O and temporary space; corrupted inputs still fail closed. See the [recovery protocol](docs/security.md#8-mmap-三文件一致性标记flush_ok-v3).
 - 🐍 **Python / Node.js native** — `pip install` or `npm install`, MongoDB-style query syntax
-- ⚡ **High-performance search** — rayon parallel brute-force (100% exact at small scale) + in-house ANN index **QuIVer**; current source uses training-free SM-L2 navigation and cosine reranking, activated at 2,500–10,000 nodes by vector workload
+- ⚡ **High-performance search** — rayon parallel brute-force (100% exact at small scale) + in-house ANN index **QuIVer**; current source uses training-free SM-L2 navigation and cosine reranking, activated at 209–834 nodes by vector workload
 - 💾 **SSD-friendly** — Append-only WAL + background compaction + independent QuIVer persistence
 - 🔒 **Shared read-only opens** — Multiple reader processes can query a completed generation under shared locks while writers retain exclusive WAL ownership
 - 🧩 **Typed access capabilities** — Rust `DatabaseReader` hides mutation APIs at compile time while `DatabaseWriter` retains the complete embedded write surface
@@ -144,18 +144,18 @@ Suppose you're building an **AI conversation memory system** and the user says "
 
 **QuIVer** (Quantized Index for Vector Retrieval) is TriviumDB's in-house ANN graph index. QuIVer combines **fast BQ graph construction, training-free SM-L2 navigation, and cosine reranking of original vectors**. Navigation uses two-bit codes and per-vector magnitudes to score reconstructed squared L2; recall and throughput depend on the workload, parameters, and reranking budget.
 
-> 📖 [QuIVer architecture and configuration](docs/quiver.md) · [Benchmark guide](benches/README.md) · [0.9.0-beta.1 changes](docs/changes/0.9.0-beta.1.md)
+> 📖 [QuIVer architecture and configuration](docs/quiver.md) · [Benchmark guide](benches/README.md) · [0.9.0-beta.3 changes](docs/changes/0.9.0-beta.3.md)
 
 > ⚠️ **Dimension guidance: keeping database vectors at or below 3072 dimensions is strongly recommended.** TriviumDB storage and exact BruteForce retrieval support higher dimensions, but QuIVer's BQ signature safety limit is 3072 dimensions. Above this limit, automatic QuIVer construction is disabled and search safely falls back to BruteForce; manual QuIVer construction returns an explicit error. Higher-dimensional databases remain usable, but do not receive QuIVer ANN acceleration and incur substantially higher memory and compute costs.
 
-TriviumDB uses an **intelligent auto-routing dual engine**. The automatic threshold is `ceil(8,000,000 / dim)`, clamped to 2,500–10,000 nodes, so low-dimensional data stays exact longer while high-dimensional data switches to ANN earlier:
+TriviumDB uses an **intelligent auto-routing dual engine**. The automatic threshold is `ceil(666,667 / dim)`, clamped to 209–834 nodes, so low-dimensional data stays exact longer while high-dimensional data switches to ANN earlier:
 
 | Phase | Engine | Activation Condition | Characteristics |
 |---|---|---|---|
 | **Small-scale hot zone** | BruteForce | Below the dimension-dependent threshold, or QuIVer not ready | 100% exact recall, rayon multi-core |
 | **Large-scale cold zone** | **QuIVer** | Dimension ≤ 3072 and the dynamic threshold is reached | BQ construction + SM-L2 navigation + original-vector cosine reranking |
 
-For example, 384/768 dimensions trigger at 10,000 nodes, 1024 at about 7,813, 1536 at about 5,209, and 3072 at about 2,605.
+For example, 384/768 dimensions trigger at 834 nodes, 1024 at 652, 1536 at 435, and 3072 at 218. Once the threshold is reached, the next eligible query or warmup builds the index.
 
 ### Key Design
 
@@ -255,15 +255,15 @@ Use as a library dependency:
 cargo add triviumdb
 ```
 
-Install the Beta packages to use the shared resources, controlled shutdown, and directory snapshots introduced in `0.9.0-beta.1`:
+`0.9.0-beta.3` strengthens transactions and WAL recovery, property and graph index consistency, full integer domains, and language input validation. Cascades pipelines share projection snapshots, entity bindings, aggregation, and ordering semantics:
 
 ```bash
-pip install "triviumdb==0.9.0b1"
-npm install triviumdb@0.9.0-beta.1
-cargo add triviumdb@0.9.0-beta.1
+pip install "triviumdb==0.9.0b3"
+npm install triviumdb@0.9.0-beta.3
+cargo add triviumdb@0.9.0-beta.3
 ```
 
-See [0.9.0-beta.1 changes](docs/changes/0.9.0-beta.1.md) (Chinese).
+See the bilingual [0.9.0-beta.3 release notes](docs/changes/0.9.0-beta.3.md).
 
 > 🧪 **Early Preview: HTTP Server Edition (nightly)** — TriviumDB's primary product form remains an **embedded database** (an in-process library, no deployment required). The optional `triviumdb-server` crate in this repository adds an HTTP shell (multi-client concurrent reads/writes, OCC, streaming NDJSON, etc.) and is currently in **nightly preview**: the protocol may change at any time, so it is for experimentation only — do not use it in production. See [Server Guide (nightly)](docs/server.md) (Chinese); all API and usage documentation remains authoritative for the embedded edition.
 
@@ -449,6 +449,8 @@ finally:
 
 Memory admission accounts for declared quotas and integrated workspace reservations. Process or container sizing also includes mmap residency, page cache, thread stacks, and language-runtime overhead. Python budget exceptions and Node `QueueFull` errors expose `resource`, `requested`, `used`, and `limit` for throttling, backoff, and instance eviction decisions.
 
+In `0.9.0-beta.2`, successful close releases file handles, memory mappings, database Hooks, and quota reservations. Group commits restore their state after unwinding. Rust data reads and `set_hook()` return `Result`; Python and Node raise closed-database errors after close. See [version changes](docs/changes/0.9.0-beta.2.md#生命周期与-rust-api-迁移) for migration details (Chinese).
+
 See [Shared Resources and Diagnostics](docs/resource-runtime.md) and [Shutdown, Snapshots, and Restore](docs/lifecycle-snapshots.md) (Chinese).
 
 ---
@@ -615,7 +617,7 @@ TriviumDB/
 
 - [x] **Unified TQL query system**: `FIND` / `MATCH` / `SEARCH`, composable `WITH`, Prepared parameters, expressions/aggregates/paths/set algebra, scientific notation, and atomic `SET VECTOR`
 - [x] **Bounded Cascades and graph computing**: deterministic statistics-aware physical plans, built-in graph algorithms, and estimated/actual metrics through `EXPLAIN ANALYZE`
-- [x] **Complete persistent index suite**: Hash / Ordered ART / Composite ART / Bitmap, graph blocks, AC+BM25, and QuIVer sidecars; dynamic QuIVer thresholds select between 2,500 and 10,000 nodes by vector workload
+- [x] **Complete persistent index suite**: Hash / Ordered ART / Composite ART / Bitmap, graph blocks, AC+BM25, and QuIVer sidecars; dynamic QuIVer thresholds select between 209 and 834 nodes by vector workload
 - [x] **Production-grade storage and safety**: `.flush_ok` v3 binds `.tdb/.vec/.pld` generation, sizes, and CRCs; no production-reachable panic, byte-level zero writes in ReadOnly/Immutable modes, WAL/generation atomicity, fail-closed query/traversal/memory/Payload budgets, and bounded real fault injection
 - [x] **Payload tiering phase 1**: generation-scoped `.pld` mmap raw base, in-memory delta/tombstones, bounded LRU parsed cache, late materialization, `ColdPayloadScan`, and cross-language cache configuration
 - [x] **Aligned Rust/Python/Node capabilities**: first-class TQL values, four property indexes, Prepared TQL, six-stage Hooks, FFI ABI v2, and explicit migration errors instead of silent legacy compatibility
@@ -629,7 +631,7 @@ TriviumDB/
 
 1. **Trinity atomicity** — One `u64` ID maps to vector, payload, and edge table simultaneously. Insert atomic, delete atomic, never inconsistent.
 2. **Embedded-first** — The database runs as a library inside the host process. Rust, Python, and Node.js APIs manage data and instance lifecycles.
-3. **Auto performance routing** — Uses an approximately 8M-component workload to select a dynamic threshold between 2,500 and 10,000 nodes; exact BruteForce runs below it and QuIVer builds automatically once reached.
+3. **Auto performance routing** — Uses an approximately 0.667M-component workload to select a dynamic threshold between 209 and 834 nodes; exact BruteForce runs below it and QuIVer builds automatically once reached.
 4. **Predictable performance** — Sequential I/O only (WAL append + compaction sequential rewrite). SSD-safe.
 5. **Index as acceleration layer** — QuIVer is disposable derived data (`.tdb.quiver` file); auto-rebuilds on first query if missing.
 6. **Rust safety contracts** — mmap, SIMD, raw-pointer, and manual `Send/Sync` paths are reviewed for length, alignment, lifetime, and concurrency requirements, with ASan, TSan, and Miri validation. See [security design](docs/security.md) and [testing scope](docs/testing.md).
@@ -641,6 +643,7 @@ TriviumDB/
 
 | Document                                     | Description                                                      |
 | -------------------------------------------- | ---------------------------------------------------------------- |
+| **[LLM Project Index](llms.txt)**            | Product overview, capabilities, use cases, and documentation links |
 | **[API Reference](docs/api-reference.md)**   | Full Python / Node.js / Rust API, parameters, return types       |
 | **[Feature Details](docs/features.md)**      | Architecture, storage engine, indexing strategy, crash recovery  |
 | **[Best Practices](docs/best-practices.md)** | Data modeling, performance tuning, Hook usage guide              |

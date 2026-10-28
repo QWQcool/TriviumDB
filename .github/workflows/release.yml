@@ -122,16 +122,16 @@ jobs:
 
       - name: 运行发布质量门禁
         run: |
-          cargo fmt --all -- --check
-          cargo check --workspace --all-targets
+          cargo fmt -p triviumdb -p triviumdb-cli -- --check
+          cargo check --workspace --exclude triviumdb-server --all-targets
           cargo check --lib --features python
           cargo check --lib --features nodejs
-          cargo test --workspace -- --test-threads=1
+          cargo test --workspace --exclude triviumdb-server -- --test-threads=1
           cargo test --features test-hooks --test concurrency --test differential --test fault_io --test fault_power -- --test-threads=1
           cargo test --features test-hooks --test query tql_planner -- --test-threads=1
-          cargo clippy --workspace --all-targets -- -D warnings
+          cargo clippy --workspace --exclude triviumdb-server --all-targets -- -D warnings
           npm install --no-audit --no-fund
-          npx --yes --package typescript tsc --noEmit --skipLibCheck triviumdb.d.ts
+          npm run test:types
 
   # ═══════════════════════════════════════════════════════════
   #  阶段 1: 编译 Python Wheels（含 ARM64）
@@ -299,6 +299,8 @@ jobs:
           node-version: 20
           registry-url: 'https://registry.npmjs.org'
 
+      - uses: dtolnay/rust-toolchain@stable
+
       - name: Download all bindings
         uses: actions/download-artifact@v4
         with:
@@ -309,8 +311,11 @@ jobs:
       - name: 验证待发布的 Node 包
         run: |
           npm install --ignore-scripts --no-audit --no-fund
+          npm run test:package
           npm run test:public-api
           npm run test:lifecycle
+          npm run test:resource-lifecycle
+          npm run test:process-lifecycle
 
       - name: Publish to NPM
         shell: bash
