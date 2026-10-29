@@ -341,7 +341,8 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
+    // macOS Runner 在创建此类文件名时即返回 EILSEQ；原始字节夹具由 Linux 验证。
+    #[cfg(target_os = "linux")]
     #[test]
     fn 迁移预检保留非utf8侧文件() {
         use std::os::unix::ffi::OsStringExt;

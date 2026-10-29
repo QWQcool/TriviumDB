@@ -725,7 +725,7 @@ cargo test --test contracts 共享json契约由rust适配器完整执行
 - `tests/core/retrieval_validation.rs` 验证空库、持有库和重开后的 f32/f16 非有限输入、空 anchor、直接物理算子，以及 `usize::MAX` 附近的 Top-K/召回池在精确和索引路径的完整内容。Rust、Node 与 Python 共享 `graph_query_boundaries.json` 的计数需求；两端实际产物同时验证结构化非法向量错误。
 
 - `tests/core/retrieval_migration.rs` 以固定整数和几何样例验证各检索入口的完整 `u64` 位模式、汉明分数、Hook 改写拒绝、极端有限浮点自相似度、重开、已有迁移目标字节保持和完整新库迁移。内核向量用例覆盖标量、当前 CPU 支持的 SIMD、384 维缓存范数、极端尺度与零向量，预期来自独立几何关系。
-- `database::migration::tests` 用真实文件系统路径作为独立判据，核对主文件、多段与 Unicode 侧文件的大小写别名在目标租约及暂存目录创建前被拒绝，空闲锁别名可复用，区分大小写的目录允许独立目标。Unix 额外检查非 UTF-8 侧文件与悬空主文件链接。`tests/core/retrieval_migration.rs` 对 Rom/Mmap 的已有多代数据库验证迁移拒绝后完整文件组不变、节点/向量/Payload/边可重复打开与持久化，并验证空闲锁别名下的新库完整迁移。
+- `database::migration::tests` 用真实文件系统路径作为独立判据，核对主文件、多段与 Unicode 侧文件的大小写别名在目标租约及暂存目录创建前被拒绝，空闲锁别名可复用，区分大小写的目录允许独立目标。Linux 额外检查非 UTF-8 侧文件（macOS Runner 在创建该夹具时即返回 `EILSEQ`），Unix 检查悬空主文件与协调锁链接。`tests/core/retrieval_migration.rs` 对 Rom/Mmap 的已有多代数据库验证迁移拒绝后完整文件组不变、节点/向量/Payload/边可重复打开与持久化，并验证空闲锁别名下的新库完整迁移。
 - `tests/fault_io/migration_publication.rs` 验证暂存构建、首文件发布后、marker 提交前与提交后故障，核对原库、目标完整内容及重试；确定性交错验证目标锁和碰撞文件保留。Node/Python 通过共享 `retrieval_boundaries.json` 在安装制品上核对整数检索、有限浮点分数和迁移拒绝的结构化错误。
 - `cargo test --features test-hooks --test fault_power migration_publication -- --test-threads=1` 在首文件发布后、marker 提交前和提交后使用屏障确认并强杀子进程，不依赖析构清理。Rom/Mmap 源库均逐字节保留；提交前目标回滚，提交后核对完整节点、零向量、Payload 和边，再次持久化并重开。Unix 额外核对主文件只有一个链接；只读成功与拒绝路径均验证文件组零写。该用例模拟进程终止，不代替真实断电测试。
 - `python -m unittest discover -s tests/tools -p 'test_release_*.py'` 验证真实 Git 发布来源与发布摘要命令入口；摘要用例覆盖上传成功、失败、取消、上游阻断、既有版本跳过、门禁失败、两端不同结果及状态不一致，不能以 `should_publish` 代替实际作业结果。
