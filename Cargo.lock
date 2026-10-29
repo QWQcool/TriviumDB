@@ -2471,6 +2471,7 @@ dependencies = [
  "fs2",
  "half",
  "instant-distance",
+ "libc",
  "libloading",
  "memmap2",
  "napi",

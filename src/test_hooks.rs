@@ -40,6 +40,8 @@ pub enum ConcurrencyPoint {
     AfterSidecarsPersisted,
     AfterPublicationCommitted,
     MigrationFilePublished,
+    MigrationBeforeCommit,
+    MigrationCommitted,
     TqlPathStep,
 }
 

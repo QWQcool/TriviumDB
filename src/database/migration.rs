@@ -174,7 +174,7 @@ pub(super) fn migrate<T: VectorType + serde::Serialize + serde::de::DeserializeO
     drop(mt);
     ensure_empty(&destination.target)?;
     crate::storage::file_format::publish_new_database::<T>(&stage_path, &destination.target)?;
-    // Windows 在目标映射建立前释放暂存硬链接，清理期间目标租约仍由当前调用持有。
+    // 文件已经排他移动，清理剩余暂存目录期间目标租约仍由当前调用持有。
     std::fs::remove_dir_all(&destination.directory)?;
     // 目标租约直接交给新实例，发布与打开之间保持排他性。
     let _task = source.resource_runtime.enter_task()?;

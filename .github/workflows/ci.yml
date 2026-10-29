@@ -72,8 +72,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 验证发布来源校验行为
-        run: python -m unittest discover -s tests/tools -p test_release_source.py
+      - name: 验证发布来源与摘要行为
+        run: python -m unittest discover -s tests/tools -p 'test_release_*.py'
 
       - uses: dtolnay/rust-toolchain@stable
         with:
