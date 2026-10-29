@@ -1,6 +1,6 @@
 # TriviumDB 支持特性详解
 
-> TriviumDB `0.9.0-beta.3` 的架构、核心能力与技术实现。版本记录见[变更说明](changes/0.9.0-beta.3.md)。
+> TriviumDB `0.9.0-beta.4` 的架构、核心能力与技术实现。版本记录见[变更说明](changes/0.9.0-beta.4.md)。
 
 ## 当前能力快照
 
@@ -10,6 +10,8 @@
 - **统一查询底座**：TQL Parser/AST、WITH 管线、Cascades 优化、Prepared TQL、Path 与一等值结果共同支撑上述自由组合；数字字面量支持科学计数法，MATCH 属性/ID 投影按实际值去重，`SET VECTOR` 通过原子 mutation 更新向量。
 - **统一返回与匹配写入**：MATCH、FIND、WITH 和单跳具名边共享分组、聚合、去重、别名排序与分页；COUNT 按表达式值计数。多字段 SET 按节点合并，CREATE 按完整匹配集建立独立变量作用域，SET VECTOR 保留完整 u64 整数并按 dtype 准入。
 - **系统保证**：确定性执行、查询/遍历/内存/并行预算、ReadOnly/Immutable 零写、generation 原子发布。
+- **事实绑定与类型检查**：`.tdb` v10 保存 dtype、元素宽度和头部 CRC；QuIVer 元数据 v2 绑定主文件、向量内容及活跃 ID/slot，图与属性 sidecar 在采用前检查当前事实。
+- **查询物化准入**：TQL、精确与 GraphFirst 检索、可达性及子图在复制 Payload、向量、边和 Metadata 前申请工作区；DML 匹配使用实例内存预算，返回阶段按实际求值列计量。
 - **跨语言能力**：Rust、Python、Node 同步提供四类属性索引管理、Prepared TQL、一等查询值和存储格式观测。
 - **多实例运行管理**：共享 `ResourceRuntime` 统一登记数据库配额和工作区，管理工作线程及前台/维护任务名额；共享与实例诊断提供预算余额、维护延期和故障详情。
 - **生命周期与状态迁移**：关闭请求、排空、限时等待、目录快照、校验及恢复，Rust/Python/Node 接口同步提供。
