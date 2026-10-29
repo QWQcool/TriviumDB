@@ -148,7 +148,7 @@ fn chain(length: u64, branches: bool) -> MemTable<f32> {
 fn 小栈子进程完成深路径和超时回归() {
     let root = TestDir::new("match_worker");
     let receipt = root.file("completed");
-    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+    let mut child = super::query_child_command()
         .args([
             "--ignored",
             "--exact",

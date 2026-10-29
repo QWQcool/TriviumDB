@@ -14,7 +14,7 @@ fn oversized_expressions_are_rejected_in_small_stack_process() {
             .unwrap()
             .as_nanos()
     ));
-    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+    let mut child = super::query_child_command()
         .args([
             "--ignored",
             "--exact",
