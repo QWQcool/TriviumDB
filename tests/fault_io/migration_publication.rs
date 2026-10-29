@@ -22,10 +22,23 @@ fn 发布持有目标锁且文件碰撞只回收本次创建的链接() {
         result.err().expect("目标文件碰撞必须报错")
     });
     gate.wait_until_arrived();
-    assert!(matches!(
-        Database::<f32>::open(&target, 2),
-        Err(TriviumError::DatabaseLocked(_))
-    ));
+    // 发布屏障后独立竞争真实锁文件，验证租约本身；路径校验错误不能代替锁证据。
+    let contender = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(format!("{target}.lock"))
+        .unwrap();
+    let contention = fs2::FileExt::try_lock_exclusive(&contender).unwrap_err();
+    assert_eq!(
+        contention.raw_os_error(),
+        fs2::lock_contended_error().raw_os_error()
+    );
+    let opening = Database::<f32>::open(&target, 2);
+    // Unix 路径检查先拒绝暂存文件的第二个硬链接；Windows 继续到目标锁检查。
+    #[cfg(unix)]
+    assert!(matches!(opening, Err(TriviumError::InvalidInput(_))));
+    #[cfg(not(unix))]
+    assert!(matches!(opening, Err(TriviumError::DatabaseLocked(_))));
     std::fs::write(format!("{target}.vec"), b"outside publisher evidence").unwrap();
     gate.release();
     assert!(

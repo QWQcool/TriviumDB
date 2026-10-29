@@ -712,6 +712,7 @@ cargo test --test contracts 共享json契约由rust适配器完整执行
 ## 类型、解析与加载边界回归
 
 - `tests/storage/wal_integrity.rs` 覆盖首、中、尾完整帧的 CRC 和合法 CRC 下的解码错误、非法长度、反复打开后原日志保持，以及物理尾帧的每个截断位置。恢复原始测试副本后核对三条已确认记录；原始日志保留和恢复成功分别断言。
+- `fault_io::migration_publication` 在真实发布屏障下直接竞争目标锁文件，独立证明排他租约被持有；Unix 核对硬链接路径拒绝，Windows 核对锁竞争错误。随后验证碰撞文件保留、提交前回收及提交后重开内容。
 - `tests/storage/quiver_facts.rs` 在 Rom/Mmap 中验证有效索引、相同长度的节点替换与向量更新、旧 sidecar 混入、历史 v1 元数据、严格错误与只读回退。`memory_safety_` 子集包含 BQ 空存储、越界、巨大维度、畸形几何、最后有效行和尾位断言，随现有 Miri job 执行。
 - `tests/query_memory` 使用带 epoch 的独立分配器测量查询线程的堆请求峰值。20 节点、400 条边和 512 KiB 查询上限覆盖普通、具名边、OPTIONAL 和 SET 的复制前拒绝；解除限额后核对完整计数、写入和重开内容。共享 SDK 契约另验证三种 dtype 下读写 TQL 的结构化预算错误及资源归还。
 
