@@ -2967,7 +2967,11 @@ impl<T: VectorType + serde::Serialize + serde::de::DeserializeOwned> Database<T>
                 let (ops, mut next_id) = {
                     let mt = read_or_recover(&self.memtable);
                     (
-                        crate::query::tql_executor::execute_tql_mutation(&mutation, &mt)?,
+                        crate::query::tql_executor::execute_tql_mutation_with_limits(
+                            &mutation,
+                            &mt,
+                            self.tql_limits.clone(),
+                        )?,
                         mt.next_id_value(),
                     )
                 };

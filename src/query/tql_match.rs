@@ -1,6 +1,6 @@
 //! MATCH 的显式栈遍历：按物理边保留行重数，并在节点、路径和邻边扫描处检查预算。
 use super::{
-    EdgeDirection, QueryControl, TqlPattern, TqlResult, TriviumError, VectorType, build_node,
+    EdgeDirection, QueryControl, TqlPattern, TqlResult, TriviumError, VectorType,
     eval_predicate_env, matches_filter_with_id,
 };
 use crate::node::{Edge, NodeId};
@@ -238,6 +238,7 @@ pub(super) fn walk<T: VectorType>(
     results: &mut TqlResult<T>,
     budget: &mut WorkBudget<'_>,
     row_limit: usize,
+    memory: &super::QueryMemory,
 ) -> Result<bool, TriviumError> {
     let mut frames = vec![Frame::Visit {
         layer: 0,
@@ -305,7 +306,7 @@ pub(super) fn walk<T: VectorType>(
                         for var in return_vars {
                             if let Some(&slot) = var_map.get(var)
                                 && let Some(id) = env[slot]
-                                && let Some(node) = build_node(id, mt)
+                                && let node = memory.snapshot(id, mt)?
                             {
                                 row.insert(var.clone(), node);
                             }

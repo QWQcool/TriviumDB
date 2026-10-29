@@ -10,8 +10,11 @@
 
 #[path = "tql_match.rs"]
 mod matching;
+#[path = "tql_memory.rs"]
+mod memory;
 #[path = "tql_return.rs"]
 mod returning;
+use memory::QueryMemory;
 
 use super::pipeline::BindingValue as RuntimeValue;
 use super::planner::{
@@ -153,13 +156,6 @@ pub struct TqlLimits {
 }
 
 impl TqlLimits {
-    const UNLIMITED: Self = Self {
-        max_query_rows: Some(0),
-        row_overflow: crate::database::RowOverflowPolicy::Throw,
-        memory_limit: 0,
-        query_control: None,
-    };
-
     fn check_cancelled(&self) -> Result<(), TriviumError> {
         self.query_control
             .as_ref()
@@ -320,6 +316,7 @@ pub fn execute_tql_with_limits<T: VectorType>(
     memtable: &MemTable<T>,
     limits: TqlLimits,
 ) -> Result<TqlResult<T>, TriviumError> {
+    let memory = QueryMemory::new(limits.memory_limit, memtable);
     limits.check_cancelled()?;
     ensure_search_vector_bound(query)?;
     if query.explain {
@@ -360,6 +357,7 @@ pub fn execute_tql_with_limits<T: VectorType>(
                     .map(returning::Input::Pipeline)
                     .collect::<Vec<_>>();
                 let scope = returning::Scope {
+                    memory: &memory,
                     query: &executable,
                     mt: memtable,
                     limits: &limits,
@@ -388,13 +386,13 @@ pub fn execute_tql_with_limits<T: VectorType>(
         return Ok(generate_explain_plan(query, memtable, None, find_plan));
     }
     if !query.pipeline.is_empty() {
-        return execute_pipeline_node_query(query, memtable, limits);
+        return execute_pipeline_node_query(query, memtable, limits, &memory);
     }
 
     if let QueryEntry::Match { pattern } | QueryEntry::OptionalMatch { pattern } = &query.entry
         && pattern.edges.iter().any(|edge| edge.var.is_some())
     {
-        let expanded = collect_single_edge_rows(query, pattern, memtable, &limits)?;
+        let expanded = collect_single_edge_rows(query, pattern, memtable, &limits, &memory)?;
         let edge_var = pattern.edges[0].var.as_deref().ok_or_else(|| {
             TriviumError::QueryExecution("缺少边变量 (Missing edge variable)".into())
         })?;
@@ -405,6 +403,7 @@ pub fn execute_tql_with_limits<T: VectorType>(
             })
             .collect::<Vec<_>>();
         let scope = returning::Scope {
+            memory: &memory,
             query,
             mt: memtable,
             limits: &limits,
@@ -412,12 +411,13 @@ pub fn execute_tql_with_limits<T: VectorType>(
         };
         return returning::into_nodes(returning::finish(&inputs, &scope)?, &inputs, &scope);
     }
-    let (results, _) = execute_binding_rows(query, memtable, &limits)?;
+    let (results, _) = execute_binding_rows(query, memtable, &limits, &memory)?;
     let inputs = results
         .iter()
         .map(|row| returning::Input::Nodes(row, None))
         .collect::<Vec<_>>();
     let scope = returning::Scope {
+        memory: &memory,
         query,
         mt: memtable,
         limits: &limits,
@@ -430,6 +430,7 @@ fn execute_binding_rows<T: VectorType>(
     query: &TqlQuery,
     memtable: &MemTable<T>,
     limits: &TqlLimits,
+    memory: &QueryMemory,
 ) -> Result<(TqlResult<T>, bool), TriviumError> {
     let ordered_find = matches!(
         &query.entry,
@@ -454,6 +455,7 @@ fn execute_binding_rows<T: VectorType>(
             memtable,
             scan_limit,
             limits.query_control.as_ref(),
+            memory,
         )?,
         QueryEntry::Match { pattern } => (
             execute_match(
@@ -463,11 +465,20 @@ fn execute_binding_rows<T: VectorType>(
                 scan_limit,
                 false,
                 limits,
+                memory,
             )?,
             false,
         ),
         QueryEntry::OptionalMatch { pattern } => (
-            execute_match(pattern, &snapshot_query, memtable, scan_limit, true, limits)?,
+            execute_match(
+                pattern,
+                &snapshot_query,
+                memtable,
+                scan_limit,
+                true,
+                limits,
+                memory,
+            )?,
             false,
         ),
         QueryEntry::Search {
@@ -476,7 +487,15 @@ fn execute_binding_rows<T: VectorType>(
             expand,
             ..
         } => (
-            execute_search(vector, *top_k, expand.as_ref(), query, memtable, scan_limit)?,
+            execute_search(
+                vector,
+                *top_k,
+                expand.as_ref(),
+                query,
+                memtable,
+                scan_limit,
+                memory,
+            )?,
             false,
         ),
         QueryEntry::Text { .. } => {
@@ -1184,6 +1203,7 @@ fn execute_pipeline_node_query<T: VectorType>(
     query: &TqlQuery,
     mt: &MemTable<T>,
     limits: TqlLimits,
+    memory: &QueryMemory,
 ) -> Result<TqlResult<T>, TriviumError> {
     if matches!(&query.returns, ReturnClause::Expressions(items) if items.iter().any(|item| matches!(item.kind, ReturnExprKind::Scalar(_))))
     {
@@ -1199,6 +1219,7 @@ fn execute_pipeline_node_query<T: VectorType>(
         .map(returning::Input::Pipeline)
         .collect::<Vec<_>>();
     let scope = returning::Scope {
+        memory,
         query,
         mt,
         limits: &limits,
@@ -1239,6 +1260,7 @@ pub fn execute_tql_values_with_limits<T: VectorType>(
     mt: &MemTable<T>,
     limits: TqlLimits,
 ) -> Result<TqlValueResult<T>, TriviumError> {
+    let memory = QueryMemory::new(limits.memory_limit, mt);
     limits.check_cancelled()?;
     ensure_search_vector_bound(query)?;
     if !query.explain
@@ -1246,7 +1268,7 @@ pub fn execute_tql_values_with_limits<T: VectorType>(
         && let QueryEntry::Match { pattern } | QueryEntry::OptionalMatch { pattern } = &query.entry
         && pattern.edges.iter().any(|edge| edge.var.is_some())
     {
-        return execute_single_edge_values(query, pattern, mt, limits);
+        return execute_single_edge_values(query, pattern, mt, limits, &memory);
     }
     if query.explain {
         return execute_tql_with_limits(query, mt, limits).map(|rows| {
@@ -1260,12 +1282,13 @@ pub fn execute_tql_values_with_limits<T: VectorType>(
         });
     }
     if query.pipeline.is_empty() {
-        let (rows, _) = execute_binding_rows(query, mt, &limits)?;
+        let (rows, _) = execute_binding_rows(query, mt, &limits, &memory)?;
         let inputs = rows
             .iter()
             .map(|row| returning::Input::Nodes(row, None))
             .collect::<Vec<_>>();
         let scope = returning::Scope {
+            memory: &memory,
             query,
             mt,
             limits: &limits,
@@ -1282,6 +1305,7 @@ pub fn execute_tql_values_with_limits<T: VectorType>(
         .map(returning::Input::Pipeline)
         .collect::<Vec<_>>();
     let scope = returning::Scope {
+        memory: &memory,
         query,
         mt,
         limits: &limits,
@@ -1295,8 +1319,9 @@ fn execute_single_edge_values<T: VectorType>(
     pattern: &TqlPattern,
     mt: &MemTable<T>,
     limits: TqlLimits,
+    memory: &QueryMemory,
 ) -> Result<TqlValueResult<T>, TriviumError> {
-    let expanded = collect_single_edge_rows(query, pattern, mt, &limits)?;
+    let expanded = collect_single_edge_rows(query, pattern, mt, &limits, memory)?;
     let edge_var = pattern.edges[0]
         .var
         .as_deref()
@@ -1308,6 +1333,7 @@ fn execute_single_edge_values<T: VectorType>(
         })
         .collect::<Vec<_>>();
     let scope = returning::Scope {
+        memory,
         query,
         mt,
         limits: &limits,
@@ -1323,6 +1349,7 @@ fn collect_single_edge_rows<T: VectorType>(
     pattern: &TqlPattern,
     mt: &MemTable<T>,
     limits: &TqlLimits,
+    memory: &QueryMemory,
 ) -> Result<Vec<EdgeBindingRow<T>>, TriviumError> {
     if pattern.edges.len() != 1 || pattern.edges[0].hop_range.is_some() || pattern.nodes.len() != 2
     {
@@ -1349,6 +1376,7 @@ fn collect_single_edge_rows<T: VectorType>(
     };
     let (row_limit, _) = requested_row_limit(query, requires_full_input(query, false), limits, mt)?;
     let scope = returning::Scope {
+        memory,
         query,
         mt,
         limits,
@@ -1397,12 +1425,17 @@ fn collect_single_edge_rows<T: VectorType>(
             let mut nodes = HashMap::new();
             for (pattern, id) in [(left, start), (right, end)] {
                 if let Some(var) = &pattern.var {
-                    nodes.insert(
-                        var.clone(),
-                        build_node(id, mt).ok_or(TriviumError::NodeNotFound(id))?,
-                    );
+                    nodes.insert(var.clone(), memory.snapshot(id, mt)?);
                 }
             }
+            memory.retain(
+                edge.label
+                    .len()
+                    .saturating_add(crate::storage::payload_store::query_clone_peak(
+                        &edge.metadata,
+                    ))
+                    .saturating_add(256),
+            )?;
             let view = EdgeView {
                 source_id: source,
                 target_id: target,
@@ -1427,10 +1460,7 @@ fn collect_single_edge_rows<T: VectorType>(
         if optional && !matched {
             let mut nodes = HashMap::new();
             if let Some(var) = &left.var {
-                nodes.insert(
-                    var.clone(),
-                    build_node(start, mt).ok_or(TriviumError::NodeNotFound(start))?,
-                );
+                nodes.insert(var.clone(), memory.snapshot(start, mt)?);
             }
             expanded.push((nodes, None));
             if expanded.len() > row_limit {
@@ -1462,11 +1492,13 @@ fn pipeline_kind_value<T: VectorType>(
     kind: &ReturnExprKind,
     row: &crate::query::pipeline::NodeRow,
     mt: &MemTable<T>,
+    memory: &QueryMemory,
 ) -> Result<TqlValue<T>, TriviumError> {
     match kind {
         ReturnExprKind::Var(var) => runtime_to_tql_value(
             eval_pipeline_row_expr(&TqlExpr::Variable(var.clone()), row, mt),
             mt,
+            memory,
         ),
         ReturnExprKind::Property(var, field) => runtime_to_tql_value(
             eval_pipeline_row_expr(
@@ -1478,9 +1510,10 @@ fn pipeline_kind_value<T: VectorType>(
                 mt,
             ),
             mt,
+            memory,
         ),
         ReturnExprKind::Scalar(expr) => {
-            runtime_to_tql_value(eval_pipeline_row_expr(expr, row, mt), mt)
+            runtime_to_tql_value(eval_pipeline_row_expr(expr, row, mt), mt, memory)
         }
         ReturnExprKind::Aggregate(_, _) => Err(TriviumError::QueryExecution(
             "不允许嵌套聚合 (Nested aggregation is not supported)".into(),
@@ -1962,6 +1995,7 @@ fn eval_pipeline_row_predicate<T: VectorType>(
 fn runtime_to_tql_value<T: VectorType>(
     value: RuntimeValue,
     mt: &MemTable<T>,
+    memory: &QueryMemory,
 ) -> Result<TqlValue<T>, TriviumError> {
     Ok(match value {
         RuntimeValue::Int(value) => TqlValue::Int(value),
@@ -1971,9 +2005,7 @@ fn runtime_to_tql_value<T: VectorType>(
         RuntimeValue::Bool(value) => TqlValue::Bool(value),
         RuntimeValue::Path(value) => TqlValue::Path(value),
         RuntimeValue::Json(value) => json_to_tql_value(value),
-        RuntimeValue::Node(id) => {
-            TqlValue::Node(build_node(id, mt).ok_or(TriviumError::NodeNotFound(id))?)
-        }
+        RuntimeValue::Node(id) => TqlValue::Node(memory.snapshot(id, mt)?),
         RuntimeValue::Edge(edge) => TqlValue::Edge(edge),
         RuntimeValue::Null => TqlValue::Null,
     })
@@ -2063,6 +2095,7 @@ fn execute_find<T: VectorType>(
     mt: &MemTable<T>,
     row_limit: usize,
     control: Option<&QueryControl>,
+    memory: &QueryMemory,
 ) -> Result<(TqlResult<T>, bool), TriviumError> {
     let mut results = Vec::new();
     let ordered_plan = find_ordered_find_plan(query, filter, mt);
@@ -2091,7 +2124,8 @@ fn execute_find<T: VectorType>(
             break;
         }
 
-        let payload = match mt.get_payload(id) {
+        let _decode = memory.temporary(mt.payload_query_peak(id)?)?;
+        let payload = match mt.try_get_payload(id)? {
             Some(p) => p,
             None => continue,
         };
@@ -2108,6 +2142,7 @@ fn execute_find<T: VectorType>(
             continue;
         }
 
+        memory.retain(memory::node_bytes(id, mt)?)?;
         let node = match build_node_with_payload(id, payload, mt) {
             Some(node) => node,
             None => continue,
@@ -2182,6 +2217,7 @@ fn execute_match<T: VectorType>(
     row_limit: usize,
     optional: bool,
     limits: &TqlLimits,
+    memory: &QueryMemory,
 ) -> Result<TqlResult<T>, TriviumError> {
     // 建立变量映射
     let mut var_map: HashMap<String, usize> = HashMap::new();
@@ -2256,6 +2292,7 @@ fn execute_match<T: VectorType>(
             &mut results,
             &mut budget,
             row_limit,
+            memory,
         )?;
         if !cont {
             break;
@@ -2264,7 +2301,7 @@ fn execute_match<T: VectorType>(
             let mut row = HashMap::new();
             if let Some(var) = &pattern.nodes[0].var
                 && return_vars.contains(var)
-                && let Some(node) = build_node(start_id, mt)
+                && let node = memory.snapshot(start_id, mt)?
             {
                 row.insert(var.clone(), node);
             }
@@ -2289,6 +2326,7 @@ fn execute_search<T: VectorType>(
     query: &TqlQuery,
     mt: &MemTable<T>,
     row_limit: usize,
+    memory: &QueryMemory,
 ) -> Result<TqlResult<T>, TriviumError> {
     let mut operators = crate::query::pipeline::lower_search_entry(vector, top_k, expand)?;
     let post_filter = if expand.is_none() {
@@ -2359,7 +2397,8 @@ fn execute_search<T: VectorType>(
         {
             continue;
         }
-        if let Some(node) = build_node(id, mt) {
+        {
+            let node = memory.snapshot(id, mt)?;
             let mut row = HashMap::new();
             row.insert("_".into(), node);
             results.push(row);
@@ -2896,11 +2935,6 @@ fn runtime_sort_kind(value: &RuntimeValue) -> u8 {
         RuntimeValue::Path(_) => 7,
         RuntimeValue::Null => 8,
     }
-}
-
-/// 从 MemTable 构建完整 Node
-fn build_node<T: VectorType>(id: NodeId, mt: &MemTable<T>) -> Option<Node<T>> {
-    build_node_with_payload(id, mt.get_payload(id)?, mt)
 }
 
 fn build_node_with_payload<T: VectorType>(
@@ -3674,14 +3708,31 @@ pub fn execute_tql_mutation<T: VectorType>(
     mutation: &TqlMutation,
     mt: &MemTable<T>,
 ) -> Result<Vec<MutationOp<T>>, TriviumError> {
+    execute_tql_mutation_with_limits(mutation, mt, TqlLimits::default())
+}
+
+pub fn execute_tql_mutation_with_limits<T: VectorType>(
+    mutation: &TqlMutation,
+    mt: &MemTable<T>,
+    mut limits: TqlLimits,
+) -> Result<Vec<MutationOp<T>>, TriviumError> {
+    // 写操作的匹配集超限时整批拒绝，禁止使用读查询的部分结果策略。
+    limits.row_overflow = crate::database::RowOverflowPolicy::Throw;
+    limits.max_query_rows = Some(0);
+    let memory = QueryMemory::new(limits.memory_limit, mt);
+    limits.check_cancelled()?;
     match &mutation.action {
-        MutationAction::Create(create) => execute_create(create, &mutation.source, mt),
-        MutationAction::Set(assignments) => execute_set(assignments, &mutation.source, mt),
+        MutationAction::Create(create) => {
+            execute_create(create, &mutation.source, mt, &limits, &memory)
+        }
+        MutationAction::Set(assignments) => {
+            execute_set(assignments, &mutation.source, mt, &limits, &memory)
+        }
         MutationAction::SetVector { var, vector } => {
-            execute_set_vector(var, vector, &mutation.source, mt)
+            execute_set_vector(var, vector, &mutation.source, mt, &limits, &memory)
         }
         MutationAction::Delete { vars, detach } => {
-            execute_delete(vars, *detach, &mutation.source, mt)
+            execute_delete(vars, *detach, &mutation.source, mt, &limits, &memory)
         }
     }
 }
@@ -3691,13 +3742,16 @@ fn execute_create<T: VectorType>(
     create: &CreateAction,
     source: &Option<MutationSource>,
     mt: &MemTable<T>,
+    limits: &TqlLimits,
+    memory: &QueryMemory,
 ) -> Result<Vec<MutationOp<T>>, TriviumError> {
     let matches = if let Some(source) = source {
         let query = build_match_query(&source.pattern, source.predicate.as_ref());
-        execute_tql_with_limits(&query, mt, TqlLimits::UNLIMITED)?
+        execute_tql_with_limits(&query, mt, limits.clone())?
     } else {
         vec![HashMap::new()]
     };
+    retain_mutation_rows(&matches, mt, memory)?;
     let mut ops = Vec::new();
     for (row_index, matched) in matches.iter().enumerate() {
         // 每条匹配拥有独立的新建变量作用域，边端点始终引用该行的新节点。
@@ -3714,6 +3768,11 @@ fn execute_create<T: VectorType>(
             if let Some(var) = &node.var {
                 created.insert(var.clone(), scoped.clone());
             }
+            memory.retain(
+                crate::storage::payload_store::query_clone_peak(&node.payload)
+                    .saturating_add(mt.dim().saturating_mul(std::mem::size_of::<T>()))
+                    .saturating_add(512),
+            )?;
             ops.push(MutationOp::InsertNode {
                 var: scoped,
                 vector: vec![T::default(); mt.dim()],
@@ -3753,6 +3812,8 @@ fn execute_set_vector<T: VectorType>(
     vector: &[serde_json::Number],
     source: &Option<MutationSource>,
     mt: &MemTable<T>,
+    limits: &TqlLimits,
+    memory: &QueryMemory,
 ) -> Result<Vec<MutationOp<T>>, TriviumError> {
     if vector.len() != mt.dim() {
         return Err(TriviumError::DimensionMismatch {
@@ -3764,7 +3825,8 @@ fn execute_set_vector<T: VectorType>(
         TriviumError::QueryParse("SET VECTOR requires a preceding MATCH clause".into())
     })?;
     let query = build_match_query(&source.pattern, source.predicate.as_ref());
-    let results = execute_tql_with_limits(&query, mt, TqlLimits::UNLIMITED)?;
+    let results = execute_tql_with_limits(&query, mt, limits.clone())?;
+    retain_mutation_rows(&results, mt, memory)?;
     let converted = vector
         .iter()
         .map(T::from_json_number)
@@ -3784,6 +3846,8 @@ fn execute_set<T: VectorType>(
     assignments: &[SetAssignment],
     source: &Option<MutationSource>,
     mt: &MemTable<T>,
+    limits: &TqlLimits,
+    memory: &QueryMemory,
 ) -> Result<Vec<MutationOp<T>>, TriviumError> {
     let source = source
         .as_ref()
@@ -3791,7 +3855,8 @@ fn execute_set<T: VectorType>(
 
     // DML 匹配集不能因查询行上限发生静默的部分写入。
     let query = build_match_query(&source.pattern, source.predicate.as_ref());
-    let results = execute_tql_with_limits(&query, mt, TqlLimits::UNLIMITED)?;
+    let results = execute_tql_with_limits(&query, mt, limits.clone())?;
+    retain_mutation_rows(&results, mt, memory)?;
 
     // 同一节点的多字段及重复字段赋值按文本顺序合并，只生成一次替换。
     let mut payloads = BTreeMap::new();
@@ -3806,6 +3871,11 @@ fn execute_set<T: VectorType>(
             let payload = payloads
                 .entry(node.id)
                 .or_insert_with(|| node.payload.clone());
+            memory.retain(
+                crate::storage::payload_store::query_clone_peak(&assign.value)
+                    .saturating_add(assign.field.len())
+                    .saturating_add(256),
+            )?;
             let object = payload.as_object_mut().ok_or_else(|| {
                 TriviumError::InvalidInput(
                     "SET 字段要求对象 Payload (SET fields requires an object Payload)".into(),
@@ -3828,13 +3898,16 @@ fn execute_delete<T: VectorType>(
     detach: bool,
     source: &Option<MutationSource>,
     mt: &MemTable<T>,
+    limits: &TqlLimits,
+    memory: &QueryMemory,
 ) -> Result<Vec<MutationOp<T>>, TriviumError> {
     let source = source.as_ref().ok_or_else(|| {
         TriviumError::QueryParse("DELETE requires a preceding MATCH clause".into())
     })?;
 
     let query = build_match_query(&source.pattern, source.predicate.as_ref());
-    let results = execute_tql_with_limits(&query, mt, TqlLimits::UNLIMITED)?;
+    let results = execute_tql_with_limits(&query, mt, limits.clone())?;
+    retain_mutation_rows(&results, mt, memory)?;
 
     let mut ops = Vec::new();
     let mut deleted: HashSet<NodeId> = HashSet::new();
@@ -3871,4 +3944,23 @@ fn build_match_query(pattern: &TqlPattern, predicate: Option<&Predicate>) -> Tql
         limit: None,
         offset: None,
     }
+}
+
+fn retain_mutation_rows<T: VectorType>(
+    rows: &TqlResult<T>,
+    mt: &MemTable<T>,
+    memory: &QueryMemory,
+) -> Result<(), TriviumError> {
+    let bytes = rows
+        .iter()
+        .flat_map(|row| row.values())
+        .try_fold(0usize, |sum, node| {
+            sum.checked_add(
+                memory::node_bytes(node.id, mt)?
+                    .checked_mul(3)
+                    .ok_or_else(memory::overflow)?,
+            )
+            .ok_or_else(memory::overflow)
+        })?;
+    memory.retain(bytes)
 }

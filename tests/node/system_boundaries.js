@@ -14,6 +14,7 @@ function runSystemBoundaries(root, { TriviumDB, ResourceRuntime }) {
     for (const action of [
       () => db.searchExact([1, 0], 1), () => db.searchGraphFirst([1, 0], contract.nodes, 1),
       () => db.neighbors(1, 2), () => db.reachable(1), () => db.reachableDetailed(1), () => db.querySubgraph(1),
+      () => db.tql('MATCH (n) RETURN n'), () => db.tqlMut('MATCH (n) SET n.touched == true'),
     ]) {
       assert.throws(action, error => error.code === 'QueueFull' && error.details.resource === 'memory_bytes' && error.details.requested > 0 && error.details.used === error.details.limit)
       assert.equal(runtime.stats().reserved_workspace_bytes, 0)

@@ -76,3 +76,11 @@ RAYON_NUM_THREADS=1 cargo bench --features ablation --bench bench_quiver_connect
 ## 0.9.0-beta.3 检索与计量
 
 BruteForce 使用分片有界 Top-K 堆，并按分数降序、外部 NodeId 升序合并。QuIVer 的 SM 与公开 BQ 检索入口统一采用外部 NodeId 处理同分；查询维度、有限值与冷向量视图按入口契约校验。写入准入直接读取增量维护的热内存计量，完整图统计用于诊断。详见[版本说明](changes/0.9.0-beta.3.md)。
+
+## 索引事实绑定与 BQ 边界
+
+`.quiver.meta` v2 使用 60 字节固定布局，记录文件长度、节点数、维度、QuIVer CRC、主文件与分离向量文件的 CRC，并校验元数据自身 CRC。主文件摘要覆盖节点身份和 slot 映射；加载后逐项核对活跃 ID 与冷向量 slot。相同文件长度下的节点替换、向量更新和旧索引混入均参与一致性检查。
+
+v1 元数据通过既有 `MissingIndexPolicy` 处理：默认回退读取当前事实；严格模式返回 `ImmutableArtifactInvalid`。只读回退保留原 sidecar，可写实例可显式重建并随文件组发布更新后的索引与元数据。
+
+Rust 底层 `Bq2Signature::distance` 及 `Bq2Store` 的 `distance`、`distance_to_sig`、`distance_to_sig_cheap`、`get_sig`、`from_raw` 返回 `Result`。调用方使用 `?` 处理索引、维度和平面几何错误。预取忽略无效行；便宜距离按有效维度屏蔽尾位。合法输入继续使用现有 SIMD/标量内核。

@@ -2,6 +2,11 @@
 
 后续变更以 `0.9.0-beta.3` 为基线；该版本内容见[中英文变更说明](0.9.0-beta.3.md)。
 
+- WAL 对完整帧的 CRC、解码及超长字段损坏返回 `CorruptedFile`，保留完整日志；物理尾帧截断和未完成事务继续按提交边界恢复。增加首中尾坏帧、逐字节尾帧和反复打开的内容回归。
+- `.quiver.meta` v2 绑定主文件、分离向量与索引 CRC，校验元数据 CRC，并逐项核对活跃 ID/slot。历史 v1 元数据按索引策略回退或明确报错；只读回退保留原件。
+- TQL 在复制 Payload、向量、边与返回/分组/排序工作区前执行实例和共享预算准入。DML 匹配继承内存预算，保持完整集合语义；管线按实际求值列计量。独立分配器用例验证查询线程的实际堆请求峰值与拒绝后的数据保持。
+- Rust 底层 BQ 距离、签名读取及原始存储构造改为 `Result`，覆盖空存储、越界、超大维度、畸形平面和尾位。安全入口先验证几何，再调用既有距离内核；新增用例接入 Miri 子集。
+
 - GenerationStore 固定构造时的相对路径位置，默认运行目录在根目录存在后按规范路径统一确定；跨实例与跨进程 Reader 租约覆盖根目录创建时机、路径别名和工作目录变化。跨进程配置统一根路径与运行目录，升级后在结束旧 Reader 进程后恢复回收。
 - GraphFirst 通过有界 Top-K 堆选择最终命中后物化 Payload。精确检索、可达性各执行模式、邻域和子图为容器、路径、位图、Metadata 与 Payload 副本执行共享工作区准入，状态预留随探索增长，异常退出准确归还账本。
 - Rust 旧数字范围入口复用精确整数/浮点比较；Ordered 规划对大浮点边界使用精确扫描，覆盖正负端点、小数与非有限旧边界。
@@ -38,6 +43,11 @@
 ## Unreleased
 
 Subsequent changes build on `0.9.0-beta.3`. See the bilingual [release notes](0.9.0-beta.3.md).
+
+- Complete WAL frames with invalid CRCs, decoding or oversized lengths return `CorruptedFile` while preserving the full log. Physically incomplete tail frames and uncommitted transactions retain commit-boundary recovery. Regressions cover corruption at every frame position, bytewise tail cuts and repeated opens.
+- `.quiver.meta` v2 binds main-file, separate-vector and index CRCs, checks its own CRC, and validates every active ID/slot pair. Legacy v1 metadata follows the configured fallback/error policy; read-only fallback preserves original artifacts.
+- TQL admits Payload, vector, edge, return, grouping and sorting copies against instance and shared workspace budgets before materialization. DML matching inherits memory limits while retaining whole-set semantics; pipelines account for the columns actually evaluated. An independent allocator checks query-thread heap-request peaks and unchanged facts after rejection.
+- Low-level Rust BQ distance, signature-read and raw-store construction APIs return `Result`, covering empty stores, out-of-range rows, oversized dimensions, malformed planes and tail bits. Safe entry points validate geometry before invoking existing distance kernels; new cases join the Miri subset.
 
 - GenerationStore anchors relative paths at construction and resolves default runtime namespaces from canonical roots once they exist. Lease regressions cover construction timing, aliases, working-directory changes and multiple processes. Cooperating processes use consistent root/runtime paths; retire older Reader processes before resuming reclamation after an upgrade.
 - GraphFirst retains a bounded Top-K heap before materializing Payload. Exact retrieval, every reachability mode, neighborhoods and subgraphs admit containers, paths, bitmaps, Metadata and Payload copies through shared workspace reservations. State reservations grow with exploration and unwind correctly on errors.

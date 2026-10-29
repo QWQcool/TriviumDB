@@ -122,12 +122,13 @@ writer.write_all(&checksum.to_le_bytes())?;
 // 恢复
 let computed_crc = crc32fast::hash(&data);
 if stored_crc != computed_crc {
-    tracing::error!("WAL CRC mismatch ... Stopping recovery.");
-    break; // 停止回放，丢弃后续数据
+    return Err(TriviumError::CorruptedFile(
+        "WAL 完整帧 CRC 不匹配 (Complete WAL frame CRC mismatch)".into(),
+    ));
 }
 ```
 
-**保证**：磁盘坏块、OS 写半条记录均可被检测。CRC 不匹配时**停止回放**而非跳过，防止损坏数据静默渗入。
+完整帧的 CRC 或反序列化校验失败、完整长度字段超过单帧上限时，打开返回 `CorruptedFile`，原 WAL 字节保持完整。只有物理未写完的长度、数据或 CRC 尾字段，以及缺少提交封条的尾事务，按已完成提交边界恢复。故障日志可随备份保留供诊断；从经过验证的完整日志或快照恢复后，再验收已确认记录。
 
 ---
 

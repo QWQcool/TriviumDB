@@ -1,8 +1,8 @@
 //! Write-Ahead Log 的版本化格式、写入与崩溃恢复。
 //!
 //! 每条记录采用 `len + bincode + CRC32`，事务通过 Begin/Commit 封条过滤未提交操作。
-//! 恢复只消费连续且校验成功的前缀，遇到截断、CRC 或反序列化错误立即停止，绝不
-//! 跨过损坏边界猜测后续字节。旧版本头只允许持有 Writer 排他锁的打开流程升级；
+//! 物理未写完的尾帧只恢复完整前缀；完整帧的 CRC、长度或解码损坏返回错误并保留日志。
+//! 恢复不跨过损坏边界猜测后续字节。旧版本头只允许持有 Writer 排他锁的打开流程升级；
 //! WAL v2 通过独立历史类型解码并原子转写为 v3，未知非空版本始终 fail-closed。
 
 use crate::error::{Result, TriviumError};
@@ -600,7 +600,8 @@ impl Wal {
     ///
     /// 每条记录都会校验 CRC32：
     ///   - 校验通过 → 回放
-    ///   - 校验失败 / 截断 → 安全停止，丢弃后续残缺数据
+    ///   - 完整帧校验失败 → 返回损坏错误，调用方保留原日志
+    ///   - 尾帧物理截断 → 只恢复完整提交前缀
     pub fn read_entries<T: serde::de::DeserializeOwned>(
         db_path: &str,
     ) -> Result<(Vec<WalEntry<T>>, u64)> {
@@ -796,7 +797,9 @@ impl Wal {
 
             // 合理性检查：单条不超过 256MB
             if len > MAX_WAL_ENTRY_SIZE {
-                break; // 损坏的 len 字段
+                return Err(TriviumError::CorruptedFile(format!(
+                    "WAL 帧长度超过上限，偏移 {physical_offset} (WAL frame length exceeds limit): {len}"
+                )));
             }
 
             // 同时计入帧、事务暂存、JSON 解码及应用副本，准入先于扩容和反序列化。
@@ -839,14 +842,9 @@ impl Wal {
             let computed_crc = crc32fast::hash(&data);
 
             if stored_crc != computed_crc {
-                // CRC 不匹配 → 数据损坏，停止回放
-                tracing::error!(
-                    "WAL CRC 校验不匹配 (CRC mismatch)，第 {} 条记录: 存储={:#010x}, 计算={:#010x}。停止恢复 (Stopping recovery)",
-                    record_count,
-                    stored_crc,
-                    computed_crc
-                );
-                break;
+                return Err(TriviumError::CorruptedFile(format!(
+                    "WAL 完整帧 CRC 不匹配，记录 {record_count}、偏移 {physical_offset} (Complete WAL frame CRC mismatch): stored={stored_crc:#010x}, computed={computed_crc:#010x}"
+                )));
             }
 
             // 成功读取一条物理上合法的记录，推进物理游标
@@ -856,21 +854,13 @@ impl Wal {
 
             // 反序列化
             use bincode::Options;
-            let entry = match bincode::DefaultOptions::new()
+            let entry = bincode::DefaultOptions::new()
                 .with_fixint_encoding()
                 .with_limit(len as u64)
                 .deserialize::<WalEntry<T>>(&data)
-            {
-                Ok(entry) => entry,
-                Err(e) => {
-                    tracing::error!(
-                        "WAL 反序列化错误 (Deserialize error)，第 {} 条记录: {}。停止恢复 (Stopping recovery)",
-                        record_count,
-                        e
-                    );
-                    break;
-                }
-            };
+                .map_err(|error| TriviumError::CorruptedFile(format!(
+                    "WAL 完整帧无法解码，记录 {record_count} (Cannot decode complete WAL frame): {error}"
+                )))?;
             record_count = record_count.saturating_add(1);
             match entry {
                 WalEntry::TxBegin { tx_id } => {
@@ -1124,24 +1114,33 @@ mod streaming_tests {
                     panic!("事务标记不应交付给回放回调");
                 }
                 Ok(())
-            })
-            .unwrap();
-            (ids, offset)
+            });
+            offset.map(|offset| (ids, offset))
         };
         for cut in 0..=bytes.len() {
-            assert_eq!(parse(&bytes[..cut]), expected(cut), "截断位置：{cut}");
+            assert_eq!(
+                parse(&bytes[..cut]).unwrap(),
+                expected(cut),
+                "截断位置：{cut}"
+            );
         }
         let mut start = 0;
         while start < bytes.len() {
             let len = u32::from_le_bytes(bytes[start..start + 4].try_into().unwrap()) as usize;
             let mut corrupted = bytes.clone();
             corrupted[start + 4 + len] ^= 1;
-            assert_eq!(parse(&corrupted), expected(start), "坏帧位置：{start}");
-            // CRC 合法但枚举无法解码时，仍只能保留此前已提交前缀。
+            assert!(
+                matches!(parse(&corrupted), Err(TriviumError::CorruptedFile(_))),
+                "坏帧位置：{start}"
+            );
+            // CRC 合法但完整枚举无法解码时，也必须拒绝整个恢复操作。
             corrupted[start + 4..start + 8].copy_from_slice(&u32::MAX.to_le_bytes());
             let crc = crc32fast::hash(&corrupted[start + 4..start + 4 + len]);
             corrupted[start + 4 + len..start + 8 + len].copy_from_slice(&crc.to_le_bytes());
-            assert_eq!(parse(&corrupted), expected(start));
+            assert!(matches!(
+                parse(&corrupted),
+                Err(TriviumError::CorruptedFile(_))
+            ));
             start += 8 + len;
         }
     }

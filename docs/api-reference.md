@@ -246,6 +246,8 @@ db.set_sync_mode(SyncMode::Off)?;
 
 `flush()` 通过 `.publish` 撤销日志管理主数据、向量、QuIVer、文本、属性与图索引文件组。Mmap 在各文件同步后提交 marker，Rom 在同步后提交日志状态；ReadWrite `open()` 先完成中断恢复，再流式回放 WAL。备份使用有界缓冲，额外磁盘空间与纳入发布的旧文件组大小对应。主文件使用 v10、marker 使用 v3、发布日志使用 v2，并支持读取历史 v1 日志。协议见[恢复说明](security.md#8-mmap-三文件一致性标记flush_ok-v3)。
 
+WAL 的完整帧发生 CRC、解码或超长字段损坏时，`open()` 返回 `CorruptedFile` 并保留完整日志；物理未写完的尾帧继续按提交边界恢复。QuIVer 元数据 v2 将索引绑定到主文件、向量内容及活跃 ID/slot；失配按 `missing_index_policy` 回退或报错。底层 BQ Rust 距离、签名读取和原始存储解码接口返回 `Result`，详见 [QuIVer 边界](quiver.md#索引事实绑定与-bq-边界)。
+
 **泛型类型参数 `T`：**
 
 | 类型 | 说明 | 适用场景 |

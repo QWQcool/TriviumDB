@@ -29,6 +29,8 @@ GraphFirst 与精确检索先对候选评分并保留 Top-K，再为最终 Paylo
 
 ## Rust
 
+TQL 为完整 Payload、向量、邻接边、标签和 Metadata 快照建立查询级预留，返回、分组、DISTINCT 与排序在复制前计算工作区。管线按实际求值列估算，常量、节点 ID 与标量别名保持轻量。DML 匹配继承实例内存预算并完整执行匹配集；读查询的返回行数配置单独生效。预算拒绝发生在事务写入前，失败和完成均归还共享工作区。该准入使用保守峰值估算。
+
 ```rust
 use triviumdb::{Database, ResourceLimits, ResourceRuntime};
 use triviumdb::database::Config;

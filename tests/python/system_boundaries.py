@@ -15,7 +15,7 @@ def run_system_boundaries(root):
             db.link(source, target, label, 1)
         db.set_memory_limit(contract["blocked_quota_mb"])
         assert runtime.stats()["available_foreground_bytes"] == 0
-        for action in [lambda: db.search_exact([1, 0], 1), lambda: db.search_graph_first([1, 0], contract["nodes"], 1), lambda: db.neighbors(1, 2), lambda: db.reachable(1), lambda: db.reachable_detailed(1), lambda: db.query_subgraph(1)]:
+        for action in [lambda: db.search_exact([1, 0], 1), lambda: db.search_graph_first([1, 0], contract["nodes"], 1), lambda: db.neighbors(1, 2), lambda: db.reachable(1), lambda: db.reachable_detailed(1), lambda: db.query_subgraph(1), lambda: db.tql("MATCH (n) RETURN n"), lambda: db.tql_mut("MATCH (n) SET n.touched == true")]:
             try:
                 action()
             except triviumdb.ResourceBudgetError as error:

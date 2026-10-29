@@ -528,15 +528,19 @@ fn write_quiver_meta<T: VectorType>(memtable: &MemTable<T>, db_path: &str) -> st
     let quiver_path = quiver_path_from_db(db_path);
     let quiver_size = std::fs::metadata(&quiver_path)?.len();
     let quiver_crc = file_crc32(&quiver_path)?;
-    let mut bytes = Vec::with_capacity(48);
+    let mut bytes = Vec::with_capacity(60);
     bytes.extend_from_slice(b"QMET");
-    bytes.extend_from_slice(&1u32.to_le_bytes());
+    bytes.extend_from_slice(&2u32.to_le_bytes());
     bytes.extend_from_slice(&tdb_size.to_le_bytes());
     bytes.extend_from_slice(&vec_size.to_le_bytes());
     bytes.extend_from_slice(&quiver_size.to_le_bytes());
     bytes.extend_from_slice(&(memtable.node_count() as u64).to_le_bytes());
     bytes.extend_from_slice(&(memtable.dim() as u32).to_le_bytes());
     bytes.extend_from_slice(&quiver_crc.to_le_bytes());
+    // 主文件绑定节点身份和 slot 映射；分离向量文件绑定完整向量事实。
+    bytes.extend_from_slice(&file_crc32(db_path)?.to_le_bytes());
+    bytes.extend_from_slice(&file_crc32_or_empty(vec_path_from_db(db_path))?.to_le_bytes());
+    bytes.extend_from_slice(&crc32fast::hash(&bytes).to_le_bytes());
     let mut file = File::create(&tmp)?;
     file.write_all(&bytes)?;
     file.sync_all()?;
@@ -544,10 +548,15 @@ fn write_quiver_meta<T: VectorType>(memtable: &MemTable<T>, db_path: &str) -> st
 }
 
 fn validate_quiver_meta<T: VectorType>(memtable: &MemTable<T>, db_path: &str) -> bool {
-    let Ok(bytes) = std::fs::read(quiver_meta_path_from_db(db_path)) else {
+    use std::io::Read;
+    let Ok(mut file) = File::open(quiver_meta_path_from_db(db_path)) else {
         return false;
     };
-    if bytes.len() != 48 || &bytes[0..4] != b"QMET" {
+    let mut bytes = [0u8; 60];
+    if file.metadata().map(|metadata| metadata.len()).ok() != Some(60)
+        || file.read_exact(&mut bytes).is_err()
+        || &bytes[0..4] != b"QMET"
+    {
         return false;
     }
     let read_u64 =
@@ -556,7 +565,17 @@ fn validate_quiver_meta<T: VectorType>(memtable: &MemTable<T>, db_path: &str) ->
     let dim = u32::from_le_bytes(bytes[40..44].try_into().unwrap_or([0; 4])) as usize;
     let quiver_crc = u32::from_le_bytes(bytes[44..48].try_into().unwrap_or([0; 4]));
     let actual_quiver_crc = file_crc32(quiver_path_from_db(db_path)).unwrap_or(u32::MAX);
-    version == 1
+    version == 2
+        && crc32fast::hash(&bytes[..56])
+            == u32::from_le_bytes(bytes[56..60].try_into().unwrap_or([0; 4]))
+        && file_crc32(db_path).ok()
+            == Some(u32::from_le_bytes(
+                bytes[48..52].try_into().unwrap_or([0; 4]),
+            ))
+        && file_crc32_or_empty(vec_path_from_db(db_path)).ok()
+            == Some(u32::from_le_bytes(
+                bytes[52..56].try_into().unwrap_or([0; 4]),
+            ))
         && read_u64(8)
             == std::fs::metadata(db_path)
                 .map(|m| m.len())
@@ -2105,9 +2124,19 @@ fn load_quiver_index<T: VectorType>(
 
     admit_sidecar(memtable, &quiver_path, 8)?;
     match QuIVer::load_from_file(qp) {
-        Ok(quiver) => {
+        Ok(quiver) if quiver.matches_fact_slots(memtable) => {
             memtable.set_quiver_index(quiver);
             memtable.vec_pool_mut().advise_random();
+        }
+        Ok(_) => {
+            if policy == crate::database::MissingIndexPolicy::Error {
+                return Err(TriviumError::ImmutableArtifactInvalid {
+                    reason: "QuIVer ID 与 slot 不匹配 (QuIVer ID/slot mapping mismatch)".into(),
+                });
+            }
+            tracing::warn!(
+                "QuIVer ID 与 slot 不匹配，已拒绝 (QuIVer ID/slot mapping mismatch, rejected)"
+            );
         }
         Err(e) => {
             tracing::warn!(
