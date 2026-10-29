@@ -4289,7 +4289,8 @@
       <span id="statusHealth" class="status-pill" title="引擎整体就绪状态 (来自 /health/details 的 status)" data-i18n-title="status.healthTitle"></span>
       <span id="statusQueue">写队列: 0</span>
       <span id="statusReads">并发读: 0</span>
-      <span id="statusVersion">TriviumDB Server v0.9.0-beta.4</span>
+      <!-- 版本号由 /health/ready 的 version 字段填充；页面内不写死版本，避免每次发版都改这里 -->
+      <span id="statusVersion">TriviumDB Server</span>
     </div>
   </footer>
 
@@ -7087,7 +7088,9 @@ RETURN doc, t</div>
           const data = await res.json();
           connBadge.className = 'status-badge live';
           connText.textContent = t('status.online');
-          document.getElementById('statusVersion').textContent = `TriviumDB Server v${data.version || '0.9.0-beta.4'}`;
+          const versionEl = document.getElementById('statusVersion');
+          // 只信服务端上报的版本；缺失时退化为不带版本号，不写死一个会过期的默认值
+          if (versionEl) versionEl.textContent = data.version ? `TriviumDB Server v${data.version}` : 'TriviumDB Server';
         } else {
           connBadge.className = 'status-badge dead';
           connText.textContent = t('status.degraded');
