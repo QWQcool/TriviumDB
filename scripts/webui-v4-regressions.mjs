@@ -356,6 +356,15 @@ async function waitGsapShell(page) {
   await page.waitForTimeout(300);
 }
 
+async function waitSidebarClosed(page) {
+  await page.waitForFunction(() => {
+    const sidebar = document.querySelector('aside.sidebar');
+    return window.matchMedia('(max-width: 900px)').matches && sidebar
+      && document.getElementById('sidebarMobileBtn')?.getAttribute('aria-expanded') === 'false'
+      && sidebar.getBoundingClientRect().right <= 1;
+  }, null, { timeout: 15000 });
+}
+
 async function sidebarProbe(page) {
   return page.evaluate(() => {
     const sb = document.querySelector('aside.sidebar');
@@ -857,7 +866,7 @@ try {
     await page.screenshot({ path: path.join(OUT, `${theme}-breakpoint-1440.png`) });
 
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.waitForTimeout(600);
+    await waitSidebarClosed(page);
     const small = await sidebarProbe(page);
     report.parts.breakpoint[`${theme}-1440to390`] = small;
     expect(small.expanded === 'false', `${label}: 390 后 aria-expanded=${small.expanded}`);
@@ -904,7 +913,7 @@ try {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.waitForTimeout(400);
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.waitForTimeout(500);
+    await waitSidebarClosed(page);
     const roundTrip = await sidebarProbe(page);
     report.parts.breakpoint[`${theme}-roundtrip`] = roundTrip;
     expect(roundTrip.expanded === 'false', `${label}: 往返后 aria-expanded=${roundTrip.expanded}`);
@@ -923,7 +932,7 @@ try {
     report.parts.breakpoint['reduced-1440'] = before;
     expect(!/transform/.test(before.inline || ''), `${label}: reduced-motion 下不应有 GSAP inline transform (${before.inline})`);
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.waitForTimeout(500);
+    await waitSidebarClosed(page);
     const small = await sidebarProbe(page);
     report.parts.breakpoint['reduced-390'] = small;
     expect(small.expanded === 'false', `${label}: 390 后 aria-expanded=${small.expanded}`);
@@ -2383,12 +2392,24 @@ report.parts.fixAudit = {};
 
     // 批量删除（两步），删掉选中的 2 个
     const selectedIds = await page.evaluate(() => [...gridSelection]);
-    await page.click('#gridSelDeleteBtn');
-    await sleep(250);
-    const armedText = await page.textContent('#gridSelDeleteBtn');
-    expect(/2/.test(armedText), `删除按钮应进入确认态并显示数量：${armedText}`);
-    await page.click('#gridSelDeleteBtn');
-    await sleep(1200);
+    await page.evaluate(() => {
+      window.__batchConfirmClicks = [];
+      document.getElementById('gridSelDeleteBtn').addEventListener('click', () => {
+        queueMicrotask(() => {
+          const button = document.getElementById('gridSelDeleteBtn');
+          window.__batchConfirmClicks.push({ armed: button.dataset.armed, text: button.textContent, time: performance.now() });
+        });
+      });
+    });
+    const deletion = page.waitForResponse(response => response.url().endsWith('/v1/nodes/delete-many') && response.request().method() === 'POST');
+    // 同一次真实指针输入完成两次点击，避免自动化 IPC 延迟耗尽四秒确认窗口。
+    await page.click('#gridSelDeleteBtn', { clickCount: 2, delay: 100 });
+    const deleteResponse = await deletion;
+    const confirmClicks = await page.evaluate(() => window.__batchConfirmClicks);
+    expect(confirmClicks.length === 2 && confirmClicks[0].armed === '1' && /2/.test(confirmClicks[0].text)
+      && confirmClicks[1].time - confirmClicks[0].time < 4000, `必须实际经过四秒内的两步确认：${JSON.stringify(confirmClicks)}`);
+    expect(deleteResponse.status() === 200, `批删请求必须成功：${deleteResponse.status()}`);
+    await page.waitForFunction(() => gridSelection.size === 0 && document.getElementById('gridSelectionBar').hidden, null, { timeout: 15000 });
     const statuses = [];
     for (const id of selectedIds) {
       statuses.push((await fetch(`http://127.0.0.1:${port}/v1/nodes/${id}`)).status);
@@ -2549,17 +2570,22 @@ report.parts.fixAudit = {};
       '提交后节点应被删除');
 
     // TQL 写语句在事务模式下被拦下（不发请求）
+    const blockedWrites = [];
+    const observeBlockedWrite = request => {
+      if (request.method() === 'POST' && request.url().endsWith('/v1/tql')
+          && request.postDataJSON()?.query === 'CREATE (n:person {name: "tx-blocked"})') blockedWrites.push(request.url());
+    };
+    page.on('request', observeBlockedWrite);
     const blocked = await page.evaluate(async () => {
       const mut = document.getElementById('mutationCheck');
       mut.checked = true;
       mut.dispatchEvent(new Event('change', { bubbles: true }));
       setEditorValue('CREATE (n:person {name: "tx-blocked"})');
-      const before = __activeQueryCount;
-      executeCurrentQuery();
-      await new Promise((r) => setTimeout(r, 400));
-      return { pending: __activeQueryCount - before, toast: [...document.querySelectorAll('#toastStack .toast')].map((x) => x.textContent).slice(-1)[0] || '' };
+      await executeCurrentQuery();
+      return { toast: [...document.querySelectorAll('#toastStack .toast')].map((x) => x.textContent).slice(-1)[0] || '' };
     });
-    expect(blocked.pending === 0, `事务模式下 TQL 写语句不应发请求：${JSON.stringify(blocked)}`);
+    page.off('request', observeBlockedWrite);
+    expect(blockedWrites.length === 0, `事务模式下 TQL 写语句不应发请求：${JSON.stringify(blockedWrites)}`);
     expect(/事务|transaction/i.test(blocked.toast), `应给出明确提示：${JSON.stringify(blocked)}`);
 
     // 关闭标签 2 回到一个标签
