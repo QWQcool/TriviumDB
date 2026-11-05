@@ -1,0 +1,29 @@
+{
+  "engine": "triviumdb",
+  "engine_version": "0.9.0",
+  "git_rev": "7edf8ceacd85cd71944a3471ac05df377995a172",
+  "dataset": "sift128",
+  "dim": 128,
+  "threads": 16,
+  "params": {
+    "m": 32,
+    "ef_construction": 128,
+    "k": 10
+  },
+  "repeats": 3,
+  "repeat_index": 3,
+  "train_limit": null,
+  "test_factor": 2,
+  "rerank": null,
+  "wall_seconds": 34.939,
+  "run_id": "tdb-20261104-151633",
+  "host": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "machine": "AMD64",
+    "cpu_logical": 32,
+    "threads_used": 16,
+    "python": "3.12.0",
+    "numpy": "2.5.3",
+    "timestamp_utc": "2026-11-04T07:34:52+00:00"
+  }
+}

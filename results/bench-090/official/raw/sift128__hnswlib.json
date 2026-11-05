@@ -1,0 +1,105 @@
+{
+  "schema_version": 2,
+  "engine": "hnswlib",
+  "engine_version": "0.8.0",
+  "dataset": "sift128",
+  "dim": 128,
+  "n_train": 1000000,
+  "n_test": 20000,
+  "metric": "cosine (l2-normalized, inner product)",
+  "gt_mode": "file",
+  "params": {
+    "M": 32,
+    "ef_construction": 128,
+    "k": 10
+  },
+  "threads": 16,
+  "repeats": 3,
+  "build": {
+    "seconds": 31.178
+  },
+  "memory": {
+    "kind": "estimated",
+    "bytes": 784000000
+  },
+  "points": [
+    {
+      "ef": 10,
+      "recall_at_10": 0.75848,
+      "qps": 173177.26598064645,
+      "latency_ms": 0.005774430000019493
+    },
+    {
+      "ef": 20,
+      "recall_at_10": 0.87339,
+      "qps": 109925.62432231891,
+      "latency_ms": 0.009097060000021884
+    },
+    {
+      "ef": 25,
+      "recall_at_10": 0.90281,
+      "qps": 94740.03334768549,
+      "latency_ms": 0.010555200000089826
+    },
+    {
+      "ef": 30,
+      "recall_at_10": 0.9229,
+      "qps": 82975.63918219805,
+      "latency_ms": 0.012051729999984672
+    },
+    {
+      "ef": 35,
+      "recall_at_10": 0.93697,
+      "qps": 74350.18864560664,
+      "latency_ms": 0.01344986499989318
+    },
+    {
+      "ef": 40,
+      "recall_at_10": 0.94795,
+      "qps": 66455.18411903916,
+      "latency_ms": 0.015047735000007379
+    },
+    {
+      "ef": 80,
+      "recall_at_10": 0.98302,
+      "qps": 37870.29575202192,
+      "latency_ms": 0.026405919999888283
+    },
+    {
+      "ef": 120,
+      "recall_at_10": 0.99146,
+      "qps": 27240.355824456063,
+      "latency_ms": 0.03671023999995668
+    },
+    {
+      "ef": 200,
+      "recall_at_10": 0.99677,
+      "qps": 17796.099059446577,
+      "latency_ms": 0.056192090000149617
+    },
+    {
+      "ef": 400,
+      "recall_at_10": 0.99891,
+      "qps": 9925.590330702118,
+      "latency_ms": 0.10074967499986087
+    },
+    {
+      "ef": 800,
+      "recall_at_10": 0.99916,
+      "qps": 5644.255023245575,
+      "latency_ms": 0.17717130000000908
+    }
+  ],
+  "train_limit": null,
+  "test_factor": 2,
+  "run_id": "base-20261104-172521",
+  "host": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "machine": "AMD64",
+    "cpu_logical": 32,
+    "threads_used": 16,
+    "python": "3.12.0",
+    "numpy": "2.5.3",
+    "timestamp_utc": "2026-11-04T09:39:23+00:00"
+  }
+}

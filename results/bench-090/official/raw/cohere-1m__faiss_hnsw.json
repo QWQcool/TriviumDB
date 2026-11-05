@@ -1,0 +1,105 @@
+{
+  "schema_version": 2,
+  "engine": "faiss_hnsw",
+  "engine_version": "1.15.0",
+  "dataset": "cohere-1m",
+  "dim": 768,
+  "n_train": 1000000,
+  "n_test": 20000,
+  "metric": "cosine (l2-normalized, inner product)",
+  "gt_mode": "file",
+  "params": {
+    "M": 32,
+    "ef_construction": 128,
+    "k": 10
+  },
+  "threads": 16,
+  "repeats": 3,
+  "build": {
+    "seconds": 204.077
+  },
+  "memory": {
+    "kind": "estimated",
+    "bytes": 3344000000
+  },
+  "points": [
+    {
+      "ef": 10,
+      "recall_at_10": 0.7979,
+      "qps": 32091.169729448142,
+      "latency_ms": 0.03116122000010364
+    },
+    {
+      "ef": 20,
+      "recall_at_10": 0.8795000000000001,
+      "qps": 21472.421948593466,
+      "latency_ms": 0.04657136499990883
+    },
+    {
+      "ef": 25,
+      "recall_at_10": 0.8979,
+      "qps": 18502.943494553478,
+      "latency_ms": 0.05404545499986853
+    },
+    {
+      "ef": 30,
+      "recall_at_10": 0.9138000000000001,
+      "qps": 16228.399796981497,
+      "latency_ms": 0.06162037000012788
+    },
+    {
+      "ef": 35,
+      "recall_at_10": 0.9313,
+      "qps": 14187.049437035255,
+      "latency_ms": 0.07048682000004192
+    },
+    {
+      "ef": 40,
+      "recall_at_10": 0.9394,
+      "qps": 12640.507137128932,
+      "latency_ms": 0.07911075000010896
+    },
+    {
+      "ef": 80,
+      "recall_at_10": 0.9735,
+      "qps": 7341.628051537004,
+      "latency_ms": 0.13620957000002817
+    },
+    {
+      "ef": 120,
+      "recall_at_10": 0.9823,
+      "qps": 5030.237006155196,
+      "latency_ms": 0.198797790000026
+    },
+    {
+      "ef": 200,
+      "recall_at_10": 0.9884000000000001,
+      "qps": 3119.8829045544567,
+      "latency_ms": 0.320524850000038
+    },
+    {
+      "ef": 400,
+      "recall_at_10": 0.9935,
+      "qps": 1607.0256332319345,
+      "latency_ms": 0.6222676100000172
+    },
+    {
+      "ef": 800,
+      "recall_at_10": 0.9957,
+      "qps": 861.881498861202,
+      "latency_ms": 1.1602523100000326
+    }
+  ],
+  "train_limit": null,
+  "test_factor": 20,
+  "run_id": "base-20261104-171458",
+  "host": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "machine": "AMD64",
+    "cpu_logical": 32,
+    "threads_used": 16,
+    "python": "3.12.0",
+    "numpy": "2.5.3",
+    "timestamp_utc": "2026-11-04T09:21:29+00:00"
+  }
+}

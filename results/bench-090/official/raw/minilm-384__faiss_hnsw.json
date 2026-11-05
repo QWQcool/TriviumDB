@@ -1,0 +1,111 @@
+{
+  "schema_version": 2,
+  "engine": "faiss_hnsw",
+  "engine_version": "1.15.0",
+  "dataset": "minilm-384",
+  "dim": 384,
+  "n_train": 1000000,
+  "n_test": 20000,
+  "metric": "cosine (l2-normalized, inner product)",
+  "gt_mode": "file",
+  "params": {
+    "M": 32,
+    "ef_construction": 128,
+    "k": 10
+  },
+  "threads": 16,
+  "repeats": 3,
+  "build": {
+    "seconds": 114.678
+  },
+  "memory": {
+    "kind": "estimated",
+    "bytes": 1808000000
+  },
+  "points": [
+    {
+      "ef": 10,
+      "recall_at_10": 0.8677,
+      "qps": 59344.328254984786,
+      "latency_ms": 0.016850809999959894
+    },
+    {
+      "ef": 15,
+      "recall_at_10": 0.9088,
+      "qps": 45906.29469411348,
+      "latency_ms": 0.02178350499998487
+    },
+    {
+      "ef": 20,
+      "recall_at_10": 0.9308,
+      "qps": 38511.81118754745,
+      "latency_ms": 0.025966059999882416
+    },
+    {
+      "ef": 25,
+      "recall_at_10": 0.9464,
+      "qps": 31809.12995179798,
+      "latency_ms": 0.03143751500010694
+    },
+    {
+      "ef": 30,
+      "recall_at_10": 0.9541000000000001,
+      "qps": 28309.02814543337,
+      "latency_ms": 0.03532441999996081
+    },
+    {
+      "ef": 35,
+      "recall_at_10": 0.9635,
+      "qps": 24544.40672243552,
+      "latency_ms": 0.040742479999971694
+    },
+    {
+      "ef": 40,
+      "recall_at_10": 0.9676,
+      "qps": 21891.75882556462,
+      "latency_ms": 0.045679289999861795
+    },
+    {
+      "ef": 80,
+      "recall_at_10": 0.9853,
+      "qps": 12781.154239193222,
+      "latency_ms": 0.07824019500003487
+    },
+    {
+      "ef": 120,
+      "recall_at_10": 0.9913,
+      "qps": 9097.15511489996,
+      "latency_ms": 0.1099244750001162
+    },
+    {
+      "ef": 200,
+      "recall_at_10": 0.995,
+      "qps": 5788.133533281183,
+      "latency_ms": 0.1727672650000386
+    },
+    {
+      "ef": 400,
+      "recall_at_10": 0.9971,
+      "qps": 3096.3837056026728,
+      "latency_ms": 0.3229573900000105
+    },
+    {
+      "ef": 800,
+      "recall_at_10": 0.9985,
+      "qps": 1586.043841947179,
+      "latency_ms": 0.6304995950000375
+    }
+  ],
+  "train_limit": null,
+  "test_factor": 20,
+  "run_id": "base-20261104-182007",
+  "host": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "machine": "AMD64",
+    "cpu_logical": 32,
+    "threads_used": 16,
+    "python": "3.12.0",
+    "numpy": "2.5.3",
+    "timestamp_utc": "2026-11-04T10:23:36+00:00"
+  }
+}

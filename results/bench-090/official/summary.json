@@ -1,0 +1,1526 @@
+{
+  "schema_version": 2,
+  "generated_at": "2026-11-04T10:35:16+00:00",
+  "target_recall": 0.9,
+  "notes": [
+    "QPS/延迟为多次重复的中位数；召回为同组中位数（确定性应一致）",
+    "同召回 QPS 为 recall 轴线性插值，不外推；到不了目标召回记 unreachable",
+    "triviumdb 内存为 hot_bytes；hnswlib/faiss 为官方估算公式，带 * 标注"
+  ],
+  "datasets": {
+    "cohere-1m": {
+      "engines": {
+        "triviumdb": {
+          "version": "0.9.0",
+          "dim": 768,
+          "n_train": 1000000,
+          "n_test": 20000,
+          "threads": 16,
+          "repeats": 3,
+          "build_seconds": 51.0105872,
+          "memory_bytes": 980000000,
+          "memory_kind": "hot_bytes",
+          "points": [
+            {
+              "ef": 10,
+              "recall_at_10": 0.619,
+              "recall_min": 0.6183,
+              "recall_max": 0.6213,
+              "qps": 100806.3499935988,
+              "latency_ms": 0.00992001,
+              "samples": 3
+            },
+            {
+              "ef": 20,
+              "recall_at_10": 0.8246,
+              "recall_min": 0.8223,
+              "recall_max": 0.825,
+              "qps": 64285.055363896805,
+              "latency_ms": 0.015555715000000001,
+              "samples": 3
+            },
+            {
+              "ef": 25,
+              "recall_at_10": 0.8633,
+              "recall_min": 0.8607,
+              "recall_max": 0.8651,
+              "qps": 57419.1581317873,
+              "latency_ms": 0.01741579,
+              "samples": 3
+            },
+            {
+              "ef": 30,
+              "recall_at_10": 0.8886,
+              "recall_min": 0.8867,
+              "recall_max": 0.8887,
+              "qps": 48905.43522780763,
+              "latency_ms": 0.020447625,
+              "samples": 3
+            },
+            {
+              "ef": 35,
+              "recall_at_10": 0.9082,
+              "recall_min": 0.9079,
+              "recall_max": 0.9089,
+              "qps": 43196.842829151305,
+              "latency_ms": 0.023149839999999998,
+              "samples": 3
+            },
+            {
+              "ef": 40,
+              "recall_at_10": 0.9175,
+              "recall_min": 0.9168,
+              "recall_max": 0.9176,
+              "qps": 40020.37036851757,
+              "latency_ms": 0.024987275000000003,
+              "samples": 3
+            },
+            {
+              "ef": 80,
+              "recall_at_10": 0.9583,
+              "recall_min": 0.9579,
+              "recall_max": 0.9588,
+              "qps": 25976.66749748708,
+              "latency_ms": 0.038496085000000006,
+              "samples": 3
+            },
+            {
+              "ef": 120,
+              "recall_at_10": 0.9706,
+              "recall_min": 0.9701,
+              "recall_max": 0.9708,
+              "qps": 19172.374602125295,
+              "latency_ms": 0.052158380000000004,
+              "samples": 3
+            },
+            {
+              "ef": 200,
+              "recall_at_10": 0.9794,
+              "recall_min": 0.9791,
+              "recall_max": 0.9798,
+              "qps": 13412.915739191487,
+              "latency_ms": 0.07455500500000001,
+              "samples": 3
+            },
+            {
+              "ef": 400,
+              "recall_at_10": 0.9864,
+              "recall_min": 0.9863,
+              "recall_max": 0.9867,
+              "qps": 7634.31800003466,
+              "latency_ms": 0.13098747,
+              "samples": 3
+            },
+            {
+              "ef": 800,
+              "recall_at_10": 0.9909,
+              "recall_min": 0.9907,
+              "recall_max": 0.9909,
+              "qps": 4545.5911198059175,
+              "latency_ms": 0.21999338999999998,
+              "samples": 3
+            }
+          ],
+          "at_target": {
+            "reachable": true,
+            "qps": 45585.131485732,
+            "ef_low": 30,
+            "ef_high": 35,
+            "span_recall": 0.019600000000000062,
+            "confidence": "interpolated"
+          },
+          "max_recall": 0.9909,
+          "max_qps": 100806.3499935988
+        },
+        "hnswlib": {
+          "version": "0.8.0",
+          "dim": 768,
+          "n_train": 1000000,
+          "n_test": 20000,
+          "threads": 16,
+          "repeats": 3,
+          "build_seconds": 187.006,
+          "memory_bytes": 3344000000,
+          "memory_kind": "estimated",
+          "points": [
+            {
+              "ef": 10,
+              "recall_at_10": 0.8071,
+              "recall_min": 0.8071,
+              "recall_max": 0.8071,
+              "qps": 33363.15999839521,
+              "latency_ms": 0.02997317999997904,
+              "samples": 1
+            },
+            {
+              "ef": 20,
+              "recall_at_10": 0.8847,
+              "recall_min": 0.8847,
+              "recall_max": 0.8847,
+              "qps": 22216.574275313636,
+              "latency_ms": 0.04501144000005297,
+              "samples": 1
+            },
+            {
+              "ef": 25,
+              "recall_at_10": 0.9082,
+              "recall_min": 0.9082,
+              "recall_max": 0.9082,
+              "qps": 19357.13596462969,
+              "latency_ms": 0.051660534999973605,
+              "samples": 1
+            },
+            {
+              "ef": 30,
+              "recall_at_10": 0.919,
+              "recall_min": 0.919,
+              "recall_max": 0.919,
+              "qps": 16856.15939658028,
+              "latency_ms": 0.05932549499993911,
+              "samples": 1
+            },
+            {
+              "ef": 35,
+              "recall_at_10": 0.9309,
+              "recall_min": 0.9309,
+              "recall_max": 0.9309,
+              "qps": 15108.335072043294,
+              "latency_ms": 0.0661886300000333,
+              "samples": 1
+            },
+            {
+              "ef": 40,
+              "recall_at_10": 0.9417,
+              "recall_min": 0.9417,
+              "recall_max": 0.9417,
+              "qps": 13605.292240989413,
+              "latency_ms": 0.07350081000004138,
+              "samples": 1
+            },
+            {
+              "ef": 80,
+              "recall_at_10": 0.9697,
+              "recall_min": 0.9697,
+              "recall_max": 0.9697,
+              "qps": 7673.330071405239,
+              "latency_ms": 0.13032151499992325,
+              "samples": 1
+            },
+            {
+              "ef": 120,
+              "recall_at_10": 0.9798,
+              "recall_min": 0.9798,
+              "recall_max": 0.9798,
+              "qps": 5310.152182588529,
+              "latency_ms": 0.18831852000002983,
+              "samples": 1
+            },
+            {
+              "ef": 200,
+              "recall_at_10": 0.9875,
+              "recall_min": 0.9875,
+              "recall_max": 0.9875,
+              "qps": 3369.711787034975,
+              "latency_ms": 0.29676128499995685,
+              "samples": 1
+            },
+            {
+              "ef": 400,
+              "recall_at_10": 0.9947,
+              "recall_min": 0.9947,
+              "recall_max": 0.9947,
+              "qps": 1774.413096233231,
+              "latency_ms": 0.5635666250000213,
+              "samples": 1
+            },
+            {
+              "ef": 800,
+              "recall_at_10": 0.9973,
+              "recall_min": 0.9973,
+              "recall_max": 0.9973,
+              "qps": 1002.3140022444387,
+              "latency_ms": 0.997691339999983,
+              "samples": 1
+            }
+          ],
+          "at_target": {
+            "reachable": true,
+            "qps": 20354.897417719407,
+            "ef_low": 20,
+            "ef_high": 25,
+            "span_recall": 0.023499999999999965,
+            "confidence": "interpolated"
+          },
+          "max_recall": 0.9973,
+          "max_qps": 33363.15999839521
+        },
+        "faiss_hnsw": {
+          "version": "1.15.0",
+          "dim": 768,
+          "n_train": 1000000,
+          "n_test": 20000,
+          "threads": 16,
+          "repeats": 3,
+          "build_seconds": 204.077,
+          "memory_bytes": 3344000000,
+          "memory_kind": "estimated",
+          "points": [
+            {
+              "ef": 10,
+              "recall_at_10": 0.7979,
+              "recall_min": 0.7979,
+              "recall_max": 0.7979,
+              "qps": 32091.169729448142,
+              "latency_ms": 0.03116122000010364,
+              "samples": 1
+            },
+            {
+              "ef": 20,
+              "recall_at_10": 0.8795000000000001,
+              "recall_min": 0.8795000000000001,
+              "recall_max": 0.8795000000000001,
+              "qps": 21472.421948593466,
+              "latency_ms": 0.04657136499990883,
+              "samples": 1
+            },
+            {
+              "ef": 25,
+              "recall_at_10": 0.8979,
+              "recall_min": 0.8979,
+              "recall_max": 0.8979,
+              "qps": 18502.943494553478,
+              "latency_ms": 0.05404545499986853,
+              "samples": 1
+            },
+            {
+              "ef": 30,
+              "recall_at_10": 0.9138000000000001,
+              "recall_min": 0.9138000000000001,
+              "recall_max": 0.9138000000000001,
+              "qps": 16228.399796981497,
+              "latency_ms": 0.06162037000012788,
+              "samples": 1
+            },
+            {
+              "ef": 35,
+              "recall_at_10": 0.9313,
+              "recall_min": 0.9313,
+              "recall_max": 0.9313,
+              "qps": 14187.049437035255,
+              "latency_ms": 0.07048682000004192,
+              "samples": 1
+            },
+            {
+              "ef": 40,
+              "recall_at_10": 0.9394,
+              "recall_min": 0.9394,
+              "recall_max": 0.9394,
+              "qps": 12640.507137128932,
+              "latency_ms": 0.07911075000010896,
+              "samples": 1
+            },
+            {
+              "ef": 80,
+              "recall_at_10": 0.9735,
+              "recall_min": 0.9735,
+              "recall_max": 0.9735,
+              "qps": 7341.628051537004,
+              "latency_ms": 0.13620957000002817,
+              "samples": 1
+            },
+            {
+              "ef": 120,
+              "recall_at_10": 0.9823,
+              "recall_min": 0.9823,
+              "recall_max": 0.9823,
+              "qps": 5030.237006155196,
+              "latency_ms": 0.198797790000026,
+              "samples": 1
+            },
+            {
+              "ef": 200,
+              "recall_at_10": 0.9884000000000001,
+              "recall_min": 0.9884000000000001,
+              "recall_max": 0.9884000000000001,
+              "qps": 3119.8829045544567,
+              "latency_ms": 0.320524850000038,
+              "samples": 1
+            },
+            {
+              "ef": 400,
+              "recall_at_10": 0.9935,
+              "recall_min": 0.9935,
+              "recall_max": 0.9935,
+              "qps": 1607.0256332319345,
+              "latency_ms": 0.6222676100000172,
+              "samples": 1
+            },
+            {
+              "ef": 800,
+              "recall_at_10": 0.9957,
+              "recall_min": 0.9957,
+              "recall_max": 0.9957,
+              "qps": 861.881498861202,
+              "latency_ms": 1.1602523100000326,
+              "samples": 1
+            }
+          ],
+          "at_target": {
+            "reachable": true,
+            "qps": 18202.53206279869,
+            "ef_low": 25,
+            "ef_high": 30,
+            "span_recall": 0.015900000000000025,
+            "confidence": "interpolated"
+          },
+          "max_recall": 0.9957,
+          "max_qps": 32091.169729448142
+        }
+      }
+    },
+    "dbpedia-1536": {
+      "engines": {
+        "triviumdb": {
+          "version": "0.9.0",
+          "dim": 1536,
+          "n_train": 990000,
+          "n_test": 20000,
+          "threads": 16,
+          "repeats": 3,
+          "build_seconds": 103.386345,
+          "memory_bytes": 1350360000,
+          "memory_kind": "hot_bytes",
+          "points": [
+            {
+              "ef": 10,
+              "recall_at_10": 0.51876,
+              "recall_min": 0.51474,
+              "recall_max": 0.52298,
+              "qps": 67262.99798580953,
+              "latency_ms": 0.014867014999999999,
+              "samples": 3
+            },
+            {
+              "ef": 20,
+              "recall_at_10": 0.79302,
+              "recall_min": 0.79042,
+              "recall_max": 0.79683,
+              "qps": 40889.20946029106,
+              "latency_ms": 0.024456330000000002,
+              "samples": 3
+            },
+            {
+              "ef": 25,
+              "recall_at_10": 0.84826,
+              "recall_min": 0.84587,
+              "recall_max": 0.8501,
+              "qps": 35278.45193919477,
+              "latency_ms": 0.028345915,
+              "samples": 3
+            },
+            {
+              "ef": 30,
+              "recall_at_10": 0.88427,
+              "recall_min": 0.88251,
+              "recall_max": 0.88521,
+              "qps": 31231.38316768988,
+              "latency_ms": 0.03201907500000001,
+              "samples": 3
+            },
+            {
+              "ef": 35,
+              "recall_at_10": 0.90735,
+              "recall_min": 0.90631,
+              "recall_max": 0.90821,
+              "qps": 27256.382115942928,
+              "latency_ms": 0.036688654999999994,
+              "samples": 3
+            },
+            {
+              "ef": 40,
+              "recall_at_10": 0.9248,
+              "recall_min": 0.92414,
+              "recall_max": 0.92574,
+              "qps": 24945.270077450074,
+              "latency_ms": 0.04008776,
+              "samples": 3
+            },
+            {
+              "ef": 80,
+              "recall_at_10": 0.97157,
+              "recall_min": 0.97149,
+              "recall_max": 0.97204,
+              "qps": 16056.827037705683,
+              "latency_ms": 0.062278805,
+              "samples": 3
+            },
+            {
+              "ef": 120,
+              "recall_at_10": 0.98301,
+              "recall_min": 0.98295,
+              "recall_max": 0.98311,
+              "qps": 13058.407711303156,
+              "latency_ms": 0.076579015,
+              "samples": 3
+            },
+            {
+              "ef": 200,
+              "recall_at_10": 0.99021,
+              "recall_min": 0.99013,
+              "recall_max": 0.99026,
+              "qps": 9541.891863266217,
+              "latency_ms": 0.10480102000000001,
+              "samples": 3
+            },
+            {
+              "ef": 400,
+              "recall_at_10": 0.99493,
+              "recall_min": 0.99479,
+              "recall_max": 0.99496,
+              "qps": 5813.740712222189,
+              "latency_ms": 0.172006295,
+              "samples": 3
+            },
+            {
+              "ef": 800,
+              "recall_at_10": 0.99724,
+              "recall_min": 0.99723,
+              "recall_max": 0.99729,
+              "qps": 3380.4406184617524,
+              "latency_ms": 0.29581942499999997,
+              "samples": 3
+            }
+          ],
+          "at_target": {
+            "reachable": true,
+            "qps": 28522.251168384002,
+            "ef_low": 30,
+            "ef_high": 35,
+            "span_recall": 0.02307999999999999,
+            "confidence": "interpolated"
+          },
+          "max_recall": 0.99724,
+          "max_qps": 67262.99798580953
+        },
+        "hnswlib": {
+          "version": "0.8.0",
+          "dim": 1536,
+          "n_train": 990000,
+          "n_test": 20000,
+          "threads": 16,
+          "repeats": 3,
+          "build_seconds": 409.418,
+          "memory_bytes": 6351840000,
+          "memory_kind": "estimated",
+          "points": [
+            {
+              "ef": 10,
+              "recall_at_10": 0.82367,
+              "recall_min": 0.82367,
+              "recall_max": 0.82367,
+              "qps": 15225.608499057924,
+              "latency_ms": 0.06567881999999371,
+              "samples": 1
+            },
+            {
+              "ef": 15,
+              "recall_at_10": 0.87656,
+              "recall_min": 0.87656,
+              "recall_max": 0.87656,
+              "qps": 12033.08110590544,
+              "latency_ms": 0.08310423500006436,
+              "samples": 1
+            },
+            {
+              "ef": 20,
+              "recall_at_10": 0.9069200000000001,
+              "recall_min": 0.9069200000000001,
+              "recall_max": 0.9069200000000001,
+              "qps": 9832.374725957787,
+              "latency_ms": 0.10170483000001695,
+              "samples": 1
+            },
+            {
+              "ef": 25,
+              "recall_at_10": 0.92516,
+              "recall_min": 0.92516,
+              "recall_max": 0.92516,
+              "qps": 8552.121180477512,
+              "latency_ms": 0.11693005500001163,
+              "samples": 1
+            },
+            {
+              "ef": 30,
+              "recall_at_10": 0.93854,
+              "recall_min": 0.93854,
+              "recall_max": 0.93854,
+              "qps": 7554.466856157388,
+              "latency_ms": 0.13237201499996445,
+              "samples": 1
+            },
+            {
+              "ef": 35,
+              "recall_at_10": 0.9480500000000001,
+              "recall_min": 0.9480500000000001,
+              "recall_max": 0.9480500000000001,
+              "qps": 6742.6629965477205,
+              "latency_ms": 0.14830935499994666,
+              "samples": 1
+            },
+            {
+              "ef": 40,
+              "recall_at_10": 0.95483,
+              "recall_min": 0.95483,
+              "recall_max": 0.95483,
+              "qps": 6196.470242686483,
+              "latency_ms": 0.16138220000011644,
+              "samples": 1
+            },
+            {
+              "ef": 80,
+              "recall_at_10": 0.97899,
+              "recall_min": 0.97899,
+              "recall_max": 0.97899,
+              "qps": 3648.239385210948,
+              "latency_ms": 0.27410481999995684,
+              "samples": 1
+            },
+            {
+              "ef": 120,
+              "recall_at_10": 0.9859,
+              "recall_min": 0.9859,
+              "recall_max": 0.9859,
+              "qps": 2624.8358821371894,
+              "latency_ms": 0.3809761999998955,
+              "samples": 1
+            },
+            {
+              "ef": 200,
+              "recall_at_10": 0.99155,
+              "recall_min": 0.99155,
+              "recall_max": 0.99155,
+              "qps": 1718.9592107656065,
+              "latency_ms": 0.5817473699999027,
+              "samples": 1
+            },
+            {
+              "ef": 400,
+              "recall_at_10": 0.99559,
+              "recall_min": 0.99559,
+              "recall_max": 0.99559,
+              "qps": 954.1385437312141,
+              "latency_ms": 1.048065825000049,
+              "samples": 1
+            },
+            {
+              "ef": 800,
+              "recall_at_10": 0.9975,
+              "recall_min": 0.9975,
+              "recall_max": 0.9975,
+              "qps": 535.7218169107298,
+              "latency_ms": 1.8666404249999686,
+              "samples": 1
+            }
+          ],
+          "at_target": {
+            "reachable": true,
+            "qps": 10333.985007553236,
+            "ef_low": 15,
+            "ef_high": 20,
+            "span_recall": 0.030360000000000054,
+            "confidence": "interpolated"
+          },
+          "max_recall": 0.9975,
+          "max_qps": 15225.608499057924
+        },
+        "faiss_hnsw": {
+          "version": "1.15.0",
+          "dim": 1536,
+          "n_train": 990000,
+          "n_test": 20000,
+          "threads": 16,
+          "repeats": 3,
+          "build_seconds": 387.278,
+          "memory_bytes": 6351840000,
+          "memory_kind": "estimated",
+          "points": [
+            {
+              "ef": 10,
+              "recall_at_10": 0.82635,
+              "recall_min": 0.82635,
+              "recall_max": 0.82635,
+              "qps": 16479.23731452707,
+              "latency_ms": 0.060682420000011915,
+              "samples": 1
+            },
+            {
+              "ef": 15,
+              "recall_at_10": 0.87775,
+              "recall_min": 0.87775,
+              "recall_max": 0.87775,
+              "qps": 12859.376163358507,
+              "latency_ms": 0.07776427000007971,
+              "samples": 1
+            },
+            {
+              "ef": 20,
+              "recall_at_10": 0.90678,
+              "recall_min": 0.90678,
+              "recall_max": 0.90678,
+              "qps": 10785.095063327135,
+              "latency_ms": 0.0927205550000508,
+              "samples": 1
+            },
+            {
+              "ef": 25,
+              "recall_at_10": 0.92503,
+              "recall_min": 0.92503,
+              "recall_max": 0.92503,
+              "qps": 9202.008706472943,
+              "latency_ms": 0.10867192500008968,
+              "samples": 1
+            },
+            {
+              "ef": 30,
+              "recall_at_10": 0.93897,
+              "recall_min": 0.93897,
+              "recall_max": 0.93897,
+              "qps": 8087.582697563588,
+              "latency_ms": 0.12364633999986836,
+              "samples": 1
+            },
+            {
+              "ef": 35,
+              "recall_at_10": 0.94859,
+              "recall_min": 0.94859,
+              "recall_max": 0.94859,
+              "qps": 7155.958936953861,
+              "latency_ms": 0.13974367500013615,
+              "samples": 1
+            },
+            {
+              "ef": 40,
+              "recall_at_10": 0.95575,
+              "recall_min": 0.95575,
+              "recall_max": 0.95575,
+              "qps": 6533.399899967085,
+              "latency_ms": 0.15305966500000068,
+              "samples": 1
+            },
+            {
+              "ef": 80,
+              "recall_at_10": 0.97828,
+              "recall_min": 0.97828,
+              "recall_max": 0.97828,
+              "qps": 3820.8564698133328,
+              "latency_ms": 0.2617214249999961,
+              "samples": 1
+            },
+            {
+              "ef": 120,
+              "recall_at_10": 0.98492,
+              "recall_min": 0.98492,
+              "recall_max": 0.98492,
+              "qps": 2735.732532462928,
+              "latency_ms": 0.36553281000014975,
+              "samples": 1
+            },
+            {
+              "ef": 200,
+              "recall_at_10": 0.99089,
+              "recall_min": 0.99089,
+              "recall_max": 0.99089,
+              "qps": 1737.0389945191023,
+              "latency_ms": 0.5756923150000148,
+              "samples": 1
+            },
+            {
+              "ef": 400,
+              "recall_at_10": 0.99513,
+              "recall_min": 0.99513,
+              "recall_max": 0.99513,
+              "qps": 939.6058652190706,
+              "latency_ms": 1.064276029999928,
+              "samples": 1
+            },
+            {
+              "ef": 800,
+              "recall_at_10": 0.99724,
+              "recall_min": 0.99724,
+              "recall_max": 0.99724,
+              "qps": 472.9612778869069,
+              "latency_ms": 2.1143379949999144,
+              "samples": 1
+            }
+          ],
+          "at_target": {
+            "reachable": true,
+            "qps": 11269.546522445728,
+            "ef_low": 15,
+            "ef_high": 20,
+            "span_recall": 0.02903,
+            "confidence": "interpolated"
+          },
+          "max_recall": 0.99724,
+          "max_qps": 16479.23731452707
+        }
+      }
+    },
+    "minilm-384": {
+      "engines": {
+        "triviumdb": {
+          "version": "0.9.0",
+          "dim": 384,
+          "n_train": 1000000,
+          "n_test": 20000,
+          "threads": 16,
+          "repeats": 3,
+          "build_seconds": 44.5050278,
+          "memory_bytes": 756000000,
+          "memory_kind": "hot_bytes",
+          "points": [
+            {
+              "ef": 10,
+              "recall_at_10": 0.6567,
+              "recall_min": 0.6563,
+              "recall_max": 0.6577,
+              "qps": 206062.35446846214,
+              "latency_ms": 0.0048529,
+              "samples": 3
+            },
+            {
+              "ef": 20,
+              "recall_at_10": 0.8434,
+              "recall_min": 0.8416,
+              "recall_max": 0.8443,
+              "qps": 135153.03378014924,
+              "latency_ms": 0.00739902,
+              "samples": 3
+            },
+            {
+              "ef": 25,
+              "recall_at_10": 0.8825,
+              "recall_min": 0.8813,
+              "recall_max": 0.8827,
+              "qps": 116239.33213529327,
+              "latency_ms": 0.008602940000000002,
+              "samples": 3
+            },
+            {
+              "ef": 30,
+              "recall_at_10": 0.9064,
+              "recall_min": 0.9062,
+              "recall_max": 0.9071,
+              "qps": 103358.69238851086,
+              "latency_ms": 0.009675045,
+              "samples": 3
+            },
+            {
+              "ef": 35,
+              "recall_at_10": 0.923,
+              "recall_min": 0.9228,
+              "recall_max": 0.9238,
+              "qps": 92308.74320723036,
+              "latency_ms": 0.010833210000000001,
+              "samples": 3
+            },
+            {
+              "ef": 40,
+              "recall_at_10": 0.9346,
+              "recall_min": 0.9338,
+              "recall_max": 0.935,
+              "qps": 83790.58554118035,
+              "latency_ms": 0.011934515,
+              "samples": 3
+            },
+            {
+              "ef": 80,
+              "recall_at_10": 0.9708,
+              "recall_min": 0.9707,
+              "recall_max": 0.9709,
+              "qps": 51394.367742633454,
+              "latency_ms": 0.019457385,
+              "samples": 3
+            },
+            {
+              "ef": 120,
+              "recall_at_10": 0.9809,
+              "recall_min": 0.9809,
+              "recall_max": 0.981,
+              "qps": 40397.054569957196,
+              "latency_ms": 0.02475428,
+              "samples": 3
+            },
+            {
+              "ef": 200,
+              "recall_at_10": 0.9874,
+              "recall_min": 0.9872,
+              "recall_max": 0.9874,
+              "qps": 29586.739814949735,
+              "latency_ms": 0.033798925,
+              "samples": 3
+            },
+            {
+              "ef": 400,
+              "recall_at_10": 0.9914,
+              "recall_min": 0.9914,
+              "recall_max": 0.9914,
+              "qps": 18004.524356925653,
+              "latency_ms": 0.055541595,
+              "samples": 3
+            },
+            {
+              "ef": 800,
+              "recall_at_10": 0.9932,
+              "recall_min": 0.9931,
+              "recall_max": 0.9932,
+              "qps": 10120.27798581977,
+              "latency_ms": 0.098811515,
+              "samples": 3
+            }
+          ],
+          "at_target": {
+            "reachable": true,
+            "qps": 106807.90135836051,
+            "ef_low": 25,
+            "ef_high": 30,
+            "span_recall": 0.023900000000000032,
+            "confidence": "interpolated"
+          },
+          "max_recall": 0.9932,
+          "max_qps": 206062.35446846214
+        },
+        "hnswlib": {
+          "version": "0.8.0",
+          "dim": 384,
+          "n_train": 1000000,
+          "n_test": 20000,
+          "threads": 16,
+          "repeats": 3,
+          "build_seconds": 117.205,
+          "memory_bytes": 1808000000,
+          "memory_kind": "estimated",
+          "points": [
+            {
+              "ef": 10,
+              "recall_at_10": 0.8594,
+              "recall_min": 0.8594,
+              "recall_max": 0.8594,
+              "qps": 53481.91321894163,
+              "latency_ms": 0.01869791000008263,
+              "samples": 1
+            },
+            {
+              "ef": 15,
+              "recall_at_10": 0.9019,
+              "recall_min": 0.9019,
+              "recall_max": 0.9019,
+              "qps": 44080.03965419952,
+              "latency_ms": 0.022686005000105067,
+              "samples": 1
+            },
+            {
+              "ef": 20,
+              "recall_at_10": 0.9256,
+              "recall_min": 0.9256,
+              "recall_max": 0.9256,
+              "qps": 36901.43111137558,
+              "latency_ms": 0.02709921999994549,
+              "samples": 1
+            },
+            {
+              "ef": 25,
+              "recall_at_10": 0.9407,
+              "recall_min": 0.9407,
+              "recall_max": 0.9407,
+              "qps": 31522.904621333186,
+              "latency_ms": 0.03172296499997174,
+              "samples": 1
+            },
+            {
+              "ef": 30,
+              "recall_at_10": 0.9487,
+              "recall_min": 0.9487,
+              "recall_max": 0.9487,
+              "qps": 26405.871715271573,
+              "latency_ms": 0.037870364999980664,
+              "samples": 1
+            },
+            {
+              "ef": 35,
+              "recall_at_10": 0.9573,
+              "recall_min": 0.9573,
+              "recall_max": 0.9573,
+              "qps": 23612.307631933323,
+              "latency_ms": 0.042350795000129435,
+              "samples": 1
+            },
+            {
+              "ef": 40,
+              "recall_at_10": 0.9657,
+              "recall_min": 0.9657,
+              "recall_max": 0.9657,
+              "qps": 21803.098830835537,
+              "latency_ms": 0.04586503999998968,
+              "samples": 1
+            },
+            {
+              "ef": 80,
+              "recall_at_10": 0.9834,
+              "recall_min": 0.9834,
+              "recall_max": 0.9834,
+              "qps": 12320.119327740253,
+              "latency_ms": 0.08116804500004945,
+              "samples": 1
+            },
+            {
+              "ef": 120,
+              "recall_at_10": 0.9891,
+              "recall_min": 0.9891,
+              "recall_max": 0.9891,
+              "qps": 8601.213837699455,
+              "latency_ms": 0.11626266000002944,
+              "samples": 1
+            },
+            {
+              "ef": 200,
+              "recall_at_10": 0.9946,
+              "recall_min": 0.9946,
+              "recall_max": 0.9946,
+              "qps": 5830.8573812274135,
+              "latency_ms": 0.1715013649998582,
+              "samples": 1
+            },
+            {
+              "ef": 400,
+              "recall_at_10": 0.9968,
+              "recall_min": 0.9968,
+              "recall_max": 0.9968,
+              "qps": 3158.487219174092,
+              "latency_ms": 0.31660726499994785,
+              "samples": 1
+            },
+            {
+              "ef": 800,
+              "recall_at_10": 0.9991,
+              "recall_min": 0.9991,
+              "recall_max": 0.9991,
+              "qps": 1784.6808439632437,
+              "latency_ms": 0.5603242749999481,
+              "samples": 1
+            }
+          ],
+          "at_target": {
+            "reachable": true,
+            "qps": 44500.35870768211,
+            "ef_low": 10,
+            "ef_high": 15,
+            "span_recall": 0.04249999999999998,
+            "confidence": "interpolated"
+          },
+          "max_recall": 0.9991,
+          "max_qps": 53481.91321894163
+        },
+        "faiss_hnsw": {
+          "version": "1.15.0",
+          "dim": 384,
+          "n_train": 1000000,
+          "n_test": 20000,
+          "threads": 16,
+          "repeats": 3,
+          "build_seconds": 114.678,
+          "memory_bytes": 1808000000,
+          "memory_kind": "estimated",
+          "points": [
+            {
+              "ef": 10,
+              "recall_at_10": 0.8677,
+              "recall_min": 0.8677,
+              "recall_max": 0.8677,
+              "qps": 59344.328254984786,
+              "latency_ms": 0.016850809999959894,
+              "samples": 1
+            },
+            {
+              "ef": 15,
+              "recall_at_10": 0.9088,
+              "recall_min": 0.9088,
+              "recall_max": 0.9088,
+              "qps": 45906.29469411348,
+              "latency_ms": 0.02178350499998487,
+              "samples": 1
+            },
+            {
+              "ef": 20,
+              "recall_at_10": 0.9308,
+              "recall_min": 0.9308,
+              "recall_max": 0.9308,
+              "qps": 38511.81118754745,
+              "latency_ms": 0.025966059999882416,
+              "samples": 1
+            },
+            {
+              "ef": 25,
+              "recall_at_10": 0.9464,
+              "recall_min": 0.9464,
+              "recall_max": 0.9464,
+              "qps": 31809.12995179798,
+              "latency_ms": 0.03143751500010694,
+              "samples": 1
+            },
+            {
+              "ef": 30,
+              "recall_at_10": 0.9541000000000001,
+              "recall_min": 0.9541000000000001,
+              "recall_max": 0.9541000000000001,
+              "qps": 28309.02814543337,
+              "latency_ms": 0.03532441999996081,
+              "samples": 1
+            },
+            {
+              "ef": 35,
+              "recall_at_10": 0.9635,
+              "recall_min": 0.9635,
+              "recall_max": 0.9635,
+              "qps": 24544.40672243552,
+              "latency_ms": 0.040742479999971694,
+              "samples": 1
+            },
+            {
+              "ef": 40,
+              "recall_at_10": 0.9676,
+              "recall_min": 0.9676,
+              "recall_max": 0.9676,
+              "qps": 21891.75882556462,
+              "latency_ms": 0.045679289999861795,
+              "samples": 1
+            },
+            {
+              "ef": 80,
+              "recall_at_10": 0.9853,
+              "recall_min": 0.9853,
+              "recall_max": 0.9853,
+              "qps": 12781.154239193222,
+              "latency_ms": 0.07824019500003487,
+              "samples": 1
+            },
+            {
+              "ef": 120,
+              "recall_at_10": 0.9913,
+              "recall_min": 0.9913,
+              "recall_max": 0.9913,
+              "qps": 9097.15511489996,
+              "latency_ms": 0.1099244750001162,
+              "samples": 1
+            },
+            {
+              "ef": 200,
+              "recall_at_10": 0.995,
+              "recall_min": 0.995,
+              "recall_max": 0.995,
+              "qps": 5788.133533281183,
+              "latency_ms": 0.1727672650000386,
+              "samples": 1
+            },
+            {
+              "ef": 400,
+              "recall_at_10": 0.9971,
+              "recall_min": 0.9971,
+              "recall_max": 0.9971,
+              "qps": 3096.3837056026728,
+              "latency_ms": 0.3229573900000105,
+              "samples": 1
+            },
+            {
+              "ef": 800,
+              "recall_at_10": 0.9985,
+              "recall_min": 0.9985,
+              "recall_max": 0.9985,
+              "qps": 1586.043841947179,
+              "latency_ms": 0.6304995950000375,
+              "samples": 1
+            }
+          ],
+          "at_target": {
+            "reachable": true,
+            "qps": 48783.53788962851,
+            "ef_low": 10,
+            "ef_high": 15,
+            "span_recall": 0.041100000000000025,
+            "confidence": "interpolated"
+          },
+          "max_recall": 0.9985,
+          "max_qps": 59344.328254984786
+        }
+      }
+    },
+    "sift128": {
+      "engines": {
+        "triviumdb": {
+          "version": "0.9.0",
+          "dim": 128,
+          "n_train": 1000000,
+          "n_test": 20000,
+          "threads": 16,
+          "repeats": 3,
+          "build_seconds": 26.4622258,
+          "memory_bytes": 628000000,
+          "memory_kind": "hot_bytes",
+          "points": [
+            {
+              "ef": 10,
+              "recall_at_10": 0.05427,
+              "recall_min": 0.04515,
+              "recall_max": 0.05452,
+              "qps": 345100.09628292685,
+              "latency_ms": 0.00289771,
+              "samples": 3
+            },
+            {
+              "ef": 20,
+              "recall_at_10": 0.10312,
+              "recall_min": 0.09743,
+              "recall_max": 0.10425,
+              "qps": 206181.10329570185,
+              "latency_ms": 0.0048501049999999995,
+              "samples": 3
+            },
+            {
+              "ef": 25,
+              "recall_at_10": 0.12188,
+              "recall_min": 0.11824,
+              "recall_max": 0.12353,
+              "qps": 176369.79808303667,
+              "latency_ms": 0.005669905,
+              "samples": 3
+            },
+            {
+              "ef": 30,
+              "recall_at_10": 0.13874,
+              "recall_min": 0.13688,
+              "recall_max": 0.14059,
+              "qps": 150377.18357069118,
+              "latency_ms": 0.006649945,
+              "samples": 3
+            },
+            {
+              "ef": 35,
+              "recall_at_10": 0.15474,
+              "recall_min": 0.15424,
+              "recall_max": 0.15642,
+              "qps": 133281.62006474822,
+              "latency_ms": 0.007502910000000001,
+              "samples": 3
+            },
+            {
+              "ef": 40,
+              "recall_at_10": 0.16982,
+              "recall_min": 0.1689,
+              "recall_max": 0.17106,
+              "qps": 116295.90562819851,
+              "latency_ms": 0.008598755,
+              "samples": 3
+            },
+            {
+              "ef": 80,
+              "recall_at_10": 0.23684,
+              "recall_min": 0.23677,
+              "recall_max": 0.23795,
+              "qps": 72586.53403655167,
+              "latency_ms": 0.013776659999999998,
+              "samples": 3
+            },
+            {
+              "ef": 120,
+              "recall_at_10": 0.25477,
+              "recall_min": 0.254,
+              "recall_max": 0.25478,
+              "qps": 55861.25628055087,
+              "latency_ms": 0.017901495,
+              "samples": 3
+            },
+            {
+              "ef": 200,
+              "recall_at_10": 0.27289,
+              "recall_min": 0.27254,
+              "recall_max": 0.27342,
+              "qps": 38480.963948146906,
+              "latency_ms": 0.025986875,
+              "samples": 3
+            },
+            {
+              "ef": 400,
+              "recall_at_10": 0.29033,
+              "recall_min": 0.29,
+              "recall_max": 0.29073,
+              "qps": 21746.285435436203,
+              "latency_ms": 0.04598486500000001,
+              "samples": 3
+            },
+            {
+              "ef": 800,
+              "recall_at_10": 0.30099,
+              "recall_min": 0.30072,
+              "recall_max": 0.30114,
+              "qps": 12456.990682544678,
+              "latency_ms": 0.08027621,
+              "samples": 3
+            }
+          ],
+          "at_target": {
+            "reachable": false,
+            "max_recall": 0.30099,
+            "max_recall_ef": 800,
+            "reason": "本次扫描到的最高召回 0.3010 < 0.90（可加大 ef 后重跑）"
+          },
+          "max_recall": 0.30099,
+          "max_qps": 345100.09628292685
+        },
+        "hnswlib": {
+          "version": "0.8.0",
+          "dim": 128,
+          "n_train": 1000000,
+          "n_test": 20000,
+          "threads": 16,
+          "repeats": 3,
+          "build_seconds": 31.178,
+          "memory_bytes": 784000000,
+          "memory_kind": "estimated",
+          "points": [
+            {
+              "ef": 10,
+              "recall_at_10": 0.75848,
+              "recall_min": 0.75848,
+              "recall_max": 0.75848,
+              "qps": 173177.26598064645,
+              "latency_ms": 0.005774430000019493,
+              "samples": 1
+            },
+            {
+              "ef": 20,
+              "recall_at_10": 0.87339,
+              "recall_min": 0.87339,
+              "recall_max": 0.87339,
+              "qps": 109925.62432231891,
+              "latency_ms": 0.009097060000021884,
+              "samples": 1
+            },
+            {
+              "ef": 25,
+              "recall_at_10": 0.90281,
+              "recall_min": 0.90281,
+              "recall_max": 0.90281,
+              "qps": 94740.03334768549,
+              "latency_ms": 0.010555200000089826,
+              "samples": 1
+            },
+            {
+              "ef": 30,
+              "recall_at_10": 0.9229,
+              "recall_min": 0.9229,
+              "recall_max": 0.9229,
+              "qps": 82975.63918219805,
+              "latency_ms": 0.012051729999984672,
+              "samples": 1
+            },
+            {
+              "ef": 35,
+              "recall_at_10": 0.93697,
+              "recall_min": 0.93697,
+              "recall_max": 0.93697,
+              "qps": 74350.18864560664,
+              "latency_ms": 0.01344986499989318,
+              "samples": 1
+            },
+            {
+              "ef": 40,
+              "recall_at_10": 0.94795,
+              "recall_min": 0.94795,
+              "recall_max": 0.94795,
+              "qps": 66455.18411903916,
+              "latency_ms": 0.015047735000007379,
+              "samples": 1
+            },
+            {
+              "ef": 80,
+              "recall_at_10": 0.98302,
+              "recall_min": 0.98302,
+              "recall_max": 0.98302,
+              "qps": 37870.29575202192,
+              "latency_ms": 0.026405919999888283,
+              "samples": 1
+            },
+            {
+              "ef": 120,
+              "recall_at_10": 0.99146,
+              "recall_min": 0.99146,
+              "recall_max": 0.99146,
+              "qps": 27240.355824456063,
+              "latency_ms": 0.03671023999995668,
+              "samples": 1
+            },
+            {
+              "ef": 200,
+              "recall_at_10": 0.99677,
+              "recall_min": 0.99677,
+              "recall_max": 0.99677,
+              "qps": 17796.099059446577,
+              "latency_ms": 0.056192090000149617,
+              "samples": 1
+            },
+            {
+              "ef": 400,
+              "recall_at_10": 0.99891,
+              "recall_min": 0.99891,
+              "recall_max": 0.99891,
+              "qps": 9925.590330702118,
+              "latency_ms": 0.10074967499986087,
+              "samples": 1
+            },
+            {
+              "ef": 800,
+              "recall_at_10": 0.99916,
+              "recall_min": 0.99916,
+              "recall_max": 0.99916,
+              "qps": 5644.255023245575,
+              "latency_ms": 0.17717130000000908,
+              "samples": 1
+            }
+          ],
+          "at_target": {
+            "reachable": true,
+            "qps": 96190.45859033402,
+            "ef_low": 20,
+            "ef_high": 25,
+            "span_recall": 0.02942,
+            "confidence": "interpolated"
+          },
+          "max_recall": 0.99916,
+          "max_qps": 173177.26598064645
+        },
+        "faiss_hnsw": {
+          "version": "1.15.0",
+          "dim": 128,
+          "n_train": 1000000,
+          "n_test": 20000,
+          "threads": 16,
+          "repeats": 3,
+          "build_seconds": 34.254,
+          "memory_bytes": 784000000,
+          "memory_kind": "estimated",
+          "points": [
+            {
+              "ef": 10,
+              "recall_at_10": 0.76183,
+              "recall_min": 0.76183,
+              "recall_max": 0.76183,
+              "qps": 161069.37177320404,
+              "latency_ms": 0.006208504999995057,
+              "samples": 1
+            },
+            {
+              "ef": 20,
+              "recall_at_10": 0.8772800000000001,
+              "recall_min": 0.8772800000000001,
+              "recall_max": 0.8772800000000001,
+              "qps": 105721.20894390794,
+              "latency_ms": 0.009458839999933842,
+              "samples": 1
+            },
+            {
+              "ef": 25,
+              "recall_at_10": 0.9052,
+              "recall_min": 0.9052,
+              "recall_max": 0.9052,
+              "qps": 88348.93943758267,
+              "latency_ms": 0.011318754999956581,
+              "samples": 1
+            },
+            {
+              "ef": 30,
+              "recall_at_10": 0.92478,
+              "recall_min": 0.92478,
+              "recall_max": 0.92478,
+              "qps": 81151.1122981941,
+              "latency_ms": 0.012322689999928117,
+              "samples": 1
+            },
+            {
+              "ef": 35,
+              "recall_at_10": 0.93816,
+              "recall_min": 0.93816,
+              "recall_max": 0.93816,
+              "qps": 75112.34929603286,
+              "latency_ms": 0.013313390000075743,
+              "samples": 1
+            },
+            {
+              "ef": 40,
+              "recall_at_10": 0.94906,
+              "recall_min": 0.94906,
+              "recall_max": 0.94906,
+              "qps": 67574.75879980977,
+              "latency_ms": 0.014798425000117278,
+              "samples": 1
+            },
+            {
+              "ef": 80,
+              "recall_at_10": 0.98429,
+              "recall_min": 0.98429,
+              "recall_max": 0.98429,
+              "qps": 37763.21670107734,
+              "latency_ms": 0.026480794999952196,
+              "samples": 1
+            },
+            {
+              "ef": 120,
+              "recall_at_10": 0.99251,
+              "recall_min": 0.99251,
+              "recall_max": 0.99251,
+              "qps": 27939.621918127035,
+              "latency_ms": 0.035791465000147585,
+              "samples": 1
+            },
+            {
+              "ef": 200,
+              "recall_at_10": 0.99733,
+              "recall_min": 0.99733,
+              "recall_max": 0.99733,
+              "qps": 17646.755714555806,
+              "latency_ms": 0.056667639999977835,
+              "samples": 1
+            },
+            {
+              "ef": 400,
+              "recall_at_10": 0.99912,
+              "recall_min": 0.99912,
+              "recall_max": 0.99912,
+              "qps": 9588.852537022141,
+              "latency_ms": 0.10428776499993547,
+              "samples": 1
+            },
+            {
+              "ef": 800,
+              "recall_at_10": 0.99938,
+              "recall_min": 0.99938,
+              "recall_max": 0.99938,
+              "qps": 4725.2367001027405,
+              "latency_ms": 0.211629609999909,
+              "samples": 1
+            }
+          ],
+          "at_target": {
+            "reachable": true,
+            "qps": 91584.4624115401,
+            "ef_low": 20,
+            "ef_high": 25,
+            "span_recall": 0.027919999999999945,
+            "confidence": "interpolated"
+          },
+          "max_recall": 0.99938,
+          "max_qps": 161069.37177320404
+        }
+      }
+    }
+  }
+}
