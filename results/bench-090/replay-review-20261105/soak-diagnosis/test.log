@@ -1,0 +1,26 @@
+warning: linker stdout: 正在创建库 <WORKSPACE>\.bench090\target\release\deps\triviumdb.dll.lib 和对象 <WORKSPACE>\.bench090\target\release\deps\triviumdb.dll.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `triviumdb` (lib) generated 1 warning
+   Compiling triviumdb v0.9.0 (<WORKTREE>)
+    Finished `release` profile [optimized] target(s) in 25.67s
+     Running tests\long_running\main.rs (<WORKSPACE>\.bench090\target\release\deps\long_running-bf0edd00e35c2c62.exe)
+
+running 1 test
+test soak::SOAK_01_连续运行5分钟_RSS增长有界 ...   浸泡测试完成: 476 轮
+  内存: initial=13MB, peak=51MB, final=51MB
+
+thread 'soak::SOAK_01_连续运行5分钟_RSS增长有界' (56220) panicked at tests\long_running\soak.rs:153:5:
+RSS 增长超限：初始=13MiB，最终=51MiB
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    soak::SOAK_01_连续运行5分钟_RSS增长有界
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 11 filtered out; finished in 302.02s
+
+error: test failed, to rerun pass `--test long_running`

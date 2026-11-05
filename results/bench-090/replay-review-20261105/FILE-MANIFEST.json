@@ -1,0 +1,167 @@
+{
+  "note": "Source hashes identify local originals; published hashes identify the path/user-redacted copies. Raw originals remain local.",
+  "files": [
+    {
+      "file": "p1p6/run.json",
+      "source_sha256": "14a7d618c40bb2468e49a958527b84f427b0d148b198cd18adfc5ef220b7bdf4",
+      "published_sha256": "983c6e8e13e0621a84938da4df4442d49ea48c29d1df778320cacd87772d8d3f",
+      "redacted": true
+    },
+    {
+      "file": "p1p6/worktree-setup.log",
+      "source_sha256": "8c4701d447732d7980697e3f5a69f2c683d336ea2418f43feaa92f1b694230e6",
+      "published_sha256": "8c4701d447732d7980697e3f5a69f2c683d336ea2418f43feaa92f1b694230e6",
+      "redacted": false
+    },
+    {
+      "file": "p1p6/pipeline-gate-historical.patch",
+      "source_sha256": "3eb240b43e3fa60e487d49ee16446f6f603b58fe2c13a7a9472461714d0b3f21",
+      "published_sha256": "3eb240b43e3fa60e487d49ee16446f6f603b58fe2c13a7a9472461714d0b3f21",
+      "redacted": false
+    },
+    {
+      "file": "p1p6/logs/p1_clean_200k.log",
+      "source_sha256": "de4baa2aed58f33a4aa939cbf4be68591e1dd792e29af3331d3873740f6fb9c5",
+      "published_sha256": "7c6f2db516f2121ab677f6e72c7799a56b89bb0b1e66d5878642991ec6dcff37",
+      "redacted": true
+    },
+    {
+      "file": "p1p6/logs/p1_clean_20k.log",
+      "source_sha256": "5e6ff8d19086252a5d3f3ae2fff3b2ec1dff8f276da6138fe5c82cb01d962037",
+      "published_sha256": "6ad8813d7a3006fcc2bc349404e6b2f970667af8d79d7feb1634b863da1ea437",
+      "redacted": true
+    },
+    {
+      "file": "p1p6/logs/p1_patched_200k.log",
+      "source_sha256": "b899fe566b1de60ba82e788474361e886d49add075c179688ee3d1455a0de319",
+      "published_sha256": "f42f00634bff20d84dc1d7892bb25da0f624f3063a2614ea1a368a5b4644ce64",
+      "redacted": true
+    },
+    {
+      "file": "p1p6/logs/p1_patched_20k.log",
+      "source_sha256": "f25f2f55f9e5dedef779a475595cf6e46dfbc86300877d9d0f23b663251795d0",
+      "published_sha256": "bba32a1d7d6f51530ff2dae049d5d254e442e295ebc0a4c095e21cbfa5ec8011",
+      "redacted": true
+    },
+    {
+      "file": "p1p6/logs/p2_indexes_leiden.log",
+      "source_sha256": "b5750d1684205f8182d15376686e442d818ec32d5204118da21bd4abad20dfe8",
+      "published_sha256": "8936802a34ba0eb010a8021ccb5d6b984dbe18678cc796ba5732dcb7f6f4502d",
+      "redacted": true
+    },
+    {
+      "file": "p1p6/logs/p3_deep_traversal.log",
+      "source_sha256": "601333a55914721fb0a845da32b7598ff2d1add5cd1325b4a10251c2f8fd6500",
+      "published_sha256": "296793df4f65ffe5d2fdbebaff6d8bfd38c62f6e4422d19e4146d7ff33c6b984",
+      "redacted": true
+    },
+    {
+      "file": "p1p6/logs/p3_graph_parallel.log",
+      "source_sha256": "45751bf7f65ec1434ebf92ae56b6f7bc486e3871cbb7ab336fe77c65901dde3a",
+      "published_sha256": "eb4b50e4ab68de62760945a4a201915e417c057f083fed4b649b9929a6db011b",
+      "redacted": true
+    },
+    {
+      "file": "p1p6/logs/p4_fault_debug_without_allocator.log",
+      "source_sha256": "0342ea718e5615e63ee65fc506d4bd539edd6dff7c3f14a842d77cca8836c992",
+      "published_sha256": "0ec418c39a9c5edee355d40d343780e9498ec6f586f44b06f2a5f76b86c6c357",
+      "redacted": true
+    },
+    {
+      "file": "p1p6/logs/p4_fault_release_all.log",
+      "source_sha256": "4b7157ea79fa5407de6ea41047125f67860a39aac1eaf66fc52108286d473b04",
+      "published_sha256": "28bd86eb374b3de876b458a71b007ba5e58cd4b45bead2f4dd38f4dae0aa3c97",
+      "redacted": true
+    },
+    {
+      "file": "p1p6/logs/p5_soak.log",
+      "source_sha256": "62ccb38dc34a0cafbde801929f4bb7896b3641d4cb1aa662e4a626ea203ff2e0",
+      "published_sha256": "6e6cb98729208d9e3f15f073b88156a42c7feaca050a68687406711ceec8aa76",
+      "redacted": true
+    },
+    {
+      "file": "p1p6/logs/p6_concurrency.log",
+      "source_sha256": "af22ec1059a1cd10079644fc0da3a3eba2050f18857d3cc8f7b51c9607ee4e57",
+      "published_sha256": "a1954a4eb4bfdbe7c0bce3c850faa09ce1c49a4806cb16bd711e808ecb959585",
+      "redacted": true
+    },
+    {
+      "file": "p1p6/logs/p6_query_parallel.log",
+      "source_sha256": "d7dec941504455b1082ef353e75cc6e611701ab7b4254c849b38d3c6fb8e0af6",
+      "published_sha256": "9ae9fcc5da45bea1c9ba9dd375aef7eee4ed5849476111b3366c30fa49e7a2cf",
+      "redacted": true
+    },
+    {
+      "file": "p1p6/reports/p1_patched_200k.json",
+      "source_sha256": "f57904455f523ec9cee8477d1a3d72943158f79a7484dc18bedb24a08ebbc2ea",
+      "published_sha256": "f57904455f523ec9cee8477d1a3d72943158f79a7484dc18bedb24a08ebbc2ea",
+      "redacted": false
+    },
+    {
+      "file": "p1p6/reports/p1_patched_20k.json",
+      "source_sha256": "00351a37ec3b26a156d45608c55cd90a418281986ee7b9d75187849952f69a6e",
+      "published_sha256": "00351a37ec3b26a156d45608c55cd90a418281986ee7b9d75187849952f69a6e",
+      "redacted": false
+    },
+    {
+      "file": "p1p6/reports/p3_deep_traversal.json",
+      "source_sha256": "d278120e836874bc7b2634a6c679c0c3bf5c9621fac1c00cfac9a66cc7051d15",
+      "published_sha256": "d278120e836874bc7b2634a6c679c0c3bf5c9621fac1c00cfac9a66cc7051d15",
+      "redacted": false
+    },
+    {
+      "file": "p1p6/reports/p3_graph_parallel.json",
+      "source_sha256": "19c0aaa36a45648ed9763910225a42a0635e22866fcf5cead8a0b7a62b1e1bec",
+      "published_sha256": "19c0aaa36a45648ed9763910225a42a0635e22866fcf5cead8a0b7a62b1e1bec",
+      "redacted": false
+    },
+    {
+      "file": "p1p6/reports/p6_query_parallel.json",
+      "source_sha256": "55329b5648b0ae79da57cbeca2a9af471da7c8d6f296ff0c44fd2ad678d799f9",
+      "published_sha256": "55329b5648b0ae79da57cbeca2a9af471da7c8d6f296ff0c44fd2ad678d799f9",
+      "redacted": false
+    },
+    {
+      "file": "allocator-debug-extra/fault_allocator_debug.log",
+      "source_sha256": "de99db7c066e7dcd648354866e924df4314e3710478565d1d3b06fce1a967aec",
+      "published_sha256": "861db0a9e913373d6f440f6ddbc2110c061903a9174c1f67e874c44160558e7f",
+      "redacted": true
+    },
+    {
+      "file": "allocator-debug-extra/gate.jsonl",
+      "source_sha256": "21f2b6e5456582327d7bee9687cdb767b0a9c578c326a9f273e9174df5a3ae56",
+      "published_sha256": "21f2b6e5456582327d7bee9687cdb767b0a9c578c326a9f273e9174df5a3ae56",
+      "redacted": false
+    },
+    {
+      "file": "allocator-debug-extra/result.json",
+      "source_sha256": "1a0cfa8c1c940b59a5c9d3e53d1fa6dcea9ea860a8dcd9a8350e7508021b6b36",
+      "published_sha256": "6ee11970517c6e3dd8a53a553e97c1f4a71d737af47bb6b123bdfc0a75a0bb35",
+      "redacted": true
+    },
+    {
+      "file": "soak-diagnosis/test.log",
+      "source_sha256": "f9cfcb015d5c5e899a318b55d693781a668e529b74a141ff995c3953877d7329",
+      "published_sha256": "77cce063f842e024262cd047c25e0c7dd05ab5e4a8fd89b2e3c991b61d28fe0f",
+      "redacted": true
+    },
+    {
+      "file": "soak-diagnosis/samples.ndjson",
+      "source_sha256": "c42586bcbad8c5fddec57d1c7d09bd5da80ca1a55e456d969da7815fb4853f4b",
+      "published_sha256": "c42586bcbad8c5fddec57d1c7d09bd5da80ca1a55e456d969da7815fb4853f4b",
+      "redacted": false
+    },
+    {
+      "file": "soak-diagnosis/run.json",
+      "source_sha256": "64d145b61107634219d07d08252dbe66239eaeeb6e49378be1e0e4945f529309",
+      "published_sha256": "3fa52c53982520646b3c881c2eea46b3dbffa7fc27b2f6b441758c7409313208",
+      "redacted": true
+    },
+    {
+      "file": "soak-diagnosis/PROVENANCE.md",
+      "source_sha256": "1333d209e63880e2d2b676eaf5efad0f7d9e41ac38e936c6f2974336d65d2d01",
+      "published_sha256": "1333d209e63880e2d2b676eaf5efad0f7d9e41ac38e936c6f2974336d65d2d01",
+      "redacted": false
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+warning: linker stdout: 正在创建库 <WORKSPACE>\.bench090\target\release\deps\triviumdb.dll.lib 和对象 <WORKSPACE>\.bench090\target\release\deps\triviumdb.dll.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `triviumdb` (lib) generated 1 warning
+   Compiling triviumdb v0.9.0 (<WORKTREE>)
+    Finished `bench` profile [optimized] target(s) in 11.49s
+     Running benches\bench_query_parallel.rs (<WORKSPACE>\.bench090\target\release\deps\bench_query_parallel-4055d7d4421b0036.exe)
+multi_source_expand 请求/实际线程 1/1：87.697 ms，160000 行
+exact_rerank 请求/实际线程 1/1：55.103 ms，100 行
+degree 请求/实际线程 1/1：161.153 ms，200000 行
+property_scan 请求/实际线程 1/1：89.416 ms，20000 行
+multi_source_expand 请求/实际线程 2/2：89.900 ms，160000 行
+exact_rerank 请求/实际线程 2/2：54.955 ms，100 行
+degree 请求/实际线程 2/2：68.381 ms，200000 行
+property_scan 请求/实际线程 2/2：90.822 ms，20000 行
+multi_source_expand 请求/实际线程 4/4：163.034 ms，160000 行
+exact_rerank 请求/实际线程 4/4：40.663 ms，100 行
+degree 请求/实际线程 4/4：50.924 ms，200000 行
+property_scan 请求/实际线程 4/4：101.566 ms，20000 行
+multi_source_expand 请求/实际线程 8/8：192.102 ms，160000 行
+exact_rerank 请求/实际线程 8/8：38.621 ms，100 行
+degree 请求/实际线程 8/8：47.540 ms，200000 行
+property_scan 请求/实际线程 8/8：130.470 ms，20000 行
+multi_source_expand 请求/实际线程 16/16：225.686 ms，160000 行
+exact_rerank 请求/实际线程 16/16：43.497 ms，100 行
+degree 请求/实际线程 16/16：51.949 ms，200000 行
+property_scan 请求/实际线程 16/16：146.556 ms，20000 行
+查询并行报告已写入 target/bench-reports\query-parallel-200000-768.json

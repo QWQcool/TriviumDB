@@ -1,0 +1,5 @@
+# Interrupted supervised replay
+
+This independent full attempt was interrupted during the first dataset/engine group after its supervisor could not reconcile a process-tree snapshot with the Job Object process count. The affected worker had written validated output and exited with code zero; the supervisor subsequently recorded the Job as empty. The evidence suggests a process-exit snapshot race but does not establish the sole cause. No final input hashes, complete summary, or passed run exists for this batch. It is retained as diagnostic evidence only, not as a publishable benchmark.
+
+The attempt directories contain all retained observations and supervision records; the ground-truth check log is a path-redacted copy, while the original remains private on the host. An earlier first full attempt is recorded separately in `../replay-20261105/`.

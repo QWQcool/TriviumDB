@@ -1,0 +1,24 @@
+   Compiling triviumdb v0.9.0 (<WORKTREE>)
+warning: linker stdout: 正在创建库 <WORKSPACE>\.bench090\target\debug\deps\triviumdb.dll.lib 和对象 <WORKSPACE>\.bench090\target\debug\deps\triviumdb.dll.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `triviumdb` (lib) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.40s
+     Running tests\fault_allocator\main.rs (<WORKSPACE>\.bench090\target\debug\deps\fault_allocator-452b21eeb162da6a.exe)
+
+running 5 tests
+test __allocator_failure_child_entry ... ok
+test 测试_巨量边极速扩张图谱_评估软隔离能力 ... ok
+test 测试_深层海量多重自连边_避免调用栈溢出 ... ok
+test 测试_真实allocator_failure隔离子进程并保持数据库可恢复 ... 
+running 1 test
+test __allocator_failure_child_entry ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.05s
+
+ok
+test 测试_真实分配失败_try_reserve安全返回且不申请物理大内存 ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.68s
+

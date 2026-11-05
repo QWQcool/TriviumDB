@@ -1,0 +1,10 @@
+{
+  "ended_at": "2026-11-05T13:43:22+00:00",
+  "reason": "watchdog observation failed: RuntimeError('Job contains processes outside the observable rooted tree')",
+  "root_pid": 37152,
+  "root_created_100ns": 134383597219808457,
+  "active_before_termination": 0,
+  "termination_confirmed": true,
+  "active_after_termination": 0,
+  "exit_code": 0
+}

@@ -1,0 +1,823 @@
+"""Continue an interrupted ANN replay without touching or overwriting it.
+
+Source groups are eligible only when all three original runs passed their
+individual validation and the entire group passes dispersion checks. Incomplete
+or failing groups are retried as three new builds. The source group is first
+in the fixed selection order; otherwise the first complete passing retry wins.
+Failed attempts and watchdog terminations are kept. The source batch did not
+record hnswlib/FAISS binary hashes, so byte identity between source and
+continuation cannot be established; this limitation is always recorded.
+
+Run only after other benchmark suites have finished. All output uses a new tag.
+"""
+from __future__ import annotations
+
+import argparse
+import ctypes
+import hashlib
+import importlib.util
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import threading
+import time
+from ctypes import wintypes
+from pathlib import Path
+
+import replay_complete as runner
+import replay_retry_group as retry
+
+K32 = ctypes.WinDLL('kernel32', use_last_error=True)
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+TH32CS_SNAPPROCESS = 0x00000002
+INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+DWORD = wintypes.DWORD
+
+
+class PROCESSENTRY32W(ctypes.Structure):
+    _fields_ = [('dwSize', DWORD), ('cntUsage', DWORD), ('th32ProcessID', DWORD),
+                ('th32DefaultHeapID', ctypes.c_size_t), ('th32ModuleID', DWORD),
+                ('cntThreads', DWORD), ('th32ParentProcessID', DWORD),
+                ('pcPriClassBase', ctypes.c_long), ('dwFlags', DWORD),
+                ('szExeFile', ctypes.c_wchar * 260)]
+
+
+class IO_COUNTERS(ctypes.Structure):
+    _fields_ = [('ReadOperationCount', ctypes.c_ulonglong), ('WriteOperationCount', ctypes.c_ulonglong),
+                ('OtherOperationCount', ctypes.c_ulonglong), ('ReadTransferCount', ctypes.c_ulonglong),
+                ('WriteTransferCount', ctypes.c_ulonglong), ('OtherTransferCount', ctypes.c_ulonglong)]
+
+
+class BASIC_LIMITS(ctypes.Structure):
+    _fields_ = [('PerProcessUserTimeLimit', ctypes.c_longlong), ('PerJobUserTimeLimit', ctypes.c_longlong),
+                ('LimitFlags', DWORD), ('MinimumWorkingSetSize', ctypes.c_size_t),
+                ('MaximumWorkingSetSize', ctypes.c_size_t), ('ActiveProcessLimit', DWORD),
+                ('Affinity', ctypes.c_size_t), ('PriorityClass', DWORD), ('SchedulingClass', DWORD)]
+
+
+class EXTENDED_LIMITS(ctypes.Structure):
+    _fields_ = [('BasicLimitInformation', BASIC_LIMITS), ('IoInfo', IO_COUNTERS),
+                ('ProcessMemoryLimit', ctypes.c_size_t), ('JobMemoryLimit', ctypes.c_size_t),
+                ('PeakProcessMemoryUsed', ctypes.c_size_t), ('PeakJobMemoryUsed', ctypes.c_size_t)]
+
+
+class BASIC_ACCOUNTING(ctypes.Structure):
+    _fields_ = [('TotalUserTime', ctypes.c_longlong), ('TotalKernelTime', ctypes.c_longlong),
+                ('ThisPeriodTotalUserTime', ctypes.c_longlong), ('ThisPeriodTotalKernelTime', ctypes.c_longlong),
+                ('TotalPageFaultCount', DWORD), ('TotalProcesses', DWORD),
+                ('ActiveProcesses', DWORD), ('TotalTerminatedProcesses', DWORD)]
+
+
+class ContinuationFatal(RuntimeError):
+    """Integrity or process containment is uncertain; stop the entire continuation."""
+
+
+K32.CreateToolhelp32Snapshot.argtypes = [DWORD, DWORD]
+K32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+K32.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
+K32.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
+K32.OpenProcess.argtypes = [DWORD, wintypes.BOOL, DWORD]
+K32.OpenProcess.restype = wintypes.HANDLE
+K32.GetProcessTimes.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.FILETIME),
+                                ctypes.POINTER(wintypes.FILETIME), ctypes.POINTER(wintypes.FILETIME),
+                                ctypes.POINTER(wintypes.FILETIME)]
+K32.GetProcessIoCounters.argtypes = [wintypes.HANDLE, ctypes.POINTER(IO_COUNTERS)]
+K32.CloseHandle.argtypes = [wintypes.HANDLE]
+K32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+K32.CreateJobObjectW.restype = wintypes.HANDLE
+K32.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, DWORD]
+K32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+K32.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+K32.QueryInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, DWORD, ctypes.c_void_p]
+K32.IsProcessInJob.argtypes = [wintypes.HANDLE, wintypes.HANDLE, ctypes.POINTER(wintypes.BOOL)]
+NTDLL = ctypes.WinDLL('ntdll')
+NTDLL.NtResumeProcess.argtypes = [wintypes.HANDLE]
+NTDLL.NtResumeProcess.restype = ctypes.c_long
+
+
+def create_job():
+    job = K32.CreateJobObjectW(None, None)
+    if not job:
+        raise ctypes.WinError(ctypes.get_last_error())
+    limits = EXTENDED_LIMITS()
+    limits.BasicLimitInformation.LimitFlags = 0x00002000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    if not K32.SetInformationJobObject(job, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
+        error = ctypes.WinError(ctypes.get_last_error())
+        K32.CloseHandle(job)
+        raise error
+    return job
+
+
+def active_job_processes(job):
+    info = BASIC_ACCOUNTING()
+    if not K32.QueryInformationJobObject(job, 1, ctypes.byref(info), ctypes.sizeof(info), None):
+        raise ctypes.WinError(ctypes.get_last_error())
+    return int(info.ActiveProcesses)
+
+
+def wait_job_empty(job, seconds=30):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if active_job_processes(job) == 0:
+            return True
+        time.sleep(0.25)
+    return active_job_processes(job) == 0
+
+
+def process_tree(root):
+    snapshot = K32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+    if snapshot == INVALID_HANDLE_VALUE:
+        raise ctypes.WinError(ctypes.get_last_error())
+    parents = {}
+    try:
+        entry = PROCESSENTRY32W()
+        entry.dwSize = ctypes.sizeof(entry)
+        ok = K32.Process32FirstW(snapshot, ctypes.byref(entry))
+        if not ok:
+            raise ctypes.WinError(ctypes.get_last_error())
+        while ok:
+            parents[int(entry.th32ProcessID)] = int(entry.th32ParentProcessID)
+            ok = K32.Process32NextW(snapshot, ctypes.byref(entry))
+        if ctypes.get_last_error() != 18:  # ERROR_NO_MORE_FILES
+            raise ctypes.WinError(ctypes.get_last_error())
+    finally:
+        K32.CloseHandle(snapshot)
+    found = {root}
+    while True:
+        extended = found | {pid for pid, parent in parents.items() if parent in found}
+        if extended == found:
+            return found
+        found = extended
+
+
+def process_counters(pid, job=None):
+    handle = K32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        if job is not None:
+            in_job = wintypes.BOOL()
+            if not K32.IsProcessInJob(handle, job, ctypes.byref(in_job)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            if not in_job.value:
+                return None
+        created, ended, kernel, user = (wintypes.FILETIME() for _ in range(4))
+        counters = IO_COUNTERS()
+        if not K32.GetProcessTimes(handle, ctypes.byref(created), ctypes.byref(ended),
+                                   ctypes.byref(kernel), ctypes.byref(user)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        if not K32.GetProcessIoCounters(handle, ctypes.byref(counters)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        def integer(value):
+            return (value.dwHighDateTime << 32) | value.dwLowDateTime
+        return {'pid': pid, 'created_100ns': integer(created),
+                'cpu_100ns': integer(kernel) + integer(user),
+                'io_bytes': int(counters.ReadTransferCount + counters.WriteTransferCount)}
+    finally:
+        K32.CloseHandle(handle)
+
+
+def tree_counters(root, job):
+    # A child can disappear between process enumeration and opening its handle.
+    # Resample once rather than silently omitting a still-running process.
+    for attempt in range(2):
+        pids = process_tree(root)
+        try:
+            found = {pid: process_counters(pid, job) for pid in pids}
+            return {pid: item for pid, item in found.items() if item is not None}
+        except OSError:
+            if attempt:
+                raise
+    raise RuntimeError('unable to inspect controlled process tree')
+
+
+def binary_fingerprint():
+    """Hash benchmark distributions' Python and binary files, excluding OS DLLs."""
+    files = {}
+    for package in ('hnswlib', 'faiss', 'numpy'):
+        spec = importlib.util.find_spec(package)
+        if spec is None or spec.origin is None:
+            raise RuntimeError(f'cannot locate {package}')
+        origin = Path(spec.origin)
+        candidates = {origin}
+        if origin.name == '__init__.py':
+            candidates.update(origin.parent.rglob('*.py'))
+            candidates.update(origin.parent.rglob('*.pyd'))
+            candidates.update(origin.parent.rglob('*.dll'))
+            for libs in origin.parent.parent.glob(package + '*.libs'):
+                candidates.update(libs.rglob('*.dll'))
+        for path in sorted(candidates):
+            if path.is_file():
+                files[f'{package}:{path}'] = runner.old.sha256_file(path)
+    base = getattr(sys, '_base_executable', sys.executable)
+    files['python-base-executable:' + Path(base).name] = runner.old.sha256_file(Path(base))
+    python_dll = Path(sys.base_prefix) / f'python{sys.version_info.major}{sys.version_info.minor}.dll'
+    if python_dll.is_file():
+        files['python-runtime-dll:' + python_dll.name] = runner.old.sha256_file(python_dll)
+    return files
+
+
+def measurement_environment():
+    # Only behavior-affecting compute settings; do not archive arbitrary secrets.
+    names = ('FAISS_OPT_LEVEL', 'OMP_DYNAMIC', 'OMP_PROC_BIND', 'OMP_PLACES',
+             'OPENBLAS_CORETYPE', 'MKL_DYNAMIC', 'MKL_DEBUG_CPU_TYPE',
+             'KMP_AFFINITY', 'KMP_BLOCKTIME', 'RAYON_NUM_THREADS')
+    return {name: os.environ.get(name) for name in names}
+
+
+def require_runtime(manifest, executable, library_hashes=None, inherited_env=None):
+    try:
+        retry.verify_runtime(manifest, executable)
+        if library_hashes is not None and binary_fingerprint() != library_hashes:
+            raise RuntimeError('benchmark library binaries changed')
+        if inherited_env is not None and measurement_environment() != inherited_env:
+            raise RuntimeError('recorded inherited compute environment changed')
+    except Exception as exc:
+        raise ContinuationFatal(f'benchmark environment integrity failed: {exc}') from exc
+
+
+def assert_source_stopped(tag, executable_name):
+    # Inspect command lines, including both the venv launcher and base Python.
+    command = ('Get-CimInstance Win32_Process | '
+               'Select-Object ProcessId,Name,CommandLine | ConvertTo-Json -Compress')
+    proc = subprocess.run(['powershell.exe', '-NoProfile', '-Command', command], capture_output=True,
+                          text=True, encoding='utf-8', errors='replace', check=True)
+    rows = json.loads(proc.stdout)
+    if isinstance(rows, dict):
+        rows = [rows]
+    active = []
+    for row in rows:
+        if row['ProcessId'] == os.getpid():
+            continue
+        name = (row.get('Name') or '').lower()
+        commandline = row.get('CommandLine')
+        if name == executable_name.lower():
+            active.append({'pid': row['ProcessId'], 'reason': 'benchmark executable still running'})
+        elif name in ('python.exe', 'pythonw.exe') and commandline is None:
+            raise ContinuationFatal('cannot inspect a Python process command line; source termination is unverified')
+        elif commandline:
+            line = commandline.lower().replace('/', '\\')
+            if 'replay_complete.py' in line:
+                active.append({'pid': row['ProcessId'], 'reason': 'source runner or worker still running'})
+    if active:
+        raise ContinuationFatal(f'original batch still has active processes: {active}')
+
+
+def progress_state(folder, raw_path):
+    files = [folder / 'measurements.jsonl', folder / 'stdout.log', raw_path]
+    return {p.name: {'size': p.stat().st_size, 'mtime_ns': p.stat().st_mtime_ns}
+            for p in files if p.exists()}
+
+
+def gate_passed(folder):
+    path = folder / 'gate.jsonl'
+    if not path.exists():
+        return False
+    data = path.read_text(encoding='utf-8')
+    # The child can be writing its final line while we inspect it.
+    lines = data[:data.rfind('\n') + 1].splitlines()
+    return bool(lines and json.loads(lines[-1]).get('passed'))
+
+
+def validate_baseline_artifacts(batch, dataset, engine, manifest, repeats=3):
+    """Independently recompute each query's hit count against bound GT bytes."""
+    if engine == 'triviumdb':
+        return
+    import numpy as np
+    ds = runner.old.DATASETS[dataset]
+    factor = manifest['factors'][dataset]
+    n_queries = runner.old.n_rows(ds.test(factor), ds.dim)
+    gt_raw = np.memmap(ds.gt(factor), dtype=np.int32, mode='r')
+    if gt_raw.size % n_queries:
+        raise ValueError('ground-truth size does not match query count')
+    gt = gt_raw.reshape(n_queries, -1)[:, :10]
+    if gt.shape != (n_queries, 10):
+        raise ValueError('ground-truth has fewer than ten neighbours')
+    for rep in range(1, repeats + 1):
+        folder = batch / 'runs' / f'{dataset}__{engine}__r{rep}'
+        raw = retry.read_json(batch / 'raw' / f'{dataset}__{engine}__r{rep}.json')
+        for point in raw['points']:
+            with np.load(folder / f"query_ef{point['ef']}.npz", allow_pickle=False) as saved:
+                labels, hits = saved['labels'], saved['hit_counts']
+                if (labels.shape != (n_queries, 10) or hits.shape != (n_queries,) or
+                    labels.dtype.kind not in 'iu' or hits.dtype.kind not in 'iu' or
+                    (labels < 0).any() or (labels >= raw['n_train']).any() or (hits > 10).any() or
+                    (np.diff(np.sort(labels, axis=1), axis=1) == 0).any()):
+                    raise ValueError(f'invalid baseline labels or hit counts for run {rep}, ef={point["ef"]}')
+                recomputed = (labels[:, :, None] == gt[:, None, :]).any(axis=2).sum(axis=1)
+                if not np.array_equal(recomputed, hits):
+                    raise ValueError(f'GT-recomputed hit counts differ for run {rep}, ef={point["ef"]}')
+                if abs(float(recomputed.sum()) / (n_queries * 10) - point['recall_at_10']) > 1e-12:
+                    raise ValueError(f'GT-recomputed recall differs for run {rep}, ef={point["ef"]}')
+
+
+def terminate_job(job, trace):
+    trace['active_before_termination'] = active_job_processes(job)
+    if trace['active_before_termination'] and not K32.TerminateJobObject(job, 1):
+        raise ContinuationFatal('could not terminate controlled Windows Job')
+    trace['termination_confirmed'] = wait_job_empty(job)
+    trace['active_after_termination'] = active_job_processes(job)
+    if not trace['termination_confirmed']:
+        raise ContinuationFatal('could not confirm that the entire controlled Job is empty')
+
+
+def diagnostic_worker(config_path):
+    """Instrument stages only; diagnostic timings are never benchmark evidence."""
+    import numpy as np
+    config = retry.read_json(config_path)
+    ds = runner.old.DATASETS[config['dataset']]
+    def stage(name):
+        print(f'[{runner.now()}] STAGE {name}', flush=True)
+    stage('load_dataset begin')
+    train, queries, gt, _ = runner.old.load_dataset(ds, None, config['factor'])
+    stage(f'load_dataset end: train={len(train)}, queries={len(queries)}, gt={len(gt)}')
+    stage('import_hnswlib begin')
+    import hnswlib
+    stage('import_hnswlib end')
+    stage('index_create begin')
+    idx = hnswlib.Index(space='cosine', dim=ds.dim)
+    idx.init_index(max_elements=train.shape[0], ef_construction=config['efc'], M=config['m'])
+    idx.set_num_threads(config['threads'])
+    stage('index_create end')
+    stage('add_items begin')
+    idx.add_items(train, np.arange(train.shape[0]))
+    stage('add_items end')
+    idx.set_ef(config['efs'][0])
+    stage('full_query_batch begin')
+    labels = idx.knn_query(queries, k=runner.old.K, num_threads=config['threads'])[0]
+    stage(f'full_query_batch end: rows={len(labels)}')
+    runner.write_json(config_path.parent / 'diagnostic-outcome.json', {
+        'completed_at': runner.now(), 'train_rows': int(len(train)), 'query_rows': int(len(queries)),
+        'returned_rows': int(len(labels)), 'status': 'completed', 'performance_publishable': False})
+
+
+def diagnostic_run(batch, config, max_wait):
+    folder = batch / 'runs' / f"{config['dataset']}__{config['engine']}__r{config['run']}"
+    folder.mkdir(parents=True, exist_ok=False)
+    required = 3 * runner.old.DATASETS[config['dataset']].train.stat().st_size + 8 * (1 << 30)
+    deadline = time.monotonic() + max_wait
+    while True:
+        cpu = [runner.cpu_percent(1) for _ in range(3)]
+        memory = runner.memory_snapshot()
+        passed = max(cpu) < 15 and memory['available_bytes'] >= required
+        runner.append_event(folder / 'gate.jsonl', {'at': runner.now(), 'cpu_percent_samples': cpu,
+                            **memory, 'required_available_bytes': required, 'passed': passed,
+                            'smoke_override': False})
+        if passed:
+            break
+        if time.monotonic() >= deadline:
+            raise RuntimeError('diagnostic gate did not pass; worker was not launched')
+        time.sleep(15)
+    config_path = folder / 'config.json'
+    runner.write_json(config_path, config)
+    env = os.environ.copy()
+    env.update({'OMP_NUM_THREADS': str(config['threads']), 'OPENBLAS_NUM_THREADS': str(config['threads']),
+                'MKL_NUM_THREADS': str(config['threads'])})
+    stop, errors = threading.Event(), []
+    monitor = threading.Thread(target=runner.sample_monitor, args=(stop, folder / 'system_load.jsonl', errors), daemon=True)
+    monitor.start()
+    try:
+        with (folder / 'stdout.log').open('x', encoding='utf-8') as log:
+            proc = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), '--diagnostic-worker', str(config_path)],
+                                    cwd=runner.ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
+            while proc.poll() is None:
+                if errors:
+                    raise RuntimeError('diagnostic system monitor failed: ' + repr(errors))
+                time.sleep(1)
+            if proc.returncode:
+                raise RuntimeError(f'diagnostic worker failed with exit {proc.returncode}')
+    finally:
+        stop.set()
+        monitor.join()
+    if errors:
+        raise RuntimeError('diagnostic system monitor failed: ' + repr(errors))
+
+
+def supervised_run(batch, config, max_wait, supervision, diagnostic=False):
+    supervision.mkdir(parents=True, exist_ok=False)
+    request = supervision / 'request.json'
+    runner.write_json(request, {'batch': str(batch), 'config': config, 'max_wait': max_wait,
+                                'diagnostic': diagnostic})
+    folder = batch / 'runs' / f"{config['dataset']}__{config['engine']}__r{config['run']}"
+    raw = batch / 'raw' / f"{config['dataset']}__{config['engine']}__r{config['run']}.json"
+    events = supervision / 'watchdog.jsonl'
+    cmd = [sys.executable, str(Path(__file__).resolve()), '--child-request', str(request)]
+    with (supervision / 'child.log').open('x', encoding='utf-8') as log:
+        try:
+            job = create_job()
+        except Exception as exc:
+            raise ContinuationFatal(f'could not create isolated Windows Job: {exc}') from exc
+        proc = None
+        assigned = False
+        try:
+            # Start suspended so no descendant can escape before job assignment.
+            proc = subprocess.Popen(cmd, cwd=runner.ROOT, stdout=log, stderr=subprocess.STDOUT,
+                                    creationflags=0x00000004)  # CREATE_SUSPENDED
+            if not K32.AssignProcessToJobObject(job, wintypes.HANDLE(int(proc._handle))):
+                raise ctypes.WinError(ctypes.get_last_error())
+            assigned = True
+            identity = process_counters(proc.pid)['created_100ns']
+            status = NTDLL.NtResumeProcess(wintypes.HANDLE(int(proc._handle)))
+            if status != 0:
+                raise RuntimeError(f'NtResumeProcess failed with NTSTATUS {status:#x}')
+        except Exception as exc:
+            try:
+                if proc is not None and not assigned:
+                    proc.kill()
+                    proc.wait(timeout=30)
+                if assigned:
+                    terminate_job(job, {})
+            except Exception as stop_exc:
+                raise ContinuationFatal(f'job startup and containment failed: {stop_exc}') from exc
+            finally:
+                K32.CloseHandle(job)
+            raise ContinuationFatal(f'could not start contained worker: {exc}') from exc
+        previous = {}
+        prior_progress = {}
+        quiet_cpu = quiet_io = 0
+        quiet_since = None
+        stop_reason = None
+        try:
+            while active_job_processes(job):
+                time.sleep(10)
+                if not active_job_processes(job):
+                    break
+                if proc.poll() is not None:
+                    stop_reason = 'root worker exited while Job descendants were still running'
+                    break
+                active = tree_counters(proc.pid, job)
+                if len(active) != active_job_processes(job):
+                    time.sleep(0.2)
+                    active = tree_counters(proc.pid, job)
+                    if len(active) != active_job_processes(job):
+                        raise RuntimeError('Job contains processes outside the observable rooted tree')
+                current_progress = progress_state(folder, raw)
+                changed = set(active) != set(previous) or current_progress != prior_progress
+                delta_cpu = delta_io = 0
+                for pid, item in active.items():
+                    prev = previous.get(pid)
+                    if prev and item['created_100ns'] == prev['created_100ns']:
+                        delta_cpu += max(0, item['cpu_100ns'] - prev['cpu_100ns'])
+                        delta_io += max(0, item['io_bytes'] - prev['io_bytes'])
+                    elif prev:
+                        changed = True
+                previous, prior_progress = active, current_progress
+                ready = gate_passed(folder)
+                if not ready or changed or quiet_since is None:
+                    quiet_since, quiet_cpu, quiet_io = time.monotonic(), 0, 0
+                else:
+                    quiet_cpu += delta_cpu
+                    quiet_io += delta_io
+                    if quiet_cpu >= 10_000_000 or quiet_io >= (1 << 20):
+                        quiet_since, quiet_cpu, quiet_io = time.monotonic(), 0, 0
+                event = {'at': runner.now(), 'gate_passed': ready, 'processes': list(active.values()),
+                         'progress': current_progress, 'quiet_seconds': time.monotonic() - quiet_since,
+                         'quiet_cpu_100ns': quiet_cpu, 'quiet_io_bytes': quiet_io}
+                runner.append_event(events, event)
+                if ready and time.monotonic() - quiet_since >= 300:
+                    stop_reason = 'no progress: under 1 CPU second and 1 MiB I/O for 300 seconds'
+                    break
+        except Exception as exc:
+            stop_reason = 'watchdog observation failed: ' + repr(exc)
+        trace = {'ended_at': runner.now(), 'reason': stop_reason, 'root_pid': proc.pid,
+                 'root_created_100ns': identity}
+        try:
+            if stop_reason:
+                terminate_job(job, trace)
+            else:
+                trace['termination_confirmed'] = wait_job_empty(job)
+                trace['active_after_termination'] = active_job_processes(job)
+                if not trace['termination_confirmed']:
+                    raise ContinuationFatal('normal completion left processes in controlled Job')
+            proc.wait(timeout=30)
+            trace['exit_code'] = proc.returncode
+            runner.write_json(supervision / 'result.json', trace)
+        except Exception as exc:
+            trace['containment_error'] = repr(exc)
+            if not (supervision / 'result.json').exists():
+                runner.write_json(supervision / 'result.json', trace)
+            raise ContinuationFatal(f'cannot confirm controlled Job termination: {exc}') from exc
+        finally:
+            K32.CloseHandle(job)  # kill-on-close remains a final containment backstop
+    if stop_reason and (stop_reason.startswith('watchdog observation failed:') or
+                        stop_reason.startswith('root worker exited')):
+        raise ContinuationFatal(f'watchdog or process ancestry became uncertain: {supervision}; {stop_reason}')
+    if stop_reason or proc.returncode:
+            raise RuntimeError(f'controlled run failed: {supervision}; {stop_reason}; exit={proc.returncode}')
+
+
+def check_source_group(source, dataset, engine, manifest, source_inputs):
+    failures = []
+    efs = manifest['efs']
+    for rep in range(1, 4):
+        folder = source / 'runs' / f'{dataset}__{engine}__r{rep}'
+        try:
+            config = retry.read_json(folder / 'config.json')
+            result = retry.read_json(folder / 'result.json')
+            raw = source / 'raw' / f'{dataset}__{engine}__r{rep}.json'
+            gate = json.loads((folder / 'gate.jsonl').read_text(encoding='utf-8').splitlines()[-1])
+            required = 3 * source_inputs[dataset]['train']['bytes'] + 8 * (1 << 30)
+            if (config['dataset'] != dataset or config['engine'] != engine or config['run'] != rep or
+                config['threads'] != manifest['threads'] or config['m'] != manifest['m'] or
+                config['efc'] != manifest['ef_construction'] or config['factor'] != manifest['factors'][dataset] or
+                config['efs'] != efs or config['train_limit'] is not None or
+                Path(config['raw_path']).resolve() != raw.resolve() or not result['validation_passed'] or
+                result['exit_code'] != 0 or result['monitor_errors'] or not gate['passed'] or gate['smoke_override'] or
+                len(gate['cpu_percent_samples']) != 3 or max(gate['cpu_percent_samples']) >= 15 or
+                gate['required_available_bytes'] != required or gate['available_bytes'] < required or
+                not (folder / 'system_load.jsonl').is_file() or (folder / 'system_load.jsonl').stat().st_size == 0):
+                raise ValueError('missing or inconsistent config, gate, process or monitor record')
+            runner.validate_result(config)
+            if engine == 'triviumdb':
+                sidecar = retry.read_json(raw.with_suffix('.meta.json'))
+                if (sidecar['dataset'] != dataset or sidecar['repeat_index'] != rep or
+                    sidecar['git_rev'] != manifest['benchmark_git_rev'] or sidecar['threads'] != manifest['threads']):
+                    raise ValueError('inconsistent TriviumDB sidecar')
+        except (OSError, ValueError, KeyError, TypeError, IndexError) as exc:
+            failures.append(f'run {rep}: {exc}')
+    if failures:
+        return {'passed': False, 'complete': False, 'reasons': failures}
+    try:
+        validate_baseline_artifacts(source, dataset, engine, manifest)
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        return {'passed': False, 'complete': False, 'reasons': [str(exc)]}
+    result = retry.review_group(source, dataset, engine, efs)
+    result['complete'] = True
+    return result
+
+
+def copy_group(source, dest, dataset, engine):
+    """Copy raw, all per-run artifacts and exact hashes to the new accepted tree."""
+    records = []
+    def copy_one(src, dst):
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if dst.exists():
+            raise FileExistsError(f'refusing to overwrite {dst}')
+        digest = runner.old.sha256_file(src)
+        shutil.copy2(src, dst)
+        if runner.old.sha256_file(dst) != digest or runner.old.sha256_file(src) != digest:
+            raise ContinuationFatal(f'file changed while copying: {src}')
+        records.append({'source': str(src), 'accepted': str(dst.relative_to(dest)), 'sha256': digest})
+    for rep in range(1, 4):
+        raw = source / 'raw' / f'{dataset}__{engine}__r{rep}.json'
+        copy_one(raw, dest / 'raw' / raw.name)
+        if engine == 'triviumdb':
+            sidecar = raw.with_suffix('.meta.json')
+            copy_one(sidecar, dest / 'raw' / sidecar.name)
+        folder = source / 'runs' / f'{dataset}__{engine}__r{rep}'
+        for path in sorted(folder.rglob('*')):
+            if path.is_file():
+                copy_one(path, dest / 'artifacts' / folder.name / path.relative_to(folder))
+        supervision = source / 'supervision' / f'r{rep}'
+        if supervision.is_dir():
+            for path in sorted(supervision.rglob('*')):
+                if path.is_file():
+                    copy_one(path, dest / 'artifacts' / folder.name / 'supervision' / path.relative_to(supervision))
+    return records
+
+
+def run_preflight(batch, datasets, factors, expected):
+    """Bind a new GT preflight to input bytes with hashes on both sides."""
+    cmd = [sys.executable, '-u', str(runner.ROOT / 'scripts' / 'bench090' / 'bench090.py'),
+           'check', '--datasets', ','.join(datasets)]
+    started = runner.now()
+    with (batch / 'groundtruth-check.log').open('x', encoding='utf-8') as log:
+        proc = subprocess.run(cmd, cwd=runner.ROOT, stdout=log, stderr=subprocess.STDOUT)
+    log_path = batch / 'groundtruth-check.log'
+    preflight_text = log_path.read_text(encoding='utf-8')
+    checks_ok = all(re.search(r'^\s*' + re.escape(key) + r'\s+gt_match=1\.0000\s+.*\[OK\]',
+                              preflight_text, re.MULTILINE) for key in datasets)
+    runner.write_json(batch / 'groundtruth-check.meta.json', {
+        'started_at': started, 'ended_at': runner.now(), 'exit_code': proc.returncode,
+        'sha256': runner.old.sha256_file(log_path), 'datasets': datasets, 'all_checks_ok': bool(checks_ok)})
+    if proc.returncode or '[FAIL]' in preflight_text or not checks_ok:
+        raise ContinuationFatal('new GT preflight failed')
+    post = runner.hashes(datasets, factors)
+    runner.write_json(batch / 'input_hashes_after_preflight.json', post)
+    if post != expected:
+        raise ContinuationFatal('input bytes changed during new GT preflight')
+    return {'log_sha256': runner.old.sha256_file(log_path),
+            'meta_sha256': runner.old.sha256_file(batch / 'groundtruth-check.meta.json')}
+
+
+def verify_preflight(batch, expected):
+    if (runner.old.sha256_file(batch / 'groundtruth-check.log') != expected['log_sha256'] or
+        runner.old.sha256_file(batch / 'groundtruth-check.meta.json') != expected['meta_sha256']):
+        raise ContinuationFatal('new GT preflight evidence changed during the batch')
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--source', help='interrupted original batch tag')
+    parser.add_argument('--tag', help='fresh continuation tag')
+    parser.add_argument('--mode', choices=('diagnostic', 'full', 'continue'), default='full',
+                        help='diagnostic: full-size sift/hnswlib without publication; full: rebuild every group; continue: reuse eligible old groups with explicit uncertainty')
+    parser.add_argument('--max-wait', type=int, default=1800)
+    parser.add_argument('--max-attempts', type=int, default=3)
+    parser.add_argument('--child-request', type=Path, help=argparse.SUPPRESS)
+    parser.add_argument('--diagnostic-worker', type=Path, help=argparse.SUPPRESS)
+    args = parser.parse_args()
+    if args.diagnostic_worker:
+        return diagnostic_worker(args.diagnostic_worker)
+    if args.child_request:
+        request = retry.read_json(args.child_request)
+        if request.get('diagnostic'):
+            return diagnostic_run(Path(request['batch']), request['config'], request['max_wait'])
+        return runner.run_one(Path(request['batch']), request['config'], request['max_wait'], False)
+    if os.name != 'nt':
+        raise RuntimeError('Windows process-tree watchdog is required')
+    if any(not value or not value.replace('-', '').replace('_', '').isalnum() for value in (args.source, args.tag)):
+        raise ValueError('source and tag must be simple folder names')
+    if args.max_attempts < 1 or args.max_wait < 0:
+        raise ValueError('max-attempts must be positive and max-wait nonnegative')
+    source = runner.RESULTS / args.source
+    manifest = retry.read_json(source / 'manifest.json')
+    if manifest['smoke'] or set(manifest['datasets']) != set(runner.old.DATASETS):
+        raise RuntimeError('source must be the complete-design, non-smoke four-dataset batch')
+    if (source / 'completed.json').exists():
+        raise RuntimeError('source finished; use normal review/retry workflow, not interruption continuation')
+    source_before = retry.read_json(source / 'input_hashes_before.json')
+    source_post_preflight = retry.read_json(source / 'input_hashes_after_preflight.json')
+    if source_before != source_post_preflight:
+        raise RuntimeError('source input hashes do not bind preflight')
+    meta = retry.read_json(source / 'groundtruth-check.meta.json')
+    preflight_text = (source / 'groundtruth-check.log').read_text(encoding='utf-8')
+    checks_ok = all(re.search(r'^\s*' + re.escape(key) + r'\s+gt_match=1\.0000\s+.*\[OK\]',
+                              preflight_text, re.MULTILINE) for key in manifest['datasets'])
+    if meta['exit_code'] or meta['sha256'] != runner.old.sha256_file(source / 'groundtruth-check.log') or not checks_ok:
+        raise RuntimeError('source preflight is invalid')
+    original = retry.read_json(source / 'runs' /
+                               f"{manifest['datasets'][0]}__triviumdb__r1" / 'config.json')
+    executable = Path(original['executable_path'])
+    assert_source_stopped(args.source, manifest['benchmark_executable']['file'])
+    require_runtime(manifest, executable)
+    continuation = runner.RESULTS / args.tag
+    continuation.mkdir(exist_ok=False)
+    (continuation / 'accepted' / 'raw').mkdir(parents=True)
+    library_hashes = binary_fingerprint()
+    library_fingerprint_hash = hashlib.sha256(json.dumps(library_hashes, sort_keys=True).encode('utf-8')).hexdigest()
+    inherited_env = measurement_environment()
+    selection_policy = ('first complete passing attempt from new builds' if args.mode == 'full' else
+                        'source complete passing group first; otherwise first complete passing retry'
+                        if args.mode == 'continue' else 'diagnostic output is not eligible for publication')
+    continuation_meta = {'created_at': runner.now(), 'source_tag': args.source, 'mode': args.mode,
+                         'source_manifest_sha256': runner.old.sha256_file(source / 'manifest.json'),
+                         'source_preflight_sha256': runner.old.sha256_file(source / 'groundtruth-check.log'),
+                         'continuation_script_sha256': runner.old.sha256_file(Path(__file__)),
+                         'retry_script_sha256': runner.old.sha256_file(Path(retry.__file__)),
+                         'selection_policy': selection_policy,
+                         'max_attempts_per_group': args.max_attempts,
+                         'selection_limit': 'variability-based repeated attempts can bias results; preserve and disclose every attempt',
+                         'statistics': 'one full query batch per ef on each independently rebuilt index; three builds per group',
+                         'timing_boundary': manifest['timing_boundary'],
+                         'per_query_artifacts': manifest['per_query_artifacts'],
+                         'watchdog_policy': 'after pre-run gate passes, 300s under 1 CPU second and 1 MiB I/O with unchanged progress files',
+                         'binary_limit': ('old source baseline binaries were not hashed; source identity remains unverified'
+                                          if args.mode == 'continue' else 'source groups are not selected'),
+                         'source_input_limit': ('source batch lacks end-of-batch hashes; continuity is unverified'
+                                                if args.mode == 'continue' else 'source groups are not selected'),
+                         'new_batch_hash_limit': 'input and distribution binaries are hashed at boundaries, not continuously; changes reverted between snapshots are not ruled out',
+                         'library_fingerprint_sha256': library_fingerprint_hash,
+                         'inherited_compute_environment': inherited_env,
+                         'benchmark_overrides': {'threads': manifest['threads'],
+                             'baseline': 'OMP_NUM_THREADS, OPENBLAS_NUM_THREADS, MKL_NUM_THREADS',
+                             'triviumdb': 'RAYON_NUM_THREADS and TRIVIUM_MT_THREADS; other TRIVIUM_ variables removed'},
+                         'binary_scope': 'installed hnswlib, faiss and numpy Python files, binary files and Python runtime; OS DLLs and non-whitelisted environment variables excluded'}
+    runner.write_json(continuation / 'manifest.json', continuation_meta)
+    runner.write_json(continuation / 'library_hashes.json', library_hashes)
+    before = runner.hashes(manifest['datasets'], manifest['factors'])
+    runner.write_json(continuation / 'input_hashes_before.json', before)
+    before_mtimes = {dataset: {kind: (runner.ROOT / data['file']).stat().st_mtime_ns
+                              for kind, data in kinds.items()} for dataset, kinds in before.items()}
+    runner.write_json(continuation / 'input_mtimes_before.json', before_mtimes)
+    if before != source_before:
+        raise RuntimeError('current input files differ from the source preflight files')
+    preflight_identity = run_preflight(continuation, manifest['datasets'], manifest['factors'], before)
+    runner.write_json(continuation / 'groundtruth-check.identity.json', preflight_identity)
+    require_runtime(manifest, executable, library_hashes, inherited_env)
+    if args.mode == 'diagnostic':
+        batch = continuation / 'diagnostic' / 'sift128__hnswlib'
+        (batch / 'raw').mkdir(parents=True, exist_ok=False)
+        config = {'dataset': 'sift128', 'engine': 'hnswlib', 'run': 1,
+                  'threads': manifest['threads'], 'm': manifest['m'], 'efc': manifest['ef_construction'],
+                  'factor': manifest['factors']['sift128'], 'efs': manifest['efs'],
+                  'train_limit': None, 'executable_path': str(executable)}
+        outcome = {'status': 'diagnostic_only', 'publishable_performance': False,
+                   'library_fingerprint_sha256': library_fingerprint_hash}
+        try:
+            supervised_run(batch, config, args.max_wait, batch / 'supervision' / 'r1', diagnostic=True)
+            run_result = retry.read_json(batch / 'runs' / 'sift128__hnswlib__r1' / 'diagnostic-outcome.json')
+            if run_result['status'] != 'completed' or run_result['performance_publishable']:
+                raise RuntimeError('invalid diagnostic worker outcome')
+            outcome['outcome'] = 'completed'
+        except ContinuationFatal:
+            raise
+        except Exception as exc:
+            outcome.update({'outcome': 'failed_or_stalled', 'error': repr(exc)})
+        require_runtime(manifest, executable, library_hashes, inherited_env)
+        verify_preflight(continuation, preflight_identity)
+        after = runner.hashes(manifest['datasets'], manifest['factors'])
+        runner.write_json(continuation / 'input_hashes_after.json', after)
+        after_mtimes = {dataset: {kind: (runner.ROOT / data['file']).stat().st_mtime_ns
+                                 for kind, data in kinds.items()} for dataset, kinds in after.items()}
+        runner.write_json(continuation / 'input_mtimes_after.json', after_mtimes)
+        if before != after or before_mtimes != after_mtimes:
+            raise ContinuationFatal('input file bytes or modification times changed during diagnostic')
+        assert_source_stopped(args.source, manifest['benchmark_executable']['file'])
+        runner.write_json(continuation / 'diagnostic_status.json', outcome)
+        print(f'Diagnostic {outcome["outcome"]}; not a publishable benchmark: {continuation}', flush=True)
+        if outcome['outcome'] != 'completed':
+            raise SystemExit(1)
+        return
+    decisions = []
+    unresolved = []
+    for dataset in manifest['datasets']:
+        for engine in runner.ENGINES:
+            require_runtime(manifest, executable, library_hashes, inherited_env)
+            source_review = (check_source_group(source, dataset, engine, manifest, source_before)
+                             if args.mode == 'continue' else
+                             {'passed': False, 'complete': False, 'reasons': ['full mode: old groups are excluded']})
+            decision = {'dataset': dataset, 'engine': engine, 'source_review': source_review, 'attempts': []}
+            selected = source if source_review['passed'] else None
+            if selected is None:
+                for attempt in range(1, args.max_attempts + 1):
+                    batch = continuation / 'attempts' / f'{dataset}__{engine}__a{attempt:03d}'
+                    (batch / 'raw').mkdir(parents=True, exist_ok=False)
+                    item = {'attempt': attempt, 'path': str(batch.relative_to(continuation)),
+                            'library_fingerprint_sha256': library_fingerprint_hash,
+                            'continuation_script_sha256': continuation_meta['continuation_script_sha256'],
+                            'runner_sha256': manifest['runner_sha256'],
+                            'retry_script_sha256': continuation_meta['retry_script_sha256']}
+                    try:
+                        for rep in range(1, 4):
+                            require_runtime(manifest, executable, library_hashes, inherited_env)
+                            config = {'dataset': dataset, 'engine': engine, 'run': rep,
+                                      'threads': manifest['threads'], 'm': manifest['m'],
+                                      'efc': manifest['ef_construction'], 'factor': manifest['factors'][dataset],
+                                      'efs': manifest['efs'], 'train_limit': None,
+                                      'executable_path': str(executable)}
+                            supervised_run(batch, config, args.max_wait, batch / 'supervision' / f'r{rep}')
+                            require_runtime(manifest, executable, library_hashes, inherited_env)
+                            runner.write_json(batch / 'supervision' / f'r{rep}' / 'library_hash_check.json',
+                                              {'before': library_fingerprint_hash, 'after': library_fingerprint_hash,
+                                               'checked_at': runner.now()})
+                        validate_baseline_artifacts(batch, dataset, engine, manifest)
+                        review = retry.review_group(batch, dataset, engine, manifest['efs'])
+                        item['review'] = review
+                        if review['passed']:
+                            selected = batch
+                    except ContinuationFatal as exc:
+                        item['failure'] = repr(exc)
+                        runner.write_json(batch / 'attempt.json', item)
+                        runner.append_event(continuation / 'fatal_errors.jsonl', item)
+                        raise
+                    except Exception as exc:
+                        item['failure'] = repr(exc)
+                    runner.write_json(batch / 'attempt.json', item)
+                    decision['attempts'].append(item)
+                    if selected is not None:
+                        break
+            if selected is None:
+                unresolved.append(f'{dataset}/{engine}')
+                decision['selected'] = None
+            else:
+                decision['selected'] = 'source' if selected == source else str(selected.relative_to(continuation))
+                decision['accepted_files'] = copy_group(selected, continuation / 'accepted', dataset, engine)
+            decisions.append(decision)
+            runner.append_event(continuation / 'selection.jsonl', decision)
+    after = runner.hashes(manifest['datasets'], manifest['factors'])
+    runner.write_json(continuation / 'input_hashes_after.json', after)
+    after_mtimes = {dataset: {kind: (runner.ROOT / data['file']).stat().st_mtime_ns
+                             for kind, data in kinds.items()} for dataset, kinds in after.items()}
+    runner.write_json(continuation / 'input_mtimes_after.json', after_mtimes)
+    assert_source_stopped(args.source, manifest['benchmark_executable']['file'])
+    require_runtime(manifest, executable, library_hashes, inherited_env)
+    verify_preflight(continuation, preflight_identity)
+    if (after != source_before or before_mtimes != after_mtimes or binary_fingerprint() != library_hashes or
+        runner.old.sha256_file(Path(__file__)) != continuation_meta['continuation_script_sha256'] or
+        runner.old.sha256_file(Path(retry.__file__)) != continuation_meta['retry_script_sha256']):
+        raise RuntimeError('inputs, scripts, or binaries changed during continuation')
+    for decision in decisions:
+        for record in decision.get('accepted_files', []):
+            if (runner.old.sha256_file(Path(record['source'])) != record['sha256'] or
+                runner.old.sha256_file(continuation / 'accepted' / record['accepted']) != record['sha256']):
+                raise ContinuationFatal('selected source or accepted artifact changed during continuation')
+    runner.write_json(continuation / 'selection.json', {'decisions': decisions, 'unresolved': unresolved})
+    if unresolved:
+        raise RuntimeError(f'no passing complete group within fixed attempts: {unresolved}')
+    final = runner.check_variability(continuation / 'accepted', manifest['datasets'], manifest['efs'])
+    runner.write_json(continuation / 'completed.json', {'completed_at': runner.now(),
+        'status': 'complete_unreviewed' if final['passed'] else 'failed_final_variability',
+        'source_binary_equivalence': 'unverified' if args.mode == 'continue' else 'not_required_old_groups_excluded',
+        'source_input_continuity': 'unverified' if args.mode == 'continue' else 'not_required_old_groups_excluded',
+        'passed_variability': final['passed']})
+    if not final['passed']:
+        raise RuntimeError('combined accepted groups did not pass final variability review')
+    print(f'Continuation complete, independent review required: {continuation}', flush=True)
+
+
+if __name__ == '__main__':
+    main()

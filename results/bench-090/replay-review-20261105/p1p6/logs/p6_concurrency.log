@@ -1,0 +1,64 @@
+   Compiling triviumdb v0.9.0 (<WORKTREE>)
+warning: linker stdout: 正在创建库 <WORKSPACE>\.bench090\target\release\deps\triviumdb.dll.lib 和对象 <WORKSPACE>\.bench090\target\release\deps\triviumdb.dll.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `triviumdb` (lib) generated 1 warning
+    Finished `release` profile [optimized] target(s) in 2m 00s
+     Running tests\concurrency\main.rs (<WORKSPACE>\.bench090\target\release\deps\concurrency-6469b23e514dc6c5.exe)
+
+running 51 tests
+test concurrency_invariants::BQ重建_重复准备后容量与内容保持稳定 ... ok
+test concurrency_invariants::Flush不得隐式构建QuIVer索引 ... ok
+test concurrency_invariants::Generation规则_向量与非向量修改推进正确代际 ... ok
+test concurrency_invariants::QuIVer与Slot复用_旧候选不得读取新节点向量 ... ok
+test concurrency_invariants::QuIVer导航树及遍历工作区必须提前计入构图预算 ... ok
+test concurrency_invariants::QuIVer构建峰值预算_显式构建应在分配前拒绝 ... ok
+test concurrency_invariants::QuIVer构建峰值预算_自动构建应返回明确错误 ... ok
+test concurrency_invariants::QuIVer流式签名构建_FP16无需全量FP32副本仍可检索 ... ok
+test concurrency_invariants::Slot复用_旧ID绝不读取新节点的向量或Payload ... ok
+test concurrency_invariants::Writer进展_持续并发读结束前写者最终取得写锁 ... ok
+test concurrency_invariants::串行提交基线_多线程写入后Flush重载不丢提交 ... ok
+test concurrency_invariants::向量更新_查询只能看到完整旧排名或完整新排名 ... ok
+test concurrency_invariants::图更新_正向反向入度与标签索引始终联动 ... ok
+test concurrency_invariants::容量规划_ExpectedNodes受内存预算约束且打开失败不污染数据 ... ok
+test concurrency_invariants::容量规划_ReserveNodes零值与溢出均防呆拒绝 ... ok
+test concurrency_invariants::容量规划_事务预留拒绝前后WAL与代际完全不变 ... ok
+test concurrency_invariants::容量规划_已有Mmap库ExpectedNodes按目标总量补足 ... ok
+test concurrency_invariants::容量规划_批次中非法向量不得产生半批数据 ... ok
+test concurrency_invariants::容量规划_更新与图边增长在WAL前统一拒绝 ... ok
+test concurrency_invariants::并发读_16线程同版本精确搜索结果完全一致 ... ok
+test concurrency_invariants::并发读_冷Payload首次惰性解析只产生一致值 ... ok
+test concurrent::并发_1写4读_写入期间读取一致性 ... ok
+test concurrent::并发_8线程TQL查询_结果互不干扰 ... ok
+test concurrent::并发_8线程同时只读查询_不恐慌不矛盾 ... ok
+test concurrent::并发_编译期验证_Database是Send和Sync ... ok
+test deterministic::DET_01_相同查询_100次结果bit_exact一致 ... ok
+test deterministic::DET_02_similarity数学不变量_大规模验证 ... ok
+test deterministic::DET_03B_自动QuIVer路由_结果结构正确 ... ok
+test deterministic::DET_03_QuIVer与BruteForce_Top1近似一致性 ... ok
+test deterministic::DET_04_flush前后数据bit_exact一致 ... ok
+test deterministic::DET_05_TQL查询_50次结果一致 ... ok
+test deterministic_interleaving::Failpoint_能够确定等待到达并释放目标线程 ... ok
+test deterministic_interleaving::Fatigue交错_有状态查询保持串行而无状态查询不受影响 ... ok
+test deterministic_interleaving::Fatigue清理交错_只能在线性顺序上发生于完整查询之间 ... ok
+test deterministic_interleaving::QuIVer交错_发布前保持阻塞释放后索引可查询 ... ok
+test deterministic_interleaving::QuIVer交错_构建期间向量变化会拒绝过期索引 ... ok
+test deterministic_interleaving::QuIVer候选交错_候选生成与精排边界均可精确控制 ... ok
+test deterministic_interleaving::QuIVer单飞_同代际只有一个构建者 ... ok
+test deterministic_interleaving::事务交错_WAL完整提交后才允许应用MemTable ... ok
+test deterministic_interleaving::压实交错_主数据已保存但WAL未清理时释放后可完整重载 ... ok
+test deterministic_interleaving::显式连续视图交错_发布前读取阻塞释放后结果完整 ... ok
+test deterministic_interleaving::查询交错_RwLock允许第二查询进入共享读区 ... ok
+test deterministic_interleaving::查询写交错_更新向量必须等待完整查询释放读锁 ... ok
+test opening::路径持续缺失且租约空闲时保留原始io错误并归还探测租约 ... ok
+test opening::路径解析与发布交错时保留真实租约冲突且不改写文件 ... ok
+test opening::路径解析失败后租约已释放时持锁重读完整已提交事实 ... ok
+test resources::单线程共享维护不会阻断前台检索且关闭撤销登记 ... ok
+test resources::受限运行时的只读打开查询关闭不改写制品 ... ok
+test resources::工作区拒绝关闭时保留配额文件锁与可重试数据 ... ok
+test resources::开库失败回收登记且有限运行时要求显式数据库配额 ... ok
+test resources::活动任务跨库拒绝且回调保持调用线程 ... ok
+
+test result: ok. 51 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.51s
+

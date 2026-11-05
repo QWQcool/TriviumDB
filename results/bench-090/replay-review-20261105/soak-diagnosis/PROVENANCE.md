@@ -1,0 +1,3 @@
+# Provenance note
+
+The diagnosis process began at 2026-11-05T13:24:42Z. The local `diagnose_soak_rss.py` file was modified at approximately 2026-11-05T21:24:50+08:00, after the process had started, to add a completeness check. The process had already loaded its Python code; the exact executed script bytes were not snapshotted or hashed. Therefore the test log and observed measurements are retained as diagnostic evidence, but the current script must not be represented as a verified byte-identical reproduction of the code executed in this run. The release test itself was invoked by the recorded Cargo command.

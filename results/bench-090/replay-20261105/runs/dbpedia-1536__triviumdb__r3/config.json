@@ -1,0 +1,26 @@
+{
+  "dataset": "dbpedia-1536",
+  "engine": "triviumdb",
+  "run": 3,
+  "threads": 16,
+  "m": 32,
+  "efc": 128,
+  "factor": 2,
+  "executable_path": "D:\\TriviumDB\\.bench090\\target\\release\\deps\\bench_cohere1m-1ecbe82aebd1c270.exe",
+  "efs": [
+    10,
+    15,
+    20,
+    25,
+    30,
+    35,
+    40,
+    80,
+    120,
+    200,
+    400,
+    800
+  ],
+  "train_limit": null,
+  "raw_path": "D:\\TriviumDB\\results\\bench-090\\replay-20261105\\raw\\dbpedia-1536__triviumdb__r3.json"
+}

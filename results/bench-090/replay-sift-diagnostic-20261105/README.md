@@ -1,0 +1,3 @@
+# Full-size SIFT baseline diagnostic
+
+This is a single instrumented diagnostic run, not publishable performance evidence. The stage log records a successful data load, hnswlib index initialization, full-size add, and one query batch. It does not establish why the earlier worker stopped making progress or exclude a recurrence. The ground-truth check log is a path-redacted copy; the original remains private on the host.

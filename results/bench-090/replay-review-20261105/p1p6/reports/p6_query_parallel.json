@@ -1,0 +1,168 @@
+{
+  "schema_version": 1,
+  "nodes": 200000,
+  "dim": 768,
+  "available_threads": 32,
+  "points": [
+    {
+      "operator": "multi_source_expand",
+      "requested_threads": 1,
+      "actual_threads": 1,
+      "elapsed_ms": 87.69730000000001,
+      "rows": 160000,
+      "result_hash": 11276137061410863685
+    },
+    {
+      "operator": "exact_rerank",
+      "requested_threads": 1,
+      "actual_threads": 1,
+      "elapsed_ms": 55.10339999999999,
+      "rows": 100,
+      "result_hash": 10473356365424910591
+    },
+    {
+      "operator": "degree",
+      "requested_threads": 1,
+      "actual_threads": 1,
+      "elapsed_ms": 161.1529,
+      "rows": 200000,
+      "result_hash": 16823280192980239429
+    },
+    {
+      "operator": "property_scan",
+      "requested_threads": 1,
+      "actual_threads": 1,
+      "elapsed_ms": 89.4165,
+      "rows": 20000,
+      "result_hash": 9758794718771926469
+    },
+    {
+      "operator": "multi_source_expand",
+      "requested_threads": 2,
+      "actual_threads": 2,
+      "elapsed_ms": 89.9002,
+      "rows": 160000,
+      "result_hash": 11276137061410863685
+    },
+    {
+      "operator": "exact_rerank",
+      "requested_threads": 2,
+      "actual_threads": 2,
+      "elapsed_ms": 54.9546,
+      "rows": 100,
+      "result_hash": 10473356365424910591
+    },
+    {
+      "operator": "degree",
+      "requested_threads": 2,
+      "actual_threads": 2,
+      "elapsed_ms": 68.3807,
+      "rows": 200000,
+      "result_hash": 16823280192980239429
+    },
+    {
+      "operator": "property_scan",
+      "requested_threads": 2,
+      "actual_threads": 2,
+      "elapsed_ms": 90.8216,
+      "rows": 20000,
+      "result_hash": 9758794718771926469
+    },
+    {
+      "operator": "multi_source_expand",
+      "requested_threads": 4,
+      "actual_threads": 4,
+      "elapsed_ms": 163.0343,
+      "rows": 160000,
+      "result_hash": 11276137061410863685
+    },
+    {
+      "operator": "exact_rerank",
+      "requested_threads": 4,
+      "actual_threads": 4,
+      "elapsed_ms": 40.6628,
+      "rows": 100,
+      "result_hash": 10473356365424910591
+    },
+    {
+      "operator": "degree",
+      "requested_threads": 4,
+      "actual_threads": 4,
+      "elapsed_ms": 50.923700000000004,
+      "rows": 200000,
+      "result_hash": 16823280192980239429
+    },
+    {
+      "operator": "property_scan",
+      "requested_threads": 4,
+      "actual_threads": 4,
+      "elapsed_ms": 101.5661,
+      "rows": 20000,
+      "result_hash": 9758794718771926469
+    },
+    {
+      "operator": "multi_source_expand",
+      "requested_threads": 8,
+      "actual_threads": 8,
+      "elapsed_ms": 192.1023,
+      "rows": 160000,
+      "result_hash": 11276137061410863685
+    },
+    {
+      "operator": "exact_rerank",
+      "requested_threads": 8,
+      "actual_threads": 8,
+      "elapsed_ms": 38.620599999999996,
+      "rows": 100,
+      "result_hash": 10473356365424910591
+    },
+    {
+      "operator": "degree",
+      "requested_threads": 8,
+      "actual_threads": 8,
+      "elapsed_ms": 47.5402,
+      "rows": 200000,
+      "result_hash": 16823280192980239429
+    },
+    {
+      "operator": "property_scan",
+      "requested_threads": 8,
+      "actual_threads": 8,
+      "elapsed_ms": 130.47039999999998,
+      "rows": 20000,
+      "result_hash": 9758794718771926469
+    },
+    {
+      "operator": "multi_source_expand",
+      "requested_threads": 16,
+      "actual_threads": 16,
+      "elapsed_ms": 225.6861,
+      "rows": 160000,
+      "result_hash": 11276137061410863685
+    },
+    {
+      "operator": "exact_rerank",
+      "requested_threads": 16,
+      "actual_threads": 16,
+      "elapsed_ms": 43.4969,
+      "rows": 100,
+      "result_hash": 10473356365424910591
+    },
+    {
+      "operator": "degree",
+      "requested_threads": 16,
+      "actual_threads": 16,
+      "elapsed_ms": 51.948800000000006,
+      "rows": 200000,
+      "result_hash": 16823280192980239429
+    },
+    {
+      "operator": "property_scan",
+      "requested_threads": 16,
+      "actual_threads": 16,
+      "elapsed_ms": 146.5556,
+      "rows": 20000,
+      "result_hash": 9758794718771926469
+    }
+  ]
+}

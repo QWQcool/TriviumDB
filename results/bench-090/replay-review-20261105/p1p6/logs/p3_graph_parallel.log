@@ -1,0 +1,34 @@
+warning: linker stdout: 正在创建库 <WORKSPACE>\.bench090\target\release\deps\triviumdb.dll.lib 和对象 <WORKSPACE>\.bench090\target\release\deps\triviumdb.dll.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `triviumdb` (lib) generated 1 warning
+   Compiling triviumdb v0.9.0 (<WORKTREE>)
+    Finished `bench` profile [optimized] target(s) in 16.51s
+     Running benches\bench_graph_parallel.rs (<WORKSPACE>\.bench090\target\release\deps\bench_graph_parallel-e0570b838bceddbe.exe)
+single_source_bfs 1 线程：3.486 ms
+pagerank 1 线程：106.095 ms
+wcc 1 线程：239.976 ms
+betweenness_sample64 1 线程：514.194 ms
+label_propagation 1 线程：1620.728 ms
+single_source_bfs 2 线程：5.808 ms
+pagerank 2 线程：32.006 ms
+wcc 2 线程：20.837 ms
+betweenness_sample64 2 线程：263.756 ms
+label_propagation 2 线程：288.883 ms
+single_source_bfs 4 线程：8.891 ms
+pagerank 4 线程：28.552 ms
+wcc 4 线程：14.587 ms
+betweenness_sample64 4 线程：137.168 ms
+label_propagation 4 线程：178.524 ms
+single_source_bfs 8 线程：9.862 ms
+pagerank 8 线程：21.104 ms
+wcc 8 线程：9.588 ms
+betweenness_sample64 8 线程：87.044 ms
+label_propagation 8 线程：130.527 ms
+single_source_bfs 16 线程：11.457 ms
+pagerank 16 线程：19.525 ms
+wcc 16 线程：9.373 ms
+betweenness_sample64 16 线程：52.517 ms
+label_propagation 16 线程：140.283 ms
+图算法并行报告已写入 target/bench-reports\graph-parallel.json

@@ -1,0 +1,5 @@
+# Interrupted ANN replay: evidence, not final results
+
+This was the first attempted complete rerun. The process was stopped after a non-progressing `sift128` hnswlib worker; its failure and all earlier completed runs remain in `runs/` and `raw/`. This batch has no post-run input hashes and does not fingerprint the baseline package binaries. Do not present it as a complete run, a passed protocol gate, or a publishable performance summary. The later full attempt was also interrupted by an unconfirmed watchdog process-tree observation; that event is separately documented in the review evidence package.
+
+The `raw/` data, configuration, gate records, monitoring records, and `.npz` query results are copies of the local records. Baseline NPZ archives contain labels and hit counts per query; the original TriviumDB benchmark emitted batch aggregates only. For privacy, `groundtruth-check.redacted.log` is a derived copy with local paths replaced; the unmodified private original remains on the benchmark host. The exact executable and script hashes are listed in `manifest.json`. Input and library identity across the interrupted period are not established by this package.

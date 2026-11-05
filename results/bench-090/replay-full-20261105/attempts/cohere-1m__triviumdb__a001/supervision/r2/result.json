@@ -1,0 +1,9 @@
+{
+  "ended_at": "2026-11-05T13:39:06+00:00",
+  "reason": null,
+  "root_pid": 42528,
+  "root_created_100ns": 134383594568236191,
+  "termination_confirmed": true,
+  "active_after_termination": 0,
+  "exit_code": 0
+}

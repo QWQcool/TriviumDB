@@ -1,0 +1,10 @@
+{
+  "started_at": "2026-11-05T12:57:37+00:00",
+  "ended_at": "2026-11-05T13:03:22+00:00",
+  "wall_seconds": 345.10728350000136,
+  "exit_code": 4294967295,
+  "raw_exists": false,
+  "monitor_errors": [],
+  "validation_passed": false,
+  "validation_error": "process failed, output absent, or monitoring failed"
+}

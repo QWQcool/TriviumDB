@@ -1,0 +1,167 @@
+{
+  "attempt": 1,
+  "path": "attempts\\cohere-1m__triviumdb__a001",
+  "library_fingerprint_sha256": "c7ad4ba1884def66dd87358df6b6635764128de3b4619da3a56d517e9fc661f1",
+  "continuation_script_sha256": "d74caf800f4d56744d50b9c59e9fb240333abc19ac42f1cb0fd9fc4f8d7940e2",
+  "runner_sha256": "2cff5bed2a02a5a6f5f7667d2535b9891a6049fd1d3a894dab29df275880c313",
+  "retry_script_sha256": "84d37a8774fd7e0f01bd1892aa98d2826fd51bfc7de7b6547751f25f2c648efa",
+  "review": {
+    "passed": false,
+    "reasons": [
+      "ef=10 QPS sample CV exceeds 8%",
+      "ef=35 QPS sample CV exceeds 8%",
+      "ef=40 QPS sample CV exceeds 8%"
+    ],
+    "build_seconds": [
+      46.1908126,
+      46.6760279,
+      46.0391533
+    ],
+    "build_dispersion": 0.013787906385522188,
+    "ef_points": [
+      {
+        "ef": 10,
+        "qps_samples": [
+          117840.9418319435,
+          115531.13997464092,
+          97006.8535342022
+        ],
+        "sample_cv": 0.10370210079048568
+      },
+      {
+        "ef": 15,
+        "qps_samples": [
+          87120.08022016987,
+          96292.173564717,
+          91567.20941603927
+        ],
+        "sample_cv": 0.050040987402116356
+      },
+      {
+        "ef": 20,
+        "qps_samples": [
+          72578.76338125588,
+          67304.42092454064,
+          77218.16912632274
+        ],
+        "sample_cv": 0.06854303253563064
+      },
+      {
+        "ef": 25,
+        "qps_samples": [
+          67771.56914902628,
+          65379.77476667593,
+          59168.63920117603
+        ],
+        "sample_cv": 0.0692676796348356
+      },
+      {
+        "ef": 30,
+        "qps_samples": [
+          61013.42691979511,
+          56583.02469650987,
+          57564.09474128969
+        ],
+        "sample_cv": 0.03985442426793478
+      },
+      {
+        "ef": 35,
+        "qps_samples": [
+          47243.629491835716,
+          41071.41353635754,
+          53013.61177495934
+        ],
+        "sample_cv": 0.12677318723734993
+      },
+      {
+        "ef": 40,
+        "qps_samples": [
+          40625.5357492527,
+          44640.5752920219,
+          36439.33079169001
+        ],
+        "sample_cv": 0.10108635749347994
+      },
+      {
+        "ef": 80,
+        "qps_samples": [
+          29386.17280656464,
+          28625.67422408321,
+          27345.35653969671
+        ],
+        "sample_cv": 0.036249410462858185
+      },
+      {
+        "ef": 120,
+        "qps_samples": [
+          24144.6632326517,
+          25341.46355061273,
+          24819.232224496904
+        ],
+        "sample_cv": 0.024224923233113427
+      },
+      {
+        "ef": 200,
+        "qps_samples": [
+          17835.528426131437,
+          16369.367576849883,
+          16021.054228625091
+        ],
+        "sample_cv": 0.05751516863247709
+      },
+      {
+        "ef": 400,
+        "qps_samples": [
+          9353.016757098647,
+          9080.862355012681,
+          9246.800479890451
+        ],
+        "sample_cv": 0.014865780838039189
+      },
+      {
+        "ef": 800,
+        "qps_samples": [
+          5200.898080678776,
+          5408.828901731072,
+          5452.338694808804
+        ],
+        "sample_cv": 0.02509921360642903
+      }
+    ],
+    "at_target_median_curve": {
+      "reachable": true,
+      "qps": 51243.42702870543,
+      "ef_low": 30,
+      "ef_high": 35,
+      "span_recall": 0.02090000000000003,
+      "confidence": "interpolated"
+    },
+    "at_target_per_build": [
+      {
+        "reachable": true,
+        "qps": 52455.56216316614,
+        "ef_low": 30,
+        "ef_high": 35,
+        "span_recall": 0.021399999999999975,
+        "confidence": "interpolated"
+      },
+      {
+        "reachable": true,
+        "qps": 46991.30378588427,
+        "ef_low": 30,
+        "ef_high": 35,
+        "span_recall": 0.02070000000000005,
+        "confidence": "interpolated"
+      },
+      {
+        "reachable": true,
+        "qps": 55204.58505504432,
+        "ef_low": 30,
+        "ef_high": 35,
+        "span_recall": 0.018900000000000028,
+        "confidence": "interpolated"
+      }
+    ],
+    "method": "build (max-min)/median; QPS sample standard deviation / mean at every ef"
+  }
+}

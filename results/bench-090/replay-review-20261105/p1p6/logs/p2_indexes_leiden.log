@@ -1,0 +1,68 @@
+warning: linker stdout: 正在创建库 <WORKSPACE>\.bench090\target\release\deps\triviumdb.dll.lib 和对象 <WORKSPACE>\.bench090\target\release\deps\triviumdb.dll.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `triviumdb` (lib) generated 1 warning
+   Compiling triviumdb v0.9.0 (<WORKTREE>)
+    Finished `bench` profile [optimized] target(s) in 24.74s
+     Running benches\bench_indexes_and_leiden.rs (<WORKSPACE>\.bench090\target\release\deps\bench_indexes_and_leiden-f85e49358118f5de.exe)
+Gnuplot not found, using plotters backend
+Benchmarking property_indexes/composite_exact
+Benchmarking property_indexes/composite_exact: Warming up for 3.0000 s
+Benchmarking property_indexes/composite_exact: Collecting 100 samples in estimated 5.0049 s (3.8M iterations)
+Benchmarking property_indexes/composite_exact: Analyzing
+property_indexes/composite_exact
+                        time:   [1.3251 µs 1.3309 µs 1.3374 µs]
+                        thrpt:  [74.772 Gelem/s 75.138 Gelem/s 75.468 Gelem/s]
+                 change:
+                        time:   [-24.074% -20.532% -16.998%] (p = 0.00 < 0.05)
+                        thrpt:  [+20.480% +25.837% +31.708%]
+                        Performance has improved.
+Found 8 outliers among 100 measurements (8.00%)
+  6 (6.00%) high mild
+  2 (2.00%) high severe
+Benchmarking property_indexes/bitmap_or
+Benchmarking property_indexes/bitmap_or: Warming up for 3.0000 s
+Benchmarking property_indexes/bitmap_or: Collecting 100 samples in estimated 6.4252 s (10k iterations)
+Benchmarking property_indexes/bitmap_or: Analyzing
+property_indexes/bitmap_or
+                        time:   [638.31 µs 641.44 µs 644.43 µs]
+                        thrpt:  [155.18 Melem/s 155.90 Melem/s 156.66 Melem/s]
+                 change:
+                        time:   [-15.034% -13.756% -12.585%] (p = 0.00 < 0.05)
+                        thrpt:  [+14.397% +15.951% +17.694%]
+                        Performance has improved.
+Found 12 outliers among 100 measurements (12.00%)
+  4 (4.00%) low severe
+  6 (6.00%) low mild
+  1 (1.00%) high mild
+  1 (1.00%) high severe
+
+Benchmarking standard_leiden_gate/weighted_multilevel/10000
+Benchmarking standard_leiden_gate/weighted_multilevel/10000: Warming up for 3.0000 s
+Benchmarking standard_leiden_gate/weighted_multilevel/10000: Collecting 100 samples in estimated 5.5538 s (800 iterations)
+Benchmarking standard_leiden_gate/weighted_multilevel/10000: Analyzing
+standard_leiden_gate/weighted_multilevel/10000
+                        time:   [6.6995 ms 6.7549 ms 6.8197 ms]
+                        thrpt:  [1.4663 Melem/s 1.4804 Melem/s 1.4927 Melem/s]
+                 change:
+                        time:   [-5.1063% -3.7816% -2.4619%] (p = 0.00 < 0.05)
+                        thrpt:  [+2.5241% +3.9303% +5.3811%]
+                        Performance has improved.
+Found 8 outliers among 100 measurements (8.00%)
+  3 (3.00%) high mild
+  5 (5.00%) high severe
+Benchmarking standard_leiden_gate/weighted_multilevel/50000
+Benchmarking standard_leiden_gate/weighted_multilevel/50000: Warming up for 3.0000 s
+Benchmarking standard_leiden_gate/weighted_multilevel/50000: Collecting 100 samples in estimated 8.2764 s (200 iterations)
+Benchmarking standard_leiden_gate/weighted_multilevel/50000: Analyzing
+standard_leiden_gate/weighted_multilevel/50000
+                        time:   [40.921 ms 41.157 ms 41.399 ms]
+                        thrpt:  [1.2078 Melem/s 1.2149 Melem/s 1.2219 Melem/s]
+                 change:
+                        time:   [-6.4891% -5.4800% -4.4686%] (p = 0.00 < 0.05)
+                        thrpt:  [+4.6776% +5.7977% +6.9394%]
+                        Performance has improved.
+Found 3 outliers among 100 measurements (3.00%)
+  3 (3.00%) high mild
+

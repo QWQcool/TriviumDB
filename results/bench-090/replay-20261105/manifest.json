@@ -1,0 +1,67 @@
+{
+  "created_at": "2026-11-05T11:16:22+00:00",
+  "scope": "ANN only; P1-P6 excluded",
+  "smoke": false,
+  "datasets": [
+    "cohere-1m",
+    "minilm-384",
+    "dbpedia-1536",
+    "sift128"
+  ],
+  "engines": [
+    "triviumdb",
+    "hnswlib",
+    "faiss_hnsw"
+  ],
+  "rebuilds_per_engine": 3,
+  "query_batches_per_ef_per_build": 1,
+  "efs": [
+    10,
+    15,
+    20,
+    25,
+    30,
+    35,
+    40,
+    80,
+    120,
+    200,
+    400,
+    800
+  ],
+  "threads": 16,
+  "m": 32,
+  "ef_construction": 128,
+  "factors": {
+    "cohere-1m": 20,
+    "minilm-384": 20,
+    "dbpedia-1536": 2,
+    "sift128": 2
+  },
+  "benchmark_git_rev": "7edf8ceacd85cd71944a3471ac05df377995a172",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "python": "3.12.0 (tags/v3.12.0:0fb18b0, Oct  2 2023, 13:03:39) [MSC v.1935 64 bit (AMD64)]",
+  "numpy": "2.5.3",
+  "hnswlib": "0.8.0",
+  "faiss": "1.15.0",
+  "benchmark_executable": {
+    "file": "bench_cohere1m-1ecbe82aebd1c270.exe",
+    "sha256": "1c0ae6dabff7378b5cac658223bcefa6273e83cdffad731cf24ebb4cf5355587"
+  },
+  "python_executable_sha256": "d55736b9f3d6b4ca7985b82db8ce11edfa09994cf93ce31c6b506543b74f32eb",
+  "cargo_executable_sha256": "86478e53f769379d7f0ebfa7c9aa97cb76ca92233f79aa2cc0dbee2efaac73c7",
+  "runner_sha256": "2cff5bed2a02a5a6f5f7667d2535b9891a6049fd1d3a894dab29df275880c313",
+  "bench090_script_sha256": "188714857a7cb186bc2e35e102ae61b15ab86949a95b053cfb18b6aacee90421",
+  "report090_script_sha256": "f138cbb5fb85f4b8287e4c87df471a3b6ca09399a705307e73b7ca409f1d8db2",
+  "bench_source_sha256": "5eb9dffe864292d5681cc791b5ad8de6e7ebbe2a7971d2ccfc610924528551ed",
+  "cargo_lock_sha256": "5e6ddc1eccd5a6a78d5b955e36efa5c7258779848fbcecb908aca1a7c0494f8a",
+  "worktree_tracked_changes": [
+    " M benches/bench_pipeline_gate.rs"
+  ],
+  "worktree_diff_sha256": "3eb240b43e3fa60e487d49ee16446f6f603b58fe2c13a7a9472461714d0b3f21",
+  "ground_truth_preflight": "within this batch, between input hash passes",
+  "per_query_artifacts": "baselines: labels and hit counts; TriviumDB: batch aggregate only",
+  "system_load_note": "During-run CPU is total system CPU including benchmark, not background CPU.",
+  "timing_boundary": "TriviumDB measured search includes GT hit counting; baseline QPS excludes recall computation.",
+  "gate_boundary": "Gate is immediately before starting each benchmark process; data loading precedes index construction."
+}

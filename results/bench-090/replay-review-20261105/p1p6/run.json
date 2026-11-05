@@ -1,0 +1,713 @@
+{
+  "state": "finished",
+  "source_commit": "7edf8ceacd85cd71944a3471ac05df377995a172",
+  "worktree": "<WORKTREE>",
+  "historical_patch": "pipeline-gate-historical.patch",
+  "historical_patch_sha256": "3eb240b43e3fa60e487d49ee16446f6f603b58fe2c13a7a9472461714d0b3f21",
+  "started_at": "2026-11-05T13:03:44.894654+00:00",
+  "steps": [
+    {
+      "id": "p1_clean_20k",
+      "command": [
+        "<USER_HOME>\\.cargo\\bin\\cargo.exe",
+        "bench",
+        "--locked",
+        "--bench",
+        "bench_pipeline_gate"
+      ],
+      "cwd": "<WORKTREE>",
+      "env_overrides": {
+        "TDB_PIPELINE_GATE_NODES": "20000"
+      },
+      "patched": false,
+      "gate_samples": [
+        {
+          "cpu_percent": [
+            6.472282219550706,
+            4.9991085061995015,
+            8.62071448851669,
+            3.943151687805546,
+            5.021936094546642
+          ],
+          "available_memory_bytes": 46305079296,
+          "timestamp_utc": "2026-11-05T13:03:52.7647884Z",
+          "passed": true
+        }
+      ],
+      "started_at": "2026-11-05T13:03:52.844774+00:00",
+      "exit_code": 101,
+      "status": "failed",
+      "elapsed_seconds": 63.5,
+      "finished_at": "2026-11-05T13:04:56.341644+00:00"
+    },
+    {
+      "id": "p1_clean_200k",
+      "command": [
+        "<USER_HOME>\\.cargo\\bin\\cargo.exe",
+        "bench",
+        "--locked",
+        "--bench",
+        "bench_pipeline_gate"
+      ],
+      "cwd": "<WORKTREE>",
+      "env_overrides": {
+        "TDB_PIPELINE_GATE_NODES": "200000"
+      },
+      "patched": false,
+      "gate_samples": [
+        {
+          "cpu_percent": [
+            3.4426594372110486,
+            6.60025358335401,
+            5.60613208736579,
+            5.815593539440311,
+            9.024858434761606
+          ],
+          "available_memory_bytes": 46184038400,
+          "timestamp_utc": "2026-11-05T13:05:02.5782761Z",
+          "passed": true
+        }
+      ],
+      "started_at": "2026-11-05T13:05:02.630044+00:00",
+      "exit_code": 101,
+      "status": "failed",
+      "elapsed_seconds": 1.9840000000003783,
+      "finished_at": "2026-11-05T13:05:04.625286+00:00"
+    },
+    {
+      "id": "p2_indexes_leiden",
+      "command": [
+        "<USER_HOME>\\.cargo\\bin\\cargo.exe",
+        "bench",
+        "--locked",
+        "--bench",
+        "bench_indexes_and_leiden"
+      ],
+      "cwd": "<WORKTREE>",
+      "env_overrides": {},
+      "patched": false,
+      "gate_samples": [
+        {
+          "cpu_percent": [
+            6.994838010177718,
+            4.9867076753390975,
+            0.5311430641359416,
+            4.037783134619044,
+            0.8012595459266247
+          ],
+          "available_memory_bytes": 46204567552,
+          "timestamp_utc": "2026-11-05T13:05:10.9632781Z",
+          "passed": true
+        }
+      ],
+      "started_at": "2026-11-05T13:05:11.043639+00:00",
+      "exit_code": 0,
+      "status": "ok",
+      "elapsed_seconds": 71.375,
+      "finished_at": "2026-11-05T13:06:22.412968+00:00"
+    },
+    {
+      "id": "p3_deep_traversal",
+      "command": [
+        "<USER_HOME>\\.cargo\\bin\\cargo.exe",
+        "bench",
+        "--locked",
+        "--bench",
+        "bench_deep_traversal"
+      ],
+      "cwd": "<WORKTREE>",
+      "env_overrides": {},
+      "patched": false,
+      "gate_samples": [
+        {
+          "cpu_percent": [
+            3.0326391423341703,
+            0.3783737783043861,
+            1.341750393364638,
+            8.534569501895428,
+            0
+          ],
+          "available_memory_bytes": 46188666880,
+          "timestamp_utc": "2026-11-05T13:06:28.5858867Z",
+          "passed": true
+        }
+      ],
+      "started_at": "2026-11-05T13:06:28.661973+00:00",
+      "exit_code": 0,
+      "status": "ok",
+      "elapsed_seconds": 62.07800000000134,
+      "finished_at": "2026-11-05T13:07:30.752234+00:00",
+      "report": "reports\\p3_deep_traversal.json"
+    },
+    {
+      "id": "p3_graph_parallel",
+      "command": [
+        "<USER_HOME>\\.cargo\\bin\\cargo.exe",
+        "bench",
+        "--locked",
+        "--bench",
+        "bench_graph_parallel"
+      ],
+      "cwd": "<WORKTREE>",
+      "env_overrides": {},
+      "patched": false,
+      "gate_samples": [
+        {
+          "cpu_percent": [
+            5.225655868762469,
+            3.558959137411588,
+            0,
+            6.107701242153096,
+            0
+          ],
+          "available_memory_bytes": 46207754240,
+          "timestamp_utc": "2026-11-05T13:07:37.0752574Z",
+          "passed": true
+        }
+      ],
+      "started_at": "2026-11-05T13:07:37.152488+00:00",
+      "exit_code": 0,
+      "status": "ok",
+      "elapsed_seconds": 21.139999999999418,
+      "finished_at": "2026-11-05T13:07:58.298185+00:00",
+      "report": "reports\\p3_graph_parallel.json"
+    },
+    {
+      "id": "p6_query_parallel",
+      "command": [
+        "<USER_HOME>\\.cargo\\bin\\cargo.exe",
+        "bench",
+        "--locked",
+        "--bench",
+        "bench_query_parallel"
+      ],
+      "cwd": "<WORKTREE>",
+      "env_overrides": {},
+      "patched": false,
+      "gate_samples": [
+        {
+          "cpu_percent": [
+            7.059032423937417,
+            4.318188749432128,
+            6.275148601369985,
+            2.6424053419851767,
+            0.45947363451801504
+          ],
+          "available_memory_bytes": 46163677184,
+          "timestamp_utc": "2026-11-05T13:08:04.4584059Z",
+          "passed": true
+        }
+      ],
+      "started_at": "2026-11-05T13:08:04.515278+00:00",
+      "exit_code": 0,
+      "status": "ok",
+      "elapsed_seconds": 14.875,
+      "finished_at": "2026-11-05T13:08:19.396052+00:00",
+      "report": "reports\\p6_query_parallel.json"
+    },
+    {
+      "id": "p4_fault_release_all",
+      "command": [
+        "<USER_HOME>\\.cargo\\bin\\cargo.exe",
+        "test",
+        "--release",
+        "--features",
+        "test-hooks",
+        "--test",
+        "fault_io",
+        "--test",
+        "fault_power",
+        "--test",
+        "fault_crash",
+        "--test",
+        "fault_allocator",
+        "--test",
+        "fault_lock",
+        "--test",
+        "fault_hardware",
+        "--",
+        "--test-threads=1"
+      ],
+      "cwd": "<WORKTREE>",
+      "env_overrides": {},
+      "patched": false,
+      "gate_samples": [
+        {
+          "cpu_percent": [
+            0.02234136285307331,
+            1.3768433287366766,
+            5.111216190787937,
+            0,
+            4.459417300322688
+          ],
+          "available_memory_bytes": 46153830400,
+          "timestamp_utc": "2026-11-05T13:08:25.5405825Z",
+          "passed": true
+        }
+      ],
+      "started_at": "2026-11-05T13:08:25.599739+00:00",
+      "exit_code": 101,
+      "status": "failed",
+      "elapsed_seconds": 108.09399999999732,
+      "finished_at": "2026-11-05T13:10:13.685387+00:00",
+      "test_audit": {
+        "expected_targets": [
+          "fault_io",
+          "fault_power",
+          "fault_crash",
+          "fault_allocator",
+          "fault_lock",
+          "fault_hardware"
+        ],
+        "binaries": [],
+        "problems": [
+          "fault_io: expected one Cargo test binary, found 0",
+          "fault_power: expected one Cargo test binary, found 0",
+          "fault_crash: expected one Cargo test binary, found 0",
+          "fault_allocator: expected one Cargo test binary, found 0",
+          "fault_lock: expected one Cargo test binary, found 0",
+          "fault_hardware: expected one Cargo test binary, found 0"
+        ],
+        "valid": false
+      }
+    },
+    {
+      "id": "p4_fault_debug_without_allocator",
+      "command": [
+        "<USER_HOME>\\.cargo\\bin\\cargo.exe",
+        "test",
+        "--features",
+        "test-hooks",
+        "--test",
+        "fault_io",
+        "--test",
+        "fault_power",
+        "--test",
+        "fault_crash",
+        "--test",
+        "fault_lock",
+        "--test",
+        "fault_hardware",
+        "--",
+        "--test-threads=1"
+      ],
+      "cwd": "<WORKTREE>",
+      "env_overrides": {},
+      "patched": false,
+      "gate_samples": [
+        {
+          "cpu_percent": [
+            2.2082663952082804,
+            1.8065404039405375,
+            3.654946295278405,
+            1.667714352720362,
+            1.1955878269655384
+          ],
+          "available_memory_bytes": 46190411776,
+          "timestamp_utc": "2026-11-05T13:10:19.8763560Z",
+          "passed": true
+        }
+      ],
+      "started_at": "2026-11-05T13:10:19.937558+00:00",
+      "exit_code": 0,
+      "status": "ok",
+      "elapsed_seconds": 98.5470000000023,
+      "finished_at": "2026-11-05T13:11:58.488385+00:00",
+      "test_audit": {
+        "expected_targets": [
+          "fault_io",
+          "fault_power",
+          "fault_crash",
+          "fault_lock",
+          "fault_hardware"
+        ],
+        "binaries": [
+          {
+            "source": "tests\\fault_crash\\main.rs",
+            "executable": "fault_crash-7f519bec24941e57.exe",
+            "target": "fault_crash",
+            "line": 8,
+            "summaries": [
+              {
+                "line": 57,
+                "result": "ok",
+                "passed": 11,
+                "failed": 0,
+                "ignored": 0,
+                "measured": 0,
+                "filtered_out": 0
+              }
+            ],
+            "final": {
+              "line": 57,
+              "result": "ok",
+              "passed": 11,
+              "failed": 0,
+              "ignored": 0,
+              "measured": 0,
+              "filtered_out": 0
+            }
+          },
+          {
+            "source": "tests\\fault_hardware\\main.rs",
+            "executable": "fault_hardware-dd737d323ca62542.exe",
+            "target": "fault_hardware",
+            "line": 59,
+            "summaries": [
+              {
+                "line": 84,
+                "result": "ok",
+                "passed": 21,
+                "failed": 0,
+                "ignored": 0,
+                "measured": 0,
+                "filtered_out": 0
+              }
+            ],
+            "final": {
+              "line": 84,
+              "result": "ok",
+              "passed": 21,
+              "failed": 0,
+              "ignored": 0,
+              "measured": 0,
+              "filtered_out": 0
+            }
+          },
+          {
+            "source": "tests\\fault_io\\main.rs",
+            "executable": "fault_io-28d3f2b266267404.exe",
+            "target": "fault_io",
+            "line": 86,
+            "summaries": [
+              {
+                "line": 141,
+                "result": "ok",
+                "passed": 50,
+                "failed": 0,
+                "ignored": 1,
+                "measured": 0,
+                "filtered_out": 0
+              }
+            ],
+            "final": {
+              "line": 141,
+              "result": "ok",
+              "passed": 50,
+              "failed": 0,
+              "ignored": 1,
+              "measured": 0,
+              "filtered_out": 0
+            }
+          },
+          {
+            "source": "tests\\fault_lock\\main.rs",
+            "executable": "fault_lock-2d317107bb17a60f.exe",
+            "target": "fault_lock",
+            "line": 143,
+            "summaries": [
+              {
+                "line": 151,
+                "result": "ok",
+                "passed": 1,
+                "failed": 0,
+                "ignored": 0,
+                "measured": 0,
+                "filtered_out": 3
+              },
+              {
+                "line": 157,
+                "result": "ok",
+                "passed": 4,
+                "failed": 0,
+                "ignored": 0,
+                "measured": 0,
+                "filtered_out": 0
+              }
+            ],
+            "final": {
+              "line": 157,
+              "result": "ok",
+              "passed": 4,
+              "failed": 0,
+              "ignored": 0,
+              "measured": 0,
+              "filtered_out": 0
+            }
+          },
+          {
+            "source": "tests\\fault_power\\main.rs",
+            "executable": "fault_power-20fb75e364061431.exe",
+            "target": "fault_power",
+            "line": 159,
+            "summaries": [
+              {
+                "line": 249,
+                "result": "ok",
+                "passed": 16,
+                "failed": 0,
+                "ignored": 0,
+                "measured": 0,
+                "filtered_out": 0
+              }
+            ],
+            "final": {
+              "line": 249,
+              "result": "ok",
+              "passed": 16,
+              "failed": 0,
+              "ignored": 0,
+              "measured": 0,
+              "filtered_out": 0
+            }
+          }
+        ],
+        "problems": [],
+        "valid": true
+      }
+    },
+    {
+      "id": "p5_soak",
+      "command": [
+        "<USER_HOME>\\.cargo\\bin\\cargo.exe",
+        "test",
+        "--release",
+        "--test",
+        "long_running",
+        "soak",
+        "--",
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "cwd": "<WORKTREE>",
+      "env_overrides": {},
+      "patched": false,
+      "gate_samples": [
+        {
+          "cpu_percent": [
+            4.220039810754095,
+            4.0407896128517695,
+            0,
+            4.404751354642422,
+            0.7731642365393254
+          ],
+          "available_memory_bytes": 46538354688,
+          "timestamp_utc": "2026-11-05T13:12:04.8232093Z",
+          "passed": true
+        }
+      ],
+      "started_at": "2026-11-05T13:12:04.898370+00:00",
+      "exit_code": 101,
+      "status": "failed",
+      "elapsed_seconds": 405.32800000000134,
+      "finished_at": "2026-11-05T13:18:50.222670+00:00",
+      "test_audit": {
+        "expected_targets": [
+          "long_running"
+        ],
+        "binaries": [
+          {
+            "source": "tests\\long_running\\main.rs",
+            "executable": "long_running-bf0edd00e35c2c62.exe",
+            "target": "long_running",
+            "line": 8,
+            "summaries": [
+              {
+                "line": 27,
+                "result": "FAILED",
+                "passed": 1,
+                "failed": 1,
+                "ignored": 0,
+                "measured": 0,
+                "filtered_out": 10
+              }
+            ],
+            "final": {
+              "line": 27,
+              "result": "FAILED",
+              "passed": 1,
+              "failed": 1,
+              "ignored": 0,
+              "measured": 0,
+              "filtered_out": 10
+            }
+          }
+        ],
+        "problems": [
+          "long_running: harness reported failure"
+        ],
+        "valid": false
+      }
+    },
+    {
+      "id": "p6_concurrency",
+      "command": [
+        "<USER_HOME>\\.cargo\\bin\\cargo.exe",
+        "test",
+        "--release",
+        "--features",
+        "test-hooks",
+        "--test",
+        "concurrency",
+        "--",
+        "--test-threads=1"
+      ],
+      "cwd": "<WORKTREE>",
+      "env_overrides": {},
+      "patched": false,
+      "gate_samples": [
+        {
+          "cpu_percent": [
+            4.416540491304888,
+            4.269928241035603,
+            6.34428795766201,
+            1.2144595556685678,
+            0
+          ],
+          "available_memory_bytes": 46161117184,
+          "timestamp_utc": "2026-11-05T13:18:56.4904777Z",
+          "passed": true
+        }
+      ],
+      "started_at": "2026-11-05T13:18:56.595415+00:00",
+      "exit_code": 0,
+      "status": "ok",
+      "elapsed_seconds": 122.0779999999977,
+      "finished_at": "2026-11-05T13:20:58.670899+00:00",
+      "test_audit": {
+        "expected_targets": [
+          "concurrency"
+        ],
+        "binaries": [
+          {
+            "source": "tests\\concurrency\\main.rs",
+            "executable": "concurrency-6469b23e514dc6c5.exe",
+            "target": "concurrency",
+            "line": 8,
+            "summaries": [
+              {
+                "line": 63,
+                "result": "ok",
+                "passed": 51,
+                "failed": 0,
+                "ignored": 0,
+                "measured": 0,
+                "filtered_out": 0
+              }
+            ],
+            "final": {
+              "line": 63,
+              "result": "ok",
+              "passed": 51,
+              "failed": 0,
+              "ignored": 0,
+              "measured": 0,
+              "filtered_out": 0
+            }
+          }
+        ],
+        "problems": [],
+        "valid": true
+      }
+    },
+    {
+      "id": "p1_patched_20k",
+      "command": [
+        "<USER_HOME>\\.cargo\\bin\\cargo.exe",
+        "bench",
+        "--locked",
+        "--bench",
+        "bench_pipeline_gate"
+      ],
+      "cwd": "<WORKTREE>",
+      "env_overrides": {
+        "TDB_PIPELINE_GATE_NODES": "20000"
+      },
+      "patched": true,
+      "gate_samples": [
+        {
+          "cpu_percent": [
+            5.349212098861056,
+            1.942199638716935,
+            4.349500247239746,
+            0,
+            3.3913037775028854
+          ],
+          "available_memory_bytes": 46108377088,
+          "timestamp_utc": "2026-11-05T13:21:05.1216543Z",
+          "passed": true
+        }
+      ],
+      "started_at": "2026-11-05T13:21:05.194332+00:00",
+      "exit_code": 0,
+      "status": "ok",
+      "elapsed_seconds": 61.51499999999942,
+      "finished_at": "2026-11-05T13:22:06.713134+00:00",
+      "report": "reports\\p1_patched_20k.json"
+    },
+    {
+      "id": "p1_patched_200k",
+      "command": [
+        "<USER_HOME>\\.cargo\\bin\\cargo.exe",
+        "bench",
+        "--locked",
+        "--bench",
+        "bench_pipeline_gate"
+      ],
+      "cwd": "<WORKTREE>",
+      "env_overrides": {
+        "TDB_PIPELINE_GATE_NODES": "200000"
+      },
+      "patched": true,
+      "gate_samples": [
+        {
+          "cpu_percent": [
+            4.509626566739888,
+            2.269299651239509,
+            4.072474835126694,
+            0,
+            2.2427128532649276
+          ],
+          "available_memory_bytes": 46030454784,
+          "timestamp_utc": "2026-11-05T13:22:12.8364792Z",
+          "passed": true
+        }
+      ],
+      "started_at": "2026-11-05T13:22:12.895024+00:00",
+      "exit_code": 0,
+      "status": "ok",
+      "elapsed_seconds": 9.18699999999808,
+      "finished_at": "2026-11-05T13:22:22.080974+00:00",
+      "report": "reports\\p1_patched_200k.json"
+    }
+  ],
+  "host": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+    "python": "3.12.0 (tags/v3.12.0:0fb18b0, Oct  2 2023, 13:03:39) [MSC v.1935 64 bit (AMD64)]",
+    "cargo": {
+      "exit_code": 0,
+      "version": "cargo 1.97.1 (c980f4866 2026-06-30)",
+      "error": ""
+    },
+    "rustc": {
+      "exit_code": 0,
+      "version": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: x86_64-pc-windows-msvc\nrelease: 1.97.1\nLLVM version: 22.1.6",
+      "error": ""
+    }
+  },
+  "measurement_limitations": [
+    "P1, P3 and query-parallel are single benchmark observations unless the individual report explicitly documents repeats; they are not three independent reruns.",
+    "P2 uses Criterion's per-case statistical estimates; its console output is a summary, not a complete independent-run or per-query sample record.",
+    "Ignored and filtered tests are recorded and do not count as executed; a passing selected suite is not evidence that excluded suites passed."
+  ],
+  "environment": {
+    "CARGO_TARGET_DIR": "<WORKSPACE>\\.bench090\\target",
+    "RAYON_NUM_THREADS": null,
+    "TRIVIUM_MT_THREADS": null,
+    "RUSTFLAGS": null,
+    "RUSTUP_TOOLCHAIN": null
+  },
+  "finished_at": "2026-11-05T13:22:22.082981+00:00"
+}

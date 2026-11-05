@@ -1,0 +1,1 @@
+{"at": "2026-11-05T12:20:00+00:00", "cpu_percent_samples": [5.9108527131782935, 7.338551859099807, 9.23456790123457], "available_bytes": 50571927552, "total_bytes": 68410585088, "required_available_bytes": 26837614592, "passed": true, "smoke_override": false}

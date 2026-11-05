@@ -1,0 +1,12 @@
+{
+  "started_utc": "2026-11-05T13:22:53.4098752+00:00",
+  "finished_utc": "2026-11-05T13:23:01.3412065+00:00",
+  "exit_code": 0,
+  "cwd": "<WORKTREE>",
+  "cargo_target_dir": "<WORKSPACE>\\.bench090\\target",
+  "rustflags": null,
+  "cargo_profile_test_lto": null,
+  "cargo_profile_test_codegen_units": null,
+  "temporary_directory": "<WORKSPACE>\\results\\bench-090\\replay-p1p6-20261105\\allocator-debug-extra\\temp",
+  "command": "cargo test --locked --features test-hooks --test fault_allocator -- --test-threads=1"
+}

@@ -1,0 +1,26 @@
+{
+  "dataset": "cohere-1m",
+  "engine": "faiss_hnsw",
+  "run": 3,
+  "threads": 16,
+  "m": 32,
+  "efc": 128,
+  "factor": 20,
+  "executable_path": "D:\\TriviumDB\\.bench090\\target\\release\\deps\\bench_cohere1m-1ecbe82aebd1c270.exe",
+  "efs": [
+    10,
+    15,
+    20,
+    25,
+    30,
+    35,
+    40,
+    80,
+    120,
+    200,
+    400,
+    800
+  ],
+  "train_limit": null,
+  "raw_path": "D:\\TriviumDB\\results\\bench-090\\replay-20261105\\raw\\cohere-1m__faiss_hnsw__r3.json"
+}

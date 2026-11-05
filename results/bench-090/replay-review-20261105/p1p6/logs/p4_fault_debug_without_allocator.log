@@ -1,0 +1,250 @@
+   Compiling triviumdb v0.9.0 (<WORKTREE>)
+warning: linker stdout: 正在创建库 <WORKSPACE>\.bench090\target\debug\deps\triviumdb.dll.lib 和对象 <WORKSPACE>\.bench090\target\debug\deps\triviumdb.dll.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `triviumdb` (lib) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 29.07s
+     Running tests\fault_crash\main.rs (<WORKSPACE>\.bench090\target\debug\deps\fault_crash-7f519bec24941e57.exe)
+
+running 11 tests
+test HW01_UD2_未定义指令异常_崩溃恢复 ... 
+running 1 test
+test __hw_crash_child_entry ... ok
+test HW02_INT3_断点陷阱_崩溃恢复 ... 
+running 1 test
+test __hw_crash_child_entry ... ok
+test HW03_DIV0_除零异常_崩溃恢复 ... 
+running 1 test
+test __hw_crash_child_entry ... ok
+test HW04_NULL_DEREF_空指针写入异常_崩溃恢复 ... 
+running 1 test
+test __hw_crash_child_entry ... ok
+test HW05_寄存器毒化_GPR和SSE全清零后崩溃恢复 ... 
+running 1 test
+test __hw_crash_child_entry ... ok
+test HW06_MFENCE_内存屏障后崩溃恢复 ... 
+running 1 test
+test __hw_crash_child_entry ... ok
+test HW07_写入中途UD2崩溃_数据库仍可打开 ... 
+running 1 test
+test __hw_crash_child_entry ... ok
+test HW08_大Payload_8KB_WAL缓冲压力崩溃恢复 ... 
+running 1 test
+test __hw_crash_child_entry ... ok
+test HW09_连续三次崩溃_累积WAL回放恢复 ... 
+running 1 test
+test __hw_crash_child_entry ... 
+running 1 test
+test __hw_crash_child_entry ... 
+running 1 test
+test __hw_crash_child_entry ... ok
+test HW10_全异常向量交叉轰炸_同一DB连续恢复 ... 
+running 1 test
+test __hw_crash_child_entry ... 
+running 1 test
+test __hw_crash_child_entry ... 
+running 1 test
+test __hw_crash_child_entry ... 
+running 1 test
+test __hw_crash_child_entry ... 
+running 1 test
+test __hw_crash_child_entry ... 
+running 1 test
+test __hw_crash_child_entry ... ok
+test __hw_crash_child_entry ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 34.59s
+
+     Running tests\fault_hardware\main.rs (<WORKSPACE>\.bench090\target\debug\deps\fault_hardware-dd737d323ca62542.exe)
+
+running 21 tests
+test emi_bitflip::EMI_01_连续8字节全翻转_burst_error ... ok
+test emi_bitflip::EMI_02_向量数据区10_percent翻转_搜索降级不崩溃 ... ok
+test emi_bitflip::EMI_03_WAL单比特翻转_CRC检测率 ... ok
+test emi_bitflip::EMI_04_TDB全零覆写_安全拒绝 ... ok
+test hw_intrusion::INTRUDE_01_BTS单比特翻转_TDB文件多点侵入 ... ok
+test hw_intrusion::INTRUDE_02_MOVNTI非时序毒写_DMA级侵入 ... ok
+test hw_intrusion::INTRUDE_03_WAL尾部注入垃圾帧_回放容错 ... ok
+test hw_intrusion::INTRUDE_04_ASM构造NaN查询向量_搜索输入验证 ... ok
+test hw_intrusion::INTRUDE_05_文件头Magic全覆写_格式校验拦截 ... ok
+test hw_intrusion::INTRUDE_06_渐进式比特衰减_NAND_Flash老化模拟 ... ok
+test hw_intrusion::INTRUDE_07_TDB加WAL双文件同时侵入_灾难级容错 ... ok
+test unsafe_audit::UNSAFE_01_SIMD_非8倍数维度_尾部处理正确性 ... ok
+test unsafe_audit::UNSAFE_02_SIMD_极端浮点值_不产生NaN_Inf ... ok
+test unsafe_audit::UNSAFE_03_SIMD_与标量路径结果一致 ... ok
+test unsafe_audit::UNSAFE_04_关闭后向量文件截断_重开返回损坏错误 ... ok
+test unsafe_audit::UNSAFE_05_关闭后向量文件缺失_重开返回损坏错误 ... ok
+test unsafe_audit::UNSAFE_06_畸形Header偏移量越界_不panic ... ok
+test unsafe_audit::UNSAFE_07_截断Header_只有Magic ... ok
+test unsafe_audit::UNSAFE_08_node_count溢出_声明百万实际为空 ... ok
+test unsafe_audit::UNSAFE_09_零字节文件_不panic ... ok
+test unsafe_audit::UNSAFE_10_单字节文件_不panic ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.21s
+
+     Running tests\fault_io\main.rs (<WORKSPACE>\.bench090\target\debug\deps\fault_io-28d3f2b266267404.exe)
+
+running 51 tests
+test detach_batch::关联集合删除在WAL和应用失败后恢复完整事务状态 ... ok
+test deterministic_failpoint::io_failpoint_guard作用域结束后恢复正常发布 ... ok
+test deterministic_failpoint::marker_io各操作定点失败均返回错误且不发布伪成功generation ... ok
+test deterministic_failpoint::wal_group_commit_flush与sync故障均传播且不报告成功 ... ok
+test deterministic_failpoint::wal_v2迁移各发布阶段故障均保持原文件且可重试 ... ok
+test deterministic_failpoint::恢复复制失败必须保留日志与备份并允许再次打开 ... ok
+test io_fault::IO_01_WAL文件被清空_安全启动 ... ok
+test io_fault::IO_02_WAL文件注入随机垃圾_安全恢复 ... ok
+test io_fault::IO_03_TDB文件全覆写随机数据_安全拒绝 ... ok
+test io_fault::IO_04_vec与tdb大小不匹配_降级加载 ... ok
+test io_fault::IO_05B_tdb_tmp半截矩阵_必须忽略并保留旧快照 ... ok
+test io_fault::IO_05C_vec_tmp半截矩阵_必须忽略并保留旧向量文件 ... ok
+test io_fault::IO_05D_vec追加半截_flush_ok不匹配_不得产生脏节点 ... ok
+test io_fault::IO_05_残留tmp文件_不影响正常启动 ... ok
+test io_fault::IO_06_文件锁_同一路径不能打开两次 ... ok
+test io_fault::IO_07_纯WAL恢复_不flush直接退出 ... ok
+test io_fault::IO_08_SyncMode_Normal和Full_drop后必须恢复完整WAL ... ok
+test io_fault::IO_09_SyncMode_Off未flush_writer时允许WAL不可见 ... ok
+test io_fault::IO_10_SyncMode_Normal写入后WAL应立即可见_Full至少同等可见 ... ok
+test lifecycle_resources::分组异常展开中同步失败关闭写入能力 ... ok
+test lifecycle_resources::分组正常返回路径同步失败传播原错误并拒绝后续写入 ... ok
+test lifecycle_resources::最后同步失败保留数据文件锁与Hook且可重试关闭 ... ok
+test migration_publication::发布持有目标锁且文件碰撞只回收本次移动的文件 ... ok
+test migration_publication::迁移故障按提交点保留完整目标并支持重试 ... ok
+test retained_publication::关闭进行中或关闭失败后丢弃对象_后台任务与错误记录不泄漏库资源 ... ok
+test retained_publication::发布阶段关闭超时保留自身资源且共享实例可继续操作 ... ok
+test retained_publication::同阶段按数据库路径选择的屏障可独立释放 ... ok
+test retained_publication::恢复已替换正文后再次IO失败保留撤销组并可再次恢复 ... ok
+test retained_publication::跨存储模式连续失败后恢复WAL事实和原始正文_支持ID复用与索引清空 ... ok
+test retained_publication::连续保存与关闭失败保留锁配额和Hook_跨关闭方式重试释放文件 ... ok
+test retained_publication::重复注册屏障拒绝后原有屏障仍可控制目标线程 ... ok
+test schema_publication::约束发布失败隔离实例并按真实提交点恢复 ... ok
+test schema_publication::约束构建预检拒绝不隔离可用实例 ... ok
+test sector_tearing::测试_深层页撕裂_模拟写入一半断电截断 ... ignored, 故障注入测试由 fault-injection workflow 显式运行
+test snapshot_shutdown::关闭等待超时不释放正在刷盘的锁与配额 ... ok
+test snapshot_shutdown::异步关闭继承故障注入并保留可重试状态 ... ok
+test snapshot_shutdown::快照各阶段失败不暴露半份目标且可重试 ... ok
+test snapshot_shutdown::快照重命名后目录同步失败保留完整目标并报告不确定状态 ... ok
+test snapshot_shutdown::损坏或多余制品拒绝恢复且已有目标保持原样 ... ok
+test text_publication::文本与派生索引发布故障支持重开恢复及同句柄重试 ... ok
+test wal_failure_state::group同步和事务中途序列化失败同样隔离writer ... ok
+test wal_failure_state::wal失败隔离子进程入口 ... ok
+test wal_failure_state::事务应用失败拒绝部分状态并从完整wal恢复 ... ok
+test wal_failure_state::同步失败后无新增确认结果且重启保留先前确认数据 ... ok
+test wal_failure_state::底层wal隔离禁止clear追加和group重启 ... ok
+test wal_midwrite::WAL_事务边界截断_未提交事务必须被丢弃 ... ok
+test wal_midwrite::WAL_单帧字段边界截断_len_data_crc各字段 ... ok
+test wal_midwrite::WAL_有效前缀加垃圾尾部_前缀条目必须完整恢复 ... ok
+test wal_midwrite::WAL_端到端_文件物理截断后Database重新加载 ... ok
+test wal_midwrite::WAL_解析器_10000轮随机字节绝不panic ... ok
+test wal_midwrite::WAL_逐字节截断_覆盖每个断电时间点 ... ok
+
+test result: ok. 50 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 20.00s
+
+     Running tests\fault_lock\main.rs (<WORKSPACE>\.bench090\target\debug\deps\fault_lock-2d317107bb17a60f.exe)
+
+running 4 tests
+test 双写跨进程辅助进程 ... ok
+test 同一路径跨进程第二个writer被拒绝且文件字节不变 ... 
+running 1 test
+test 双写跨进程辅助进程 ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+ok
+test 相对路径绝对路径与父目录别名共享同一writer锁 ... ok
+test 符号链接别名在权限允许时不能绕过writer锁 ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+     Running tests\fault_power\main.rs (<WORKSPACE>\.bench090\target\debug\deps\fault_power-20fb75e364061431.exe)
+
+running 16 tests
+test PWR_00A_发布阶段强杀必须恢复全部已同步事务 ... 
+running 1 test
+
+running 1 test
+
+running 1 test
+
+running 1 test
+
+running 1 test
+
+running 1 test
+
+running 1 test
+
+running 1 test
+
+running 1 test
+
+running 1 test
+
+running 1 test
+
+running 1 test
+
+running 1 test
+
+running 1 test
+
+running 1 test
+
+running 1 test
+
+running 1 test
+
+running 1 test
+
+running 1 test
+
+running 1 test
+
+running 1 test
+ok
+test PWR_00B_group_commit确认后强杀可恢复全部独立事务 ... 
+running 1 test
+ok
+test PWR_00_真实强杀子进程后WAL保持可恢复 ... 
+running 1 test
+ok
+test PWR_01_快速断电循环_100轮 ... ok
+test PWR_02_flush中途断电_tmp残留_原子性验证 ... ok
+test PWR_03_删除后断电_tombstone持久化 ... ok
+test PWR_04_事务commit后断电_WAL原子回放 ... ok
+test __group_commit_power_loss_child_entry ... ok
+test __power_loss_child_entry ... ok
+test __publication_power_loss_child_entry ... ok
+test migration_publication::__migration_child ... ok
+test migration_publication::迁移强杀后按提交点恢复且保留全部源事实 ... 
+running 1 test
+
+running 1 test
+
+running 1 test
+
+running 1 test
+
+running 1 test
+
+running 1 test
+ok
+test snapshot::__snapshot_power_child ... ok
+test snapshot::快照提交点强杀后要么无目标要么完整可恢复 ... 
+running 1 test
+
+running 1 test
+ok
+test text_publication::__text_publication_child ... ok
+test text_publication::文本发布强杀后恢复确定正文关键词及全部WAL节点 ... 
+running 1 test
+
+running 1 test
+
+running 1 test
+
+running 1 test
+ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.29s
+

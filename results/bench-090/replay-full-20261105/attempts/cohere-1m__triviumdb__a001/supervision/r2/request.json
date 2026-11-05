@@ -1,0 +1,30 @@
+{
+  "batch": "D:\\TriviumDB\\results\\bench-090\\replay-full-20261105\\attempts\\cohere-1m__triviumdb__a001",
+  "config": {
+    "dataset": "cohere-1m",
+    "engine": "triviumdb",
+    "run": 2,
+    "threads": 16,
+    "m": 32,
+    "efc": 128,
+    "factor": 20,
+    "efs": [
+      10,
+      15,
+      20,
+      25,
+      30,
+      35,
+      40,
+      80,
+      120,
+      200,
+      400,
+      800
+    ],
+    "train_limit": null,
+    "executable_path": "D:\\TriviumDB\\.bench090\\target\\release\\deps\\bench_cohere1m-1ecbe82aebd1c270.exe"
+  },
+  "max_wait": 1800,
+  "diagnostic": false
+}

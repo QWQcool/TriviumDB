@@ -1,0 +1,10 @@
+[2026-11-05T13:34:22+00:00] STAGE load_dataset begin
+[2026-11-05T13:34:22+00:00] STAGE load_dataset end: train=1000000, queries=20000, gt=20000
+[2026-11-05T13:34:22+00:00] STAGE import_hnswlib begin
+[2026-11-05T13:34:22+00:00] STAGE import_hnswlib end
+[2026-11-05T13:34:22+00:00] STAGE index_create begin
+[2026-11-05T13:34:22+00:00] STAGE index_create end
+[2026-11-05T13:34:22+00:00] STAGE add_items begin
+[2026-11-05T13:34:50+00:00] STAGE add_items end
+[2026-11-05T13:34:50+00:00] STAGE full_query_batch begin
+[2026-11-05T13:34:50+00:00] STAGE full_query_batch end: rows=20000

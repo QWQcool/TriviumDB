@@ -1,0 +1,111 @@
+{
+  "state": "failed-or-incomplete",
+  "source_commit": "7edf8ceacd85cd71944a3471ac05df377995a172",
+  "worktree": "<WORKTREE>",
+  "command": [
+    "<USER_HOME>\\.cargo\\bin\\cargo.exe",
+    "test",
+    "--locked",
+    "--release",
+    "--test",
+    "long_running",
+    "soak::SOAK_01_连续运行5分钟_RSS增长有界",
+    "--",
+    "--ignored",
+    "--exact",
+    "--nocapture",
+    "--test-threads=1"
+  ],
+  "sample_interval_seconds": 10.0,
+  "started_at": "2026-11-05T13:24:42.167359+00:00",
+  "gate_samples": [
+    {
+      "cpu_percent": [
+        0.8499272905356903,
+        4.962257744850973,
+        4.0483808120928995,
+        0.49262182439917535,
+        3.091101732548762
+      ],
+      "available_memory_bytes": 46067724288,
+      "timestamp_utc": "2026-11-05T13:24:49.3627341Z",
+      "passed": true
+    }
+  ],
+  "collector_limitations": [
+    "Windows Win32_Process parent IDs identify the Cargo descendant tree; PIDs and creation times are recorded to expose possible PID reuse.",
+    "WorkingSet64 and PrivateMemorySize64 have different meanings; neither alone establishes a memory leak.",
+    "Each process-tree observation starts an extra PowerShell process and samples system CPU for about one second; it can perturb the target and is included in system CPU.",
+    "collector_wall_seconds measures the subprocess wall cost, not its CPU usage; total collector CPU and attribution cannot be inferred from that field.",
+    "The test itself also invokes PowerShell to sample its working set; additional observation is a diagnostic condition, not identical to the original failed run."
+  ],
+  "cargo": {
+    "exit_code": 0,
+    "stdout": "cargo 1.97.1 (c980f4866 2026-06-30)\n",
+    "stderr": ""
+  },
+  "rustc": {
+    "exit_code": 0,
+    "stdout": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: x86_64-pc-windows-msvc\nrelease: 1.97.1\nLLVM version: 22.1.6\n",
+    "stderr": ""
+  },
+  "environment": {
+    "TEMP": "<WORKSPACE>\\results\\bench-090\\soak-diagnosis-20261105\\temp",
+    "TMP": "<WORKSPACE>\\results\\bench-090\\soak-diagnosis-20261105\\temp",
+    "CARGO_TARGET_DIR": "<WORKSPACE>\\.bench090\\target",
+    "RAYON_NUM_THREADS": null,
+    "TRIVIUM_MT_THREADS": null,
+    "RUSTFLAGS": null,
+    "RUSTUP_TOOLCHAIN": null
+  },
+  "test_started_at": "2026-11-05T13:24:49.433835+00:00",
+  "cargo_pid": 31440,
+  "exit_code": 101,
+  "finished_at": "2026-11-05T13:30:19.458022+00:00",
+  "observed_test_identities": [
+    "23732:2026-11-05T13:25:15.2948610Z"
+  ],
+  "sampling": {
+    "count": 33,
+    "failed": 0,
+    "mean_collector_wall_seconds": 3.687787878789205,
+    "max_collector_wall_seconds": 3.937000000001717
+  },
+  "test_audit": {
+    "expected_targets": [
+      "long_running"
+    ],
+    "binaries": [
+      {
+        "source": "tests\\long_running\\main.rs",
+        "executable": "long_running-bf0edd00e35c2c62.exe",
+        "target": "long_running",
+        "line": 8,
+        "summaries": [
+          {
+            "line": 24,
+            "result": "FAILED",
+            "passed": 0,
+            "failed": 1,
+            "ignored": 0,
+            "measured": 0,
+            "filtered_out": 11
+          }
+        ],
+        "final": {
+          "line": 24,
+          "result": "FAILED",
+          "passed": 0,
+          "failed": 1,
+          "ignored": 0,
+          "measured": 0,
+          "filtered_out": 11
+        }
+      }
+    ],
+    "problems": [
+      "long_running: harness reported failure"
+    ],
+    "valid": false
+  }
+}

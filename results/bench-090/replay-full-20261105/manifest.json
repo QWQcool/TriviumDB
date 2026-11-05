@@ -1,0 +1,38 @@
+{
+  "created_at": "2026-11-05T13:35:35+00:00",
+  "source_tag": "replay-20261105",
+  "mode": "full",
+  "source_manifest_sha256": "eac3b668c337c73c3e359676ffe39cdc14d623520e3fc470e4a932f364047a0c",
+  "source_preflight_sha256": "39f972f7298f8a23f77c0e05f38ceff70319ab02e2d3db47d0b5d817d9edb1a8",
+  "continuation_script_sha256": "d74caf800f4d56744d50b9c59e9fb240333abc19ac42f1cb0fd9fc4f8d7940e2",
+  "retry_script_sha256": "84d37a8774fd7e0f01bd1892aa98d2826fd51bfc7de7b6547751f25f2c648efa",
+  "selection_policy": "first complete passing attempt from new builds",
+  "max_attempts_per_group": 3,
+  "selection_limit": "variability-based repeated attempts can bias results; preserve and disclose every attempt",
+  "statistics": "one full query batch per ef on each independently rebuilt index; three builds per group",
+  "timing_boundary": "TriviumDB measured search includes GT hit counting; baseline QPS excludes recall computation.",
+  "per_query_artifacts": "baselines: labels and hit counts; TriviumDB: batch aggregate only",
+  "watchdog_policy": "after pre-run gate passes, 300s under 1 CPU second and 1 MiB I/O with unchanged progress files",
+  "binary_limit": "source groups are not selected",
+  "source_input_limit": "source groups are not selected",
+  "new_batch_hash_limit": "input and distribution binaries are hashed at boundaries, not continuously; changes reverted between snapshots are not ruled out",
+  "library_fingerprint_sha256": "c7ad4ba1884def66dd87358df6b6635764128de3b4619da3a56d517e9fc661f1",
+  "inherited_compute_environment": {
+    "FAISS_OPT_LEVEL": null,
+    "OMP_DYNAMIC": null,
+    "OMP_PROC_BIND": null,
+    "OMP_PLACES": null,
+    "OPENBLAS_CORETYPE": null,
+    "MKL_DYNAMIC": null,
+    "MKL_DEBUG_CPU_TYPE": null,
+    "KMP_AFFINITY": null,
+    "KMP_BLOCKTIME": null,
+    "RAYON_NUM_THREADS": null
+  },
+  "benchmark_overrides": {
+    "threads": 16,
+    "baseline": "OMP_NUM_THREADS, OPENBLAS_NUM_THREADS, MKL_NUM_THREADS",
+    "triviumdb": "RAYON_NUM_THREADS and TRIVIUM_MT_THREADS; other TRIVIUM_ variables removed"
+  },
+  "binary_scope": "installed hnswlib, faiss and numpy Python files, binary files and Python runtime; OS DLLs and non-whitelisted environment variables excluded"
+}

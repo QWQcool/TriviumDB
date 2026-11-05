@@ -1,0 +1,41 @@
+加载数据集 / Loading dataset: cohere-1m...
+训练集文件 / Training file: D:\TriviumDB\cohere_train.f32
+测试集文件 / Test file: D:\TriviumDB\cohere_test_x20.f32
+GroundTruth 文件 / Ground-truth file: D:\TriviumDB\cohere_groundtruth_x20.i32
+向量维度 / Vector dimension: 768
+加载完成 / Loading completed! 耗时 / Elapsed: 1.58s
+训练集 / Training set: 1000000 x 768（原始 / original 1000000 x 768）
+测试集 / Test set: 20000 x 768
+原始 GroundTruth K / Original ground-truth K: 1000
+使用原始 1M GroundTruth Top-10 / Using original 1M ground-truth Top-10
+
+开始构建 BQ-Vamana / Starting BQ-Vamana build (m=32, ef_c=128, alpha=1.2)...
+使用并发构图路径（默认）/ Using default concurrent graph-build path
+构建完成 / Build completed! 耗时 / Elapsed: 46.23s (21632 vecs/s)
+内存统计 / Memory statistics: Hot 934 MB
+
+加载原始 GroundTruth Top-10 用于 1M 标准评测 / Loading original ground-truth Top-10 for the standard 1M evaluation...
+
+计算 Exact Flat Cosine 基准 / Running Exact Flat Cosine baseline (Top-10, 50 条查询 / queries)...
+归一化耗时 / Normalization elapsed: 0.92s
+Exact Flat 单线程 / single-threaded: QPS=3.4, latency=298.38ms/q
+Exact Flat 多线程 / multi-threaded: QPS=25.8
+
+ef         rerank  Recall@10       MT-QPS    lat(ms)      vs BF
+--------------------------------------------------------------
+ef=10      ef(10)     61.86%       109130      0.01   32562.0x
+ef=15      ef(15)     75.84%       101406      0.01   30257.4x
+ef=20      ef(20)     82.29%        78447      0.01   23406.7x
+ef=25      ef(25)     86.22%        60739      0.02   18123.3x
+ef=30      ef(30)     88.72%        57067      0.02   17027.6x
+ef=35      ef(35)     90.84%        49372      0.02   14731.5x
+ef=40      ef(40)     91.72%        37214      0.03   11103.9x
+ef=80      ef(80)     95.76%        28642      0.03    8546.2x
+ef=120    ef(120)     97.03%        23356      0.04    6969.0x
+ef=200    ef(200)     97.93%        15578      0.06    4648.0x
+ef=400    ef(400)     98.64%         8404      0.12    2507.6x
+ef=800    ef(800)     99.09%         5548      0.18    1655.3x
+
+构图速率 / Graph-build throughput: 21632 vecs/s
+Exact Flat 基准 / baseline QPS: 3.4（单线程 / single-threaded）/ 25.8（多线程 / multi-threaded）
+结构化结果已写入 / Structured results written to: D:\TriviumDB\results\bench-090\replay-full-20261105\attempts\cohere-1m__triviumdb__a002\raw\cohere-1m__triviumdb__r2.json

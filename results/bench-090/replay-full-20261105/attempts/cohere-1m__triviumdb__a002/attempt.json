@@ -1,0 +1,9 @@
+{
+  "attempt": 2,
+  "path": "attempts\\cohere-1m__triviumdb__a002",
+  "library_fingerprint_sha256": "c7ad4ba1884def66dd87358df6b6635764128de3b4619da3a56d517e9fc661f1",
+  "continuation_script_sha256": "d74caf800f4d56744d50b9c59e9fb240333abc19ac42f1cb0fd9fc4f8d7940e2",
+  "runner_sha256": "2cff5bed2a02a5a6f5f7667d2535b9891a6049fd1d3a894dab29df275880c313",
+  "retry_script_sha256": "84d37a8774fd7e0f01bd1892aa98d2826fd51bfc7de7b6547751f25f2c648efa",
+  "failure": "ContinuationFatal(\"watchdog or process ancestry became uncertain: D:\\\\TriviumDB\\\\results\\\\bench-090\\\\replay-full-20261105\\\\attempts\\\\cohere-1m__triviumdb__a002\\\\supervision\\\\r2; watchdog observation failed: RuntimeError('Job contains processes outside the observable rooted tree')\")"
+}

@@ -1,0 +1,28 @@
+warning: linker stdout: 正在创建库 <WORKSPACE>\.bench090\target\release\deps\triviumdb.dll.lib 和对象 <WORKSPACE>\.bench090\target\release\deps\triviumdb.dll.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `triviumdb` (lib) generated 1 warning
+    Finished `bench` profile [optimized] target(s) in 0.20s
+     Running benches\bench_pipeline_gate.rs (<WORKSPACE>\.bench090\target\release\deps\bench_pipeline_gate-7423b49cafc65ee3.exe)
+[provenance-diff] property_filter_rank/384: 结果内容一致，仅行序/provenance 元数据不同
+[provenance-diff] property_filter_rank/768: 结果内容一致，仅行序/provenance 元数据不同
+[provenance-diff] property_filter_rank/1536: 结果内容一致，仅行序/provenance 元数据不同
+[provenance-diff] property_filter_rank/3072: 结果内容一致，仅行序/provenance 元数据不同
+property_filter_rank / 384 维：P95 68.915 → 5.883 ms，11.71×，候选减少 90.0%
+multi_anchor_intersect_rank / 384 维：P95 9.808 → 0.657 ms，14.93×，候选减少 93.7%
+expand_property_rank / 384 维：P95 10.609 → 1.320 ms，8.04×，候选减少 80.0%
+expand_group_rank / 384 维：P95 6.599 → 0.066 ms，100.59×，候选减少 98.7%
+property_filter_rank / 768 维：P95 71.991 → 7.226 ms，9.96×，候选减少 90.0%
+multi_anchor_intersect_rank / 768 维：P95 11.591 → 0.835 ms，13.89×，候选减少 93.7%
+expand_property_rank / 768 维：P95 16.675 → 1.747 ms，9.55×，候选减少 80.0%
+expand_group_rank / 768 维：P95 10.393 → 0.102 ms，101.49×，候选减少 98.7%
+property_filter_rank / 1536 维：P95 96.751 → 8.123 ms，11.91×，候选减少 90.0%
+multi_anchor_intersect_rank / 1536 维：P95 14.070 → 1.131 ms，12.45×，候选减少 93.7%
+expand_property_rank / 1536 维：P95 19.066 → 2.827 ms，6.75×，候选减少 80.0%
+expand_group_rank / 1536 维：P95 10.522 → 0.131 ms，80.20×，候选减少 98.7%
+property_filter_rank / 3072 维：P95 103.527 → 9.962 ms，10.39×，候选减少 90.0%
+multi_anchor_intersect_rank / 3072 维：P95 20.252 → 1.915 ms，10.58×，候选减少 93.7%
+expand_property_rank / 3072 维：P95 20.824 → 5.988 ms，3.48×，候选减少 80.0%
+expand_group_rank / 3072 维：P95 13.772 → 0.355 ms，38.84×，候选减少 98.7%
+三模管线 Gate 报告已写入 target/bench-reports\pipeline-gate.json
