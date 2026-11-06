@@ -1,0 +1,69 @@
+{
+  "scope": "ANN only; values rounded to current whitelist for labels",
+  "source": "v3 for 384d/1536d; target768 for 768d",
+  "data": [
+    {
+      "dataset": "minilm-384",
+      "label": "384d / 1M",
+      "values": {
+        "triviumdb": {
+          "qps": 119554.35378024052,
+          "build_s": 38.8952342,
+          "memory_mib": 720.977783203125
+        },
+        "hnswlib": {
+          "qps": 47543.92313130492,
+          "build_s": 107.23820030000206,
+          "memory_mib": 1724.2431640625
+        },
+        "faiss_hnsw": {
+          "qps": 46862.1699649739,
+          "build_s": 107.13683450000099,
+          "memory_mib": 1724.2431640625
+        }
+      }
+    },
+    {
+      "dataset": "cohere-1m",
+      "label": "768d / 1M",
+      "values": {
+        "triviumdb": {
+          "qps": 48154.152431271614,
+          "build_s": 48.2040435,
+          "memory_mib": 934.600830078125
+        },
+        "hnswlib": {
+          "qps": 21866.726951328557,
+          "build_s": 176.4495339999994,
+          "memory_mib": 3189.0869140625
+        },
+        "faiss_hnsw": {
+          "qps": 20706.295496314415,
+          "build_s": 174.42987459999858,
+          "memory_mib": 3189.0869140625
+        }
+      }
+    },
+    {
+      "dataset": "dbpedia-1536",
+      "label": "1536d / 990K",
+      "values": {
+        "triviumdb": {
+          "qps": 34376.9003649463,
+          "build_s": 84.5674272,
+          "memory_mib": 1287.8036499023438
+        },
+        "hnswlib": {
+          "qps": 11485.453977316176,
+          "build_s": 379.458496700001,
+          "memory_mib": 6057.586669921875
+        },
+        "faiss_hnsw": {
+          "qps": 11683.949753745293,
+          "build_s": 373.80284799999936,
+          "memory_mib": 6057.586669921875
+        }
+      }
+    }
+  ]
+}

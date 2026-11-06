@@ -1,0 +1,3 @@
+# ANN figure data
+
+`figures-data.json` records the source floating-point values used to render the ANN figures. Data is derived from the v3 384d and 1536d groups and the later 768d target batch. See [the current whitelist](../ASTRA-BRIEF.md) and [ANN-scope review](../ANN-PUBLICATION-REVIEW-20261106.md). The full original runs and failed screening attempts remain in the linked fixed-commit evidence; this directory is not a new benchmark.
