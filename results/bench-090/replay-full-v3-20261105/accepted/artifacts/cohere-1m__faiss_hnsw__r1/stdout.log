@@ -1,0 +1,12 @@
+cohere-1m faiss_hnsw ef=10 recall=0.80160 qps=37245.51
+cohere-1m faiss_hnsw ef=15 recall=0.84960 qps=29036.87
+cohere-1m faiss_hnsw ef=20 recall=0.88000 qps=24129.24
+cohere-1m faiss_hnsw ef=25 recall=0.89860 qps=21199.47
+cohere-1m faiss_hnsw ef=30 recall=0.91800 qps=18524.71
+cohere-1m faiss_hnsw ef=35 recall=0.93220 qps=16389.00
+cohere-1m faiss_hnsw ef=40 recall=0.94120 qps=14842.61
+cohere-1m faiss_hnsw ef=80 recall=0.97520 qps=8263.34
+cohere-1m faiss_hnsw ef=120 recall=0.98320 qps=5765.68
+cohere-1m faiss_hnsw ef=200 recall=0.98920 qps=3561.04
+cohere-1m faiss_hnsw ef=400 recall=0.99460 qps=1847.42
+cohere-1m faiss_hnsw ef=800 recall=0.99620 qps=967.22

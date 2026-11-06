@@ -1,0 +1,12 @@
+sift128 hnswlib ef=10 recall=0.75761 qps=184972.64
+sift128 hnswlib ef=15 recall=0.82976 qps=146231.33
+sift128 hnswlib ef=20 recall=0.87321 qps=120331.01
+sift128 hnswlib ef=25 recall=0.90335 qps=100672.59
+sift128 hnswlib ef=30 recall=0.92291 qps=86402.31
+sift128 hnswlib ef=35 recall=0.93694 qps=77358.73
+sift128 hnswlib ef=40 recall=0.94857 qps=71343.37
+sift128 hnswlib ef=80 recall=0.98285 qps=39832.35
+sift128 hnswlib ef=120 recall=0.99146 qps=28756.90
+sift128 hnswlib ef=200 recall=0.99667 qps=19057.64
+sift128 hnswlib ef=400 recall=0.99886 qps=10457.15
+sift128 hnswlib ef=800 recall=0.99923 qps=5955.45

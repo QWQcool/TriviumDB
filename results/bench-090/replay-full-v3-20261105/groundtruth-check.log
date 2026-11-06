@@ -1,0 +1,22 @@
+== 环境 ==
+  python  : <WORKSPACE>\.venv\Scripts\python.exe (3.12.0)
+  numpy   : 2.5.3
+  hnswlib : 0.8.0
+  faiss   : 1.15.0
+  cargo   : <USER_PROFILE>\.cargo\bin\cargo.exe
+  worktree: <WORKSPACE>\.bench090
+  version : v0.9.0 @ 7edf8ceac
+
+== 数据集 ==
+  cohere-1m      dim=768   n_train=1000000   n_test=20000  k_gt=1000 train= 2.86GiB  (768d / 1M，高维主战场，也是旧文的主图)
+  minilm-384     dim=384   n_train=1000000   n_test=20000  k_gt=10  train= 1.43GiB  (384d / 1M，中维，旧文口径下与 HNSW 基本持平)
+  dbpedia-1536   dim=1536  n_train=990000    n_test=20000  k_gt=10  train= 5.66GiB  (1536d / 1M，最高维，内存压力最大)
+  sift128        dim=128   n_train=1000000   n_test=20000  k_gt=10  train= 0.48GiB  (128d / 1M，边界对照，用来诚实披露劣势档)
+
+== GroundTruth 自检（每集 16 条查询，精确 cosine 重算）==
+  cohere-1m      gt_match=1.0000  tie_gap_median=0.0009021759033203125  (3.2s) [OK]
+  minilm-384     gt_match=1.0000  tie_gap_median=0.002192258834838867  (1.7s) [OK]
+  dbpedia-1536   gt_match=1.0000  tie_gap_median=0.0012036263942718506  (6.1s) [OK]
+  sift128        gt_match=1.0000  tie_gap_median=0.00037047266960144043  (0.6s) [OK]
+
+结论: 可以开跑

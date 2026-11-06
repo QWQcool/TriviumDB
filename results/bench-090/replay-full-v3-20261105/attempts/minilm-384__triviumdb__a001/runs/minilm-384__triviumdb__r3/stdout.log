@@ -1,0 +1,41 @@
+加载数据集 / Loading dataset: minilm-384...
+训练集文件 / Training file: <WORKSPACE>\minilm_train.f32
+测试集文件 / Test file: <WORKSPACE>\minilm_test_x20.f32
+GroundTruth 文件 / Ground-truth file: <WORKSPACE>\minilm_groundtruth_x20.i32
+向量维度 / Vector dimension: 384
+加载完成 / Loading completed! 耗时 / Elapsed: 0.75s
+训练集 / Training set: 1000000 x 384（原始 / original 1000000 x 384）
+测试集 / Test set: 20000 x 384
+原始 GroundTruth K / Original ground-truth K: 10
+使用原始 1M GroundTruth Top-10 / Using original 1M ground-truth Top-10
+
+开始构建 BQ-Vamana / Starting BQ-Vamana build (m=32, ef_c=128, alpha=1.2)...
+使用并发构图路径（默认）/ Using default concurrent graph-build path
+构建完成 / Build completed! 耗时 / Elapsed: 38.90s (25710 vecs/s)
+内存统计 / Memory statistics: Hot 720 MB
+
+加载原始 GroundTruth Top-10 用于 1M 标准评测 / Loading original ground-truth Top-10 for the standard 1M evaluation...
+
+计算 Exact Flat Cosine 基准 / Running Exact Flat Cosine baseline (Top-10, 50 条查询 / queries)...
+归一化耗时 / Normalization elapsed: 0.45s
+Exact Flat 单线程 / single-threaded: QPS=7.1, latency=141.83ms/q
+Exact Flat 多线程 / multi-threaded: QPS=41.5
+
+ef         rerank  Recall@10       MT-QPS    lat(ms)      vs BF
+--------------------------------------------------------------
+ef=10      ef(10)     65.92%       232705      0.00   33003.4x
+ef=15      ef(15)     78.80%       197696      0.01   28038.3x
+ef=20      ef(20)     84.22%       160837      0.01   22810.8x
+ef=25      ef(25)     88.14%       134095      0.01   19018.1x
+ef=30      ef(30)     90.51%       118358      0.01   16786.2x
+ef=35      ef(35)     92.28%       102349      0.01   14515.7x
+ef=40      ef(40)     93.39%        93588      0.01   13273.2x
+ef=80      ef(80)     97.06%        57294      0.02    8125.7x
+ef=120    ef(120)     98.11%        44672      0.02    6335.6x
+ef=200    ef(200)     98.73%        31457      0.03    4461.5x
+ef=400    ef(400)     99.15%        18687      0.05    2650.4x
+ef=800    ef(800)     99.32%        10991      0.09    1558.8x
+
+构图速率 / Graph-build throughput: 25710 vecs/s
+Exact Flat 基准 / baseline QPS: 7.1（单线程 / single-threaded）/ 41.5（多线程 / multi-threaded）
+结构化结果已写入 / Structured results written to: <WORKSPACE>\results\bench-090\replay-full-v3-20261105\attempts\minilm-384__triviumdb__a001\raw\minilm-384__triviumdb__r3.json

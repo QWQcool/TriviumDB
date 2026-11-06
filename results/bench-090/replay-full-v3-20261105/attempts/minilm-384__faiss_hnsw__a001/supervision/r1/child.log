@@ -1,0 +1,3 @@
+[2026-11-05T14:46:07+00:00] gate waiting for minilm-384__faiss_hnsw__r1: cpu=[6.280667320902844, 1.479713603818611, 48.50674373795761], available=45372805120, required=13197934592
+[2026-11-05T14:46:26+00:00] starting minilm-384__faiss_hnsw__r1
+[2026-11-05T14:48:49+00:00] completed minilm-384__faiss_hnsw__r1

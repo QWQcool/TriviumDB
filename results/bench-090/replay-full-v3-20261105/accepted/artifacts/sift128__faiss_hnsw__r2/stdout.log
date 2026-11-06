@@ -1,0 +1,12 @@
+sift128 faiss_hnsw ef=10 recall=0.76336 qps=187166.55
+sift128 faiss_hnsw ef=15 recall=0.83498 qps=141776.40
+sift128 faiss_hnsw ef=20 recall=0.87757 qps=117360.63
+sift128 faiss_hnsw ef=25 recall=0.90583 qps=99457.51
+sift128 faiss_hnsw ef=30 recall=0.92469 qps=86663.45
+sift128 faiss_hnsw ef=35 recall=0.93874 qps=78609.77
+sift128 faiss_hnsw ef=40 recall=0.94916 qps=71249.30
+sift128 faiss_hnsw ef=80 recall=0.98421 qps=40259.37
+sift128 faiss_hnsw ef=120 recall=0.99251 qps=28784.09
+sift128 faiss_hnsw ef=200 recall=0.99734 qps=18580.45
+sift128 faiss_hnsw ef=400 recall=0.99909 qps=10108.18
+sift128 faiss_hnsw ef=800 recall=0.99935 qps=5033.44

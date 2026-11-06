@@ -1,0 +1,70 @@
+{
+  "cohere-1m": {
+    "train": {
+      "file": "cohere_train.f32",
+      "bytes": 3072000000,
+      "sha256": "d4bd7224f525ff1722ef4a77d0437a01c5f2c624857ead009f0a9c0e8e167961"
+    },
+    "queries": {
+      "file": "cohere_test_x20.f32",
+      "bytes": 61440000,
+      "sha256": "0445996b442d7eb91555c4944225f41de50d1b07f799238ff10fd8e5b0062ef7"
+    },
+    "ground_truth": {
+      "file": "cohere_groundtruth_x20.i32",
+      "bytes": 80000000,
+      "sha256": "71585a12718d9c84811db23c7d4236340c0c120c55724ac0721c57231612360b"
+    }
+  },
+  "minilm-384": {
+    "train": {
+      "file": "minilm_train.f32",
+      "bytes": 1536000000,
+      "sha256": "2146eb0231f043f3c3e9e6c68dde0907b6f5b8a892cbeebb5e752f471883ae4b"
+    },
+    "queries": {
+      "file": "minilm_test_x20.f32",
+      "bytes": 30720000,
+      "sha256": "e08fb48a9e5a5352471e366c3790ba70eccaeee5f5783505af03a97dce504364"
+    },
+    "ground_truth": {
+      "file": "minilm_groundtruth_x20.i32",
+      "bytes": 800000,
+      "sha256": "ebe35045233d1dca0dad723898838b1c9a5f12818b0549d2e7d0bcd088a323fa"
+    }
+  },
+  "dbpedia-1536": {
+    "train": {
+      "file": "dbpedia_openai_train.f32",
+      "bytes": 6082560000,
+      "sha256": "fed2f582fd9f31182886514c89713d21d8c10ff03b32c8472c0c596b71f4a260"
+    },
+    "queries": {
+      "file": "dbpedia_openai_test_x2.f32",
+      "bytes": 122880000,
+      "sha256": "1afeab11ea5ff7317629795a9d08bc9fcd153f1f0f267290a80d6c3d7d7ec324"
+    },
+    "ground_truth": {
+      "file": "dbpedia_openai_groundtruth_x2.i32",
+      "bytes": 800000,
+      "sha256": "eee13a89f17993ebf01872c755270de9bef72d72b24fe586a8e01878bfa36238"
+    }
+  },
+  "sift128": {
+    "train": {
+      "file": "sift128_train.f32",
+      "bytes": 512000000,
+      "sha256": "63a20f112cbf534415e0c71e278cc2ac1078067b489abadd5c393321a4a54d4f"
+    },
+    "queries": {
+      "file": "sift128_test_x2.f32",
+      "bytes": 10240000,
+      "sha256": "2220b1c248139658b9922b608aa7caa231cf7a86a4f3274e6499f010305f0afb"
+    },
+    "ground_truth": {
+      "file": "sift128_groundtruth_x2.i32",
+      "bytes": 800000,
+      "sha256": "00bfe92e17ada4ce0dde4fd1fc8e9a9b037bff8e0b8410166c659206e7410c90"
+    }
+  }
+}

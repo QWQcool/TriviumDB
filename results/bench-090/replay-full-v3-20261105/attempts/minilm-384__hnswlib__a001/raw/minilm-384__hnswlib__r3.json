@@ -1,0 +1,125 @@
+{
+  "schema_version": 2,
+  "engine": "hnswlib",
+  "engine_version": "0.8.0",
+  "dataset": "minilm-384",
+  "dim": 384,
+  "n_train": 1000000,
+  "n_test": 20000,
+  "metric": "cosine",
+  "gt_mode": "file",
+  "params": {
+    "M": 32,
+    "ef_construction": 128,
+    "k": 10
+  },
+  "threads": 16,
+  "repeats": 1,
+  "build": {
+    "seconds": 106.3306171999975
+  },
+  "memory": {
+    "kind": "estimated",
+    "bytes": 1808000000
+  },
+  "points": [
+    {
+      "ef": 10,
+      "recall_at_10": 0.8624,
+      "qps": 62225.08181036815,
+      "latency_ms": 0.01607069000001502,
+      "elapsed_seconds": 0.3214138000003004,
+      "query_count": 20000
+    },
+    {
+      "ef": 15,
+      "recall_at_10": 0.9052,
+      "qps": 48053.35844910465,
+      "latency_ms": 0.02081020000005083,
+      "elapsed_seconds": 0.41620400000101654,
+      "query_count": 20000
+    },
+    {
+      "ef": 20,
+      "recall_at_10": 0.9286,
+      "qps": 39271.38233508353,
+      "latency_ms": 0.025463834999936808,
+      "elapsed_seconds": 0.5092766999987361,
+      "query_count": 20000
+    },
+    {
+      "ef": 25,
+      "recall_at_10": 0.9435,
+      "qps": 34644.26060654014,
+      "latency_ms": 0.028864810000050055,
+      "elapsed_seconds": 0.5772962000010011,
+      "query_count": 20000
+    },
+    {
+      "ef": 30,
+      "recall_at_10": 0.952,
+      "qps": 30029.020044941863,
+      "latency_ms": 0.033301120000032824,
+      "elapsed_seconds": 0.6660224000006565,
+      "query_count": 20000
+    },
+    {
+      "ef": 35,
+      "recall_at_10": 0.962,
+      "qps": 26480.792686680907,
+      "latency_ms": 0.037763219999942525,
+      "elapsed_seconds": 0.7552643999988504,
+      "query_count": 20000
+    },
+    {
+      "ef": 40,
+      "recall_at_10": 0.9675,
+      "qps": 24625.653133899294,
+      "latency_ms": 0.04060805999997683,
+      "elapsed_seconds": 0.8121611999995366,
+      "query_count": 20000
+    },
+    {
+      "ef": 80,
+      "recall_at_10": 0.9847,
+      "qps": 13630.28360051278,
+      "latency_ms": 0.07336604500014801,
+      "elapsed_seconds": 1.4673209000029601,
+      "query_count": 20000
+    },
+    {
+      "ef": 120,
+      "recall_at_10": 0.9904,
+      "qps": 9739.41607915369,
+      "latency_ms": 0.10267555999998877,
+      "elapsed_seconds": 2.0535111999997753,
+      "query_count": 20000
+    },
+    {
+      "ef": 200,
+      "recall_at_10": 0.9945,
+      "qps": 6252.073734709509,
+      "latency_ms": 0.15994692999993276,
+      "elapsed_seconds": 3.1989385999986553,
+      "query_count": 20000
+    },
+    {
+      "ef": 400,
+      "recall_at_10": 0.9972,
+      "qps": 3478.607762381383,
+      "latency_ms": 0.2874713299999712,
+      "elapsed_seconds": 5.749426599999424,
+      "query_count": 20000
+    },
+    {
+      "ef": 800,
+      "recall_at_10": 0.9991,
+      "qps": 1923.9954459025257,
+      "latency_ms": 0.5197517500000686,
+      "elapsed_seconds": 10.395035000001371,
+      "query_count": 20000
+    }
+  ],
+  "train_limit": null,
+  "test_factor": 20
+}

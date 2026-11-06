@@ -1,0 +1,26 @@
+{
+  "dataset": "sift128",
+  "engine": "hnswlib",
+  "run": 3,
+  "threads": 16,
+  "m": 32,
+  "efc": 128,
+  "factor": 2,
+  "efs": [
+    10,
+    15,
+    20,
+    25,
+    30,
+    35,
+    40,
+    80,
+    120,
+    200,
+    400,
+    800
+  ],
+  "train_limit": null,
+  "executable_path": "<WORKSPACE>\\.bench090\\target\\release\\deps\\bench_cohere1m-1ecbe82aebd1c270.exe",
+  "raw_path": "<WORKSPACE>\\results\\bench-090\\replay-full-v3-20261105\\attempts\\sift128__hnswlib__a001\\raw\\sift128__hnswlib__r3.json"
+}

@@ -1,0 +1,12 @@
+cohere-1m hnswlib ef=10 recall=0.81660 qps=34473.16
+cohere-1m hnswlib ef=15 recall=0.86570 qps=27614.29
+cohere-1m hnswlib ef=20 recall=0.89320 qps=23551.82
+cohere-1m hnswlib ef=25 recall=0.91570 qps=20403.84
+cohere-1m hnswlib ef=30 recall=0.92520 qps=18021.86
+cohere-1m hnswlib ef=35 recall=0.93470 qps=16223.52
+cohere-1m hnswlib ef=40 recall=0.94080 qps=14599.35
+cohere-1m hnswlib ef=80 recall=0.97080 qps=8138.83
+cohere-1m hnswlib ef=120 recall=0.98050 qps=5607.08
+cohere-1m hnswlib ef=200 recall=0.98860 qps=3580.97
+cohere-1m hnswlib ef=400 recall=0.99460 qps=1911.19
+cohere-1m hnswlib ef=800 recall=0.99730 qps=1029.95

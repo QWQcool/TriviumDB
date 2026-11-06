@@ -1,0 +1,12 @@
+minilm-384 faiss_hnsw ef=10 recall=0.85960 qps=59652.52
+minilm-384 faiss_hnsw ef=15 recall=0.90170 qps=46235.03
+minilm-384 faiss_hnsw ef=20 recall=0.92390 qps=35851.08
+minilm-384 faiss_hnsw ef=25 recall=0.94450 qps=32312.54
+minilm-384 faiss_hnsw ef=30 recall=0.95330 qps=28305.91
+minilm-384 faiss_hnsw ef=35 recall=0.96040 qps=24015.11
+minilm-384 faiss_hnsw ef=40 recall=0.96590 qps=22852.01
+minilm-384 faiss_hnsw ef=80 recall=0.98520 qps=12432.88
+minilm-384 faiss_hnsw ef=120 recall=0.99120 qps=9235.71
+minilm-384 faiss_hnsw ef=200 recall=0.99440 qps=5894.94
+minilm-384 faiss_hnsw ef=400 recall=0.99690 qps=3246.52
+minilm-384 faiss_hnsw ef=800 recall=0.99810 qps=1640.01

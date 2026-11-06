@@ -1,0 +1,10 @@
+{
+  "started_at": "2026-11-05T14:35:35+00:00",
+  "ended_at": "2026-11-05T14:36:29+00:00",
+  "wall_seconds": 54.05668230000083,
+  "exit_code": 0,
+  "raw_exists": true,
+  "monitor_errors": [],
+  "validation_passed": true,
+  "validation_error": null
+}

@@ -1,0 +1,41 @@
+加载数据集 / Loading dataset: cohere-1m...
+训练集文件 / Training file: <WORKSPACE>\sift128_train.f32
+测试集文件 / Test file: <WORKSPACE>\sift128_test_x2.f32
+GroundTruth 文件 / Ground-truth file: <WORKSPACE>\sift128_groundtruth_x2.i32
+向量维度 / Vector dimension: 128
+加载完成 / Loading completed! 耗时 / Elapsed: 0.27s
+训练集 / Training set: 1000000 x 128（原始 / original 1000000 x 128）
+测试集 / Test set: 20000 x 128
+原始 GroundTruth K / Original ground-truth K: 10
+使用原始 1M GroundTruth Top-10 / Using original 1M ground-truth Top-10
+
+开始构建 BQ-Vamana / Starting BQ-Vamana build (m=32, ef_c=128, alpha=1.2)...
+使用并发构图路径（默认）/ Using default concurrent graph-build path
+构建完成 / Build completed! 耗时 / Elapsed: 24.84s (40266 vecs/s)
+内存统计 / Memory statistics: Hot 598 MB
+
+加载原始 GroundTruth Top-10 用于 1M 标准评测 / Loading original ground-truth Top-10 for the standard 1M evaluation...
+
+计算 Exact Flat Cosine 基准 / Running Exact Flat Cosine baseline (Top-10, 50 条查询 / queries)...
+归一化耗时 / Normalization elapsed: 0.17s
+Exact Flat 单线程 / single-threaded: QPS=24.9, latency=40.15ms/q
+Exact Flat 多线程 / multi-threaded: QPS=143.5
+
+ef         rerank  Recall@10       MT-QPS    lat(ms)      vs BF
+--------------------------------------------------------------
+ef=10      ef(10)      5.24%       354216      0.00   14220.9x
+ef=15      ef(15)      7.88%       259601      0.00   10422.4x
+ef=20      ef(20)     10.15%       216894      0.00    8707.8x
+ef=25      ef(25)     12.16%       169783      0.01    6816.4x
+ef=30      ef(30)     13.89%       159543      0.01    6405.3x
+ef=35      ef(35)     15.60%       138683      0.01    5567.8x
+ef=40      ef(40)     17.02%       122593      0.01    4921.8x
+ef=80      ef(80)     23.78%        71178      0.01    2857.6x
+ef=120    ef(120)     25.51%        55386      0.02    2223.6x
+ef=200    ef(200)     27.35%        37919      0.03    1522.3x
+ef=400    ef(400)     29.10%        22428      0.04     900.4x
+ef=800    ef(800)     30.11%        12813      0.08     514.4x
+
+构图速率 / Graph-build throughput: 40266 vecs/s
+Exact Flat 基准 / baseline QPS: 24.9（单线程 / single-threaded）/ 143.5（多线程 / multi-threaded）
+结构化结果已写入 / Structured results written to: <WORKSPACE>\results\bench-090\replay-full-v3-20261105\attempts\sift128__triviumdb__a001\raw\sift128__triviumdb__r2.json

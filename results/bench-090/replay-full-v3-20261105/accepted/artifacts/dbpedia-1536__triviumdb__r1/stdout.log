@@ -1,0 +1,41 @@
+加载数据集 / Loading dataset: dbpedia-1536...
+训练集文件 / Training file: <WORKSPACE>\dbpedia_openai_train.f32
+测试集文件 / Test file: <WORKSPACE>\dbpedia_openai_test_x2.f32
+GroundTruth 文件 / Ground-truth file: <WORKSPACE>\dbpedia_openai_groundtruth_x2.i32
+向量维度 / Vector dimension: 1536
+加载完成 / Loading completed! 耗时 / Elapsed: 3.59s
+训练集 / Training set: 990000 x 1536（原始 / original 990000 x 1536）
+测试集 / Test set: 20000 x 1536
+原始 GroundTruth K / Original ground-truth K: 10
+使用原始 1M GroundTruth Top-10 / Using original 1M ground-truth Top-10
+
+开始构建 BQ-Vamana / Starting BQ-Vamana build (m=32, ef_c=128, alpha=1.2)...
+使用并发构图路径（默认）/ Using default concurrent graph-build path
+构建完成 / Build completed! 耗时 / Elapsed: 85.31s (11605 vecs/s)
+内存统计 / Memory statistics: Hot 1287 MB
+
+加载原始 GroundTruth Top-10 用于 1M 标准评测 / Loading original ground-truth Top-10 for the standard 1M evaluation...
+
+计算 Exact Flat Cosine 基准 / Running Exact Flat Cosine baseline (Top-10, 50 条查询 / queries)...
+归一化耗时 / Normalization elapsed: 2.06s
+Exact Flat 单线程 / single-threaded: QPS=1.6, latency=606.89ms/q
+Exact Flat 多线程 / multi-threaded: QPS=10.9
+
+ef         rerank  Recall@10       MT-QPS    lat(ms)      vs BF
+--------------------------------------------------------------
+ef=10      ef(10)     52.00%        82751      0.01   50221.1x
+ef=15      ef(15)     70.27%        62152      0.02   37719.5x
+ef=20      ef(20)     79.43%        48811      0.02   29623.2x
+ef=25      ef(25)     84.89%        43036      0.02   26118.2x
+ef=30      ef(30)     88.47%        36528      0.03   22168.8x
+ef=35      ef(35)     90.82%        32138      0.03   19504.2x
+ef=40      ef(40)     92.56%        30258      0.03   18363.3x
+ef=80      ef(80)     97.19%        19094      0.05   11588.3x
+ef=120    ef(120)     98.31%        15389      0.06    9339.7x
+ef=200    ef(200)     99.03%        10983      0.09    6665.8x
+ef=400    ef(400)     99.50%         6818      0.15    4137.9x
+ef=800    ef(800)     99.73%         3988      0.25    2420.5x
+
+构图速率 / Graph-build throughput: 11605 vecs/s
+Exact Flat 基准 / baseline QPS: 1.6（单线程 / single-threaded）/ 10.9（多线程 / multi-threaded）
+结构化结果已写入 / Structured results written to: <WORKSPACE>\results\bench-090\replay-full-v3-20261105\attempts\dbpedia-1536__triviumdb__a001\raw\dbpedia-1536__triviumdb__r1.json

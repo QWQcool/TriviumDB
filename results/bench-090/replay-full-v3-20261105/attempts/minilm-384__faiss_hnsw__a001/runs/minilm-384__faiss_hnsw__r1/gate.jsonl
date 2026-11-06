@@ -1,0 +1,2 @@
+{"at": "2026-11-05T14:46:07+00:00", "cpu_percent_samples": [6.280667320902844, 1.479713603818611, 48.50674373795761], "available_bytes": 45372805120, "total_bytes": 68410585088, "required_available_bytes": 13197934592, "passed": false, "smoke_override": false}
+{"at": "2026-11-05T14:46:25+00:00", "cpu_percent_samples": [3.0126336248785246, 3.583872573419611, 1.680268843014887], "available_bytes": 45362360320, "total_bytes": 68410585088, "required_available_bytes": 13197934592, "passed": true, "smoke_override": false}

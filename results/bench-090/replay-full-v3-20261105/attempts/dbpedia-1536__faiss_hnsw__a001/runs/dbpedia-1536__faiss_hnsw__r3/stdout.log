@@ -1,0 +1,12 @@
+dbpedia-1536 faiss_hnsw ef=10 recall=0.82782 qps=17079.45
+dbpedia-1536 faiss_hnsw ef=15 recall=0.88009 qps=13265.90
+dbpedia-1536 faiss_hnsw ef=20 recall=0.90881 qps=10665.23
+dbpedia-1536 faiss_hnsw ef=25 recall=0.92640 qps=9350.29
+dbpedia-1536 faiss_hnsw ef=30 recall=0.93899 qps=8283.70
+dbpedia-1536 faiss_hnsw ef=35 recall=0.94821 qps=7433.30
+dbpedia-1536 faiss_hnsw ef=40 recall=0.95521 qps=6622.14
+dbpedia-1536 faiss_hnsw ef=80 recall=0.97817 qps=3872.11
+dbpedia-1536 faiss_hnsw ef=120 recall=0.98486 qps=2729.10
+dbpedia-1536 faiss_hnsw ef=200 recall=0.99095 qps=1766.12
+dbpedia-1536 faiss_hnsw ef=400 recall=0.99528 qps=955.16
+dbpedia-1536 faiss_hnsw ef=800 recall=0.99736 qps=486.57

@@ -1,0 +1,12 @@
+minilm-384 hnswlib ef=10 recall=0.86240 qps=62225.08
+minilm-384 hnswlib ef=15 recall=0.90520 qps=48053.36
+minilm-384 hnswlib ef=20 recall=0.92860 qps=39271.38
+minilm-384 hnswlib ef=25 recall=0.94350 qps=34644.26
+minilm-384 hnswlib ef=30 recall=0.95200 qps=30029.02
+minilm-384 hnswlib ef=35 recall=0.96200 qps=26480.79
+minilm-384 hnswlib ef=40 recall=0.96750 qps=24625.65
+minilm-384 hnswlib ef=80 recall=0.98470 qps=13630.28
+minilm-384 hnswlib ef=120 recall=0.99040 qps=9739.42
+minilm-384 hnswlib ef=200 recall=0.99450 qps=6252.07
+minilm-384 hnswlib ef=400 recall=0.99720 qps=3478.61
+minilm-384 hnswlib ef=800 recall=0.99910 qps=1924.00

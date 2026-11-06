@@ -1,0 +1,17 @@
+{
+  "engine": "triviumdb",
+  "engine_version": "0.9.0",
+  "git_rev": "7edf8ceacd85cd71944a3471ac05df377995a172",
+  "dataset": "dbpedia-1536",
+  "dim": 1536,
+  "threads": 16,
+  "params": {
+    "m": 32,
+    "ef_construction": 128,
+    "k": 10
+  },
+  "repeats": 3,
+  "repeat_index": 1,
+  "test_factor": 2,
+  "train_limit": null
+}

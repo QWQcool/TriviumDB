@@ -1,0 +1,12 @@
+dbpedia-1536 hnswlib ef=10 recall=0.82604 qps=16984.41
+dbpedia-1536 hnswlib ef=15 recall=0.87793 qps=13108.40
+dbpedia-1536 hnswlib ef=20 recall=0.90806 qps=10859.65
+dbpedia-1536 hnswlib ef=25 recall=0.92598 qps=9270.96
+dbpedia-1536 hnswlib ef=30 recall=0.94000 qps=8176.67
+dbpedia-1536 hnswlib ef=35 recall=0.94910 qps=7406.68
+dbpedia-1536 hnswlib ef=40 recall=0.95520 qps=6701.80
+dbpedia-1536 hnswlib ef=80 recall=0.97846 qps=3902.01
+dbpedia-1536 hnswlib ef=120 recall=0.98532 qps=2813.53
+dbpedia-1536 hnswlib ef=200 recall=0.99141 qps=1835.96
+dbpedia-1536 hnswlib ef=400 recall=0.99548 qps=1026.01
+dbpedia-1536 hnswlib ef=800 recall=0.99754 qps=570.01

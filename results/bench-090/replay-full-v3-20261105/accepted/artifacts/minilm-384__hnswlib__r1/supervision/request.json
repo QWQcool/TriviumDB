@@ -1,0 +1,30 @@
+{
+  "batch": "<WORKSPACE>\\results\\bench-090\\replay-full-v3-20261105\\attempts\\minilm-384__hnswlib__a001",
+  "config": {
+    "dataset": "minilm-384",
+    "engine": "hnswlib",
+    "run": 1,
+    "threads": 16,
+    "m": 32,
+    "efc": 128,
+    "factor": 20,
+    "efs": [
+      10,
+      15,
+      20,
+      25,
+      30,
+      35,
+      40,
+      80,
+      120,
+      200,
+      400,
+      800
+    ],
+    "train_limit": null,
+    "executable_path": "<WORKSPACE>\\.bench090\\target\\release\\deps\\bench_cohere1m-1ecbe82aebd1c270.exe"
+  },
+  "max_wait": 1800,
+  "diagnostic": false
+}
