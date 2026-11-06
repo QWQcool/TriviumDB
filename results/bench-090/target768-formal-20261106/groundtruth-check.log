@@ -1,0 +1,16 @@
+== 环境 ==
+  python  : <WORKSPACE>\.venv\Scripts\python.exe (3.12.0)
+  numpy   : 2.5.3
+  hnswlib : 0.8.0
+  faiss   : 1.15.0
+  cargo   : <USER_PROFILE>\.cargo\bin\cargo.exe
+  worktree: <WORKSPACE>\.bench090
+  version : v0.9.0 @ 7edf8ceac
+
+== 数据集 ==
+  cohere-1m      dim=768   n_train=1000000   n_test=20000  k_gt=1000 train= 2.86GiB  (768d / 1M，高维主战场，也是旧文的主图)
+
+== GroundTruth 自检（每集 16 条查询，精确 cosine 重算）==
+  cohere-1m      gt_match=1.0000  tie_gap_median=0.0009021759033203125  (3.5s) [OK]
+
+结论: 可以开跑

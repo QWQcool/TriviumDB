@@ -1,0 +1,334 @@
+"""受控重跑 Cohere 768d 的三个引擎，保留失败样本，不自动重试。
+
+历史批次已对 TriviumDB 完整尝试三组且均失败。此脚本的新批次是用户另行
+要求的额外观测，不能将它称为历史首次尝试，或据一次通过证明波动根因已解决。
+正式结果必须独立审核；--smoke 仅用于验证脚手架，不能对外引用性能。
+"""
+from __future__ import annotations
+
+import argparse
+import atexit
+import ctypes
+import hashlib
+import json
+import os
+import subprocess
+import sys
+from ctypes import wintypes
+from pathlib import Path
+
+import replay_complete as runner
+import replay_continue_v3 as supervisor
+import replay_retry_group as review
+
+DATASET = 'cohere-1m'
+SOURCE_TAG = 'replay-20261105'
+PRIOR_TAG = 'replay-full-v3-20261105'
+EFS = [10, 15, 20, 25, 30, 35, 40, 80, 120, 200, 400, 800]
+EXPECTED_REV = '7edf8ceacd85cd71944a3471ac05df377995a172'
+
+
+def target768_acquire_lock():
+    # 会话级命名互斥锁仅约束同样使用此锁的进程，不声称控制其他应用。
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel.CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
+    kernel.CreateMutexW.restype = wintypes.HANDLE
+    kernel.ReleaseMutex.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    ctypes.set_last_error(0)
+    handle = kernel.CreateMutexW(None, True, 'Local\\TriviumDB-Bench090-Target768')
+    error = ctypes.get_last_error()
+    if not handle:
+        raise ctypes.WinError(error)
+    if error == 183:  # ERROR_ALREADY_EXISTS
+        kernel.CloseHandle(handle)
+        raise supervisor.ContinuationFatal('已有目标批次持有同一会话互斥对象')
+    def release():
+        kernel.ReleaseMutex(handle)
+        kernel.CloseHandle(handle)
+    atexit.register(release)
+    return handle
+
+
+def target768_find_conflicts(rows, own_pid, parent_pid, executable_name):
+    known = ('replay_complete.py', 'replay_continue', 'replay_retry_group.py',
+             'replay_target_768.py', 'diagnose_query_variability.py',
+             'run_p1p6_audit.py', 'bench090.py')
+    conflicts = []
+    for row in rows:
+        pid = row.get('ProcessId')
+        if pid in (own_pid, parent_pid):
+            continue
+        name = (row.get('Name') or '').lower()
+        commandline = row.get('CommandLine')
+        if name == executable_name.lower() or name.startswith('bench_cohere1m-'):
+            conflicts.append({'pid': pid, 'reason': 'benchmark executable'})
+        elif name in ('python.exe', 'pythonw.exe'):
+            if commandline is None:
+                raise supervisor.ContinuationFatal('无法读取 Python 进程命令行，无法排除并发基准')
+            line = commandline.lower().replace('/', '\\')
+            if any(name in line for name in known):
+                conflicts.append({'pid': pid, 'reason': 'known benchmark runner'})
+    return conflicts
+
+
+def target768_assert_no_other_bench(executable_name):
+    command = ('Get-CimInstance Win32_Process | '
+               'Select-Object ProcessId,Name,CommandLine | ConvertTo-Json -Compress')
+    try:
+        proc = subprocess.run(['powershell.exe', '-NoProfile', '-Command', command],
+                              capture_output=True, text=True, encoding='utf-8',
+                              errors='replace', check=True, timeout=30)
+        rows = json.loads(proc.stdout)
+        if isinstance(rows, dict):
+            rows = [rows]
+        if not isinstance(rows, list):
+            raise ValueError('invalid process inventory')
+        conflicts = target768_find_conflicts(rows, os.getpid(), os.getppid(), executable_name)
+    except supervisor.ContinuationFatal:
+        raise
+    except Exception as exc:
+        raise supervisor.ContinuationFatal(f'无法可靠检查并发基准进程: {exc}') from exc
+    if conflicts:
+        raise supervisor.ContinuationFatal(f'发现可能并发的基准进程: {conflicts}')
+
+
+def target768_script_hashes():
+    files = {
+        'target_wrapper': Path(__file__),
+        'supervisor': Path(supervisor.__file__),
+        'runner': Path(runner.__file__),
+        'retry_reviewer': Path(review.__file__),
+        'bench090': Path(runner.old.__file__),
+        'report090': Path(runner.report.__file__),
+    }
+    return {name: runner.old.sha256_file(path) for name, path in files.items()}
+
+
+def target768_check_source(source, prior, manifest):
+    if (manifest.get('smoke') or manifest.get('benchmark_git_rev') != EXPECTED_REV or
+            manifest.get('threads') != 16 or manifest.get('m') != 32 or
+            manifest.get('ef_construction') != 128 or manifest.get('efs') != EFS or
+            manifest.get('factors', {}).get(DATASET) != 20):
+        raise supervisor.ContinuationFatal('原批的版本、数据集或测量参数不符')
+    source_hash = runner.old.sha256_file(source / 'manifest.json')
+    prior_manifest = review.read_json(prior / 'manifest.json')
+    if (prior_manifest.get('mode') != 'full' or
+            prior_manifest.get('source_manifest_sha256') != source_hash or
+            prior_manifest.get('continuation_script_sha256') != runner.old.sha256_file(Path(supervisor.__file__)) or
+            prior_manifest.get('retry_script_sha256') != runner.old.sha256_file(Path(review.__file__))):
+        raise supervisor.ContinuationFatal('历史 v3 批次身份或监督器源码不符')
+    before = review.read_json(prior / 'input_hashes_before.json')
+    after_preflight = review.read_json(prior / 'input_hashes_after_preflight.json')
+    after = review.read_json(prior / 'input_hashes_after.json')
+    if not (before == after_preflight == after == review.read_json(source / 'input_hashes_before.json')):
+        raise supervisor.ContinuationFatal('历史输入哈希链不一致')
+    selection = review.read_json(prior / 'selection.json')
+    if 'cohere-1m/triviumdb' not in selection.get('unresolved', []):
+        raise supervisor.ContinuationFatal('历史未通过组状态不符，停止以免误报')
+    failures = [x for x in selection['decisions'] if x['dataset'] == DATASET and x['engine'] == 'triviumdb']
+    if len(failures) != 1 or len(failures[0]['attempts']) != 3 or any(
+            x.get('review', {}).get('passed') is not False for x in failures[0]['attempts']):
+        raise supervisor.ContinuationFatal('历史三组失败记录不完整')
+    identities = {
+        'source_manifest_sha256': source_hash,
+        'prior_manifest_sha256': runner.old.sha256_file(prior / 'manifest.json'),
+        'prior_selection_sha256': runner.old.sha256_file(prior / 'selection.json'),
+        'prior_input_before_sha256': runner.old.sha256_file(prior / 'input_hashes_before.json'),
+        'prior_input_preflight_sha256': runner.old.sha256_file(prior / 'input_hashes_after_preflight.json'),
+        'prior_input_after_sha256': runner.old.sha256_file(prior / 'input_hashes_after.json'),
+        'prior_library_hashes_sha256': runner.old.sha256_file(prior / 'library_hashes.json'),
+    }
+    return before, prior_manifest, identities
+
+
+def target768_target_review(batch, dataset, engine, manifest):
+    result = review.review_group(batch, dataset, engine, manifest['efs'])
+    failures = list(result['reasons'])
+    target = result.get('at_target_median_curve', {})
+    per_build = result.get('at_target_per_build', [])
+    if not target.get('reachable') or len(per_build) != 3 or not all(p.get('reachable') for p in per_build):
+        failures.append('目标召回不可达或独立图数据缺失；禁止外推')
+    for label, point in [('median_curve', target)] + [(f'build_{i}', p) for i, p in enumerate(per_build, 1)]:
+        if point.get('reachable') and point.get('span_recall', 1.0) > 0.05:
+            failures.append(f'{label} 插值区间超过 0.05')
+    result['reasons'] = failures
+    result['passed'] = not failures
+    result['target_recall'] = 0.9
+    return result
+
+
+def target768_smoke_check(batch, dataset, engines, factor, limit):
+    # 小数据试跑的 GT 是对训练子集重新计算，不能用正式全量 GT 复核。
+    import numpy as np
+    _, queries, gt, _ = runner.old.load_dataset(runner.old.DATASETS[dataset], limit, factor)
+    for engine in engines:
+        if engine == 'triviumdb':
+            continue
+        group = batch / 'groups' / f'{dataset}__{engine}'
+        raw = review.read_json(group / 'raw' / f'{dataset}__{engine}__r1.json')
+        for point in raw['points']:
+            path = group / 'runs' / f'{dataset}__{engine}__r1' / f"query_ef{point['ef']}.npz"
+            with np.load(path, allow_pickle=False) as saved:
+                labels, hits = saved['labels'], saved['hit_counts']
+                computed = (labels[:, :, None] == gt[:, None, :]).any(axis=2).sum(axis=1)
+                if not np.array_equal(computed, hits):
+                    raise ValueError('冒烟逐查询结果与子集 GT 不一致')
+                if abs(float(computed.sum()) / (len(queries) * 10) - point['recall_at_10']) > 1e-12:
+                    raise ValueError('冒烟 recall 与逐查询 GT 不一致')
+
+
+def target768_main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--tag', required=True, help='results/bench-090 下不存在的新目录名')
+    parser.add_argument('--max-wait', type=int, default=1800)
+    parser.add_argument('--smoke', action='store_true', help='仅使用 1K 真实数据子集，不生成可发布数据')
+    args = parser.parse_args()
+    if os.name != 'nt' or not args.tag.replace('-', '').replace('_', '').isalnum() or args.max_wait < 0:
+        raise ValueError('需要 Windows、简单的新 tag 和非负等待时间')
+    if args.smoke and 'smoke' not in args.tag.lower():
+        raise ValueError('冒烟目录名必须明确包含 smoke')
+    if not args.smoke and 'smoke' in args.tag.lower():
+        raise ValueError('正式目录名不能包含 smoke')
+
+    target768_acquire_lock()
+    source = runner.RESULTS / SOURCE_TAG
+    prior = runner.RESULTS / PRIOR_TAG
+    manifest = review.read_json(source / 'manifest.json')
+    expected_inputs, prior_manifest, source_id = target768_check_source(source, prior, manifest)
+    original = review.read_json(source / 'runs' / f'{DATASET}__triviumdb__r1' / 'config.json')
+    executable = Path(original['executable_path'])
+    target768_assert_no_other_bench(manifest['benchmark_executable']['file'])
+    supervisor.assert_source_stopped(SOURCE_TAG, manifest['benchmark_executable']['file'])
+    supervisor.require_runtime(manifest, executable)
+    scripts_before = target768_script_hashes()
+    prior_libraries = review.read_json(prior / 'library_hashes.json')
+    current_libraries = supervisor.binary_fingerprint()
+    if current_libraries != prior_libraries:
+        raise supervisor.ContinuationFatal('本机库文件与 v3 不一致；旧批比较资格未建立')
+    inherited = supervisor.measurement_environment()
+    if inherited != prior_manifest.get('inherited_compute_environment'):
+        raise supervisor.ContinuationFatal('计算环境变量与 v3 不一致；旧批比较资格未建立')
+    library_fingerprint = hashlib.sha256(json.dumps(current_libraries, sort_keys=True).encode('utf-8')).hexdigest()
+    if library_fingerprint != prior_manifest.get('library_fingerprint_sha256'):
+        raise supervisor.ContinuationFatal('库指纹与 v3 记录不一致')
+
+    batch = runner.RESULTS / args.tag
+    batch.mkdir(exist_ok=False)
+    (batch / 'groups').mkdir()
+    dataset = 'minilm-384' if args.smoke else DATASET
+    factor = 1 if args.smoke else 20
+    efs = [10, 40] if args.smoke else EFS
+    repeats = 1 if args.smoke else 3
+    data_manifest = dict(manifest)
+    data_manifest['efs'] = efs
+    data_manifest['factors'] = {**manifest['factors'], dataset: factor}
+    predeclared = {
+        'created_at': runner.now(), 'status': 'smoke_only' if args.smoke else 'unreviewed_formal_attempt',
+        'scope': f'{dataset}; three engines; one group per engine; no automatic retries',
+        'dataset': dataset, 'engines': list(runner.ENGINES), 'threads': 16,
+        'm': 32, 'ef_construction': 128, 'efs': efs, 'factor': factor,
+        'train_limit': 1000 if args.smoke else None, 'independent_builds_per_engine': repeats,
+        'full_query_batches_per_ef_per_build': 1, 'target_recall': 0.9,
+        'acceptance': {'build_dispersion_max': 0.10, 'sample_cv_max_each_ef': 0.08,
+                       'target_recall_required_per_build_and_median_curve': True,
+                       'interpolation_recall_span_max': 0.05, 'automatic_retries': 0},
+        'prior_history': 'cohere-1m/triviumdb had three complete failed attempts in v3; this is a user-requested extra batch, not a first experiment',
+        'selection_bias': 'repeated campaigns can bias selection; preserve all prior and current attempts, never claim a single passing group proves the root cause resolved',
+        'timing_boundary': manifest['timing_boundary'], 'per_query_artifacts': manifest['per_query_artifacts'],
+        'environment_boundary': 'admission CPU is sampled before each worker; system load during the run includes the benchmark itself',
+        'exclusivity_limit': 'session mutex covers cooperating target wrappers only; known runners are scanned before and after each worker, not continuously; cross-session and inaccessible processes or unrelated workloads cannot be ruled out',
+        'cross_batch_limit': 'other dimensions are from an earlier session; boundary hashes do not rule out changes and restoration between snapshots, and system DLLs are not fingerprinted',
+        'source_identities': source_id, 'benchmark_executable': manifest['benchmark_executable'],
+        'script_hashes': scripts_before, 'library_fingerprint_sha256': library_fingerprint,
+        'compute_environment': inherited, 'smoke': args.smoke,
+    }
+    runner.write_json(batch / 'preregistration.json', predeclared)
+    runner.write_json(batch / 'library_hashes.json', current_libraries)
+    input_datasets = [dataset] if args.smoke else manifest['datasets']
+    input_factors = {**manifest['factors'], dataset: factor}
+    before = runner.hashes(input_datasets, input_factors)
+    runner.write_json(batch / 'input_hashes_before.json', before)
+    if not args.smoke and before != expected_inputs:
+        raise supervisor.ContinuationFatal('现有输入文件与 v3 输入不一致')
+    before_mtimes = {d: {kind: (runner.ROOT / value['file']).stat().st_mtime_ns
+                        for kind, value in kinds.items()} for d, kinds in before.items()}
+    runner.write_json(batch / 'input_mtimes_before.json', before_mtimes)
+    if args.smoke:
+        preflight_identity = None
+    else:
+        preflight_identity = supervisor.run_preflight(batch, [DATASET], manifest['factors'], {DATASET: before[DATASET]})
+        runner.write_json(batch / 'groundtruth-check.identity.json', preflight_identity)
+
+    decisions = []
+    for engine in runner.ENGINES:
+        group = batch / 'groups' / f'{dataset}__{engine}'
+        (group / 'raw').mkdir(parents=True, exist_ok=False)
+        item = {'dataset': dataset, 'engine': engine, 'group_attempts': 1, 'runs': [], 'passed': False}
+        try:
+            for rep in range(1, repeats + 1):
+                target768_assert_no_other_bench(manifest['benchmark_executable']['file'])
+                supervisor.require_runtime(manifest, executable, current_libraries, inherited)
+                if target768_script_hashes() != scripts_before:
+                    raise supervisor.ContinuationFatal('脚本内容在采样期间发生变化')
+                cfg = {'dataset': dataset, 'engine': engine, 'run': rep, 'threads': 16,
+                       'm': 32, 'efc': 128, 'factor': factor, 'efs': efs,
+                       'train_limit': 1000 if args.smoke else None, 'executable_path': str(executable)}
+                print(f'[{runner.now()}] start {dataset} / {engine} / run {rep}', flush=True)
+                supervisor.supervised_run(group, cfg, args.max_wait, group / 'supervision' / f'r{rep}')
+                target768_assert_no_other_bench(manifest['benchmark_executable']['file'])
+                supervisor.require_runtime(manifest, executable, current_libraries, inherited)
+                runner.write_json(group / 'supervision' / f'r{rep}' / 'library_hash_check.json',
+                                  {'before': library_fingerprint, 'after': library_fingerprint,
+                                   'checked_at': runner.now()})
+                item['runs'].append({'run': rep, 'status': 'completed'})
+                print(f'[{runner.now()}] finish {dataset} / {engine} / run {rep}', flush=True)
+            if args.smoke:
+                item['passed'] = True
+                item['review'] = {'status': 'smoke_only', 'not_publishable': True}
+            else:
+                supervisor.validate_baseline_artifacts(group, dataset, engine, data_manifest)
+                item['review'] = target768_target_review(group, dataset, engine, data_manifest)
+                item['passed'] = item['review']['passed']
+        except supervisor.ContinuationFatal as exc:
+            item['error'] = repr(exc)
+            runner.write_json(group / 'group-result.json', item)
+            runner.append_event(batch / 'decisions.jsonl', item)
+            raise
+        except Exception as exc:
+            # 组内失败不覆盖，也不补样；继续采集余下引擎。
+            item['error'] = repr(exc)
+        runner.write_json(group / 'group-result.json', item)
+        decisions.append(item)
+        runner.append_event(batch / 'decisions.jsonl', item)
+
+    if args.smoke and all(x['passed'] for x in decisions):
+        target768_smoke_check(batch, dataset, runner.ENGINES, factor, 1000)
+    after = runner.hashes(input_datasets, input_factors)
+    runner.write_json(batch / 'input_hashes_after.json', after)
+    after_mtimes = {d: {kind: (runner.ROOT / value['file']).stat().st_mtime_ns
+                       for kind, value in kinds.items()} for d, kinds in after.items()}
+    runner.write_json(batch / 'input_mtimes_after.json', after_mtimes)
+    target768_assert_no_other_bench(manifest['benchmark_executable']['file'])
+    supervisor.assert_source_stopped(SOURCE_TAG, manifest['benchmark_executable']['file'])
+    supervisor.require_runtime(manifest, executable, current_libraries, inherited)
+    if preflight_identity is not None:
+        supervisor.verify_preflight(batch, preflight_identity)
+    current_source_id = target768_check_source(source, prior, manifest)[2]
+    if (before != after or before_mtimes != after_mtimes or scripts_before != target768_script_hashes() or
+            current_source_id != source_id or supervisor.binary_fingerprint() != current_libraries):
+        raise supervisor.ContinuationFatal('输入、脚本、库或历史证据在边界校验时变化')
+    summary = {'completed_at': runner.now(), 'status': 'smoke_only' if args.smoke else 'complete_unreviewed',
+               'publication_permitted': False, 'independent_review_required': True,
+               'prior_failed_groups_remain_failures': True,
+               'all_current_groups_passed': len(decisions) == 3 and all(x['passed'] for x in decisions),
+               'source_and_current_environment_boundary_checks_match': True,
+               'decisions': decisions}
+    runner.write_json(batch / 'summary.json', summary)
+    print(f'[{runner.now()}] completed target batch: {batch}; passed={summary["all_current_groups_passed"]}', flush=True)
+    if not summary['all_current_groups_passed']:
+        raise SystemExit(1)
+
+
+if __name__ == '__main__':
+    target768_main()

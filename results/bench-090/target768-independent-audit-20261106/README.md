@@ -1,0 +1,11 @@
+# Independent per-query baseline recall audit
+
+This is a separate **data-integrity audit**, not a performance benchmark or a passed publication gate. The standalone audit checks all **72** stored per-query NPZ archives for the targeted Cohere 768d hnswlib and FAISS-HNSW runs. It independently recomputes each stored hit count using sorted returned IDs and ground-truth IDs with a scalar two-pointer merge, then checks the aggregate recall. It covers **1,440,000 query-row observations** across the archives; the same tiled 20,000-entry workload is repeated, so these are not 1,440,000 independent queries. The recorded audit completed with no mismatches. See [summary.json](summary.json) for all per-file identities and results.
+
+The audit uses the **same dataset ground truth** as the benchmark, not a new exact-search oracle for every query. NumPy is used to read the NPZ files and memory-map GT, while the hit-count algorithm is independent of the sampler's set intersection and the supervisor's broadcasting check. The locally recorded GT file hash is in the summary; the dataset and ground-truth files are not distributed here, so external readers cannot independently rerun or hash-check that input solely from this package. Boundary hash checks do not rule out changes that were later reverted.
+
+The original TriviumDB benchmark does **not** retain individual returned IDs, so TriviumDB per-query correctness is outside this audit. The targeted replay's TriviumDB QPS stability failure remains unchanged. The audit cannot establish performance, fix any failed test, or waive the publication gate. See the [targeted replay and review](../target768-formal-20261106/REVIEW.md) and its [raw data](../target768-formal-20261106/README.md).
+
+## Reproducibility and integrity
+
+The byte-identical [audit script snapshot](audit_two_pointer.py.snapshot) has an archival suffix and is not a ready-to-run entry point. It expects its original repository-relative layout, the associated recorded replay, NumPy, and the separately obtained GT file. The [file manifest](FILE-MANIFEST.json) records source and published SHA-256, size and transformations; original local files remain unchanged. The `.gitattributes` rule prevents Git newline conversion. This manifest, README and `.gitattributes` are not self-hashed.

@@ -1,0 +1,25 @@
+{
+  "note": "Hashes cover source and published bytes. The script is renamed with an archival suffix only. This manifest, README and .gitattributes are not self-hashed.",
+  "files": [
+    {
+      "source_file": "summary.json",
+      "published_file": "summary.json",
+      "source_sha256": "520cd594b4e47f9f23c1806055c40fc93704466fadcb8aed3f7a0adbe353897c",
+      "published_sha256": "520cd594b4e47f9f23c1806055c40fc93704466fadcb8aed3f7a0adbe353897c",
+      "source_bytes": 70749,
+      "published_bytes": 70749,
+      "transformations": []
+    },
+    {
+      "source_file": "audit_two_pointer.py",
+      "published_file": "audit_two_pointer.py.snapshot",
+      "source_sha256": "92a7da6ac4aba2535c4f134586c413ee91c38b670c9105625b70e40b01d6e602",
+      "published_sha256": "92a7da6ac4aba2535c4f134586c413ee91c38b670c9105625b70e40b01d6e602",
+      "source_bytes": 9472,
+      "published_bytes": 9472,
+      "transformations": [
+        "archival suffix only; bytes unchanged"
+      ]
+    }
+  ]
+}

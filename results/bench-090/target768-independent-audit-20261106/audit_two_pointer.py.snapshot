@@ -1,0 +1,173 @@
+"""只读复核 768d 两个基线的逐查询结果；不是性能测量。"""
+from __future__ import annotations
+
+import hashlib
+import json
+import math
+import os
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parents[3]
+BATCH = ROOT / 'results' / 'bench-090' / 'target768-formal-20261106'
+HERE = Path(__file__).resolve().parent
+GT_PATH = ROOT / 'cohere_groundtruth_x20.i32'
+EXPECTED_EFS = [10, 15, 20, 25, 30, 35, 40, 80, 120, 200, 400, 800]
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open('rb') as fh:
+        while block := fh.read(1024 * 1024):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def file_identity(path: Path) -> dict:
+    info = path.stat()
+    return {'sha256': sha256(path), 'bytes': info.st_size, 'mtime_ns': info.st_mtime_ns}
+
+
+def read_json(path: Path):
+    return json.loads(path.read_text(encoding='utf-8'))
+
+
+def sorted_two_pointer_hits(found, expected) -> int:
+    # 与采集时的集合求交和监督器的 NumPy 广播分别独立实现。
+    found_ids = sorted(int(value) for value in found)
+    expected_ids = sorted(int(value) for value in expected)
+    if len(found_ids) != 10 or len(expected_ids) != 10:
+        raise ValueError('每行必须包含 10 个结果和 10 个 GT ID')
+    if any(a == b for a, b in zip(found_ids, found_ids[1:])):
+        raise ValueError('返回结果 ID 重复')
+    i = j = hits = 0
+    while i < 10 and j < 10:
+        if found_ids[i] == expected_ids[j]:
+            hits += 1
+            i += 1
+            j += 1
+        elif found_ids[i] < expected_ids[j]:
+            i += 1
+        else:
+            j += 1
+    return hits
+
+
+def main() -> int:
+    destination = HERE / 'summary.json'
+    if destination.exists():
+        raise FileExistsError('审阅结果已存在，禁止覆盖')
+    started = datetime.now(timezone.utc).isoformat()
+    script_id = file_identity(Path(__file__).resolve())
+    gt_before = file_identity(GT_PATH)
+    prereg_before = file_identity(BATCH / 'preregistration.json')
+    after_inputs_before = file_identity(BATCH / 'input_hashes_after.json')
+    expected_inputs = read_json(BATCH / 'input_hashes_after.json')
+    if gt_before['sha256'] != expected_inputs['cohere-1m']['ground_truth']['sha256']:
+        raise RuntimeError('当前 GT 的哈希与正式批次的结束哈希不符')
+    if gt_before['bytes'] != expected_inputs['cohere-1m']['ground_truth']['bytes']:
+        raise RuntimeError('当前 GT 的大小与正式批次不符')
+    expected_counts = 20_000
+    truth_raw = np.memmap(GT_PATH, mode='r', dtype=np.int32)
+    if truth_raw.size % expected_counts != 0:
+        raise RuntimeError('GT 与查询数不匹配')
+    truth = truth_raw.reshape(expected_counts, -1)[:, :10]
+    if truth.shape != (expected_counts, 10):
+        raise RuntimeError('GT 少于每查询 10 个 ID')
+    entries = []
+    failures = []
+    try:
+        for engine in ('hnswlib', 'faiss_hnsw'):
+            group = BATCH / 'groups' / f'cohere-1m__{engine}'
+            for rep in range(1, 4):
+                raw_path = group / 'raw' / f'cohere-1m__{engine}__r{rep}.json'
+                raw_before = file_identity(raw_path)
+                raw = read_json(raw_path)
+                points = raw['points']
+                if len(points) != len(EXPECTED_EFS) or sorted(p['ef'] for p in points) != EXPECTED_EFS:
+                    raise ValueError(f'{engine}/{rep}: ef 点缺失或重复')
+                if raw['engine'] != engine or raw['dataset'] != 'cohere-1m' or raw['n_test'] != expected_counts:
+                    raise ValueError(f'{engine}/{rep}: 记录的引擎、数据集或查询数不符')
+                for point in points:
+                    ef = point['ef']
+                    npz = group / 'runs' / f'cohere-1m__{engine}__r{rep}' / f'query_ef{ef}.npz'
+                    archive_before = file_identity(npz)
+                    with np.load(npz, allow_pickle=False) as saved:
+                        labels = saved['labels']
+                        stored = saved['hit_counts']
+                    if (labels.shape != (expected_counts, 10) or stored.shape != (expected_counts,) or
+                            labels.dtype.kind not in 'iu' or stored.dtype.kind not in 'iu'):
+                        raise ValueError(f'{engine}/{rep}/{ef}: 结果形状或类型错误')
+                    total_hits = 0
+                    mismatches = 0
+                    mismatch_examples = []
+                    for row in range(expected_counts):
+                        if min(labels[row]) < 0 or max(labels[row]) >= raw['n_train']:
+                            raise ValueError(f'{engine}/{rep}/{ef}/{row}: 结果 ID 超出训练集')
+                        hits = sorted_two_pointer_hits(labels[row], truth[row])
+                        total_hits += hits
+                        if hits != int(stored[row]):
+                            mismatches += 1
+                            if len(mismatch_examples) < 5:
+                                mismatch_examples.append({'query_row': row, 'independent_hits': hits,
+                                                          'stored_hits': int(stored[row])})
+                    recomputed = total_hits / (expected_counts * 10)
+                    recall_matches = math.isclose(recomputed, point['recall_at_10'], rel_tol=0, abs_tol=1e-12)
+                    archive_after = file_identity(npz)
+                    if archive_before != archive_after:
+                        raise RuntimeError(f'{engine}/{rep}/{ef}: NPZ 复核期间发生变化')
+                    entry = {'engine': engine, 'repeat': rep, 'ef': ef,
+                             'npz': npz.relative_to(ROOT).as_posix(), 'npz_identity': archive_before,
+                             'raw_json': raw_path.relative_to(ROOT).as_posix(), 'raw_identity': raw_before,
+                             'rows_checked': expected_counts, 'row_hit_mismatches': mismatches,
+                             'mismatch_examples': mismatch_examples, 'independent_total_hits': total_hits,
+                             'independent_recall': recomputed, 'recorded_recall': point['recall_at_10'],
+                             'recall_matches': recall_matches}
+                    entries.append(entry)
+                    if mismatches or not recall_matches:
+                        failures.append(f'{engine}/{rep}/{ef}: 命中数或召回不一致')
+                if file_identity(raw_path) != raw_before:
+                    raise RuntimeError(f'{engine}/{rep}: 原始 JSON 复核期间发生变化')
+            print(f'{engine}: 36 个逐查询文件完成', flush=True)
+        if len(entries) != 72:
+            failures.append(f'预期 72 个 NPZ，实际 {len(entries)}')
+        if file_identity(GT_PATH) != gt_before:
+            failures.append('GT 在复核前后发生变化')
+        if file_identity(BATCH / 'preregistration.json') != prereg_before:
+            failures.append('预注册文件在复核前后发生变化')
+        if file_identity(BATCH / 'input_hashes_after.json') != after_inputs_before:
+            failures.append('正式输入哈希文件在复核前后发生变化')
+        if file_identity(Path(__file__).resolve()) != script_id:
+            failures.append('审阅脚本在运行期间发生变化')
+    except Exception as exc:
+        failures.append(f'{type(exc).__name__}: {exc}')
+    payload = {
+        'status': 'pass' if not failures else 'failed',
+        'started_utc': started, 'finished_utc': datetime.now(timezone.utc).isoformat(),
+        'scope': '768d hnswlib and FAISS-HNSW: all stored per-query results; not a performance benchmark',
+        'algorithm': 'Sort each returned top-10 and GT top-10, then use a scalar two-pointer merge to count matches; compare each stored hit and aggregate recall.',
+        'independence': 'Standalone script does not import benchmark runner or reviewer; its scalar sorted-merge algorithm differs from the sampler set intersection and supervisor NumPy broadcasting. NumPy is shared only for reading NPZ and memory-mapping int32 GT.',
+        'limitations': ['GT is the same dataset ground truth, not a newly computed exact-search oracle.',
+                        'TriviumDB original benchmark does not retain per-query IDs; it is outside this audit.',
+                        'Boundary hashes do not exclude data modified and restored between snapshots.',
+                        'Passing recall checks does not waive any QPS stability or product test failure.'],
+        'python_version': sys.version, 'numpy_version': np.__version__,
+        'script_identity': script_id, 'ground_truth_file': GT_PATH.name, 'ground_truth_identity': gt_before,
+        'preregistration_identity': prereg_before, 'formal_input_hashes_identity': after_inputs_before,
+        'files_expected': 72, 'files_checked': len(entries),
+        'individual_query_rows_checked': sum(row['rows_checked'] for row in entries),
+        'failures': failures, 'files': entries,
+    }
+    with destination.open('x', encoding='utf-8') as fh:
+        json.dump(payload, fh, ensure_ascii=False, indent=2)
+        fh.write('\n')
+    print(f"审阅状态: {payload['status']}; 文件: {payload['files_checked']}; 查询行: {payload['individual_query_rows_checked']}", flush=True)
+    return 0 if not failures else 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
