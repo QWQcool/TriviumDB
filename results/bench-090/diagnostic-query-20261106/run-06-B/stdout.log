@@ -1,0 +1,79 @@
+加载数据集 / Loading dataset: cohere-1m...
+训练集文件 / Training file: <WORKSPACE>\cohere_train.f32
+测试集文件 / Test file: <WORKSPACE>\results\bench-090\diagnostic-query-20261106\diagnostic-inputs-local-only\cohere_test_x80.f32
+GroundTruth 文件 / Ground-truth file: <WORKSPACE>\results\bench-090\diagnostic-query-20261106\diagnostic-inputs-local-only\cohere_groundtruth_x80.i32
+向量维度 / Vector dimension: 768
+加载完成 / Loading completed! 耗时 / Elapsed: 1.90s
+训练集 / Training set: 1000000 x 768（原始 / original 1000000 x 768）
+测试集 / Test set: 80000 x 768
+原始 GroundTruth K / Original ground-truth K: 1000
+使用原始 1M GroundTruth Top-10 / Using original 1M ground-truth Top-10
+
+开始构建 BQ-Vamana / Starting BQ-Vamana build (m=32, ef_c=128, alpha=1.2)...
+使用并发构图路径（默认）/ Using default concurrent graph-build path
+构建完成 / Build completed! 耗时 / Elapsed: 48.49s (20623 vecs/s)
+内存统计 / Memory statistics: Hot 934 MB
+
+加载原始 GroundTruth Top-10 用于 1M 标准评测 / Loading original ground-truth Top-10 for the standard 1M evaluation...
+
+计算 Exact Flat Cosine 基准 / Running Exact Flat Cosine baseline (Top-10, 50 条查询 / queries)...
+归一化耗时 / Normalization elapsed: 1.03s
+Exact Flat 单线程 / single-threaded: QPS=3.3, latency=299.91ms/q
+Exact Flat 多线程 / multi-threaded: QPS=22.0
+
+ef         rerank  Recall@10       MT-QPS    lat(ms)      vs BF
+--------------------------------------------------------------
+ef=10      ef(10)     62.23%        93569      0.01   28062.7x
+ef=25      ef(25)     86.24%        57481      0.02   17239.3x
+ef=30      ef(30)     88.76%        49626      0.02   14883.7x
+ef=35      ef(35)     90.77%        43853      0.02   13152.0x
+ef=40      ef(40)     91.64%        39550      0.03   11861.7x
+ef=10      ef(10)     62.23%        91471      0.01   27433.3x
+ef=25      ef(25)     86.24%        53854      0.02   16151.5x
+ef=30      ef(30)     88.76%        50862      0.02   15254.3x
+ef=35      ef(35)     90.77%        41563      0.02   12465.2x
+ef=40      ef(40)     91.64%        39112      0.03   11730.3x
+ef=10      ef(10)     62.23%        87551      0.01   26257.8x
+ef=25      ef(25)     86.24%        53581      0.02   16069.6x
+ef=30      ef(30)     88.76%        46946      0.02   14079.7x
+ef=35      ef(35)     90.77%        40884      0.02   12261.6x
+ef=40      ef(40)     91.64%        39399      0.03   11816.4x
+ef=10      ef(10)     62.23%        90235      0.01   27062.6x
+ef=25      ef(25)     86.24%        52147      0.02   15639.5x
+ef=30      ef(30)     88.76%        46262      0.02   13874.5x
+ef=35      ef(35)     90.77%        41813      0.02   12540.4x
+ef=40      ef(40)     91.64%        39476      0.03   11839.3x
+ef=10      ef(10)     62.23%        93804      0.01   28133.3x
+ef=25      ef(25)     86.24%        51152      0.02   15341.2x
+ef=30      ef(30)     88.76%        48136      0.02   14436.7x
+ef=35      ef(35)     90.77%        41219      0.02   12362.2x
+ef=40      ef(40)     91.64%        36853      0.03   11052.9x
+ef=10      ef(10)     62.23%        93280      0.01   27975.9x
+ef=25      ef(25)     86.24%        55785      0.02   16730.6x
+ef=30      ef(30)     88.76%        49187      0.02   14751.9x
+ef=35      ef(35)     90.77%        45117      0.02   13531.3x
+ef=40      ef(40)     91.64%        40741      0.02   12218.8x
+ef=10      ef(10)     62.23%        92710      0.01   27805.0x
+ef=25      ef(25)     86.24%        60020      0.02   18000.9x
+ef=30      ef(30)     88.76%        53369      0.02   16006.2x
+ef=35      ef(35)     90.77%        45784      0.02   13731.3x
+ef=40      ef(40)     91.64%        41658      0.02   12493.8x
+ef=10      ef(10)     62.23%        90896      0.01   27260.8x
+ef=25      ef(25)     86.24%        51319      0.02   15391.3x
+ef=30      ef(30)     88.76%        47302      0.02   14186.6x
+ef=35      ef(35)     90.77%        39866      0.03   11956.3x
+ef=40      ef(40)     91.64%        36857      0.03   11054.0x
+ef=10      ef(10)     62.23%        94798      0.01   28431.1x
+ef=25      ef(25)     86.24%        51582      0.02   15470.1x
+ef=30      ef(30)     88.76%        40546      0.02   12160.4x
+ef=35      ef(35)     90.77%        38582      0.03   11571.2x
+ef=40      ef(40)     91.64%        37808      0.03   11339.1x
+ef=10      ef(10)     62.23%        93431      0.01   28021.3x
+ef=25      ef(25)     86.24%        59491      0.02   17842.1x
+ef=30      ef(30)     88.76%        48998      0.02   14695.2x
+ef=35      ef(35)     90.77%        43863      0.02   13155.2x
+ef=40      ef(40)     91.64%        39173      0.03   11748.5x
+
+构图速率 / Graph-build throughput: 20623 vecs/s
+Exact Flat 基准 / baseline QPS: 3.3（单线程 / single-threaded）/ 22.0（多线程 / multi-threaded）
+结构化结果已写入 / Structured results written to: <WORKSPACE>\results\bench-090\diagnostic-query-20261106\run-06-B\benchmark.json

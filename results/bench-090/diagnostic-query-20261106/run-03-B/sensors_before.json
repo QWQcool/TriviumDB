@@ -1,0 +1,8 @@
+{
+  "at": "2026-11-06T01:36:59.068677+00:00",
+  "wall_seconds": 5.030999999995402,
+  "exit_code": 0,
+  "raw_stdout": "{\"processor_cim\":[{\"Name\":\"Intel(R) Core(TM) i9-14900K\",\"CurrentClockSpeed\":3200,\"MaxClockSpeed\":3200}],\"processor_counter_samples\":[{\"path\":\"\\\\Processor Information(_Total)\\\\% Processor Performance\",\"value\":127.75274127173769,\"available\":true},{\"path\":\"\\\\Processor Information(_Total)\\\\Actual Frequency\",\"value\":2839.1972810512339,\"available\":true},{\"path\":\"\\\\Processor Information(_Total)\\\\Processor Frequency\",\"value\":3200,\"available\":true}],\"acpi_thermal_zones_raw\":[{\"InstanceName\":\"ACPI\\\\ThermalZone\\\\CPUZ_0\",\"CurrentTemperature\":72}],\"errors\":[]}\n",
+  "stderr": "",
+  "limitation": "ACPI zones are raw/unvalidated, not guaranteed CPU package temperature; frequency/clock counters are reported raw and may not represent instantaneous CPU-core frequency."
+}

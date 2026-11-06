@@ -1,0 +1,21 @@
+{
+  "sha256": {
+    "script": "6a028602c0198bf26c71ca9cb5ce66243e1eab57a8d160aaaff40defc993d8ac",
+    "runner": "2cff5bed2a02a5a6f5f7667d2535b9891a6049fd1d3a894dab29df275880c313",
+    "bench_runner": "188714857a7cb186bc2e35e102ae61b15ab86949a95b053cfb18b6aacee90421",
+    "report_helper": "f138cbb5fb85f4b8287e4c87df471a3b6ca09399a705307e73b7ca409f1d8db2",
+    "job_supervisor": "5923713ce000e962c04c762cfa68090e3a98cce0a7443cf08d05887716443de5",
+    "executable": "1c0ae6dabff7378b5cac658223bcefa6273e83cdffad731cf24ebb4cf5355587",
+    "bench_source": "5eb9dffe864292d5681cc791b5ad8de6e7ebbe2a7971d2ccfc610924528551ed",
+    "cargo_lock": "5e6ddc1eccd5a6a78d5b955e36efa5c7258779848fbcecb908aca1a7c0494f8a",
+    "source_manifest": "eac3b668c337c73c3e359676ffe39cdc14d623520e3fc470e4a932f364047a0c",
+    "v3_manifest": "d300e15ee3f95394e42ecbcbc43cb593a1cc9ef8a706c758c9f8c4417d233747",
+    "prior_input_hashes": "38345fe9f34e7a342f24af19a25d9c71a8a32702645b3a17717e16c783529dc6",
+    "gt_log": "f0587b65fa3a7de59ca6603808130a6eab565f096e34b25d059061b0b67ca93a",
+    "gt_meta": "2d5d808f3b3db92e1bfa1533d677e3e49fb8fe011e3e8b3475dc3cf3d6659780",
+    "gt_identity": "cccfcd2b3933494b9f9d1b0a696217b2601c96eac60beaf1762428a31bd6d977"
+  },
+  "worktree_diff_sha256": "3eb240b43e3fa60e487d49ee16446f6f603b58fe2c13a7a9472461714d0b3f21",
+  "script_snapshot_file": "script_snapshot.py.snapshot",
+  "startup_limit": "snapshot was taken at entry to main after Python imported source; exact previously loaded bytes cannot be independently verified"
+}

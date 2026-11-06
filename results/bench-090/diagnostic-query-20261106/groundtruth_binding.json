@@ -1,0 +1,7 @@
+{
+  "source": "<WORKSPACE>\\results\\bench-090\\replay-full-v3-20261105",
+  "preflight_log_sha256": "f0587b65fa3a7de59ca6603808130a6eab565f096e34b25d059061b0b67ca93a",
+  "preflight_meta_sha256": "2d5d808f3b3db92e1bfa1533d677e3e49fb8fe011e3e8b3475dc3cf3d6659780",
+  "check": "cohere-1m sampled gt_match=1.0000; x80 is four byte-identical x20 copies",
+  "limitation": "the historical preflight is sampled, not exhaustive; boundary hashes cannot exclude changes reverted between snapshots"
+}

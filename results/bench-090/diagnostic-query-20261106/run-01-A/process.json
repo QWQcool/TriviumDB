@@ -1,0 +1,13 @@
+{
+  "started_at": "2026-11-06T01:32:12.079374+00:00",
+  "command": [
+    "<WORKSPACE>\\.bench090\\target\\release\\deps\\bench_cohere1m-1ecbe82aebd1c270.exe"
+  ],
+  "timeout_seconds": 1800,
+  "reason": null,
+  "exit_code": 0,
+  "job_empty": true,
+  "ended_at": "2026-11-06T01:33:57.171848+00:00",
+  "wall_seconds": 105.09300000000076,
+  "observer_errors": []
+}

@@ -1,0 +1,18 @@
+{
+  "condition": "B",
+  "ordinal": 6,
+  "env_overrides": {
+    "RAYON_NUM_THREADS": "16",
+    "TRIVIUM_MT_THREADS": "16",
+    "TRIVIUM_ANN_NAME": "cohere-1m",
+    "TRIVIUM_ANN_DIM": "768",
+    "TRIVIUM_ANN_TRAIN": "<WORKSPACE>\\cohere_train.f32",
+    "TRIVIUM_ANN_TEST": "<WORKSPACE>\\results\\bench-090\\diagnostic-query-20261106\\diagnostic-inputs-local-only\\cohere_test_x80.f32",
+    "TRIVIUM_ANN_GT": "<WORKSPACE>\\results\\bench-090\\diagnostic-query-20261106\\diagnostic-inputs-local-only\\cohere_groundtruth_x80.i32",
+    "TRIVIUM_ANN_EF": "10,25,30,35,40,10,25,30,35,40,10,25,30,35,40,10,25,30,35,40,10,25,30,35,40,10,25,30,35,40,10,25,30,35,40,10,25,30,35,40,10,25,30,35,40,10,25,30,35,40",
+    "TRIVIUM_ANN_M": "32",
+    "TRIVIUM_ANN_EF_CONSTRUCTION": "128",
+    "TRIVIUM_RESULT_PATH": "<WORKSPACE>\\results\\bench-090\\diagnostic-query-20261106\\run-06-B\\benchmark.json"
+  },
+  "status": "diagnostic_only"
+}

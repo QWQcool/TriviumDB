@@ -1,0 +1,20 @@
+{
+  "train": {
+    "path": "<WORKSPACE>\\cohere_train.f32",
+    "bytes": 3072000000,
+    "mtime_ns": 1789534663434880100,
+    "sha256": "d4bd7224f525ff1722ef4a77d0437a01c5f2c624857ead009f0a9c0e8e167961"
+  },
+  "queries": {
+    "path": "<WORKSPACE>\\cohere_test_x20.f32",
+    "bytes": 61440000,
+    "mtime_ns": 1793776334571410200,
+    "sha256": "0445996b442d7eb91555c4944225f41de50d1b07f799238ff10fd8e5b0062ef7"
+  },
+  "ground_truth": {
+    "path": "<WORKSPACE>\\cohere_groundtruth_x20.i32",
+    "bytes": 80000000,
+    "mtime_ns": 1793776334856836000,
+    "sha256": "71585a12718d9c84811db23c7d4236340c0c120c55724ac0721c57231612360b"
+  }
+}
